@@ -293,11 +293,25 @@ tasks.register("extractWebAssets") {
 
 android {
     signingConfigs {
+        // Permanent fixed signing config — used by ALL build types so every CI build
+        // produces the same certificate fingerprint, enabling `pm install -r` upgrades
+        // without an uninstall/reinstall cycle.
+        //
+        // CI: secrets injected via GitHub Actions secrets (RELEASE_KEYSTORE_BASE64 etc.)
+        //     The workflow decodes RELEASE_KEYSTORE_BASE64 → app/release.keystore before Gradle runs.
+        // Local dev: falls back to a no-op if the env vars are absent (debug builds are still
+        //            signed by the Gradle default debug keystore which is fine for local use).
         create("release") {
-            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "release.jks")
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
-            keyAlias = System.getenv("KEY_ALIAS") ?: "key0"
+            val ksFile = System.getenv("KEYSTORE_FILE")
+                ?.let { file(it) }
+                ?: rootProject.file("app/release.keystore")
+                    .takeIf { it.exists() }
+            if (ksFile != null) {
+                storeFile     = ksFile
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "overdrive2026"
+                keyAlias      = System.getenv("KEY_ALIAS")         ?: "overdrive-release"
+                keyPassword   = System.getenv("KEY_PASSWORD")      ?: "overdrive2026"
+            }
         }
     }
     namespace = "com.overdrive.app"
