@@ -296,21 +296,31 @@ android {
         // Permanent fixed signing config — used by ALL build types so every CI build
         // produces the same certificate fingerprint, enabling `pm install -r` upgrades
         // without an uninstall/reinstall cycle.
-        //
-        // CI: secrets injected via GitHub Actions secrets (RELEASE_KEYSTORE_BASE64 etc.)
-        //     The workflow decodes RELEASE_KEYSTORE_BASE64 → app/release.keystore before Gradle runs.
-        // Local dev: falls back to a no-op if the env vars are absent (debug builds are still
-        //            signed by the Gradle default debug keystore which is fine for local use).
+        val ksPath = System.getenv("KEYSTORE_FILE")
+        val ksFile = if (!ksPath.isNullOrBlank()) file(ksPath) else file("release.keystore")
+        val ksPass = System.getenv("KEYSTORE_PASSWORD").takeUnless { it.isNullOrBlank() } ?: "overdrive2026"
+        val kAlias = System.getenv("KEY_ALIAS").takeUnless { it.isNullOrBlank() } ?: "overdrive-release"
+        val kPass  = System.getenv("KEY_PASSWORD").takeUnless { it.isNullOrBlank() } ?: "overdrive2026"
+
+        val hasKeystore = ksFile.exists()
+        println(">>> [AGP Signing] ksFile: ${ksFile.absolutePath} (exists=$hasKeystore)")
+        println(">>> [AGP Signing] keyAlias: $kAlias")
+
         create("release") {
-            val ksFile = System.getenv("KEYSTORE_FILE")
-                ?.let { file(it) }
-                ?: rootProject.file("app/release.keystore")
-                    .takeIf { it.exists() }
-            if (ksFile != null) {
+            if (hasKeystore) {
                 storeFile     = ksFile
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "overdrive2026"
-                keyAlias      = System.getenv("KEY_ALIAS")         ?: "overdrive-release"
-                keyPassword   = System.getenv("KEY_PASSWORD")      ?: "overdrive2026"
+                storePassword = ksPass
+                keyAlias      = kAlias
+                keyPassword   = kPass
+            }
+        }
+
+        getByName("debug") {
+            if (hasKeystore) {
+                storeFile     = ksFile
+                storePassword = ksPass
+                keyAlias      = kAlias
+                keyPassword   = kPass
             }
         }
     }
@@ -426,9 +436,8 @@ android {
         debug {
             isMinifyEnabled = false
 
-            // Use the fixed permanent release signingConfig so debug builds are signed
-            // with our persistent keystore, not Gradle's auto-generated random one.
-            signingConfig = signingConfigs.getByName("release")
+            // Explicitly use the debug signingConfig which has been configured with our permanent keystore
+            signingConfig = signingConfigs.getByName("debug")
 
             // Debug builds match the active braveheart channel
             buildConfigField("String", "UPDATE_CHANNEL", "\"braveheart\"")

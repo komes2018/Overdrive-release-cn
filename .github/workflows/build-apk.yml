@@ -41,6 +41,8 @@ jobs:
         run: |
           echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > app/release.keystore
           echo "Keystore decoded: $(stat -c%s app/release.keystore) bytes"
+          mkdir -p ~/.android
+          cp app/release.keystore ~/.android/debug.keystore
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -60,6 +62,11 @@ jobs:
         run: |
           APK=$(find app/build/outputs/apk -name "*.apk" | head -1)
           echo "Verifying: $APK"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          if [ -n "$APKSIGNER" ]; then
+            echo "--- apksigner certificate details ---"
+            "$APKSIGNER" verify --print-certs "$APK" || true
+          fi
           # Extract signer cert and print SHA-256 fingerprint
           python3 - <<'PYEOF'
           import struct, hashlib, sys
