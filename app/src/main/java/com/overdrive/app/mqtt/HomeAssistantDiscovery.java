@@ -131,6 +131,7 @@ public final class HomeAssistantDiscovery {
                 JSONObject tracker = new JSONObject();
                 tracker.put("p", "device_tracker");
                 tracker.put("name", "车辆位置");
+                tracker.put("object_id", node + "_location");
                 tracker.put("unique_id", node + "_location");
                 tracker.put("json_attributes_topic", locationTopic(baseTopic));
                 tracker.put("source_type", "gps");
@@ -172,6 +173,12 @@ public final class HomeAssistantDiscovery {
         JSONObject c = new JSONObject();
         c.put("p", f.component);
         c.put("name", f.name);
+        // object_id pins the entity_id (e.g. sensor.overdrive_<device>_soc) so it stays
+        // stable and ASCII even when `name` is localised — HA would otherwise derive the
+        // entity_id from `name`, which for a Chinese name yields a transliterated slug
+        // (bi_ya_di_..._dong_li_dian_chi_dian_liang). Existing entities keep the id they
+        // were created with; this only governs newly discovered ones.
+        c.put("object_id", node + "_" + f.key);
         c.put("unique_id", node + "_" + f.key);
         c.put("state_topic", stateTopic(baseTopic, f.key));
         if (f.deviceClass != null) c.put("device_class", f.deviceClass);

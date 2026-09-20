@@ -430,6 +430,9 @@ public final class VehicleControlCatalog {
                 JSONObject c = new JSONObject();
                 c.put("p", platform);
                 c.put("name", name);
+                // Pin the entity_id so a localised `name` cannot turn it into a
+                // transliterated slug (see HomeAssistantDiscovery#component).
+                c.put("object_id", node + "_ctl_" + key);
                 c.put("unique_id", node + "_ctl_" + key);
                 if (icon != null) c.put("icon", icon);
                 if (category != null) c.put("entity_category", category);
@@ -603,7 +606,7 @@ public final class VehicleControlCatalog {
                 0, 0, 0, null, null, deviceClass, null, null, cmd, null);
     }
     static ControlEntity climate(CommandFn cmd) {
-        return new ControlEntity("climate", "climate", "Climate", "mdi:air-conditioner", null, false, null,
+        return new ControlEntity("climate", "climate", "空调", "mdi:air-conditioner", null, false, null,
                 17, 33, 1, null, null, null, null, null, cmd, null);
     }
     static ControlEntity text(String key, String name, String icon, String category, CommandFn cmd) {
@@ -929,15 +932,15 @@ public final class VehicleControlCatalog {
         // The normal HA climate entity keeps its standard in-car 17..33 C controls.
         // This cloud-only text entity supplies OPENAIR's exact 15..31 C / 10..30 minute
         // shape for off-car automations without repurposing a temperature write into a start.
-        register(text("remote_climate_start", "Remote Climate Start", "mdi:air-conditioner",
+        register(text("remote_climate_start", "远程开启空调", "mdi:air-conditioner",
                 "config", (sub, payload, snap) -> remoteClimateStartAction(payload)));
         // BOOKINGAIR has no SDK leg, but the command is capability-gated and terminally
         // confirmed by the normal router. A single JSON text control covers create/update/delete.
-        register(text("remote_climate_schedule", "Remote Climate Schedule", "mdi:calendar-clock",
+        register(text("remote_climate_schedule", "远程空调预约", "mdi:calendar-clock",
                 "config", (sub, payload, snap) -> remoteClimateScheduleAction(payload)));
 
         // ── Windows (all) — cover, command-only (per-window + position: Tier 2) ──
-        register(cover("windows_all", "Windows", "mdi:car-door", "window", true, null, (sub, payload, snap) -> {
+        register(cover("windows_all", "车窗", "mdi:car-door", "window", true, null, (sub, payload, snap) -> {
             // CLOSE-all routes to the dedicated CloseAllWindowsCommand (SDK_FIRST with
             // cloud fallback), NOT the bare local setAllWindowState(2,2,2,2). On this
             // generation the local all-windows CLOSE is unreliable (anti-pinch / the HAL
@@ -956,21 +959,21 @@ public final class VehicleControlCatalog {
         }));
         // OPENWINDOW is ventilation only, never a full-drop. Keep it separate from the cover
         // so Home Assistant cannot mark a successful 10% vent as a full-open command.
-        register(new ControlEntity("windows_vent", "button", "Vent Windows", "mdi:car-door",
+        register(new ControlEntity("windows_vent", "button", "车窗通风", "mdi:car-door",
                 null, true, null, 0, 0, 0, null, null, null, null, null,
                 (sub, payload, snap) -> "PRESS".equalsIgnoreCase(payload)
                         ? ControlAction.of(new VehicleCommandRouter.VentAllWindowsCommand()) : null,
                 null));
 
         // ── Tailgate — cover (open is cloud-safe when the keymap allows fallback) ──
-        register(cover("tailgate", "Tailgate", "mdi:car-back", "door", true, null, (sub, payload, snap) -> {
+        register(cover("tailgate", "尾门", "mdi:car-back", "door", true, null, (sub, payload, snap) -> {
             if ("CLOSE".equalsIgnoreCase(payload)) return ControlAction.of(new VehicleCommandRouter.TrunkCloseCommand());
             if ("STOP".equalsIgnoreCase(payload)) return ControlAction.of(new VehicleCommandRouter.TrunkStopCommand());
             return ControlAction.of(new VehicleCommandRouter.TrunkOpenCommand());
         }));
 
         // ── Seat heating (driver/passenger) — select off/low/high ───────
-        register(select("seat_heat_driver", "Driver Seat Heating", "mdi:car-seat-heater", null,
+        register(select("seat_heat_driver", "主驾座椅加热", "mdi:car-seat-heater", null,
                 "seat_heat_driver", SEAT_LEVELS, (sub, payload, snap) -> {
             int lvl = seatLevel(payload);
             boolean fresh = hasCurrentCompleteSeatState(snap);
@@ -979,7 +982,7 @@ public final class VehicleControlCatalog {
                     true, seatSnapshotAtMs(snap, fresh));
             return ControlAction.echo(c, "seat_heat_driver", SEAT_LEVELS.get(lvl));
         }));
-        register(select("seat_heat_passenger", "Passenger Seat Heating", "mdi:car-seat-heater", null,
+        register(select("seat_heat_passenger", "副驾座椅加热", "mdi:car-seat-heater", null,
                 "seat_heat_passenger", SEAT_LEVELS, (sub, payload, snap) -> {
             int lvl = seatLevel(payload);
             boolean fresh = hasCurrentCompleteSeatState(snap);
@@ -990,7 +993,7 @@ public final class VehicleControlCatalog {
         }));
 
         // ── Seat ventilation (driver/passenger) — select ────────────────
-        register(select("seat_vent_driver", "Driver Seat Ventilation", "mdi:car-seat-cooler", null,
+        register(select("seat_vent_driver", "主驾座椅通风", "mdi:car-seat-cooler", null,
                 "seat_vent_driver", SEAT_LEVELS, (sub, payload, snap) -> {
             int lvl = seatLevel(payload);
             boolean fresh = hasCurrentCompleteSeatState(snap);
@@ -999,7 +1002,7 @@ public final class VehicleControlCatalog {
                     true, seatSnapshotAtMs(snap, fresh));
             return ControlAction.echo(c, "seat_vent_driver", SEAT_LEVELS.get(lvl));
         }));
-        register(select("seat_vent_passenger", "Passenger Seat Ventilation", "mdi:car-seat-cooler", null,
+        register(select("seat_vent_passenger", "副驾座椅通风", "mdi:car-seat-cooler", null,
                 "seat_vent_passenger", SEAT_LEVELS, (sub, payload, snap) -> {
             int lvl = seatLevel(payload);
             boolean fresh = hasCurrentCompleteSeatState(snap);
@@ -1019,7 +1022,7 @@ public final class VehicleControlCatalog {
         // ALSO echoes optimistically so a cloud-executed press on a trim with no local
         // readback still updates HA instantly. The StateFn makes "toggle" flip the live
         // state where the getter answers.
-        register(sw("steering_heat", "Steering Wheel Heating", "mdi:steering", null,
+        register(sw("steering_heat", "方向盘加热", "mdi:steering", null,
                 "steering_wheel_heat", "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.SteeringWheelHeatCommand(truthy(payload)),
@@ -1033,12 +1036,12 @@ public final class VehicleControlCatalog {
                 }));
 
         // ── Seat memory recall — buttons ────────────────────────────────
-        register(new ControlEntity("seat_memory_driver", "button", "Recall Driver Seat", "mdi:seat-recline-extra",
+        register(new ControlEntity("seat_memory_driver", "button", "恢复主驾座椅记忆", "mdi:seat-recline-extra",
                 null, false, null, 0, 0, 0, null, null, null, null, null,
                 (sub, payload, snap) -> ControlAction.of(new VehicleCommandRouter.SeatMemoryCommand(1)), null));
 
         // ── Daytime running lights — switch (real state, toggle-capable) ─
-        register(sw("drl", "Daytime Running Lights", "mdi:car-light-dimmed", null, "light_drl", "1", "0",
+        register(sw("drl", "日间行车灯", "mdi:car-light-dimmed", null, "light_drl", "1", "0",
                 (sub, payload, snap) -> ControlAction.of(new VehicleCommandRouter.LightsCommand(truthy(payload))),
                 snap -> snap == null ? null : snap.dayTimeLight));
 
@@ -1046,7 +1049,7 @@ public final class VehicleControlCatalog {
         // This is not the DRL switch or beam-height adjustment. It mirrors CarSetting's
         // selector exactly: 1=off, 2=auto, 3=parking lights, 4=low beam. OFF is Park-gated
         // by HeadlightModeCommand; all modes are local-only and cannot wake the vehicle.
-        register(select("headlight_mode", "Headlight Mode", "mdi:car-light-high", null,
+        register(select("headlight_mode", "大灯模式", "mdi:car-light-high", null,
                 "headlight_mode", HEADLIGHT_MODES,
                 (sub, payload, snap) -> {
                     int mode = headlightModeValue(payload);
@@ -1073,12 +1076,12 @@ public final class VehicleControlCatalog {
         // reference-app precedent and an inferred feature id — so the write may be refused by
         // the HAL; setHazardLights returns false in that case. Validate actuation via
         // GET /api/debug/light/fire?candidate=A before relying on it.
-        register(sw("hazard", "Hazard Lights", "mdi:car-light-alert", null, "light_hazard", "1", "0",
+        register(sw("hazard", "双闪", "mdi:car-light-alert", null, "light_hazard", "1", "0",
                 (sub, payload, snap) -> ControlAction.of(new VehicleCommandRouter.HazardCommand(truthy(payload))),
                 snap -> snap == null ? null : snap.hazard));
 
         // ── Ambient lights colour — number (real state, 1-based palette index) ──
-        register(number("ambient_colour", "Ambient Lights Colour", "mdi:format-color-fill", "config",
+        register(number("ambient_colour", "氛围灯颜色", "mdi:format-color-fill", "config",
                 "ambient_colour", 1, 31, 1, "", (sub, payload, snap) ->
                         ControlAction.of(new VehicleCommandRouter.AmbientColourCommand(pInt(payload, 1)))));
 
@@ -1092,7 +1095,7 @@ public final class VehicleControlCatalog {
         // that reports NO state the reader returns null, so "toggle" follows the documented
         // default and turns ON every press (see ControlEntity.toAction strategy (a)) — explicit
         // on/off payloads still work either way, which is what HA itself sends.
-        register(sw("ambient_power", "Ambient Lights", "mdi:track-light", "config", "ambient_enabled",
+        register(sw("ambient_power", "氛围灯", "mdi:track-light", "config", "ambient_enabled",
                 "1", "0", (sub, payload, snap) ->
                         ControlAction.of(new VehicleCommandRouter.AmbientPowerCommand(truthy(payload))),
                 snap -> snap == null || snap.ambientEnabled == com.overdrive.app.byd.BydVehicleData.UNAVAILABLE
@@ -1102,7 +1105,7 @@ public final class VehicleControlCatalog {
         // Optimistic (echo): the SDK exposes a 0..5 LEVEL per zone, not a whole-cabin percent,
         // so there is no single field to read back — the collector publishes no ambient
         // brightness telemetry. Echoing the commanded value keeps the HA slider in step.
-        register(number("ambient_brightness", "Ambient Lights Brightness", "mdi:brightness-6", "config",
+        register(number("ambient_brightness", "氛围灯亮度", "mdi:brightness-6", "config",
                 "ambient_brightness", 0, 100, 1, "%", (sub, payload, snap) -> {
                     int v = Math.max(0, Math.min(100, pInt(payload, 0)));
                     return ControlAction.echo(
@@ -1111,7 +1114,7 @@ public final class VehicleControlCatalog {
                 }));
 
         // ── ADAS speed-limit warning — switch (real state, toggle-capable) ─
-        register(sw("adas_slw", "Speed Limit Warning", "mdi:speedometer-slow", "config", "speed_limit_warning",
+        register(sw("adas_slw", "限速提醒", "mdi:speedometer-slow", "config", "speed_limit_warning",
                 "1", "0", (sub, payload, snap) ->
                         ControlAction.of(new VehicleCommandRouter.AdasSpeedLimitWarningCommand(truthy(payload))),
                 snap -> snap == null ? null : snap.speedLimitWarning));
@@ -1121,7 +1124,7 @@ public final class VehicleControlCatalog {
         // id is a resolveOrFallback guess (unconfirmed on this firmware) — verify via
         // GET /api/vehicle/adas before relying on it. No "problem" device_class: ESP
         // ON is the desired/normal state.
-        register(sw("esp_control", "Stability Control (ESP)", "mdi:car-traction-control", "config", "esp_state",
+        register(sw("esp_control", "车身稳定控制 (ESP)", "mdi:car-traction-control", "config", "esp_state",
                 "1", "0", (sub, payload, snap) ->
                         ControlAction.of(new VehicleCommandRouter.AdasEspCommand(truthy(payload)))));
 
@@ -1130,7 +1133,7 @@ public final class VehicleControlCatalog {
         // state field is published, so the state is optimistic (echo the commanded
         // value). The iTAC feature ids are decoded from the DiLink APK — verify via
         // GET /api/vehicle/adas (itac block) before relying on it.
-        register(sw("itac", "iTAC (Torque Control)", "mdi:car-cog", "config", null, "1", "0",
+        register(sw("itac", "iTAC 扭矩控制", "mdi:car-cog", "config", null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.AdasItacCommand(truthy(payload)),
                         "itac", truthy(payload) ? "1" : "0")));
@@ -1139,7 +1142,7 @@ public final class VehicleControlCatalog {
         // Multi-mode via BYDAutoADASDevice.setLKSMode. The payload IS the app-level
         // mode int ("0".."3"); a "toggle"/cycle press advances to the next option using
         // the live getLaneAssistMode readback (parity with the OEM read-then-flip).
-        register(select("lane_assist", "Lane Assist", "mdi:road-variant", "config", null,
+        register(select("lane_assist", "车道辅助", "mdi:road-variant", "config", null,
                 java.util.Arrays.asList("0", "1", "2", "3"),
                 (sub, payload, snap) -> ControlAction.of(
                         new VehicleCommandRouter.AdasLaneAssistCommand(pInt(payload, 0))),
@@ -1149,7 +1152,7 @@ public final class VehicleControlCatalog {
         // State is published as 1/0 to child_presence_detection (see MqttConnectionManager +
         // TelemetryFieldCatalog): the raw SDK value 1=on/2=off/3=delay is normalized there, so
         // state_on="1"/state_off="0" here match the wire value. Command maps on→1, off→2.
-        register(sw("adas_cpd", "Child Presence Detection", "mdi:car-child-seat", "config", "child_presence_detection",
+        register(sw("adas_cpd", "儿童遗留检测", "mdi:car-child-seat", "config", "child_presence_detection",
                 "1", "0", (sub, payload, snap) ->
                         ControlAction.of(new VehicleCommandRouter.SettingChildPresenceDetectionCommand(truthy(payload) ? 1 : 2)),
                 // Raw childPresenceDetection: 1=on, 2=off, 3=delay. "on" iff == 1.
@@ -1162,62 +1165,62 @@ public final class VehicleControlCatalog {
         // verify via GET /api/vehicle/adas before relying on any given one. The
         // auto-brake / lane-keep entries are SAFETY controls (labelled at the action
         // layer); AEB is enable-only there.
-        register(sw("adas_bsd", "Blind Spot Detection", "mdi:car-side", "config", null, "1", "0",
+        register(sw("adas_bsd", "盲区监测 (BSD)", "mdi:car-side", "config", null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.AdasBlindSpotCommand(truthy(payload)),
                         "adas_bsd", truthy(payload) ? "1" : "0")));
-        register(sw("adas_tsr", "Traffic Sign Recognition", "mdi:sign-real-estate", "config", null, "1", "0",
+        register(sw("adas_tsr", "交通标志识别", "mdi:sign-real-estate", "config", null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.AdasTrafficSignCommand(truthy(payload)),
                         "adas_tsr", truthy(payload) ? "1" : "0")));
-        register(sw("adas_rcta", "Rear Cross Traffic Alert", "mdi:car-back", "config", null, "1", "0",
+        register(sw("adas_rcta", "后方横向来车预警", "mdi:car-back", "config", null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.AdasRearCrossTrafficCommand(truthy(payload)),
                         "adas_rcta", truthy(payload) ? "1" : "0")));
-        register(sw("adas_fcta", "Front Cross Traffic Alert", "mdi:car", "config", null, "1", "0",
+        register(sw("adas_fcta", "前方横向来车预警", "mdi:car", "config", null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.AdasFrontCrossTrafficCommand(truthy(payload)),
                         "adas_fcta", truthy(payload) ? "1" : "0")));
-        register(sw("adas_tla", "Traffic Light Attention", "mdi:traffic-light", "config", null, "1", "0",
+        register(sw("adas_tla", "交通灯提醒", "mdi:traffic-light", "config", null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.AdasTrafficLightAttentionCommand(truthy(payload)),
                         "adas_tla", truthy(payload) ? "1" : "0")));
-        register(sw("adas_dow", "Door Open Warning", "mdi:car-door", "config", null, "1", "0",
+        register(sw("adas_dow", "开门预警", "mdi:car-door", "config", null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.AdasOpenDoorWarningCommand(truthy(payload)),
                         "adas_dow", truthy(payload) ? "1" : "0")));
-        register(sw("adas_rcw", "Rear Collision Warning", "mdi:car-back", "config", null, "1", "0",
+        register(sw("adas_rcw", "后方碰撞预警", "mdi:car-back", "config", null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.AdasRearCollisionWarningCommand(truthy(payload)),
                         "adas_rcw", truthy(payload) ? "1" : "0")));
-        register(sw("adas_islc", "Speed Limit Control", "mdi:speedometer", "config", null, "1", "0",
+        register(sw("adas_islc", "限速控制", "mdi:speedometer", "config", null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.AdasSpeedLimitControlCommand(truthy(payload)),
                         "adas_islc", truthy(payload) ? "1" : "0")));
-        register(sw("adas_elka", "Emergency Lane Keeping", "mdi:road-variant", "config", null, "1", "0",
+        register(sw("adas_elka", "紧急车道保持", "mdi:road-variant", "config", null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.AdasEmergencyLaneKeepCommand(truthy(payload)),
                         "adas_elka", truthy(payload) ? "1" : "0")));
-        register(sw("adas_rctb", "Rear Cross Traffic Brake", "mdi:car-brake-alert", "config", null, "1", "0",
+        register(sw("adas_rctb", "后方横向来车制动", "mdi:car-brake-alert", "config", null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.AdasRearCrossBrakeCommand(truthy(payload)),
                         "adas_rctb", truthy(payload) ? "1" : "0")));
-        register(sw("adas_fctb", "Front Cross Traffic Brake", "mdi:car-brake-alert", "config", null, "1", "0",
+        register(sw("adas_fctb", "前方横向来车制动", "mdi:car-brake-alert", "config", null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.AdasFrontCrossBrakeCommand(truthy(payload)),
                         "adas_fctb", truthy(payload) ? "1" : "0")));
-        register(sw("adas_aeb", "Automatic Emergency Braking", "mdi:car-brake-abs", "config", null, "1", "0",
+        register(sw("adas_aeb", "自动紧急制动 (AEB)", "mdi:car-brake-abs", "config", null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.AdasEmergencyBrakingCommand(truthy(payload)),
                         "adas_aeb", truthy(payload) ? "1" : "0")));
-        register(select("adas_fcw", "Forward Collision Warning", "mdi:car-emergency", "config", null,
+        register(select("adas_fcw", "前向碰撞预警", "mdi:car-emergency", "config", null,
                 java.util.Arrays.asList("0", "1", "2", "3"),
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.AdasFcwLevelCommand(pInt(payload, 0)),
                         "adas_fcw", String.valueOf(pInt(payload, 0)))));
 
         // ── Charge cap (BEV) — switch + number, verified state ──────────
-        register(sw("charge_cap_enabled", "Charge Limit", "mdi:battery-charging-100", "config",
+        register(sw("charge_cap_enabled", "充电限值", "mdi:battery-charging-100", "config",
                 "charge_cap_enabled", "1", "0",
                 (sub, payload, snap) -> {
                     Boolean enabled = strictBoolean(payload);
@@ -1225,7 +1228,7 @@ public final class VehicleControlCatalog {
                             new VehicleCommandRouter.ChargeCapToggleCommand(enabled.booleanValue()),
                             "charge_cap_enabled", enabled.booleanValue() ? "1" : "0");
                 }));
-        register(number("charge_cap_percent", "Charge Limit %", "mdi:battery-charging-80", "config",
+        register(number("charge_cap_percent", "充电限值 (%)", "mdi:battery-charging-80", "config",
                 "charge_cap_percent", 50, 100, 5, "%", (sub, payload, snap) -> {
             Integer percent = chargeCapPercent(payload);
             return percent == null ? null : ControlAction.echo(
@@ -1234,7 +1237,7 @@ public final class VehicleControlCatalog {
         }));
         // Smart charging is cloud-only, but it is explicitly safe for the MQTT router's
         // normal route: each command is capability-gated and terminally confirmed.
-        register(sw("smart_charging", "Smart Charging", "mdi:battery-clock", "config",
+        register(sw("smart_charging", "智能充电", "mdi:battery-clock", "config",
                 null, "1", "0", (sub, payload, snap) -> {
                     Boolean enabled = strictBoolean(payload);
                     return enabled == null ? null : ControlAction.echo(
@@ -1242,46 +1245,46 @@ public final class VehicleControlCatalog {
                                     enabled.booleanValue()),
                             "smart_charging", enabled.booleanValue() ? "1" : "0");
                 }));
-        register(new ControlEntity("start_charging_now", "button", "Start Charging Now",
+        register(new ControlEntity("start_charging_now", "button", "立即开始充电",
                 "mdi:battery-charging", null, false, null, 0, 0, 0,
                 null, null, null, null, null,
                 (sub, payload, snap) -> "PRESS".equalsIgnoreCase(payload)
                         ? ControlAction.of(new VehicleCommandRouter.StartChargingNowCommand())
                         : null,
                 null));
-        register(text("smart_charge_schedule", "Smart Charging Schedule",
+        register(text("smart_charge_schedule", "智能充电预约",
                 "mdi:calendar-clock", "config",
                 (sub, payload, snap) -> smartChargeScheduleAction(payload)));
 
         // ── Tier 2: sunroof / sunshade (covers) + child lock + wireless charger ──
-        register(cover("sunroof", "Sunroof", "mdi:window-shutter-open", "window", true, null, (sub, payload, snap) -> {
+        register(cover("sunroof", "天窗", "mdi:window-shutter-open", "window", true, null, (sub, payload, snap) -> {
             int cmd = "OPEN".equalsIgnoreCase(payload) ? 1 : "STOP".equalsIgnoreCase(payload) ? 3 : 2;
             return ControlAction.of(new VehicleCommandRouter.SunroofCommand(cmd));
         }));
-        register(cover("sunshade", "Sunshade", "mdi:blinds", "shade", true, null, (sub, payload, snap) -> {
+        register(cover("sunshade", "遮阳帘", "mdi:blinds", "shade", true, null, (sub, payload, snap) -> {
             int cmd = "OPEN".equalsIgnoreCase(payload) ? 1 : "STOP".equalsIgnoreCase(payload) ? 3 : 2;
             return ControlAction.of(new VehicleCommandRouter.SunshadeCommand(cmd));
         }));
-        register(sw("child_lock", "Child Lock", "mdi:car-door-lock", "config", null, "1", "0",
+        register(sw("child_lock", "童锁", "mdi:car-door-lock", "config", null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.ChildLockCommand(truthy(payload)),
                         "child_lock", truthy(payload) ? "1" : "0")));
         // Mirror fold/unfold — set-only (no fold-state getter on this platform), so
         // like child_lock it echoes the commanded value to the last-command cache;
         // a "toggle" press flips off that cache (blind toggle). on=fold, off=unfold.
-        register(sw("mirror_fold", "Fold Mirrors", "mdi:car-side", null, null, "1", "0",
+        register(sw("mirror_fold", "外后视镜折叠", "mdi:car-side", null, null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.MirrorFoldCommand(truthy(payload)),
                         "mirror_fold", truthy(payload) ? "1" : "0")));
         // Persistent OEM preference, distinct from mirror_fold's immediate bodywork command.
         // The vehicle owns the actual fold/unfold when its power state changes, so this setting
         // can be enabled while awake even on a trim that rejects manual mirror commands.
-        register(sw("mirror_auto_follow_up", "Auto Fold / Unfold Mirrors", "mdi:car-side", "config",
+        register(sw("mirror_auto_follow_up", "外后视镜自动折叠 / 展开", "mdi:car-side", "config",
                 null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.MirrorAutoFollowUpCommand(truthy(payload)),
                         "mirror_auto_follow_up", truthy(payload) ? "1" : "0")));
-        register(sw("wireless_charging", "Phone Wireless Charger", "mdi:battery-charging-wireless", null, null, "1", "0",
+        register(sw("wireless_charging", "手机无线充电", "mdi:battery-charging-wireless", null, null, "1", "0",
                 (sub, payload, snap) -> ControlAction.echo(
                         new VehicleCommandRouter.WirelessChargingCommand(truthy(payload)),
                         "wireless_charging", truthy(payload) ? "1" : "0")));
@@ -1289,11 +1292,11 @@ public final class VehicleControlCatalog {
         // These controls are optimistic; the same-named telemetry fields report charging activity,
         // not switch position, so a command must not overwrite them with its desired state.
         // left=pad 0, right=pad 1.
-        register(sw("wireless_charging_left", "Wireless Charger (Left)", "mdi:battery-charging-wireless", null, null, "1", "0",
+        register(sw("wireless_charging_left", "手机无线充电 (左)", "mdi:battery-charging-wireless", null, null, "1", "0",
                 (sub, payload, snap) -> ControlAction.of(
                         new VehicleCommandRouter.WirelessChargingPadCommand(
                                 com.overdrive.app.byd.BydDataCollector.WIRELESS_PAD_LEFT, truthy(payload)))));
-        register(sw("wireless_charging_right", "Wireless Charger (Right)", "mdi:battery-charging-wireless", null, null, "1", "0",
+        register(sw("wireless_charging_right", "手机无线充电 (右)", "mdi:battery-charging-wireless", null, null, "1", "0",
                 (sub, payload, snap) -> ControlAction.of(
                         new VehicleCommandRouter.WirelessChargingPadCommand(
                                 com.overdrive.app.byd.BydDataCollector.WIRELESS_PAD_RIGHT, truthy(payload)))));
@@ -1303,7 +1306,7 @@ public final class VehicleControlCatalog {
         // orientation getter, and the native camera receiver publishes no selected-view state.
         // Key mapping may additionally send "toggle" to the rotation select; the generic
         // readback-less select cycle alternates horizontal ↔ vertical from its command cache.
-        register(select("infotainment_rotation", "Infotainment Orientation",
+        register(select("infotainment_rotation", "车机屏幕方向",
                 "mdi:screen-rotation", "config", null, INFOTAINMENT_ROTATIONS,
                 (sub, payload, snap) -> {
                     int rotation = infotainmentRotationValue(payload);
@@ -1313,7 +1316,7 @@ public final class VehicleControlCatalog {
         // OEM camera-view codes. This controls the native panorama app, not OverDrive's
         // /api/camview SurfaceControl overlay. It sends a view command only and never opens
         // the native panorama UI.
-        register(select("native_camera_view", "Native Camera View", "mdi:camera-switch",
+        register(select("native_camera_view", "原厂摄像头视角", "mdi:camera-switch",
                 null, null, NATIVE_CAMERA_VIEWS, (sub, payload, snap) -> {
                     int viewCode = nativeCameraViewCode(payload);
                     return viewCode < 0 ? null : ControlAction.of(
@@ -1332,7 +1335,7 @@ public final class VehicleControlCatalog {
         // (NORMAL=1, ECO=2, SPORT=3, SNOW=4). BydDataCollector maps the authoritative
         // energy-device getOperationMode value onto this axis and uses getDriveConfig only
         // as a legacy fallback. Echo the word and map int→word using the same values.
-        register(select("drive_mode", "Drive Mode", "mdi:car-shift-pattern", null, "op_mode",
+        register(select("drive_mode", "驾驶模式", "mdi:car-shift-pattern", null, "op_mode",
                 DRIVE_MODES,
                 "{% set m = value | int(-1) %}{{ 'normal' if m == 1 else 'eco' if m == 2 else 'sport' if m == 3 else 'snow' if m == 4 else value }}",
                 (sub, payload, snap) -> {
@@ -1348,7 +1351,7 @@ public final class VehicleControlCatalog {
         // Only field-validated writes are exposed. Raw telemetry still decodes the complete SDK
         // enum so a vehicle already reporting 2/4/5 does not lose observability.
         final List<String> POWERTRAIN = java.util.Arrays.asList("ev", "hev");
-        register(select("powertrain_mode", "Powertrain Mode", "mdi:engine", null, "energy_mode",
+        register(select("powertrain_mode", "动力模式", "mdi:engine", null, "energy_mode",
                 POWERTRAIN,
                 "{% set m = value | int(-1) %}{{ 'ev' if m == 1 else 'force_ev' if m == 2 else "
                         + "'hev' if m == 3 else 'fuel' if m == 4 else 'keep' if m == 5 else value }}",
@@ -1363,7 +1366,7 @@ public final class VehicleControlCatalog {
         // starts the ICE and RECHARGES the battery. Renamed to say what it actually does;
         // the key is unchanged so existing automations/keymaps keep working. Use
         // battery_hold below for a genuine hold. Any payload commands HEV (3).
-        register(select("hold_battery", "Engine Mode (HEV)", "mdi:engine", null, "energy_mode",
+        register(select("hold_battery", "发动机模式 (HEV)", "mdi:engine", null, "energy_mode",
                 java.util.Arrays.asList("on"),
                 "{% set m = value | int(-1) %}{{ 'on' if m == 3 else 'off' }}",
                 (sub, payload, snap) ->
@@ -1384,7 +1387,7 @@ public final class VehicleControlCatalog {
         // defaults to index 0 and advances — so the first such press must land on the MILDEST
         // change. With this order that is at_current ("keep what I have"); the previous order put
         // at_floor there, silently permitting the pack to run down to the reserve.
-        register(select("battery_hold", "Battery Hold", "mdi:battery-lock", null, null,
+        register(select("battery_hold", "电量保持", "mdi:battery-lock", null, null,
                 java.util.Arrays.asList("off", "at_current", "at_target", "at_floor"),
                 (sub, payload, snap) -> {
                     String p = payload == null ? "" : payload.trim().toLowerCase();
@@ -1398,7 +1401,7 @@ public final class VehicleControlCatalog {
                     // first. Anything unrecognised → at_current, the intent behind the name.
                     return ControlAction.of(new VehicleCommandRouter.SocHoldPresetCommand(!"at_floor".equals(p)));
                 }));
-        register(number("target_soc", "Target SOC", "mdi:battery-sync", "config",
+        register(number("target_soc", "目标电量 (SOC)", "mdi:battery-sync", "config",
                 "target_soc", BydDataCollector.SOC_TARGET_MIN, BydDataCollector.SOC_TARGET_MAX,
                 1, "%", (sub, payload, snap) ->
                         ControlAction.of(new VehicleCommandRouter.SocTargetPercentCommand(
@@ -1409,7 +1412,7 @@ public final class VehicleControlCatalog {
         // (Previously sent 1/2, which the setter forwarded raw: 1 was below the valid
         // MCU range and 2 was the HAL's *standard*, so standard no-op'd and high set
         // standard.)
-        register(select("regen_level", "Energy Recuperation", "mdi:battery-charging-medium", null, null,
+        register(select("regen_level", "动能回收", "mdi:battery-charging-medium", null, null,
                 java.util.Arrays.asList("standard", "high"),
                 (sub, payload, snap) -> {
                     int lvl = "high".equalsIgnoreCase(payload.trim()) ? 1   // SETTING_ENERGY_FEEDBACK_LARGE
@@ -1425,7 +1428,7 @@ public final class VehicleControlCatalog {
                 }));
         // steering_mode: SET_DR_ST_ASSIS_COMFORT = 1, SET_DR_ST_ASSIS_SPORT = 2
         // (there is no 0). Old code sent 0/1 → the HAL rejected 0.
-        register(select("steering_mode", "Steering Assist", "mdi:steering", null, null,
+        register(select("steering_mode", "转向助力", "mdi:steering", null, null,
                 java.util.Arrays.asList("comfort", "sport"),
                 (sub, payload, snap) -> {
                     int m = "sport".equalsIgnoreCase(payload.trim()) ? 2    // SET_DR_ST_ASSIS_SPORT
@@ -1438,7 +1441,7 @@ public final class VehicleControlCatalog {
         // brake_feel: brake-pedal feel comfort vs sport/strong (BYDAutoADASDevice
         // setBrakeFootSenseState). App-level 0=comfort/1=sport; the collector maps to
         // the HAL value (comfort→2, sport→0). No telemetry state field, so optimistic.
-        register(select("brake_feel", "Brake Feel", "mdi:car-brake-alert", null, null,
+        register(select("brake_feel", "制动踏板脚感", "mdi:car-brake-alert", null, null,
                 java.util.Arrays.asList("comfort", "sport"),
                 (sub, payload, snap) -> {
                     int lvl = "sport".equalsIgnoreCase(payload.trim()) ? 1

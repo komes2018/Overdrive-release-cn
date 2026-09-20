@@ -123,7 +123,7 @@ public final class TelemetryFieldCatalog {
         add("trip_km",            "单次里程",           SENSOR, "distance", null, "km", "mdi:map-marker-path",     false, 0.1);
         add("trip_hours",         "单次行驶时长",       SENSOR, "duration", null, "h",  "mdi:timer",               false, 0);
         add("trip_kwh",           "单次电耗",           SENSOR, "energy",   null, "kWh","mdi:lightning-bolt",      false, 0.1);
-        add("consumption_50km",   "近50km平均电耗",     SENSOR, null,       MEAS, "kWh/100 km", "mdi:lightning-bolt", false, 0.1);
+        add("consumption_50km",   "近 50 km 平均电耗",     SENSOR, null,       MEAS, "kWh/100 km", "mdi:lightning-bolt", false, 0.1);
         add("driving_time_hours", "总行驶时间",         SENSOR, "duration", null, "h",  "mdi:timer",               true,  0);
         add("total_elec_con",     "累计总用电量",       SENSOR, "energy",   TOTI, "kWh","mdi:lightning-bolt",      true,  0.1);
         add("total_fuel_con",     "累计总耗油量",       SENSOR, null,       TOTI, "L",  "mdi:gas-station",         true,  0.1);
@@ -240,7 +240,7 @@ public final class TelemetryFieldCatalog {
         add("emergency_alarm",          "紧急报警",          SENSOR, "enum", null, null, "mdi:alarm-light",     true, 0);
         // Ignition/accessory level (off/acc/on) — the twin of the automation `power` signal.
         // Named "Vehicle Power State" to keep it distinct from `power` (drive-motor kW) above.
-        add("power_level",              "整车电源状态 (OK挡/OFF)", SENSOR, "enum", null, null, "mdi:power",   true, 0);
+        add("power_level",              "整车电源状态 (OK 挡 / OFF)", SENSOR, "enum", null, null, "mdi:power",   true, 0);
         add("mcu_status",               "车机 MCU 状态",     SENSOR, "enum", null, null, "mdi:chip",            true, 0);
 
         // ---------- Air quality ----------
@@ -265,7 +265,7 @@ public final class TelemetryFieldCatalog {
         add("seat_cool",            "座椅通风",     NONE, null, null, null, null, true, 0);
         add("passenger_detection",  "乘员检测",     NONE, null, null, null, null, true, 0);
         add("radar_distances",      "雷达测距",     NONE, null, null, null, null, true, 0);
-        add("utc",                  "UTC时间",      NONE, null, null, null, null, true, 0);
+        add("utc",                  "UTC 时间",      NONE, null, null, null, null, true, 0);
         add("vd_timestamp",         "数据时间戳",   NONE, null, null, null, null, true, 0);
     }
 
