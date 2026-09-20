@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dashboard_modern_vehicle_status">车辆状态</string>
+    <string name="dashboard_modern_updating">正在更新车辆状态</string>
+    <string name="dashboard_modern_vehicle_unavailable">车辆数据不可用</string>
+    <string name="dashboard_modern_vehicle_connected">车辆已连接</string>
+    <string name="dashboard_modern_battery">电量</string>
+    <string name="dashboard_modern_range">预估续航</string>
+    <string name="dashboard_modern_personalized_range">个性化续航</string>
+    <string name="dashboard_modern_vehicle_range">车机估算</string>
+    <string name="dashboard_modern_breakdown_ev">纯电 %1$d %2$s</string>
+    <string name="dashboard_modern_breakdown_fuel">燃油 %1$d %2$s</string>
+    <string name="dashboard_modern_breakdown_fuel_pct">燃油 %1$d %2$s（%3$.0f%%）</string>
+    <string name="dashboard_modern_percent">%1$.0f%%</string>
+    <string name="dashboard_modern_distance">%1$d %2$s</string>
+    <string name="dashboard_modern_charging">充电中</string>
+    <string name="dashboard_modern_plugged_in">已插枪</string>
+    <string name="dashboard_modern_charge_complete">充电完成</string>
+    <string name="dashboard_modern_charge_fault">充电异常，请检查</string>
+    <string name="dashboard_modern_charge_power">%1$.1f kW</string>
+    <string name="dashboard_modern_charge_power_estimated">约 %1$.1f kW</string>
+    <string name="dashboard_modern_charge_power_label">功率</string>
+    <string name="dashboard_modern_charge_eta_label">剩余时间</string>
+    <string name="dashboard_modern_charge_session_label">本次充电</string>
+    <string name="dashboard_modern_charge_session">%1$.1f kWh</string>
+    <string name="dashboard_modern_minutes">%1$d 分钟</string>
+    <string name="dashboard_modern_hours_minutes">%1$d 小时 %2$d 分钟</string>
+    <string name="dashboard_modern_storage_summary">已用 %1$s · 剩余 %2$s</string>
+    <string name="dashboard_modern_storage_unavailable">存储空间不可用</string>
+    <string name="dashboard_modern_clips_today">今日录像 %1$d 段</string>
+    <string name="dashboard_modern_recordings_unavailable">录像不可用</string>
+    <string name="dashboard_modern_recent_activity">最近动态</string>
+    <string name="dashboard_modern_activity_loading">正在加载最近动态</string>
+    <string name="dashboard_modern_no_activity">暂无最近动态</string>
+    <string name="dashboard_modern_activity_unavailable">最近动态不可用</string>
+    <string name="dashboard_ai_insight_kicker">AI 简报</string>
+    <string name="dashboard_ai_insight_default_title">车况简报</string>
+    <string name="dashboard_ai_insight_open">查看完整 AI 简报</string>
+    <string name="dashboard_ai_insight_collapse">收起 AI 简报</string>
+    <string name="dashboard_modern_quick_actions">快捷操作</string>
+    <string name="dashboard_modern_remote_details">连接详情</string>
+    <string name="dashboard_modern_expand_remote">展开远程访问详情</string>
+    <string name="dashboard_modern_collapse_remote">收起远程访问详情</string>
+</resources>

@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources xmlns:ns0="http://schemas.android.com/tools">
     <string name="app_name">OverDrive</string>
-    <string name="accessibility_service_description">在背景下保持Overdrive车辆监测活动. 该服务不会读取或与屏幕内容交互.</string>
+    <string name="accessibility_service_description">在后台保持 OverDrive 车辆监控持续运行。该服务不会读取屏幕内容，也不会与屏幕内容交互。</string>
     <string name="action_cancel">取消</string>
     <string name="action_clear_plain">清除</string>
     <string name="action_select_all">选择所有</string>
@@ -15,7 +15,7 @@
     <string name="action_clear_output">清晰的输出</string>
     <string name="cd_camera">摄像头</string>
     <string name="cd_qr">问题问题</string>
-    <string name="cd_qr_code">问答方式</string>
+    <string name="cd_qr_code">二维码</string>
     <string name="cd_show_hide_token">显示/隐藏标志</string>
     <string name="cd_copy_token">复制标志</string>
     <string name="cd_copy_url">复制 URL</string>
@@ -32,7 +32,7 @@
     <string name="cd_player_prev">上一个录制</string>
     <string name="cd_player_next">下一个录制</string>
     <string name="cd_player_maximize">最大化播放器</string>
-    <string name="cd_player_minimize">出口全屏幕</string>
+    <string name="cd_player_minimize">退出全屏</string>
     <string name="cd_player_mute">转换音频</string>
     <string name="cd_player_quadrant_all">显示所有摄像机</string>
     <string name="cd_player_quadrant_front">显示前置摄像头</string>
@@ -50,7 +50,7 @@
     <string name="cd_permission_granted">授权</string>
     <string name="overlay_rec_inactive_label">其他国家</string>
     <string name="overlay_trip_inactive_label">行程</string>
-    <string name="overlay_mic_inactive_label">产品</string>
+    <string name="overlay_mic_inactive_label">麦克风</string>
     <string name="overlay_replay_label" translatable="false">回放</string>
     <string name="overlay_mode_off_label" translatable="false">关闭</string>
     <string name="overlay_mode_continuous_label" translatable="false">常录</string>
@@ -60,7 +60,7 @@
     <string name="overlay_mode_continuous_cd">连续录像</string>
     <string name="overlay_mode_drive_cd">驱动器模式录制</string>
     <string name="overlay_mode_proximity_cd">近距离防御录像</string>
-    <string name="log_entry_default_timestamp">时间:12:34:56</string>
+    <string name="log_entry_default_timestamp">12:34:56</string>
     <string name="log_entry_default_tag">[TAG]</string>
     <string name="log_entry_default_message">在此记录消息</string>
     <string name="daemon_card_default_name">守护进程名称</string>
@@ -73,12 +73,12 @@
     <string name="tailscale_scan_to_login">扫描到登录</string>
     <string name="tailscale_qr_waiting">等着登录URL...</string>
     <string name="tailscale_enable_proxy">启用Tailscale代理</string>
-    <string name="tailscale_proxy_explainer">通过MQTT到Tailscale的路线,这样你就可以在你的Tailnet 私有网上联系一个私人代理服务 (Broker),</string>
+    <string name="tailscale_proxy_explainer">将 MQTT 流量经由 Tailscale 路由，无需端口转发即可访问 tailnet 内的私有代理服务器（broker）。</string>
     <string name="tailscale_enable_https">在 Tailscale 上启用 HTTPS 服务</string>
     <string name="tailscale_https_explainer">在 https://&lt;节点名&gt;.ts.net 发布此车机服务并附带受信任的证书，使浏览器将其视为安全源。消息推送、座舱监听、PWA 安装以及高性能摄像头硬件解码均需要 HTTPS。需要在您的 Tailscale 控制台中为 tailnet 开启 MagicDNS 与 HTTPS 证书功能。</string>
     <string name="toast_tailscale_https_enabled">已开启 Tailnet HTTPS 服务</string>
     <string name="toast_tailscale_https_disabled">已关闭 HTTPS 服务</string>
-    <string name="toast_tailscale_https_save_failed">修改 HTTPS 设置失败 — 请检查 tailnet 是否已启用 HTTPS 证书功能</string>
+    <string name="toast_tailscale_https_save_failed">修改 HTTPS 设置失败 — 请检查您的 Tailnet 是否已启用 HTTPS 证书功能</string>
     <string name="tailscale_enable_adb">允许通过 Tailscale 进行远程 ADB 调试</string>
     <string name="tailscale_adb_explainer">仅在 Tailnet 内部网络开放 ADB 调试端口（不对公网开放）。任何拥有已授权 ADB 密钥的 Tailnet 设备均可获取本车机完整 Shell 权限。注意：原车 ADB 已在局域网内监听，关闭此开关不会关闭本地局域网 ADB。</string>
     <string name="tailscale_adb_endpoint">adb connect %1$s</string>
@@ -88,7 +88,7 @@
     <string name="toast_tailscale_adb_save_failed">修改远程 ADB 设置失败</string>
     <string name="tailscale_proxy_warning">启用后，连接公共代理服务器（HiveMQ、AWS IoT 等）的 MQTT 将失败——Tailscale 只会路由到你的 tailnet。保存将重启守护进程。</string>
     <string name="camera_mode_title">摄像头接入模式</string>
-    <string name="camera_mode_subtitle">默认适用于大多数比亚迪车型；DiLink 4 适用于新款（2024款及以后汉/唐等），其 AVM HAL 发送预拼接的 2x2 画面。</string>
+    <string name="camera_mode_subtitle">请选择与您的车机相匹配的处理路径。默认模式适用于旧版全景摄像头；DiLink 4 则直接取用 AVM HAL 原生的 SurfaceTexture 输出。</string>
     <string name="camera_mode_option_default">默认模式 (适配海豹、元PLUS/Atto 3、海豚等绝大多数车型)</string>
     <string name="camera_mode_option_dilink4">DiLink 4 (2024款及更新汉/唐车型)</string>
     <string name="camera_mode_current_default">当前: 默认模式</string>
@@ -98,32 +98,32 @@
     <string name="camera_dilink4_tweaks_title">DiLink 4 专项微调</string>
     <string name="camera_dilink4_tweaks_subtitle">针对 DiLink 4 架构车型的专属微调选项。仅在上方选中 DiLink 4 模式时生效。</string>
     <string name="camera_dilink4_save">应用微调</string>
-    <string name="camera_dilink4_hint">仅当车机底层输出出现红色标定未校准遮罩时，才建议开启此项。</string>
+    <string name="camera_dilink4_hint">仅启用本车型所需的兼容性选项。重启守护进程后生效。</string>
     <string name="camera_dilink4_passive_apa_label">使用被动 APA 端口 0</string>
     <string name="camera_dilink4_passive_apa_subtitle">保持原厂全景输出不变，直接录制输出的预览端口 0。当强制全景控制会弹出红色校准标定界面时使用。部分车型可能只输出两路而非四重视角。</string>
     <string name="camera_dilink4_red_mask_label">过滤红色标定未校准水印 (GL)</string>
-    <string name="camera_dilink4_red_mask_subtitle">通过着色器检测明亮红色的 HAL“校准失败”像素并平滑修补。仅影响视频录制画面，不改变车机系统原始标定状态。</string>
+    <string name="camera_dilink4_red_mask_subtitle">新增一个片元着色器处理：检测 HAL 输出的亮红色“校准失败”像素，并用邻近像素采样替换（若横幅区域过大无法修补，则替换为亮度灰度）。仅改善画面观感，不会改变底层标定状态。</string>
     <string name="camera_selection_title">摄像头通道选择</string>
     <string name="camera_selection_subtitle">选择全景摄像头输入源</string>
     <string name="camera_current_auto">当前: 自动检测</string>
     <string name="camera_option_auto">自动 (启动时检测)</string>
     <string name="camera_option_0">摄像头0 Atto剪装</string>
-    <string name="camera_option_1">摄像头 1  Seal (默认)</string>
+    <string name="camera_option_1">摄像头 1 — Seal（默认）</string>
     <string name="camera_option_2">摄像头2</string>
     <string name="camera_option_3">摄像头3</string>
     <string name="camera_option_4">摄像头4</string>
     <string name="camera_option_5">摄像头5</string>
-    <string name="camera_selection_hint">机器自动选择适合您的装饰的相机.相机1=BYD Seal,相机0=Atto装饰. 改变相机的身份证后重新启动.</string>
+    <string name="camera_selection_hint">每次启动时会自动为您的车型配置选择合适的摄像头。摄像头 1 = BYD Seal，摄像头 0 = Atto 车型。更改摄像头 ID 后请重启守护进程，设置才会生效。</string>
     <string name="camera_oem_dashcam_title">OEM Dashcam 摄像头 ID</string>
     <string name="camera_oem_dashcam_hint">选择指向前向行车记录仪传感器的 AVMCamera id。行车记录仪与全景相反：Seal/Han 全景 = 1 → 行车记录仪 = 0；Atto / Tang 全景 = 0 → 行车记录仪 = 1。保持“自动”可让 OverDrive 自动选择。</string>
-    <string name="camera_oem_dashcam_auto_resolved">自动-使用 id %1$d (pano id %2$d)</string>
-    <string name="camera_oem_dashcam_auto_unavailable">自动-pano id 是 %1$d，不能推断控制摄像头</string>
+    <string name="camera_oem_dashcam_auto_resolved">自动 — 使用 id %1$d（全景为 id %2$d）</string>
+    <string name="camera_oem_dashcam_auto_unavailable">自动 — pano id 为 %1$d，无法推断行车记录仪</string>
     <string name="camera_oem_dashcam_save">保存</string>
     <string name="camera_concurrent_probe_label">下次开机时测试双摄像头支援</string>
     <string name="camera_concurrent_probe_subtitle">一次性硬件兼容性检测：将同时打开两路摄像头，以确认本车机能否并发运行 360 全景与前视行车记录仪。将在下次驻车重启时执行一次。除非录像出现画面异常，否则建议保持关闭 — 该检测非必须，且执行时若有录像进行可能会短暂中断。</string>
     <string name="camera_oem_option_0">摄像头 0 - 海豹/汉 (默认)</string>
     <string name="camera_oem_option_1">相机 1 — Atto/Tang</string>
-    <string name="camera_pair_title">摄像头通道对齐</string>
+    <string name="camera_pair_title">哪个摄像头对应哪一路画面？</string>
     <string name="camera_pair_pano_label">360° 全景环视</string>
     <string name="camera_pair_dashcam_label">前视行车记录仪</string>
     <string name="camera_pair_swap">对调交换</string>
@@ -140,13 +140,13 @@
     <string name="camera_ids_pano_title">360 全景视频流源</string>
     <string name="camera_ids_pano_caption">360 管线所打开的物理摄像头 — 用于生成录像 (cam_*.mp4)、哨兵监控和实时查看所用的 2×2 四分屏画面。与上方对齐卡片联动。</string>
     <string name="camera_ids_oem_title">前视记录仪视频流源</string>
-    <string name="camera_ids_oem_caption">原厂行车记录仪模块用于录制 dvr_*.mp4 所调用的摄像头。此项独立于下方的“前挡视角角色”。</string>
+    <string name="camera_ids_oem_caption">原厂行车记录仪录制 dvr_*.mp4 片段时调用的摄像头。此项独立于下方的“前挡风玻璃”角色，后者仅影响行车记录仪录制布局中的顶部视图。</string>
     <string name="camera_role_explainer_slice">画面分片校准：选择 360 四分屏中哪个象限对应本方向。此设置不改变打开的物理摄像头。</string>
     <string name="camera_role_explainer_windshield">前挡视角角色：在行车记录仪录制布局顶部或前挡推流时所采用的视频画面。独立于上方的记录仪 ID。</string>
     <string name="camera_role_explainer_cabin">车内座舱角色：用于多视角布局或实时推流的可选车内视角。</string>
     <string name="camera_mapping_title">摄像机映射</string>
     <string name="camera_role_label">角色映射</string>
-    <string name="camera_candidate_previous">上一篇:</string>
+    <string name="camera_candidate_previous">上一个</string>
     <string name="camera_candidate_next">下一步</string>
     <string name="camera_preview_unavailable">预览画面尚未就绪。请尝试其他摄像头编号，或在后台服务重启后重新打开此窗口刷新。</string>
     <string name="camera_mapping_save">保存映射</string>
@@ -157,21 +157,21 @@
     <string name="camera_mapping_summary_probing">全景流: 自动探测中</string>
     <string name="camera_mapping_current_format">当前映射: %1$s</string>
     <string name="camera_mapping_current_none">当前映射: 自动 / 默认</string>
-    <string name="camera_mapping_hint">OverDrive 默认采用官方预设通道，同时也支持自定义标定 360° 全景环视拼接带。您可以预览每个原始切片，将逻辑方位 (前/后/左/右) 与实际画面精准对应绑定。守护进程重启后将永久应用该标定布局用于录像、实时推流及 AI 检测。</string>
+    <string name="camera_mapping_hint">OverDrive 默认沿用旧版启动行为，但现在支持正确标定合并后的全景拼接画面。您可以预览每个原始合并切片，将 360 环视的逻辑方位（前/右/后/左）映射到实际显示该方位的切片上；守护进程重启后，该布局将复用于录像、推流与 AI 检测。</string>
     <string name="dashboard_scan_to_connect">扫码连接</string>
-    <string name="dashboard_qr_waiting">等待通道建立...</string>
+    <string name="dashboard_qr_waiting">正在等待隧道建立…</string>
     <string name="dashboard_daemons_running_default">0/5 运行</string>
     <string name="dashboard_device_id_loading">加载中...</string>
     <string name="dashboard_access_code">访问码</string>
     <string name="dashboard_token_masked">••••••••</string>
     <string name="dashboard_regenerate_token">重新生成 Token</string>
     <string name="setup_guide_title">开始</string>
-    <string name="setup_guide_subtitle">获得最佳体验的三个快速步骤:</string>
-    <string name="setup_step_one_label">其他</string>
+    <string name="setup_guide_subtitle">获得最佳体验的三个简单步骤：</string>
+    <string name="setup_step_one_label">1</string>
     <string name="setup_step_two_label">其他类型</string>
     <string name="setup_step_three_label">其他类型</string>
     <string name="setup_language_title">选择自己的语言</string>
-    <string name="setup_language_body">按键选择一个不同的OverDrive应用程序和网络道.</string>
+    <string name="setup_language_body">默认跟随车机系统语言。点击可为 OverDrive 应用与 Web 通道选择其他语言。</string>
     <string name="setup_language_button">选择语言</string>
     <string name="setup_autostart_title">禁用自动启动限制</string>
     <string name="setup_autostart_body">点击下方打开比亚迪自启动管理。在列表中找到 OverDrive 并取消勾选（比亚迪每次更新安装时都会重置该选项，需重新取消勾选）。</string>
@@ -180,7 +180,7 @@
     <string name="setup_autostart_enabled">开机自启已配置 ✓</string>
     <string name="setup_autostart_failed">无法自动配置自启 — 正在打开比亚迪自启动管理界面，请手动勾选允许。</string>
     <string name="setup_overlay_title">允许在其他应用程序上显示</string>
-    <string name="setup_overlay_body">在其他应用程序上,可显示浮动状态指标,以便记录和跟踪行程.</string>
+    <string name="setup_overlay_body">开启后将在其他应用之上显示悬浮状态指示器，用于提示录制与行程记录状态。</string>
     <string name="setup_overlay_button">打开叠加设置</string>
     <string name="onboarding_next">下一个</string>
     <string name="onboarding_back">后退</string>
@@ -195,27 +195,27 @@
     <string name="onboarding_authorize_waiting_title">等待权限…</string>
     <string name="onboarding_authorize_waiting_body">接受安卓弹出窗口。如果您看不到它，它可能已经被授予了 — — 这将继续单独进行。</string>
     <string name="onboarding_authorize_retry_title">仍未连接</string>
-    <string name="onboarding_authorize_retry_body">助手尚未运行。Android 权限可能已被取消。请重试并记住检查 </string>
+    <string name="onboarding_authorize_retry_body">辅助程序尚未运行，可能是 Android 授权弹窗被忽略了。请重试，并记得勾选 <b>一律允许</b>。</string>
     <string name="onboarding_authorize_retry_button">再试一次</string>
     <string name="onboarding_mode_title">Overdrive 应在何时运行？</string>
-    <string name="onboarding_mode_body">选择您关闭汽车后OverDrive的行为。\n\n</string>
+    <string name="onboarding_mode_body">选择您熄火下电后 OverDrive 的运行方式。\\n\\n<b>行车 + 驻车（On &amp; Off）</b>：驻车期间持续监控 — 哨兵与后台监测保持运行，因此夜间会消耗少量电量。\\n\\n<b>仅行车时（On Only）</b>：您离车后 OverDrive 会完全关闭。行车期间行车记录仪、行程与充电记录仍正常工作，再次上电时所有功能会自动恢复。您可以随时在设置中更改。</string>
     <string name="onboarding_mode_on_off_button">在 &amp; 关闭</string>
     <string name="onboarding_mode_on_only_button">仅在</string>
     <string name="onboarding_camera_step_label">相机 · 步长 %1$d ，共 %2$d</string>
     <string name="onboarding_camera_intro_title">设置您的摄像头</string>
-    <string name="onboarding_camera_intro_body">让我们告诉 Overdrive 哪个摄像头是您的 360 全景视图，哪个是您的 dashcam。大约需要一分钟，稍后您也可以更改。</string>
+    <string name="onboarding_camera_intro_body">让我们告诉 OverDrive 哪个摄像头对应 360 全景视图，哪个对应行车记录仪。大约需要一分钟，之后您也可以更改。</string>
     <string name="onboarding_camera_intro_primary">开始</string>
     <string name="onboarding_camera_opening_title">打开相机设置…</string>
     <string name="onboarding_camera_opening_body">正在加载摄像头实时画面预览，这通常需要几秒钟。</string>
     <string name="onboarding_camera_pano_title">这是您的360次视图</string>
-    <string name="onboarding_camera_pano_body">使用箭头来查找已修剪的四号图像。请从BOTOM阅读：左下是REAR，右下是LEFT一侧。</string>
+    <string name="onboarding_camera_pano_body">使用箭头找到拼接好的四宫格画面。请从底部（BOTTOM）开始判读：左下角为车尾（REAR），右下角为车身左侧（LEFT）。</string>
     <string name="onboarding_camera_dashcam_title">现在找到前方摄像头</string>
     <string name="onboarding_camera_dashcam_body">步过照相机的箭头并停止显示风盾/前进视图。 注意它的数字 — — 你下一步会挑选它。</string>
     <string name="onboarding_camera_pick_title">选择您的360个摄像头</string>
     <string name="onboarding_camera_pick_body">在顶部卡片中，选择您的 360 / 普通摄像头对应的编号。不确定？保持 AUTO 设置，Overdrive 会自动识别。</string>
     <string name="onboarding_camera_pick_primary">下一个</string>
     <string name="onboarding_camera_pick_dash_title">选择您的摄像头摄像头</string>
-    <string name="onboarding_camera_pick_dash_body">在这张卡片中选择您早些时候发现的 dashcam 号码 — 或将它留在AUTO上。</string>
+    <string name="onboarding_camera_pick_dash_body">在这张卡片中，选择您此前确认的行车记录仪编号 — 或保持 AUTO 不变。</string>
     <string name="onboarding_camera_save_primary">保存 &amp; 重启</string>
     <string name="onboarding_camera_applying_title">正在应用-正在重新启动相机</string>
     <string name="onboarding_camera_applying_body">画面将短暂黑屏并闪烁约 10 秒，此属正常现象，请稍候。</string>
@@ -223,14 +223,14 @@
     <string name="onboarding_camera_verify_body">360° 全景画面是否正常，显示了车辆前方的道路？如果画面不对，请点击切换 —— 不会损坏。</string>
     <string name="onboarding_camera_verify_ok">向右</string>
     <string name="onboarding_camera_verify_repick">重新选择</string>
-    <string name="onboarding_camera_windshield_title">记录中的前行带？(可选)</string>
-    <string name="onboarding_camera_windshield_body">对于OEM仪表盘布局——风盾摄像头作为屏幕顶部录制件——在角色菜单中选择风盾。 选择前方摄像头并保存。 大多数所有者都可以跳过这个。</string>
+    <string name="onboarding_camera_windshield_title">录制画面是否包含前方道路区域？（可选）</string>
+    <string name="onboarding_camera_windshield_body">若需要原厂行车记录仪布局——把挡风玻璃摄像头以顶部条状叠加在录制画面上——请在角色菜单中选择“挡风玻璃”，再选择前视摄像头并保存。大多数车主可跳过此步。</string>
     <string name="onboarding_camera_windshield_primary">显示我</string>
     <string name="onboarding_camera_windshield_skip">不要谢谢。</string>
     <string name="onboarding_vehicle_title">告诉 Overdrive 您的电池信息</string>
     <string name="onboarding_vehicle_body">选择您的模型，我们填充了 kWh，或者输入自己(15-120)。 这使得续航里程和充电估算准确。您可以跳过并稍后设置。</string>
     <string name="onboarding_vehicle_primary">设置电池</string>
-    <string name="onboarding_dash_tiles_title">你的鸡蛋一眼！</string>
+    <string name="onboarding_dash_tiles_title">座舱信息一目了然</string>
     <string name="onboarding_dash_tiles_body">这些卡片是快捷入口 — 点击可打开实时摄像头、录像回放、服务管理或车辆控制。</string>
     <string name="onboarding_dash_chips_title">这些仅显示状态</string>
     <string name="onboarding_dash_chips_body">顶部显示录制、服务和您的远程链接。他们自己更新了 — — 他们不是按钮。</string>
@@ -240,14 +240,14 @@
     <string name="onboarding_done_primary">完成</string>
     <string name="onboarding_done_secondary">探索设置</string>
     <string name="onboarding_help_cd">导游览</string>
-    <string name="onboarding_reset_toast">开机重置-重播指南</string>
+    <string name="onboarding_reset_toast">引导设置已重置 — 正在重新播放设置向导</string>
     <string name="onboarding_expert_chapter_label">%1$d 第 %2$d 章</string>
     <string name="onboarding_expert_finish">完成</string>
     <string name="onboarding_expert_menu_title">导游览</string>
     <string name="onboarding_expert_menu_body">快速导览进阶功能设置 — 包含车辆配置、扩展集成、哨兵监控、系统诊断、守护服务与安全防护。您可随时退出。</string>
     <string name="onboarding_expert_menu_start">开始游览</string>
     <string name="onboarding_expert_vehicle_title">车辆资料</string>
-    <string name="onboarding_expert_vehicle_body">点击车辆卡片来设置电池大小和型号——它能使精确的范围和健康估计。</string>
+    <string name="onboarding_expert_vehicle_body">点击“车辆”卡片设置电池容量与车型——这些数据用于提供准确的续航里程与健康度估算。</string>
     <string name="onboarding_expert_recordings_title">行车录像</string>
     <string name="onboarding_expert_recordings_body">使用此开关在行车记录仪（连续录像 + 近距防护片段）与驻车哨兵（停放期间传感器告警事件）之间切换 — 两者分别归档。点击任意片段即可播放。</string>
     <string name="onboarding_expert_live_title">实时摄像机</string>
@@ -261,20 +261,20 @@
     <string name="onboarding_expert_maps_title">车载导航联动</string>
     <string name="onboarding_expert_maps_body">打开地图即可获得完整的逐向导航——搜索目的地、获取路线规划和实时引导，还能查看附近的兴趣点以及 RoadSense 沿途记录的所有路面隐患。当您开始驾驶时，还可以将其自动投屏到液晶仪表盘上——该开关位于 RoadSense 的地图标签页中。</string>
     <string name="onboarding_expert_integrations_title">集成</string>
-    <string name="onboarding_expert_integrations_body">连接 Telegram 警示，一个更好的路由规划器，MQTT 或 BYD 云。 每张卡片都在应用程序内打开它的设置。当所有东西的链接时，上面的避孕药都会转向绿化。</string>
-    <string name="onboarding_expert_bydcloud_title">BYD 云解锁远程控制</string>
+    <string name="onboarding_expert_integrations_body">在此连接 Telegram 告警、A Better Routeplanner（ABRP）、MQTT 或比亚迪云服务。每张卡片都会打开应用内对应的设置页面。当所有服务均已连接时，顶部的状态胶囊会变为绿色。</string>
+    <string name="onboarding_expert_bydcloud_title">BYD Cloud 可解锁远程控制</string>
     <string name="onboarding_expert_bydcloud_body">将您的BYD账户链接到这里允许您在手机上进行远程锁车、闪灯和鸣笛。将链接的账户和访问代码视为敏感的。</string>
     <string name="onboarding_expert_surveillance_title">哨兵监控与录像</string>
-    <string name="onboarding_expert_surveillance_body">在此处微调检测、质量和存储。 这些是作为您的汽车服务的应用内配置页面打开-空白屏幕仅仅表示帮助者仍在开始。</string>
+    <string name="onboarding_expert_surveillance_body">可在此微调检测、画质与存储设置。这些配置页面由车机本地提供并在应用内打开——出现空白页面只是说明辅助服务仍在启动中。</string>
     <string name="onboarding_expert_camprobe_title">相机探测-小心的</string>
-    <string name="onboarding_expert_camprobe_body">用于重新映射各路物理摄像头的通道角色并重启摄像头服务。若画面一切正常，请勿改动此项。</string>
+    <string name="onboarding_expert_camprobe_body">用于重新映射各路物理摄像头对应的通道角色并重启摄像头服务。仅当某一路画面异常时才需要修改 — 您在前面的引导中已设置过此项。</string>
     <string name="onboarding_expert_traffic_title">比亚迪路况监测服务 — 远程访问前置要求</string>
     <string name="onboarding_expert_traffic_body">比亚迪原厂内置的 Traffic Monitor（路况监测器）会独占并阻止第三方应用使用车机内置车联网 SIM 卡。若希望通过原车流量卡远程连入车机，必须在此禁用该服务。修改后车机需重启生效。</string>
     <string name="onboarding_expert_daemons_title">服务 — 小心处理</string>
     <string name="onboarding_expert_daemons_body">用于启停后台核心守护进程。关闭摄像头服务、哨兵监控或熄火录像将停止录制，即使车机重启后也将保持关闭，直到您手动重新开启。</string>
     <string name="onboarding_expert_security_title">使用 PIN 码锁定</string>
     <string name="onboarding_expert_security_body">设置保护 PIN 码以防止共用车人误操作设置。即使应用处于锁定状态，哨兵安防与后台录像仍会照常运行。若遗忘 PIN 码，只能通过电脑连接 USB 调试清除。</string>
-    <string name="onboarding_expert_reset_title">重置数据 - 永久性数据</string>
+    <string name="onboarding_expert_reset_title">重置数据 — 不可恢复</string>
     <string name="onboarding_expert_reset_body">这将清除所有录像、事件日志和设置，无法撤销。仅在转让出售车辆时使用。</string>
     <string name="onboarding_expert_done_title">那是游览</string>
     <string name="onboarding_expert_done_body">您已经看到了更深的设置。随时从帮助按钮重新打开本指南。</string>
@@ -297,21 +297,21 @@
     <string name="webview_start_camera_daemon">请在“守护进程”页面启动摄像头后台服务后再访问此页面。</string>
     <string name="zrok_enable_token_hint">启用代码</string>
     <string name="zrok_token_storage_note">访问令牌安全保存在车机本地，并在应用与后台守护进程之间共享。</string>
-    <string name="zrok_reset_environment">重置Zrok环境</string>
-    <string name="zrok_reset_environment_desc">重置后您需要使用新的访问令牌重新启用 Zrok 环境。</string>
+    <string name="zrok_reset_environment">重置 Zrok 环境</string>
+    <string name="zrok_reset_environment_desc">将移除环境和访问令牌。您需使用自己的访问令牌重新启用（会占用一个设备名额）。</string>
     <string name="reset_title">重新设置数据</string>
     <string name="reset_subtitle">按类别清除积累的数据</string>
-    <string name="reset_warning">这不能撤销.记录,行程和电池历史将永久删除.</string>
+    <string name="reset_warning">此操作无法撤销。录像、行程与电池历史记录将被永久删除。</string>
     <string name="reset_cat_trips">行程</string>
-    <string name="reset_cat_trips_desc">旅程历史,航线,每周/每月的行程</string>
+    <string name="reset_cat_trips_desc">行程历史、行驶路线、每周/每月汇总统计</string>
     <string name="reset_cat_soc_history">SoC &amp; 12V 历史</string>
     <string name="reset_cat_soc_history_desc">动力电池 SoC 采样点、充电记录与电压日志</string>
     <string name="reset_cat_soh">SOH校准</string>
     <string name="reset_cat_soh_desc">重新检测 BMS 标称容量，并重置 SOH 预估模型</string>
     <string name="reset_cat_abrp_token">ABRP 访问令牌</string>
-    <string name="reset_cat_abrp_token_desc">禁用ABRP远程测量,直到修复</string>
+    <string name="reset_cat_abrp_token_desc">重新配对前将停用 ABRP 遥测数据上传</string>
     <string name="reset_cat_byd_cloud">BYD 云权证</string>
-    <string name="reset_cat_byd_cloud_desc">用户名,登录密钥,VIN 需要重新登录</string>
+    <string name="reset_cat_byd_cloud_desc">用户名、登录密钥、VIN — 需重新登录</string>
     <string name="reset_cat_recordings">行车录像 (视频)</string>
     <string name="reset_cat_recordings_desc">清空录像存储目录中的所有 MP4 视频</string>
     <string name="reset_cat_sentry_events">哨兵监控事件</string>
@@ -337,7 +337,7 @@
     <string name="recording_lib_filter_section_what">目标类型</string>
     <string name="recording_lib_filter_section_severity">告警级别</string>
     <string name="recording_lib_filter_section_type">类型</string>
-    <string name="recording_lib_filter_section_place">地方</string>
+    <string name="recording_lib_filter_section_place">地点</string>
     <string name="recording_lib_filter_section_storage">存储</string>
     <string name="recording_lib_storage_filter_internal">内部存储</string>
     <string name="recording_lib_storage_filter_sd">SD 卡</string>
@@ -381,15 +381,15 @@
     <string name="toast_share_recordings">正在分享 %1$d 个录像</string>
     <string name="toast_share_failed">分享失败</string>
     <string name="player_title_recording">录制</string>
-    <string name="player_time_zero">时间:</string>
+    <string name="player_time_zero">0:00</string>
     <string name="player_time_separator"> / </string>
-    <string name="daemons_hero_title">背景服务</string>
+    <string name="daemons_hero_title">后台服务</string>
     <string name="daemons_count_pending">货运服务...</string>
     <string name="daemons_count_fmt">运行的%1$d或%2$d</string>
     <string name="daemons_wifi_auto_enable_title">驻车时自动唤醒并开启 Wi‑Fi</string>
     <string name="daemons_wifi_auto_enable_subtitle">OverDrive 会在车辆停放以及后台服务启动时自动恢复开启 Wi‑Fi。关闭此项可将 Wi‑Fi 状态完全交由原车系统管理。</string>
     <string name="daemons_wifi_auto_enable_save_failed">无法保存 Wi‑Fi 自动开启设置。</string>
-    <string name="update_preparing">准备更新...</string>
+    <string name="update_preparing">准备更新…</string>
     <string name="update_percent_zero">百分点</string>
     <string name="battery_health_title">电池健康</string>
     <string name="battery_health_subtitle">电池健康度 (SOH)</string>
@@ -401,7 +401,7 @@
     <string name="battery_health_samples">样本数</string>
     <string name="battery_health_last_updated">最后更新</string>
     <string name="battery_health_reset">重置 SOH 估算</string>
-    <string name="battery_health_reset_desc">更换电池或读数异常时使用。</string>
+    <string name="battery_health_reset_desc">将清除全部数据并从头重新估算。若电池已更换或读数异常时使用。</string>
     <string name="soh_dialog_model_label">车型</string>
     <string name="soh_dialog_pack_capacity_label">电池包容量</string>
     <string name="soh_dialog_estimated_capacity_label">有效产能</string>
@@ -410,12 +410,12 @@
     <string name="soh_dialog_source_auto">自动检测</string>
     <string name="soh_dialog_model_not_selected">没有选择</string>
     <string name="soh_dialog_capacity_not_detected">没有发现</string>
-    <string name="soh_dialog_calibration_format">在%2$s上,%1$.1f%%</string>
+    <string name="soh_dialog_calibration_format">%1$.1f%%（%2$s）</string>
     <string name="soh_dialog_frame_anchor_label">实测满电可用电量</string>
-    <string name="soh_dialog_frame_anchor_format">完全观察到的%1$.2f kWh (%2$d/%3$d样本)</string>
-    <string name="soh_dialog_frame_anchor_pending_format">完全观察到的%1$.2f kWh (采集%2$d/%3$d样本)</string>
+    <string name="soh_dialog_frame_anchor_format">满电状态下观测到 %1$.2f kWh（%2$d/%3$d 个样本）</string>
+    <string name="soh_dialog_frame_anchor_pending_format">满电状态下观测到 %1$.2f kWh（正在采集 %2$d/%3$d 个样本）</string>
     <string name="soh_dialog_frame_mismatch_title">电池包容量框架不匹配</string>
-    <string name="soh_dialog_frame_mismatch_format">车辆报告%1$.1f kWh在充电状态下,但电池包容量设置为%2$.1f kWh.上面的数字可能反映了单位不匹配 (标称容量与可用),而不是真实衰减.考虑输入%1$.1f kWh以匹配车辆报告.</string>
+    <string name="soh_dialog_frame_mismatch_format">车辆在满电状态下上报 %1$.1f kWh，但电池包容量已设置为 %2$.1f kWh。上述数值可能只是口径不一致（标称容量与可用容量），并非真实衰减。建议填入 %1$.1f kWh，以与车辆上报值保持一致。</string>
     <string name="soh_dialog_use_observed_value">使用观测值</string>
     <string name="soh_dialog_use_observed_value_pending">保存中…</string>
     <string name="toast_soh_observed_value_saved">电池包容量更新至%1$.1f kWh.</string>
@@ -423,10 +423,10 @@
     <string name="diagnostics_battery_needs_review">需要确认</string>
     <string name="dialog_ok">确定</string>
     <string name="toast_updated_to">更新至%1$s</string>
-    <string name="toast_update_install_failed">更新安装失败:%1$s</string>
+    <string name="toast_update_install_failed">更新安装失败：%1$s</string>
     <string name="toast_checking_for_updates">检查是否有更新...</string>
     <string name="toast_app_up_to_date">应用程序是最新版本(%1$s)</string>
-    <string name="toast_update_check_failed">更新检查失败:%1$s</string>
+    <string name="toast_update_check_failed">更新检查失败：%1$s</string>
     <string name="update_dialog_available_title">有可用的更新</string>
     <string name="update_dialog_subtitle">有新版本可供安装</string>
     <string name="update_dialog_current">目前版本：v%1$s</string>
@@ -439,8 +439,8 @@
     <string name="update_picker_title">选择版本</string>
     <string name="update_picker_subtitle">安装任何已发布的版本 — 无论新旧</string>
     <string name="update_picker_empty">尚未发布任何版本。</string>
-    <string name="update_picker_current_suffix">%1$s (已安装)</string>
-    <string name="update_picker_older_suffix">%1$s (旧版本)</string>
+    <string name="update_picker_current_suffix">%1$s（已安装）</string>
+    <string name="update_picker_older_suffix">%1$s（旧版本）</string>
     <string name="update_progress_title">正在更新 Overdrive</string>
     <string name="update_step_downloading">正在下载更新…</string>
     <string name="update_step_verifying">正在验证下载…</string>
@@ -451,7 +451,7 @@
     <string name="update_step_queued">正在启动更新…</string>
     <string name="update_error_title">更新失败</string>
     <string name="update_error_daemon_down">摄像头后台服务未运行。请先在“守护进程”页面启动该服务，然后再尝试更新。</string>
-    <string name="update_error_start_failed">无法启动更新: %1$s</string>
+    <string name="update_error_start_failed">无法启动更新：%1$s</string>
     <string name="update_error_lost_headunit">安装完成前与车机中控屏失去连接。若使用内网穿透，请检查 Telegram 推送的新地址，或直接使用车机本地 IP。</string>
     <string name="update_hide">隐藏</string>
     <string name="settings_update_channel_title">更新通道</string>
@@ -468,20 +468,20 @@
     <string name="toast_url_copied_short">已复制了URL!</string>
     <string name="toast_camera_set_to_auto">摄像头设置为自动</string>
     <string name="toast_failed_to_save_short">无法保存</string>
-    <string name="toast_failed_with_message">失败:%1$s</string>
+    <string name="toast_failed_with_message">失败：%1$s</string>
     <string name="toast_camera_id_set">摄像头%1$d设置 下一个ACC周期</string>
     <string name="toast_clearing_camera_config">清除摄像头配置...</string>
     <string name="toast_restarting_camera_daemon">正在重启摄像头后台守护进程...</string>
     <string name="toast_camera_daemon_restarting">摄像头守护进程正在重新探测并启动…</string>
-    <string name="toast_camera_restart_failed">配置已清除,但 daemon 重启失败.请手动重启.</string>
+    <string name="toast_camera_restart_failed">配置已清除，但守护进程重启失败。请手动重启。</string>
     <string name="toast_camera_settings_saved_restarting">预览 预览 预览 预览 预览</string>
     <string name="toast_camera_settings_restart_failed">摄像头设置已保存，但守护进程重启失败，请稍后手动重启。</string>
-    <string name="toast_failed_with_message_x">失败:%1$s</string>
+    <string name="toast_failed_with_message_x">失败：%1$s</string>
     <string name="toast_soh_reset_success">SOH估计重置 将从下一个数据中重新计算</string>
     <string name="toast_soh_reset_failed_no_daemon">重置失败 — 守护进程未响应且文件不可写</string>
-    <string name="toast_soh_reset_failed_with_message">重置失败:%1$s</string>
+    <string name="toast_soh_reset_failed_with_message">重置失败：%1$s</string>
     <string name="toast_select_at_least_one_category">选择至少一个类别</string>
-    <string name="toast_reset_failed_with_error">设置失败:%1$s</string>
+    <string name="toast_reset_failed_with_error">重置失败：%1$s</string>
     <string name="toast_traffic_monitor_changing">正在设置路况监测服务为 %1$s…</string>
     <string name="toast_traffic_monitor_persist_failed">已应用设置，但偏好未能持久化保存 — 固件升级后可能丢失。</string>
     <string name="dialog_close">关闭</string>
@@ -494,15 +494,15 @@
     <string name="dialog_keep_disabled">保持残疾</string>
     <string name="dialog_regenerate">重新生成</string>
     <string name="dialog_reset_selected">选择重置</string>
-    <string name="dialog_reset_soh_title">设置SOH估计?</string>
-    <string name="dialog_reset_soh_message">这将清除所有SOH数据并从零开始强迫重新估计.\n\n如果:\n•电池被更换\n•SOH读取似乎不正确\n•您想重新校准\n\n系统将从下一个可用的数据源 (OEM,充电校准或即时读取) 中重新播放.</string>
-    <string name="dialog_reset_following_title">设置下面的设置?</string>
+    <string name="dialog_reset_soh_title">重置 SOH 估算？</string>
+    <string name="dialog_reset_soh_message">此操作将清除所有 SOH 数据，并强制从零重新估算。\\n\\n在以下情况使用：\\n• 电池已更换\\n• SOH 读数疑似不准确\\n• 需要重新标定\\n\\n系统将重新从下一个可用数据源（OEM、充电标定或瞬时读数）取初始值。</string>
+    <string name="dialog_reset_following_title">重置以下项目？</string>
     <string name="dialog_reset_following_message">此操作无法撤销。
 
 %1$s</string>
     <string name="dialog_reset_complete_title">完成重新设置</string>
     <string name="dialog_traffic_cannot_check_title">无法检查状态</string>
-    <string name="dialog_traffic_cannot_check_message">应用程序需要ADB访问来管理系统包.请确保:\n\n• 在开发者选项中已启用USB调试\n•已接受ADB授权提示\n\n状态将自动更新,一旦连接.</string>
+    <string name="dialog_traffic_cannot_check_message">ADB 连接尚未就绪。\\n\\n应用需要 ADB 权限才能管理系统应用，请确保：\\n\\n• 已在开发者选项中启用 USB 调试\\n• 已接受 ADB 授权提示\\n\\n连接成功后状态会自动更新。</string>
     <string name="dialog_traffic_disable_title">停用比亚迪路况监测器？</string>
     <string name="dialog_traffic_disable_message">比亚迪原厂路况监测服务 (com.byd.trafficmonitor) 是车机内置的系统应用，在后台持续监测道路交通状况。
 
@@ -516,15 +516,15 @@
 此项操作完全安全可逆 — 仅停用原厂简易地图自带的路况图层，车辆的导航、蓝牙及所有行车功能均不受任何影响。
 
 停用后需强制重启车机（长按中控台滚轮 5 秒）。</string>
-    <string name="dialog_traffic_enable_title">再启用BYD交通监测器?</string>
-    <string name="dialog_traffic_enable_message">目前,BYD 交通监测器已被禁用.\n\n重新启用将恢复导航地图内置的交通覆盖.请注意,它将在背景中运行并消耗移动数据.\n\n启动后需要硬式重新启动 (保持中心控制台按5秒).</string>
+    <string name="dialog_traffic_enable_title">重新启用 BYD 路况监测服务？</string>
+    <string name="dialog_traffic_enable_message">目前比亚迪原厂路况监测服务（BYD Traffic Monitor）已被禁用。\\n\\n重新启用后将恢复导航地图内置的路况图层。请注意，它会在后台持续运行并消耗车机流量。\\n\\n启用后需强制重启车机（长按中控台按钮 5 秒）。</string>
     <string name="dialog_traffic_status_title">路况监测服务已 %1$s</string>
     <string name="dialog_traffic_reboot_message">设置已应用。
 
 请立即执行车机硬重启：
 按住中控台下方的音量滚轮/电源键 5 秒以上直至车机重启。</string>
     <string name="traffic_monitor_loading">路况监测服务：正在检测…</string>
-    <string name="traffic_monitor_tap_to_check">交通监测器 (点击查看)</string>
+    <string name="traffic_monitor_tap_to_check">流量监控（点击查看）</string>
     <string name="reset_label_trips">行程</string>
     <string name="reset_label_soc_history">SoC + 12V 历史记录</string>
     <string name="reset_label_soh">SOH校准</string>
@@ -537,8 +537,8 @@
     <string name="toast_access_code_copied">复制访问代码</string>
     <string name="dialog_regenerate_token_title">重新生成访问 Token</string>
     <string name="dialog_regenerate_token_message">重新生成访问令牌将使当前令牌失效，所有活跃连接将被强制登出。是否继续？</string>
-    <string name="toast_token_regenerated_logged_out">已生成新令牌，所有活跃连接已强制登出。</string>
-    <string name="toast_token_regenerated_restart">代蒙可能需要重新启动才能应用.</string>
+    <string name="toast_token_regenerated_logged_out">已生成新令牌，所有会话均已登出。</string>
+    <string name="toast_token_regenerated_restart">令牌已重新生成。守护进程可能需要重启才能生效。</string>
     <string name="toast_token_regenerated_no_notify">访问令牌已重新生成，但未能成功通知后台守护进程。</string>
     <string name="toast_token_regenerated">访问令牌已重新生成</string>
     <string name="dashboard_no_tunnel">没有道运行</string>
@@ -564,12 +564,12 @@
     <string name="clip_label_url">访问链接</string>
     <string name="toast_no_config_needed">对于%1$s没有配置</string>
     <string name="dialog_zrok_token_title">Zrok道标志</string>
-    <string name="dialog_zrok_token_message">请输入 Zrok 访问凭证令牌 (Enable Token)。</string>
+    <string name="dialog_zrok_token_message">请输入您的 Zrok 启用令牌（Enable Token）。\\n可在 zrok.io 获取。</string>
     <string name="toast_token_cannot_be_empty">标签不能空</string>
-    <string name="dialog_tailscale_settings_title">Tailscale道设置</string>
+    <string name="dialog_tailscale_settings_title">Tailscale 隧道设置</string>
     <string name="dialog_tailscale_settings_message">配置 Tailscale</string>
     <string name="tailscale_failed_login_url">无法生成登录URL</string>
-    <string name="tailscale_logged_in_relogin">登录. 点击登录另一个帐户</string>
+    <string name="tailscale_logged_in_relogin">已登录。点击可登录其他账户。</string>
     <string name="dialog_tailscale_adb_enable_title">允许远程 ADB 调试？</string>
     <string name="dialog_tailscale_adb_enable_message">这将在您的 Tailnet 内部网络开放 ADB (端口 5555)，方便远程调试车机。
 
@@ -581,25 +581,27 @@
 • 开启车载 Wi-Fi 热点会导致车机断开 Wi-Fi，此时远程访问将完全依赖车机流量卡
 
 请仅在您信任并掌控的 Tailnet 中开启。您可以随时将其关闭。</string>
-    <string name="dialog_tailscale_proxy_enable_title">启用Tailscale代理?</string>
-    <string name="dialog_tailscale_proxy_enable_message">这将使MQTT通过Tailscale路由,以便您可以在您的Tailnet 私有网上访问一个私人代理服务 (Broker),而不需转发端口.\n\n当启用:\n•MQTT到Tailnet 私有网代理服务 (Broker)工作时 (例如,在Tailnet 私有网上的设备上Mosquitto)\n•MQTT到公共代理服务 (Broker) (HiveMQ,AWS IoT等) 将失败 Z0XX只有通往Tailnet 私有网的路由\n•Tailscale daemon将重新启动应用变化\n•其他应用程序和设备的流量不会受到影响\n\n•您可以随时关闭此.</string>
+    <string name="dialog_tailscale_proxy_enable_title">启用 Tailscale 代理？</string>
+    <string name="dialog_tailscale_proxy_enable_message">此项将把 MQTT 流量经由 Tailscale 路由，无需端口转发即可访问您 tailnet 内的私有代理服务器（broker）。\\n\\n启用期间：\\n• 连接 tailnet 内的 MQTT 代理服务器可正常工作（例如 tailnet 中某台设备上的 Mosquitto）\\n• 连接公共代理服务器（HiveMQ、AWS IoT 等）的 MQTT 会失败 — Tailscale 只会路由到您的 tailnet\\n• Tailscale 守护进程将重启以应用此更改\\n• 其他应用流量及设备其余部分不受影响\\n\\n您可以随时关闭此项。</string>
     <string name="dialog_zrok_reset_title">重置Zrok环境</string>
     <string name="dialog_zrok_reset_message">此操作将：
 • 停止当前正在运行的 Zrok 穿透隧道
 • 从本设备中移除 Zrok 环境配置
 • 清除已保存的访问令牌
 
-之后您需要重新输入令牌以再次启用。</string>
+之后您需要重新输入令牌并重新启用。此操作会占用您在 zrok.io 上的 5 个设备名额之一。
+
+确定吗？</string>
     <string name="toast_resetting_zrok">重新设置zrok环境...</string>
     <string name="toast_zrok_reset_success">Zrok 环境已重置。请输入新的访问令牌以重新配置。</string>
     <string name="toast_zrok_reset_partial">环境已重置（部分残留凭证文件可能需要手动清理）</string>
-    <string name="toast_zrok_reset_warnings">环境重置 (附警告:%1$s)</string>
-    <string name="zrok_no_token_configured">尚未配置 Zrok 访问令牌。</string>
+    <string name="toast_zrok_reset_warnings">环境已重置（附警告：%1$s）</string>
+    <string name="zrok_no_token_configured">尚未配置 Zrok 访问令牌。点击进行设置。</string>
     <string name="dialog_tailscale_reset_title">重置Tailscale环境</string>
-    <string name="dialog_tailscale_reset_message">此操作将:\n• 如果 Tailscale 隧道正在运行，则停止它\n• 从本设备移除 Tailscale 环境\n• 你仍需在 Tailscale 控制台中移除该设备\n\n你需要重新登录。\n\n确定吗?</string>
+    <string name="dialog_tailscale_reset_message">此操作将：\\n• 如果 Tailscale 隧道正在运行，则停止它\\n• 从本设备移除 Tailscale 环境\\n• 你仍需在 Tailscale 控制台中移除该设备\\n\\n你需要重新登录。\\n\\n确定吗？</string>
     <string name="toast_resetting_tailscale">正在重置 Tailscale 环境…</string>
-    <string name="toast_tailscale_reset_success">Tailscale环境重置. 登录重新设置.</string>
-    <string name="toast_tailscale_reset_warnings">环境重置Tailscale (附警告:%1$s)</string>
+    <string name="toast_tailscale_reset_success">Tailscale 环境已重置，请重新登录并完成设置。</string>
+    <string name="toast_tailscale_reset_warnings">Tailscale 环境已重置（附警告：%1$s）</string>
     <string name="toast_tailscale_proxy_enabled">启用Tailscale代理</string>
     <string name="toast_tailscale_proxy_disabled">禁用Tailscale代理</string>
     <string name="toast_tailscale_proxy_save_failed">无法保存代理设置</string>
@@ -610,15 +612,15 @@
     <string name="toast_fetching_log">带来%1$s日志...</string>
     <string name="toast_log_empty_or_missing">日志文件为空或未找到</string>
     <string name="toast_log_empty">记录文件是空的</string>
-    <string name="toast_daemon_manager_unavailable">Daemon 经理不准备,在一瞬间再试一次</string>
-    <string name="toast_log_save_failed">未能保存日志:%1$s</string>
+    <string name="toast_daemon_manager_unavailable">守护进程管理器尚未就绪，请稍后再试。</string>
+    <string name="toast_log_save_failed">未能保存日志：%1$s</string>
     <string name="toast_log_not_found">未找到日志文件或文件不可读</string>
     <string name="log_share_title">%1$s日志 - %2$s</string>
     <string name="log_share_chooser">分享%1$s日志</string>
     <string name="log_header_title">=== %1$s 运行日志 ===</string>
-    <string name="log_header_source">来源:%1$s</string>
-    <string name="log_header_exported">出口:%1$s</string>
-    <string name="log_header_truncated">注:截至10000行的日志 (总数:%1$d行)</string>
+    <string name="log_header_source">来源：%1$s</string>
+    <string name="log_header_exported">导出时间：%1$s</string>
+    <string name="log_header_truncated">注意：日志已截断，仅保留最后 10000 行（总计：%1$d 行）</string>
     <string name="logs_send_title">传送 %1$s 日志</string>
     <string name="logs_send_title_plain">发送后台守护进程日志</string>
     <string name="logs_send_subtitle">%1$s · 选择如何向我们发送它</string>
@@ -634,19 +636,19 @@
     <string name="logs_copy_code">复制代码</string>
     <string name="logs_done">完成</string>
     <string name="placeholder_dash">—</string>
-    <string name="errors_network">网路错误</string>
-    <string name="toast_cannot_play_video">无法播放视频:%1$s</string>
+    <string name="errors_network">网络错误</string>
+    <string name="toast_cannot_play_video">无法播放视频：%1$s</string>
     <string name="dialog_delete_recording_title">删除录像</string>
-    <string name="dialog_delete_recording_message">删除%1$s?</string>
+    <string name="dialog_delete_recording_message">删除 %1$s？\\n此操作无法撤销。</string>
     <string name="toast_recording_deleted">删除记录</string>
-    <string name="toast_recording_delete_failed">无法删除记录</string>
+    <string name="toast_recording_delete_failed">无法删除录像</string>
     <string name="toast_batch_delete_partial">已删除%1$d,失败的%2$d</string>
     <string name="play_with_chooser">玩一下</string>
     <string name="setup_version_banner">已更新到 %1$s — 重新确认自动启动，每次安装时都会有BYD wipes</string>
     <string name="setup_overlay_already_granted">已授予</string>
-    <string name="setup_tips_header">提示 &amp; 解决问题</string>
+    <string name="setup_tips_header">使用提示与故障排查</string>
     <string name="setup_traffic_title">停用比亚迪路况监测服务</string>
-    <string name="setup_traffic_body">BYD 交通监测器阻止第三方应用访问互联网. 禁用它使OverDrive和其他安装的应用程序实际上使用网络. 之后需要硬式重新启动.</string>
+    <string name="setup_traffic_body">比亚迪原厂路况监测服务（BYD Traffic Monitor）会阻止第三方应用联网。禁用后，OverDrive 及您安装的其他应用才能真正使用车机网络。此后需强制重启车机。</string>
     <string name="setup_traffic_button">开放的交通监测器</string>
     <string name="setup_camera_fix_title">摄像头画面黑屏或显示异常？</string>
     <string name="setup_camera_fix_body">进入摄像头探测，将摄像头 ID 设为 0 并点击保存，然后重启摄像头守护进程。若画面仍异常，请尝试设为 ID 1。下方映射列表无需改动。</string>
@@ -701,12 +703,12 @@
     <string name="settings_section_overlay">状态覆盖</string>
     <string name="settings_section_security">安全</string>
     <string name="settings_overlay_subtitle">选择漂浮状态药物的哪些部分保持可见.</string>
-    <string name="settings_overlay_camera_title">摄像头指标</string>
+    <string name="settings_overlay_camera_title">摄像头状态指示</string>
     <string name="settings_overlay_camera_subtitle">录像进行中在屏幕角落显示 REC / PROX 状态指示。</string>
     <string name="settings_overlay_trip_title">行程指示器</string>
     <string name="settings_overlay_trip_subtitle">在行程记录与监测运行时，在屏幕上显示行程悬浮小胶囊。</string>
     <string name="settings_overlay_replay_title">即时回放悬浮窗</string>
-    <string name="settings_overlay_replay_subtitle">在屏幕上显示悬浮胶囊卡片，点击可一键回放并保存最近几分钟的行车记录片段。</string>
+    <string name="settings_overlay_replay_subtitle">显示 CLIP 徽标：回放录制中为绿色，保存成功后显示蓝色 5 秒，失败时为红色。仅在存在回放绑定或自动化时才会显示。</string>
     <string name="settings_overlay_roadsense_title">RoadSense 悬浮窗</string>
     <string name="settings_overlay_roadsense_subtitle">在 RoadSense 启用时，于屏幕上显示悬浮状态胶囊与路况危险预警卡片。</string>
     <string name="remote_voice_overlay_title">远程语音对讲</string>
@@ -749,7 +751,7 @@
     <string name="cd_settings_subrail">设置子轨道</string>
     <string name="settings_privacy_title">隐私与数据</string>
     <string name="settings_privacy_body">重置将清除录像索引、缓存凭证、守护进程状态及本机偏好设置，此操作无法撤销。</string>
-    <string name="settings_about_title">关于OverDrive</string>
+    <string name="settings_about_title">关于 OverDrive</string>
     <string name="settings_about_version_label">版本</string>
     <string name="settings_about_package_label">建设</string>
     <string name="settings_about_vehicle_title">车辆与车机系统信息</string>
@@ -791,8 +793,8 @@
     <string name="settings_backup_restore_confirm_title">还原设置？</string>
     <string name="settings_backup_restore_confirm_msg">此操作将用备份替换您当前的 Overdrive 设置并重新加载服务。它仅适用于创建该备份时所用的同一台车机。</string>
     <string name="settings_backup_restore_confirm_btn">恢复</string>
-    <string name="settings_backup_restart_hint">设置已恢复。重启相机守护进程 (Daemons = 相机-&gt; 重启) 以确保每个恢复的设置都已应用。</string>
-    <string name="settings_backup_trips_prompt">包括您的行程历史记录(距离、能源、成本、分数、起始/结束位置？不包括每次行程的详细遥测数据。 该文件将包含您的位置历史记录——保持其隐私。</string>
+    <string name="settings_backup_restart_hint">设置已恢复。请重启摄像头守护进程（守护进程 → 摄像头 → 重启），以确保所有恢复的设置均已生效。</string>
+    <string name="settings_backup_trips_prompt">是否包含您的行程历史记录（距离、能耗、费用、评分、起止地点）？单次行程的详细遥测数据不会包含在内。该文件将包含您的位置轨迹 — 请妥善保管，切勿外传。</string>
     <string name="settings_backup_settings_only">仅设置</string>
     <string name="settings_backup_with_trips">包括行程</string>
     <string name="settings_about_support_section">由像你这样的人来推动</string>
@@ -801,24 +803,24 @@
     <string name="settings_about_support_share_message">推荐体验 OverDrive — 专为比亚迪车机打造的开源哨兵与行车记录仪系统：https://overdrive-5lc.pages.dev/</string>
     <string name="settings_about_support_share_chooser">分享 Overdrive</string>
     <string name="settings_about_open_link_failed">无法打开链接.</string>
-    <string name="settings_about_open_link_copied">没有浏览器. URL复制: %1$s</string>
+    <string name="settings_about_open_link_copied">未找到浏览器。已复制网址：%1$s</string>
     <string name="settings_about_support_kofi_title">赞助下一次更新</string>
-    <string name="settings_about_support_kofi_value">一杯咖啡让晚上的承诺持续下去.</string>
+    <string name="settings_about_support_kofi_value">在 Ko-fi 上赞助一杯咖啡，就能让深夜的代码提交持续不断。</string>
     <string name="settings_about_support_kofi_url" translatable="false">https://ko-fi.com/E1E71XALHX</string>
     <string name="settings_about_license_title">许可证</string>
-    <string name="settings_about_license_value">开源. 点击查看全文.</string>
+    <string name="settings_about_license_value">MIT — 开源许可。点击查看全文。</string>
     <string name="settings_about_source_title">源代码</string>
     <string name="settings_about_source_value">github.com/komes2018/Overdrive-release</string>
     <string name="settings_about_license_url" translatable="false">https://github.com/komes2018/Overdrive-release/blob/main/LICENSE</string>
     <string name="settings_about_source_url" translatable="false">https://github.com/komes2018/Overdrive-release</string>
     <string name="settings_about_star_title">在 GitHub 上放一个</string>
-    <string name="settings_about_star_value">需要一秒钟,这意味着很多.</string>
+    <string name="settings_about_star_value">只需一秒钟，对我们却意义重大。</string>
     <string name="settings_about_star_url" translatable="false">https://github.com/komes2018/Overdrive-release</string>
     <string name="settings_about_thanks_title">致谢</string>
     <string name="settings_about_thanks_subtitle">在贡献者和支持者的帮助下打造。</string>
     <string name="settings_about_contributors_title">贡献者</string>
     <string name="settings_about_supporters_title">支持者</string>
-    <string name="settings_about_thanks_empty">随着大家加入,这里会被填满。</string>
+    <string name="settings_about_thanks_empty">随着大家加入，这里会逐渐充实。</string>
     <string name="settings_about_tier_diamond">钻石赞助者</string>
     <string name="settings_about_tier_platinum">白金赞助者</string>
     <string name="settings_about_tier_gold">黄金赞助者</string>
@@ -904,9 +906,9 @@
     <string name="integrations_status_unknown">按下设置</string>
     <string name="integrations_status_configured">配置</string>
     <string name="integrations_status_not_set_up">没有设置</string>
-    <string name="integrations_telegram_desc">发送驱动器总结,运动警报和SOS通知给您的私人Telegram机器人.</string>
-    <string name="integrations_abrp_desc">请将电池与路线数据推至更好的路线规划器,</string>
-    <string name="integrations_mqtt_desc">将车辆遥测数据（车速、挡位、门窗、电量等）实时推送发布至 Home Assistant 或自建 MQTT 代理服务。</string>
+    <string name="integrations_telegram_desc">将行车摘要、移动侦测警报与 SOS 紧急通知发送到您的私人 Telegram 机器人。</string>
+    <string name="integrations_abrp_desc">将实时电量与路线数据推送至 A Better Routeplanner（ABRP），用于充电规划预测。</string>
+    <string name="integrations_mqtt_desc">将车辆遥测数据（车速、挡位、门窗、电量等）实时推送至 Home Assistant 或任意 MQTT 代理服务器。</string>
     <string name="integrations_byd_cloud_desc">连接您的BYD应用账户以启用远程命令，如车门锁定、闪灯和喇叭。</string>
     <string name="integrations_configure_button">配置</string>
     <string name="settings_action_check_update">查看是否有更新</string>
@@ -924,7 +926,7 @@
     <string name="dashboard_metric_vehicle">车辆</string>
     <string name="dashboard_chip_recording_active">收音</string>
     <string name="dashboard_chip_recording_idle">空闲</string>
-    <string name="dashboard_vehicle_tap_to_set">按下设置</string>
+    <string name="dashboard_vehicle_tap_to_set">点击设置</string>
     <string name="dashboard_vehicle_summary">%1$.1f kWh · %2$s</string>
     <string name="vehicle_dialog_title">设置电池容量</string>
     <string name="vehicle_dialog_capacity_label">产能 (kWh)</string>
@@ -938,8 +940,8 @@
     <string name="vehicle_dialog_detection_auto">自动</string>
     <string name="vehicle_dialog_detection_manual">手动</string>
     <string name="vehicle_dialog_invalid_capacity">容量必须为15-120kWh</string>
-    <string name="vehicle_dialog_summary_effective">有效:%1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_calibration">最后校准:%1$.1f%% 在%2$s</string>
+    <string name="vehicle_dialog_summary_effective">有效：%1$.1f kWh</string>
+    <string name="vehicle_dialog_summary_calibration">上次校准：%1$.1f%%（%2$s）</string>
     <string name="vehicle_dialog_soh_unavailable">无法使用</string>
     <string name="vehicle_dialog_value_pending">—</string>
     <string name="dashboard_metric_storage_chip">已用 %1$s · 可用 %2$s</string>
@@ -963,14 +965,14 @@
     <string name="settings_overline_about_data">关于 &amp; DATA</string>
     <string name="settings_quick_theme_label">主题</string>
     <string name="settings_quick_language_label">语言</string>
-    <string name="settings_section_recording_subtitle">预/后缓冲器,代码,存储限制.</string>
-    <string name="settings_section_surveillance_subtitle">检测区域,时间表,运动敏感性.</string>
+    <string name="settings_section_recording_subtitle">录制前后缓冲、编码格式与存储上限。</string>
+    <string name="settings_section_surveillance_subtitle">侦测区域、计划时段与移动侦测灵敏度。</string>
     <string name="settings_section_daemons_subtitle">Cloudflared、Zrok、Telegram、MQTT 运行程序。</string>
     <string name="settings_about_row_title">关于OverDrive</string>
-    <string name="settings_about_row_subtitle">版本,许可证,支持开发.</string>
+    <string name="settings_about_row_subtitle">版本、许可证与支持开发。</string>
     <string name="settings_reset_row_subtitle">清空录像、事件日志或全部缓存。</string>
     <string name="settings_footer_format">OverDrive %1$s · %2$s</string>
-    <string name="settings_appearance_subtitle">的主题,语言和视觉偏好.</string>
+    <string name="settings_appearance_subtitle">主题、语言与视觉偏好。</string>
     <string name="settings_theme_active_auto_caption">自动跟踪你的系统主题.</string>
     <string name="settings_theme_active_light_caption">灯光主题总是开放.</string>
     <string name="settings_theme_active_dark_caption">黑暗的主题总是开放.</string>
@@ -990,7 +992,7 @@
     <string name="settings_privacy_log_level_label">日志记录详细级别</string>
     <string name="settings_privacy_log_level_debug">调试 (Debug)</string>
     <string name="settings_privacy_log_level_info">常规信息 (Info)</string>
-    <string name="settings_privacy_log_level_warn">仅警告 (Warnings)</string>
+    <string name="settings_privacy_log_level_warn">仅警告</string>
     <string name="settings_privacy_log_level_error">仅错误 (Errors)</string>
     <string name="settings_privacy_log_level_debug_desc">记录每一条 ADB 命令交互与守护进程轮询。在排查故障时使用 — 日志增长极快，旧日志会被更快轮转覆盖。</string>
     <string name="settings_privacy_log_level_info_desc">日常正常运行模式。记录应用及后台守护进程的关键动作，不记录繁杂的单条指令细节。</string>
@@ -1010,7 +1012,7 @@
     <string name="settings_security_overline_recovery">如果您忘记了您的 PIN</string>
     <string name="settings_security_toggle_title">需要 PIN</string>
     <string name="settings_security_toggle_subtitle_off">关闭 — 任何人都可以打开OverDrive。</string>
-    <string name="settings_security_toggle_subtitle_on">开启-需要打开OverDrive的 PIN 码。</string>
+    <string name="settings_security_toggle_subtitle_on">开启 — 打开 OverDrive 需要输入 PIN 码。</string>
     <string name="settings_security_change_title">更改 PIN</string>
     <string name="settings_security_change_subtitle">确认当前PIN，然后设置一个新PIN。</string>
     <string name="settings_security_autolock_title">自动锁定</string>
@@ -1061,15 +1063,15 @@
     <string name="dashboard_recordings_value_live">●%1$d</string>
     <string name="dashboard_insight_welcome">欢迎——Overdrive 现已成为你的第二双眼睛。</string>
     <string name="dashboard_insight_parked_charged_kwh">在停车时拿到%1$s (≈%2$s)</string>
-    <string name="dashboard_insight_parked_charged">在停车时拿到%1$s</string>
-    <string name="dashboard_insight_parked_drained_kwh">自从你停车以来,一直使用%1$s (≈%2$s)</string>
-    <string name="dashboard_insight_parked_drained">自从你停车以来,一直使用%1$s</string>
-    <string name="dashboard_insight_last_alert">最后的监控警报:%1$s</string>
-    <string name="dashboard_insight_last_charge">最后的电荷:%2$s中的%1$s</string>
+    <string name="dashboard_insight_parked_charged">停车期间补充 %1$s</string>
+    <string name="dashboard_insight_parked_drained_kwh">停车以来已消耗 %1$s（≈%2$s）</string>
+    <string name="dashboard_insight_parked_drained">停车以来已消耗 %1$s</string>
+    <string name="dashboard_insight_last_alert">最近一次哨兵警报：%1$s</string>
+    <string name="dashboard_insight_last_charge">最近一次充电：%2$s 内充入 %1$s</string>
     <string name="dashboard_insight_storage_milestone">已录制 %1$d 条片段 · 累计 %2$s</string>
     <string name="dashboard_insight_kwh_format">%1$.1f kWh</string>
     <string name="dashboard_insight_percent_format">%1$.1f%%</string>
-    <string name="dashboard_insight_hours_minutes">时间:%1$d小时%2$d分钟</string>
+    <string name="dashboard_insight_hours_minutes">%1$d 小时 %2$d 分钟</string>
     <string name="rail_roadsense">RoadSense</string>
     <string name="rail_hazard_map">地图</string>
     <string name="roadsense_title">RoadSense 路况感知</string>
@@ -1079,7 +1081,7 @@
     <string name="roadsense_cal_learning">学习你的车辆</string>
     <string name="roadsense_cal_ready">车辆校准</string>
     <string name="roadsense_cal_partial">校准改进</string>
-    <string name="roadsense_clear_ahead">前方清空</string>
+    <string name="roadsense_clear_ahead">前方道路通畅</string>
     <string name="roadsense_road_mapped">已绘制的道路 · 清除</string>
     <string name="roadsense_road_new">新的道路·学习</string>
     <string name="roadsense_unit_meters">米</string>
@@ -1100,7 +1102,7 @@
     <string name="roadsense_confirm_prompt">这是一种危险吗？</string>
     <string name="roadsense_confirm_reject">不是危险</string>
     <string name="roadsense_confirm_accept">确认</string>
-    <string name="roadsense_cd_cal_level">路由校准级别</string>
+    <string name="roadsense_cd_cal_level">车辆标定等级</string>
     <string name="roadsense_cd_direction">下一个危险的方向</string>
     <string name="blindspot_overlay_left">左键</string>
     <string name="blindspot_overlay_right">右侧</string>
@@ -1129,7 +1131,7 @@
     <string name="roadsense_map_search_network">无法连接搜索服务。请检查你的网络连接或代理后重试。</string>
     <string name="roadsense_map_pick_destination">选择目标</string>
     <string name="roadsense_map_routing">正在规划路线…</string>
-    <string name="roadsense_map_route_failed">找不到路由。再试一次。</string>
+    <string name="roadsense_map_route_failed">找不到路线，请重试。</string>
     <string name="roadsense_map_need_key">在 RoadSense 设置中添加路由键以导航。</string>
     <string name="roadsense_map_route_key_rejected">路由键被拒绝。请在“RoadSense”设置中检查您的键值。</string>
     <string name="roadsense_map_route_network">网络太慢无法找到路由。请检查您的连接，然后重试。</string>
@@ -1152,7 +1154,7 @@
     <string name="roadsense_map_3d_off">3D 建筑已关闭</string>
     <string name="roadsense_map_poi_loading">正在搜索充电站与加油站…</string>
     <string name="roadsense_map_poi_none">附近未找到气象站</string>
-    <string name="roadsense_map_poi_need_route">先选择一个目标</string>
+    <string name="roadsense_map_poi_need_route">请先选择目的地</string>
     <string name="roadsense_map_stop_added">停止添加</string>
     <string name="roadsense_map_remove_stop_action">移除停止</string>
     <string name="roadsense_map_poi_navigate">导航到这里</string>
@@ -1165,7 +1167,7 @@
     <string name="roadsense_map_exit_n">结束 %1$d</string>
     <string name="roadsense_map_pill_severe">%1$d 严重的</string>
     <string name="roadsense_map_pill_moderate">%1$d 审核</string>
-    <string name="roadsense_map_pill_minor">%1$d 小的</string>
+    <string name="roadsense_map_pill_minor">%1$d 处轻微</string>
     <string name="roadsense_map_offline">离线地图数据不可用</string>
     <string name="roadsense_map_clear_search">清除搜索</string>
     <string name="roadsense_map_routes_title">选择路线</string>
@@ -1180,13 +1182,13 @@
     <string name="roadsense_map_stop_removed">已移除途经点</string>
     <string name="roadsense_map_remove_stop">移除此途经点</string>
     <string name="roadsense_map_move_stop_up">停止上移</string>
-    <string name="roadsense_map_move_stop_down">下移停止</string>
+    <string name="roadsense_map_move_stop_down">下移途经点</string>
     <string name="roadsense_map_max_stops">最多允许 %1$d 停止</string>
     <string name="roadsense_map_theme_toggle">地图主题</string>
     <string name="roadsense_map_theme_auto">地图主题：跟随系统</string>
     <string name="roadsense_map_theme_light">地图主题：浅色</string>
     <string name="roadsense_map_theme_dark">地图主题：深色</string>
-    <string name="roadsense_map_saved_home">住家</string>
+    <string name="roadsense_map_saved_home">家</string>
     <string name="roadsense_map_saved_work">公司</string>
     <string name="roadsense_map_saved_set_home">设为家庭地址</string>
     <string name="roadsense_map_saved_set_work">设为公司地址</string>
@@ -1231,13 +1233,13 @@
     <string name="toast_cloudflared_saved_settings">Cloudflared 设置已保存</string>
     <string name="projection_hero_title">仪表投屏</string>
     <string name="projection_hero_subtitle">将应用投射到液晶仪表盘，并在中控大屏实时同步预览。</string>
-    <string name="projection_pick_app">选择要项目的应用</string>
+    <string name="projection_pick_app">选择要投屏的应用</string>
     <string name="projection_cast">投屏到仪表盘</string>
     <string name="projection_stop">停止</string>
     <string name="projection_cast_failed">无法将该应用投射到液晶仪表盘。</string>
     <string name="projection_status_idle">未投射。</string>
     <string name="projection_status_live">实时镜像 — 点击并滑动以控制。</string>
-    <string name="projection_status_preview">预览模式(降低此车辆的帧率)。</string>
+    <string name="projection_status_preview">预览模式（本车已降低帧率）。</string>
     <string name="projection_status_none">尚未投稿——请选择应用并投播。</string>
     <string name="projection_status_unsupported">当前车型暂不支持实时双屏镜像预览，但应用仍会在液晶仪表盘上正常投屏显示。</string>
     <string name="projection_status_service_down">镜像服务尚未就绪 — 请重启应用（或摄像头守护进程）后重试。</string>
@@ -1267,7 +1269,7 @@
     <string name="projection_app_uninstalled">该应用已被卸载。</string>
     <string name="rail_network">网络与热点</string>
     <string name="network_title">网络共享与车载热点</string>
-    <string name="network_subtitle">将车机自带的蜂窝移动流量共享给手机、平板或车载设备。</string>
+    <string name="network_subtitle">将车机内置的蜂窝移动流量共享给手机、平板或笔记本电脑。</string>
     <string name="network_hotspot_title">车载 Wi‑Fi 热点</string>
     <string name="network_state_on">已开启 — 正在共享车机流量</string>
     <string name="network_state_off">已关闭</string>
@@ -1327,4 +1329,94 @@
     <string name="network_warn_body">当前车机仅配备了一块 Wi‑Fi 无线网卡，无法同时连接外部 Wi‑Fi 并开启热点。开启热点后，车机将自动断开外部 Wi‑Fi，自身及连入设备均将使用车机内置 SIM 卡的移动蜂窝数据。关闭热点后会自动重新连回 Wi‑Fi。</string>
     <string name="network_warn_continue">确认开启热点</string>
     <string name="network_warn_cancel">取消</string>
-    </resources>
+        <plurals name="recordings_deleted_count">
+        <item quantity="one">已删除 %d 段录像</item>
+        <item quantity="other">已删除 %d 段录像</item>
+    </plurals>
+
+    <plurals name="delete_recordings_title">
+        <item quantity="one">删除 %d 段录像</item>
+        <item quantity="other">删除 %d 段录像</item>
+    </plurals>
+
+    <plurals name="delete_recordings_message">
+        <item quantity="one">此操作将永久删除 %d 段录像，且无法撤销。</item>
+        <item quantity="other">此操作将永久删除 %d 段录像，且无法撤销。</item>
+    </plurals>
+
+    <plurals name="recording_headline_person">
+        <item quantity="one">检测到行人</item>
+        <item quantity="other">检测到 %1$d 名行人</item>
+    </plurals>
+
+    <plurals name="recording_headline_vehicle">
+        <item quantity="one">检测到车辆</item>
+        <item quantity="other">检测到 %1$d 辆车</item>
+    </plurals>
+
+    <plurals name="recording_headline_bike">
+        <item quantity="one">检测到非机动车</item>
+        <item quantity="other">检测到 %1$d 辆非机动车</item>
+    </plurals>
+
+    <plurals name="recording_headline_animal">
+        <item quantity="one">检测到动物</item>
+        <item quantity="other">检测到 %1$d 只动物</item>
+    </plurals>
+
+    <plurals name="recording_actor_person">
+        <item quantity="one">%1$d 名行人</item>
+        <item quantity="other">%1$d 名行人</item>
+    </plurals>
+
+    <plurals name="recording_actor_vehicle">
+        <item quantity="one">%1$d 辆车</item>
+        <item quantity="other">%1$d 辆车</item>
+    </plurals>
+
+    <plurals name="recording_actor_bike">
+        <item quantity="one">%1$d 辆非机动车</item>
+        <item quantity="other">%1$d 辆非机动车</item>
+    </plurals>
+
+    <plurals name="recording_actor_animal">
+        <item quantity="one">%1$d 只动物</item>
+        <item quantity="other">%1$d 只动物</item>
+    </plurals>
+
+    <plurals name="pin_lock_dot_a11y">
+        <item quantity="zero">尚未输入数字</item>
+        <item quantity="one">已输入 %1$d 位数字</item>
+        <item quantity="other">已输入 %1$d 位数字</item>
+    </plurals>
+
+    <plurals name="dashboard_insight_today_clips">
+        <item quantity="one">今日已录制 %1$d 段视频</item>
+        <item quantity="other">今日已录制 %1$d 段视频</item>
+    </plurals>
+
+    <plurals name="dashboard_insight_uptime_days_hours">
+        <item quantity="one">OverDrive 已在线运行 %1$d 天 %2$d 小时</item>
+        <item quantity="other">OverDrive 已在线运行 %1$d 天 %2$d 小时</item>
+    </plurals>
+
+    <plurals name="dashboard_insight_uptime_hours">
+        <item quantity="one">OverDrive 已在线运行 %1$d 小时</item>
+        <item quantity="other">OverDrive 已在线运行 %1$d 小时</item>
+    </plurals>
+
+    <plurals name="dashboard_insight_minutes">
+        <item quantity="one">%1$d 分钟</item>
+        <item quantity="other">%1$d 分钟</item>
+    </plurals>
+
+    <plurals name="dashboard_insight_hours">
+        <item quantity="one">%1$d 小时</item>
+        <item quantity="other">%1$d 小时</item>
+    </plurals>
+
+    <plurals name="roadsense_map_reports">
+        <item quantity="one">%1$d 条上报</item>
+        <item quantity="other">%1$d 条上报</item>
+    </plurals>
+</resources>
