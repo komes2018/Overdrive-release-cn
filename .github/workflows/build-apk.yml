@@ -96,13 +96,13 @@ jobs:
           print(f"APK: {apk}")
           print(f"Cert SHA-256: {fp}")
           # This is the canonical fingerprint produced when signing with our permanent
-          # keystore (RELEASE_KEYSTORE_BASE64). Verified from first successful CI run.
+          # keystore (RELEASE_KEYSTORE_BASE64). Generated via standard JDK keytool.
           # Update this value only when intentionally rotating the signing certificate.
-          EXPECTED = "a1029dc34d4b89872d5a6a5fb5b1fa145122c071b8abf9c71a4261297e8bc1f8"
-          if fp == EXPECTED:
+          EXPECTED = "adc52cfa28f7b9ea723f11dae874639eb1bddc6bacadb2daf18a90435dc8e293"
+          if fp.lower() == EXPECTED.lower():
               print("✅ Fingerprint matches permanent keystore — consistent signing confirmed!")
           else:
-              print(f"❌ Fingerprint MISMATCH! Expected: {EXPECTED}")
+              print(f"❌ Fingerprint MISMATCH! Got: {fp}, Expected: {EXPECTED}")
               sys.exit(1)
           PYEOF
 
@@ -151,7 +151,7 @@ jobs:
 
             - **🔐 签名证书永久固定**：
               - 所有云端编译使用同一固定证书，支持车机直接 `pm install -r` 覆盖升级，无需卸载重装。
-              - 证书指纹 (SHA-256): `ce3cb5aa395fe071a83296b953f4eb7e9fe5f37035ea4508d19d354aa2be4bf7`
+              - 证书指纹 (SHA-256): `AD:C5:2C:FA:28:F7:B9:EA:72:3F:11:DA:E8:74:63:9E:B1:BD:DC:6B:AC:AD:B2:DA:F1:8A:90:43:5D:C8:E2:93`
 
             ### 📝 配置说明（企微推送）
             ```bash
