@@ -63,55 +63,16 @@ jobs:
           APK=$(find app/build/outputs/apk -name "*.apk" | head -1)
           echo "Verifying: $APK"
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
-          if [ -n "$APKSIGNER" ]; then
-            echo "--- apksigner certificate details ---"
-            "$APKSIGNER" verify --print-certs "$APK" || true
+          CERTS_OUTPUT=$("$APKSIGNER" verify --print-certs "$APK")
+          echo "$CERTS_OUTPUT"
+
+          EXPECTED="adc52cfa28f7b9ea723f11dae874639eb1bddc6bacadb2daf18a90435dc8e293"
+          if echo "$CERTS_OUTPUT" | grep -qi "$EXPECTED"; then
+            echo "✅ Verified: APK signature matches permanent keystore ($EXPECTED)!"
+          else
+            echo "❌ Fingerprint mismatch! Expected $EXPECTED not found in apksigner output."
+            exit 1
           fi
-          # Extract signer cert and print SHA-256 fingerprint
-          python3 - <<'PYEOF'
-          import struct, hashlib, sys
-
-          def get_v2_cert_sha256(apk_path):
-              with open(apk_path, "rb") as f:
-                  f.seek(0, 2); sz = f.tell()
-                  search = min(65536+22, sz)
-                  f.seek(sz - search); data = f.read(search)
-                  eocd = data.rfind(b"\x50\x4b\x05\x06")
-                  eocd_off = sz - search + eocd
-                  f.seek(eocd_off + 16)
-                  cd_off = struct.unpack("<I", f.read(4))[0]
-                  f.seek(cd_off - 24); bsz = struct.unpack("<Q", f.read(8))[0]
-                  f.seek(cd_off - bsz - 8); block = f.read(bsz)
-              o = 8
-              while o < len(block) - 24:
-                  plen = struct.unpack("<Q", block[o:o+8])[0]; o += 8
-                  pid  = struct.unpack("<I", block[o:o+4])[0]
-                  val  = block[o+4:o+plen]; o += plen
-                  if pid != 0x7109871a: continue
-                  sq = struct.unpack("<I", val[:4])[0]
-                  sd_len = struct.unpack("<I", val[4:8])[0]
-                  sd = val[8:8+sd_len]
-                  dl = struct.unpack("<I", sd[:4])[0]
-                  co = 4+dl; cq = struct.unpack("<I", sd[co:co+4])[0]
-                  ci = co+4; cl = struct.unpack("<I", sd[ci:ci+4])[0]
-                  cert = sd[ci+4:ci+4+cl]
-                  return hashlib.sha256(cert).hexdigest()
-
-          import glob
-          apk = glob.glob("app/build/outputs/apk/**/*.apk", recursive=True)[0]
-          fp = get_v2_cert_sha256(apk)
-          print(f"APK: {apk}")
-          print(f"Cert SHA-256: {fp}")
-          # This is the canonical fingerprint produced when signing with our permanent
-          # keystore (RELEASE_KEYSTORE_BASE64). Generated via standard JDK keytool.
-          # Update this value only when intentionally rotating the signing certificate.
-          EXPECTED = "adc52cfa28f7b9ea723f11dae874639eb1bddc6bacadb2daf18a90435dc8e293"
-          if fp.lower() == EXPECTED.lower():
-              print("✅ Fingerprint matches permanent keystore — consistent signing confirmed!")
-          else:
-              print(f"❌ Fingerprint MISMATCH! Got: {fp}, Expected: {EXPECTED}")
-              sys.exit(1)
-          PYEOF
 
       - name: Prepare APK Asset
         run: |
