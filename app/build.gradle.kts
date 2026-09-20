@@ -426,6 +426,10 @@ android {
         debug {
             isMinifyEnabled = false
 
+            // Use the fixed permanent release signingConfig so debug builds are signed
+            // with our persistent keystore, not Gradle's auto-generated random one.
+            signingConfig = signingConfigs.getByName("release")
+
             // Debug builds match the active braveheart channel
             buildConfigField("String", "UPDATE_CHANNEL", "\"braveheart\"")
         }
