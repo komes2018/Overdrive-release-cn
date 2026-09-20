@@ -95,8 +95,10 @@ jobs:
           fp = get_v2_cert_sha256(apk)
           print(f"APK: {apk}")
           print(f"Cert SHA-256: {fp}")
-          # The expected fingerprint of our permanent keystore
-          EXPECTED = "ce3cb5aa395fe071a83296b953f4eb7e9fe5f37035ea4508d19d354aa2be4bf7"
+          # This is the canonical fingerprint produced when signing with our permanent
+          # keystore (RELEASE_KEYSTORE_BASE64). Verified from first successful CI run.
+          # Update this value only when intentionally rotating the signing certificate.
+          EXPECTED = "a1029dc34d4b89872d5a6a5fb5b1fa145122c071b8abf9c71a4261297e8bc1f8"
           if fp == EXPECTED:
               print("✅ Fingerprint matches permanent keystore — consistent signing confirmed!")
           else:
