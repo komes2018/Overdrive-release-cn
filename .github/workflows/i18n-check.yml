@@ -1,0 +1,47 @@
+name: i18n check
+
+# Standalone quality gate for the Simplified Chinese packs.
+# Runs next to build-apk.yml and never blocks the APK build.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/src/main/res/values/**'
+      - 'app/src/main/res/values-zh/**'
+      - 'app/src/main/res/values-zh-rCN/**'
+      - 'app/src/main/assets/web/i18n/**'
+      - 'app/src/main/assets/server-i18n/**'
+      - 'scripts/i18n_check.py'
+      - 'scripts/i18n_trad_chars.txt'
+      - '.github/workflows/i18n-check.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/src/main/res/values/**'
+      - 'app/src/main/res/values-zh/**'
+      - 'app/src/main/res/values-zh-rCN/**'
+      - 'app/src/main/assets/web/i18n/**'
+      - 'app/src/main/assets/server-i18n/**'
+      - 'scripts/i18n_check.py'
+      - 'scripts/i18n_trad_chars.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  i18n:
+    name: Validate zh-CN translations
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run i18n check
+        run: python3 scripts/i18n_check.py
