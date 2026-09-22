@@ -68,14 +68,14 @@ public class WeComNotifier {
         motionExecutor.execute(() -> {
             String label = localizeDetection(aiDetection);
             String camStr = camera != null ? "（" + localizeCamera(camera) + "摄像头）" : "";
-            String sevStr = "CRITICAL".equals(severity) ? "🚨 **紧急提醒**：" :
-                    "ALERT".equals(severity) ? "⚠️ **安全警报**：" : "🔍 **哨兵动检**：";
+            String sevStr = "CRITICAL".equals(severity) ? "🚨【紧急提醒】" :
+                    "ALERT".equals(severity) ? "⚠️【安全警报】" : "🔍【哨兵动检】";
             String confText = formatConfidence(confidence);
 
-            String msg = sevStr + "车辆周围发现" + label + camStr + "\n"
-                    + "> 识别可信度：" + confText + "\n"
-                    + "> " + nowStr();
-            WeComSink.sendMarkdown(msg);
+            String msg = sevStr + " 发现" + label + camStr + "\n"
+                    + "• 可信度：" + confText + "\n"
+                    + "• 时间：" + nowStr();
+            WeComSink.sendText(msg);
         });
     }
 
@@ -89,13 +89,13 @@ public class WeComNotifier {
     public static void notifyVideoRecorded(String videoFilename, String aiDetection, int durationSec) {
         motionExecutor.execute(() -> {
             String label = localizeDetection(aiDetection);
-            String msg = "📹 **哨兵录像已保存**\n"
-                    + "> 触发原因：" + label + "\n"
-                    + "> 录像时长：" + durationSec + " 秒\n"
-                    + "> 录像文件：`" + videoFilename + "`\n"
-                    + "> 可在网页端「事件录像」中查看回放\n"
-                    + "> " + nowStr();
-            WeComSink.sendMarkdown(msg);
+            String msg = "📹【哨兵录像已保存】\n"
+                    + "• 触发原因：" + label + "\n"
+                    + "• 录像时长：" + durationSec + " 秒\n"
+                    + "• 录像文件：" + videoFilename + "\n"
+                    + "• 提示：可在网页端「事件录像」中查看回放\n"
+                    + "• 时间：" + nowStr();
+            WeComSink.sendText(msg);
         });
     }
 
@@ -114,11 +114,11 @@ public class WeComNotifier {
             String camStr = camera != null ? "（" + localizeCamera(camera) + "摄像头）" : "";
 
             // 先发文字
-            String msg = "🎯 **哨兵事件录像完成**\n"
-                    + "> " + label + camStr + "\n"
-                    + "> 文件：`" + (videoFilename != null ? videoFilename : "–") + "`\n"
-                    + "> " + nowStr();
-            WeComSink.sendMarkdown(msg);
+            String msg = "🎯【哨兵事件录像完成】\n"
+                    + "• 目标：" + label + camStr + "\n"
+                    + "• 文件：" + (videoFilename != null ? videoFilename : "–") + "\n"
+                    + "• 时间：" + nowStr();
+            WeComSink.sendText(msg);
 
             // 再发截图（如有）
             if (heroPhotoPath != null && !heroPhotoPath.isEmpty()) {
@@ -134,12 +134,11 @@ public class WeComNotifier {
      */
     public static void notifyTunnelUrl(String url, boolean isNew) {
         criticalExecutor.execute(() -> {
-            String title = isNew ? "🌐 **隧道已建立**" : "🔄 **隧道地址已更新**";
+            String title = isNew ? "🌐【隧道已建立】" : "🔄【隧道地址已更新】";
             String msg = title + "\n"
-                    + "> [点击打开 OverDrive Web 控制台](" + url + ")\n"
-                    + "> `" + url + "`\n"
-                    + "> " + nowStr();
-            WeComSink.sendMarkdown(msg);
+                    + "• 访问地址：" + url + "\n"
+                    + "• 时间：" + nowStr();
+            WeComSink.sendText(msg);
         });
     }
 
@@ -155,9 +154,9 @@ public class WeComNotifier {
         criticalExecutor.execute(() -> {
             String title = criticalTitle(type);
             String msg = title + "\n"
-                    + (details != null && !details.isEmpty() ? "> " + details + "\n" : "")
-                    + "> " + nowStr();
-            WeComSink.sendMarkdown(msg);
+                    + (details != null && !details.isEmpty() ? "• 详情：" + details + "\n" : "")
+                    + "• 时间：" + nowStr();
+            WeComSink.sendText(msg);
         });
     }
 
@@ -165,7 +164,7 @@ public class WeComNotifier {
      * 发送自定义文字消息（用于自动化动作、手动测试等）。
      */
     public static void sendMessage(String text) {
-        criticalExecutor.execute(() -> WeComSink.sendMarkdown(text));
+        criticalExecutor.execute(() -> WeComSink.sendText(text));
     }
 
     // ==================== 内部工具 ====================
@@ -244,14 +243,14 @@ public class WeComNotifier {
     }
 
     private static String criticalTitle(String type) {
-        if (type == null) return "🚨 **系统告警**";
+        if (type == null) return "🚨【系统告警】";
         switch (type) {
-            case "LOW_BATTERY":   return "🔋 **12V 小电瓶低电量告警**";
-            case "STORAGE_FULL":  return "💾 **存储空间不足**";
-            case "DAEMON_CRASH":  return "💥 **守护进程崩溃**";
-            case "SYSTEM_ERROR":  return "⚠️ **系统错误**";
-            case "SYSTEM_REBOOT": return "🔄 **系统已重启上线**";
-            default:              return "🚨 **" + type + "**";
+            case "LOW_BATTERY":   return "🔋【12V 小电瓶低电量告警】";
+            case "STORAGE_FULL":  return "💾【存储空间不足】";
+            case "DAEMON_CRASH":  return "💥【守护进程崩溃】";
+            case "SYSTEM_ERROR":  return "⚠️【系统错误】";
+            case "SYSTEM_REBOOT": return "🔄【系统已重启上线】";
+            default:              return "🚨【" + type + "】";
         }
     }
 

@@ -82,13 +82,13 @@ public final class WeComSink implements NotificationBus.Sink {
             String icon = event.severity == NotificationEvent.Severity.CRITICAL ? "🚨"
                     : (event.severity == NotificationEvent.Severity.INFO ? "🔔" : "⚠️");
             StringBuilder msg = new StringBuilder();
-            msg.append(icon).append(" **").append(safe(event.title)).append("**");
+            msg.append(icon).append("【").append(safe(event.title)).append("】");
             if (event.body != null && !event.body.isEmpty()) {
                 msg.append("\n").append(safe(event.body));
             }
 
             final String text = msg.toString();
-            executor.execute(() -> sendMarkdown(text));
+            executor.execute(() -> sendText(text));
 
         } catch (Throwable t) {
             Log.w(TAG, "WeComSink forward failed: " + t.getMessage());
@@ -105,7 +105,7 @@ public final class WeComSink implements NotificationBus.Sink {
     }
 
     /**
-     * 发送 Markdown 消息（企微 Markdown 子集）。
+     * 发送文本消息（向后兼容接口：自动清洗 Markdown 标记以保证个人微信原生兼容）。
      */
     public static void sendMarkdown(String content) {
         executor.execute(() -> doSendMarkdown(content));
@@ -135,16 +135,14 @@ public final class WeComSink implements NotificationBus.Sink {
     }
 
     private static void doSendMarkdown(String content) {
-        try {
-            JSONObject payload = new JSONObject();
-            payload.put("msgtype", "markdown");
-            JSONObject md = new JSONObject();
-            md.put("content", content);
-            payload.put("markdown", md);
-            post(payload.toString());
-        } catch (Exception e) {
-            Log.e(TAG, "doSendMarkdown failed: " + e.getMessage());
-        }
+        if (content == null) return;
+        // 企微机器人发送 markdown 时，手机微信个人端会显示“暂不支持此消息类型，点击前往企业微信查看”。
+        // 将其轻量清洗为原生 text 格式，确保微信客户端直接可见。
+        String clean = content.replaceAll("\\*\\*", "")
+                .replaceAll("`", "")
+                .replaceAll("^>\\s*", "• ")
+                .replaceAll("\n>\\s*", "\n• ");
+        doSendText(clean);
     }
 
     private static void doSendImage(String base64Jpeg, String md5) {

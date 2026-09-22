@@ -589,6 +589,7 @@ class DaemonStartupManager(
             vm.tailscaleController.isRunning { isRunning ->
                 if (isRunning) {
                     log.info(TAG, "Tailscale already running, skipping start")
+                    handler.post { vm.refreshDaemonStatus(DaemonType.TAILSCALE_TUNNEL) }
                 } else {
                     ifNotUserStopped(DaemonType.TAILSCALE_TUNNEL) {
                         log.info(TAG, "Starting Tailscale (user enabled)...")
