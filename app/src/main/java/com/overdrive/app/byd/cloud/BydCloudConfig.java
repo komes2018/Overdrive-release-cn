@@ -32,6 +32,18 @@ public final class BydCloudConfig {
     public static final String CN_NETWORK_OPERATOR = "无"; // 无
     public static final String CN_BRAND_FLAG = "dynasty";
 
+    // ── CN login identifier type ────────────────────────────────────────
+    // The CN /app/auth/login payload carries an int `loginType` next to
+    // `identifier`. BYD's own app offers several console login modes, and 0 is
+    // what the stock CN email/account flow sends. A bare mobile number is
+    // believed to use 1 — that is NOT verified against a live server, so the
+    // value stays overridable through bydCloud.cnLoginType in the unified
+    // config (accepts "auto", or any int) to test another value without a
+    // rebuild. AUTO keeps every pre-existing email account on 0.
+    public static final int CN_LOGIN_TYPE_AUTO = -1;
+    public static final int CN_LOGIN_TYPE_EMAIL = 0;
+    public static final int CN_LOGIN_TYPE_PHONE = 1;
+
     public final boolean enabled;
     public final String username;
     public final String loginKey;
@@ -47,11 +59,12 @@ public final class BydCloudConfig {
     public final String appVersion;
     public final boolean cloudDataMerge; // Toggle: merge cloud telemetry into vehicle data
     public final String energyType;      // From vehicle list: PHEV/BEV identifier
+    public final int cnLoginType;        // CN only; always emitted as an int on the wire
 
     private BydCloudConfig(boolean enabled, String username, String loginKey,
                            String signPassword, String commandPwd, String rawPassword,
                            String vin, String countryCode, String language, String region,
-                           boolean cloudDataMerge, String energyType) {
+                           boolean cloudDataMerge, String energyType, int cnLoginType) {
         this.enabled = enabled;
         this.username = username;
         this.loginKey = loginKey;
@@ -75,6 +88,7 @@ public final class BydCloudConfig {
         this.region = BydCloudRegionCatalog.regionForCountryCode(this.countryCode);
         this.cloudDataMerge = cloudDataMerge;
         this.energyType = energyType != null ? energyType : "";
+        this.cnLoginType = resolveCnLoginType(cnLoginType, username);
         // Device fingerprint derived from username (matches Niek/BYD-re)
         this.imeiMd5 = (username != null && !username.isEmpty())
                 ? com.overdrive.app.byd.cloud.crypto.BydCryptoUtils.md5Hex(username)
@@ -91,6 +105,55 @@ public final class BydCloudConfig {
     }
 
     /**
+     * Redact a login identifier for logs.
+     *
+     * Keeps the first character and, for an email, the domain (useful when
+     * telling two accounts apart); never assumes an '@' is present — a CN
+     * account may be a bare mobile number, and the old inline
+     * {@code substring(indexOf('@') + 1)} threw StringIndexOutOfBoundsException
+     * on exactly that input.
+     */
+    public static String maskIdentifier(String identifier) {
+        if (identifier == null || identifier.length() < 2) return "***";
+        int at = identifier.indexOf('@');
+        return (at > 0)
+                ? identifier.charAt(0) + "***" + identifier.substring(at)
+                : identifier.charAt(0) + "***";
+    }
+
+    /**
+     * Parse the optional {@code bydCloud.cnLoginType} override.
+     * Empty or "auto" → {@link #CN_LOGIN_TYPE_AUTO}; any non-negative int is
+     * taken verbatim so a new wire value can be probed on-device.
+     */
+    private static int parseCnLoginType(String raw) {
+        if (raw == null) return CN_LOGIN_TYPE_AUTO;
+        String value = raw.trim();
+        if (value.isEmpty() || "auto".equalsIgnoreCase(value)) return CN_LOGIN_TYPE_AUTO;
+        try {
+            int parsed = Integer.parseInt(value);
+            if (parsed >= 0) return parsed;
+            logger.warn("Ignoring negative bydCloud.cnLoginType=" + raw);
+        } catch (NumberFormatException e) {
+            logger.warn("Ignoring non-numeric bydCloud.cnLoginType=" + raw);
+        }
+        return CN_LOGIN_TYPE_AUTO;
+    }
+
+    /**
+     * Resolve the CN login identifier type. An explicit non-negative override
+     * wins; otherwise infer it from the identifier: an '@' means the stock
+     * email/account login (0), anything else is treated as a bare mobile number
+     * (1). An empty identifier also stays on 0 so an unconfigured store never
+     * changes an existing account's behaviour.
+     */
+    private static int resolveCnLoginType(int configured, String username) {
+        if (configured >= 0) return configured;
+        if (username == null || username.isEmpty()) return CN_LOGIN_TYPE_EMAIL;
+        return username.indexOf('@') > 0 ? CN_LOGIN_TYPE_EMAIL : CN_LOGIN_TYPE_PHONE;
+    }
+
+    /**
      * Load config from UnifiedConfigManager.
      * Handles legacy plaintext values transparently.
      */
@@ -101,7 +164,8 @@ public final class BydCloudConfig {
             return new BydCloudConfig(false, "", "", "", "", "", "",
                     BydCloudRegionCatalog.DEFAULT_COUNTRY_CODE,
                     BydCloudRegionCatalog.DEFAULT_LANGUAGE,
-                    BydCloudRegionCatalog.DEFAULT_REGION, false, "");
+                    BydCloudRegionCatalog.DEFAULT_REGION, false, "",
+                    CN_LOGIN_TYPE_AUTO);
         }
 
         String storedRawPassword = bydCloud.optString("rawPassword", "");
@@ -131,7 +195,8 @@ public final class BydCloudConfig {
                 bydCloud.optString("language", BydCloudRegionCatalog.DEFAULT_LANGUAGE),
                 bydCloud.optString("region", BydCloudRegionCatalog.DEFAULT_REGION),
                 bydCloud.optBoolean("cloudDataMerge", false),
-                bydCloud.optString("energyType", "")
+                bydCloud.optString("energyType", ""),
+                parseCnLoginType(bydCloud.optString("cnLoginType", ""))
         );
     }
 

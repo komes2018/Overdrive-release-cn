@@ -206,7 +206,10 @@ public class BydCloudApiHandler {
                 return;
             }
 
-            logger.info("Testing BYD Cloud login for: " + username.charAt(0) + "***@" + username.substring(username.indexOf('@') + 1));
+            // Masked via BydCloudConfig: a CN identifier may be a bare mobile
+            // number, which the previous inline substring(indexOf('@') + 1)
+            // turned into a StringIndexOutOfBoundsException before login ran.
+            logger.info("Testing BYD Cloud login for: " + BydCloudConfig.maskIdentifier(username));
             logger.info("  countryCode=" + countryCode + ", language=" + language + ", region=" + region);
             logger.info("  loginKey derived: [redacted]");
             logger.info("  commandPwd derived: [redacted]");

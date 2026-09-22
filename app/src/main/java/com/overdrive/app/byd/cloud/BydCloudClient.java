@@ -77,6 +77,12 @@ public final class BydCloudClient {
 
         long nowMs = System.currentTimeMillis();
         boolean cn = config.isChinaRegion();
+        if (cn) {
+            // Which identifier form we sent — the only way to tell an email
+            // login apart from a phone login in a field log.
+            logger.info("CN login: identifier=" + BydCloudConfig.maskIdentifier(config.username)
+                    + " loginType=" + config.cnLoginType);
+        }
         JSONObject outer = cn ? buildCnLoginRequest(nowMs) : buildLoginRequest(nowMs);
         JSONObject response = transport.postSecure(
                 cn ? "/app/auth/login" : "/app/account/login", outer);
@@ -1654,11 +1660,15 @@ public final class BydCloudClient {
 
             String encryData = BydCryptoUtils.aesEncryptHex(inner.toString(), config.loginKey);
 
-            // Sign fields = inner + CN outer context. loginType is an int (0).
+            // Sign fields = inner + CN outer context. loginType must stay an int:
+            // BydCryptoUtils.cnSignValue() stringifies it into the sign string.
+            // The value is resolved by BydCloudConfig (AUTO -> 0 for an email,
+            // 1 for a bare mobile number) so a phone-number login has a chance
+            // of working; see BydCloudConfig.CN_LOGIN_TYPE_* for the override.
             JSONObject signFields = new JSONObject(inner.toString());
             signFields.put("appChannel", BydCloudConfig.CN_APP_CHANNEL);
             signFields.put("identifier", config.username);
-            signFields.put("loginType", 0);
+            signFields.put("loginType", config.cnLoginType);
             signFields.put("reqTimestamp", reqTimestamp);
             signFields.put("targetBrand", BydCloudConfig.CN_TARGET_BRAND);
 
@@ -1671,7 +1681,7 @@ public final class BydCloudClient {
             outer.put("identifier", config.username);
             outer.put("imeiMD5", config.imeiMd5);
             outer.put("isAuto", "0");
-            outer.put("loginType", 0);
+            outer.put("loginType", config.cnLoginType);
             outer.put("reqTimestamp", reqTimestamp);
             outer.put("sign", sign);
             outer.put("targetBrand", BydCloudConfig.CN_TARGET_BRAND);

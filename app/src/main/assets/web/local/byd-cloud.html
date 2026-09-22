@@ -140,10 +140,13 @@
                             <span class="md-supporting" id="bydRegionDerived" data-i18n="byd_cloud.region_derived_default">Selected automatically from country code.</span>
                         </div>
 
-                        <!-- Email -->
+                        <!-- Login identifier: an email on every region, a bare
+                             mobile number on the China (CN) stack. type=email
+                             would reject the latter, so use text + an
+                             email-optimised keyboard. -->
                         <div class="md-field">
                             <div class="md-field-box">
-                                <input type="email" class="md-input" id="bydEmail" placeholder=" " autocomplete="username">
+                                <input type="text" inputmode="email" class="md-input" id="bydEmail" placeholder=" " autocomplete="username">
                                 <label class="md-label" for="bydEmail" data-i18n="surveillance.byd_email">Email</label>
                             </div>
                         </div>
