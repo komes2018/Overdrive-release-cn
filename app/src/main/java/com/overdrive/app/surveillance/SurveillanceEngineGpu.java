@@ -7928,19 +7928,6 @@ public class SurveillanceEngineGpu {
      * Honours the user's notification tier toggles (item 8).
      */
     private void sendRichMotionNotifications(String videoFilename) {
-        // User opt-out: by default, Telegram only gets the recording-CLOSE
-        // photo (sendFinalTelegramNotification, fired from stopRecording). The
-        // start-stage text message is suppressed because the user-visible end
-        // result is two messages back-to-back — same content, no replace
-        // semantics in Telegram. Telegram-only users who want low-latency
-        // pings can flip telegramSendStartPing on in Sentry settings.
-        //
-        // Treat null config as "default" (off). Without this, an early-startup
-        // motion event before config has been wired would leak through with
-        // legacy "always send" behaviour, contradicting the documented default.
-        if (config == null || !config.isTelegramSendStartPing()) {
-            return;
-        }
         java.util.List<Actor> snap = lastActors;
         Actor.Severity peakSev = com.overdrive.app.notifications.NotificationGate.maxSeverity(snap);
         // Per-tier muting for the web push system happens device-side via
@@ -8013,7 +8000,8 @@ public class SurveillanceEngineGpu {
         String camHint = cameraNameFor(camAnchor);
         float bestConf = threat != null ? threat.peakConfidence : 0f;
         if (threat != null) detectionLabel = Actor.groupLabel(threat.classGroup);
-        // 企微独立直连推送（国内直连，无需代理，独立于 Telegram 门控）
+
+        // 企微独立直连推送（国内直连，无需代理，完全独立于 Telegram 门控）
         try {
             com.overdrive.app.wecom.WeComNotifier.notifyMotion(
                     detectionLabel,
@@ -8022,6 +8010,16 @@ public class SurveillanceEngineGpu {
                     peakSev != null ? peakSev.name() : null);
         } catch (Throwable t) {
             logger.debug("WeComNotifier motion notify failed: " + t.getMessage());
+        }
+
+        // Telegram start-stage ping gate: by default, Telegram only gets the recording-CLOSE
+        // photo (sendFinalTelegramNotification, fired from stopRecording). The
+        // start-stage text message is suppressed because the user-visible end
+        // result is two messages back-to-back — same content, no replace
+        // semantics in Telegram. Telegram-only users who want low-latency
+        // pings can flip telegramSendStartPing on in Sentry settings.
+        if (config == null || !config.isTelegramSendStartPing()) {
+            return;
         }
 
         // Telegram tier mute — mirrors the push tier toggles so a
