@@ -550,35 +550,25 @@ public class AppUpdater {
                         .header("Accept", "application/vnd.github.v3+json")
                         .build();
 
-                JSONObject release = null;
-                try (Response response = client.newCall(request).execute()) {
-                    if (response.isSuccessful()) {
-                        String body = response.body().string();
-                        release = new JSONObject(body);
-                    } else if (response.code() == 404) {
-                        // Fallback: If channel tag does not exist, query latest release
-                        Request latestReq = new Request.Builder()
-                                .url("https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest")
-                                .header("Accept", "application/vnd.github.v3+json")
-                                .build();
-                        try (Response latestResp = client.newCall(latestReq).execute()) {
-                            if (latestResp.isSuccessful()) {
-                                String body = latestResp.body().string();
-                                release = new JSONObject(body);
-                            } else {
-                                postError(callback, "GitHub API error: HTTP " + response.code());
-                                return;
-                            }
-                        }
-                    } else {
-                        postError(callback, "GitHub API error: HTTP " + response.code());
+                Response response = client.newCall(request).execute();
+                if (response.code() == 404) {
+                    response.close();
+                    // Fallback: If channel tag does not exist, query latest release
+                    Request latestReq = new Request.Builder()
+                            .url("https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest")
+                            .header("Accept", "application/vnd.github.v3+json")
+                            .build();
+                    response = client.newCall(latestReq).execute();
+                }
+
+                try (Response res = response) {
+                    if (!res.isSuccessful()) {
+                        postError(callback, "GitHub API error: HTTP " + res.code());
                         return;
                     }
-                }
-                if (release == null) {
-                    postError(callback, "Failed to load release info");
-                    return;
-                }
+
+                    String body = res.body().string();
+                    JSONObject release = new JSONObject(body);
 
                     releaseNotes = release.optString("body", "Bug fixes and improvements.");
 
@@ -2904,34 +2894,23 @@ public class AppUpdater {
                         .header("Accept", "application/vnd.github.v3+json")
                         .build();
 
-                JSONObject release = null;
-                try (Response response = client.newCall(request).execute()) {
-                    if (response.isSuccessful()) {
-                        release = new JSONObject(response.body().string());
-                    } else if (response.code() == 404) {
-                        Request latestReq = new Request.Builder()
-                                .url("https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest")
-                                .header("Accept", "application/vnd.github.v3+json")
-                                .build();
-                        try (Response latestResp = client.newCall(latestReq).execute()) {
-                            if (latestResp.isSuccessful()) {
-                                release = new JSONObject(latestResp.body().string());
-                            } else {
-                                String err = "GitHub API HTTP " + response.code();
-                                runCallback(() -> callback.onError(err));
-                                return;
-                            }
-                        }
-                    } else {
-                        String err = "GitHub API HTTP " + response.code();
+                Response response = client.newCall(request).execute();
+                if (response.code() == 404) {
+                    response.close();
+                    Request latestReq = new Request.Builder()
+                            .url("https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest")
+                            .header("Accept", "application/vnd.github.v3+json")
+                            .build();
+                    response = client.newCall(latestReq).execute();
+                }
+
+                try (Response res = response) {
+                    if (!res.isSuccessful()) {
+                        String err = "GitHub API HTTP " + res.code();
                         runCallback(() -> callback.onError(err));
                         return;
                     }
-                }
-                if (release == null) {
-                    runCallback(() -> callback.onError("Failed to load release info"));
-                    return;
-                }
+                    JSONObject release = new JSONObject(res.body().string());
                     JSONArray assets = release.optJSONArray("assets");
                     String label = null;
                     if (assets != null) {
