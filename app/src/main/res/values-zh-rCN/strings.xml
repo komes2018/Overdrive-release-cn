@@ -462,7 +462,7 @@
     <string name="settings_update_channel_save_failed">保存更新通道失败</string>
     <string name="settings_update_channel_braveheart_toast">已切换至尝鲜通道 (Braveheart)。此通道版本可能不够稳定 — 若遇到故障，请提交运行日志反馈。</string>
     <string name="community_discord_url" translatable="false">https://discord.gg/PZutk9fg4h</string>
-    <string name="community_github_issues_url" translatable="false">https://github.com/komes2018/Overdrive-release/issues</string>
+    <string name="community_github_issues_url" translatable="false">https://github.com/komes2018/Overdrive-release-cn/issues</string>
     <string name="community_whatsapp_url" translatable="false">https://chat.whatsapp.com/HChmriCWgr9KwAtE6OEkiM</string>
     <string name="toast_storage_permission_required">保存录像需要存储权限</string>
     <string name="toast_url_copied_short">已复制了URL!</string>
@@ -810,12 +810,12 @@
     <string name="settings_about_license_title">许可证</string>
     <string name="settings_about_license_value">MIT — 开源许可。点击查看全文。</string>
     <string name="settings_about_source_title">源代码</string>
-    <string name="settings_about_source_value">github.com/komes2018/Overdrive-release</string>
-    <string name="settings_about_license_url" translatable="false">https://github.com/komes2018/Overdrive-release/blob/main/LICENSE</string>
-    <string name="settings_about_source_url" translatable="false">https://github.com/komes2018/Overdrive-release</string>
-    <string name="settings_about_star_title">在 GitHub 上放一个</string>
+    <string name="settings_about_source_value">github.com/komes2018/Overdrive-release-cn</string>
+    <string name="settings_about_license_url" translatable="false">https://github.com/komes2018/Overdrive-release-cn/blob/main/LICENSE</string>
+    <string name="settings_about_source_url" translatable="false">https://github.com/komes2018/Overdrive-release-cn</string>
+    <string name="settings_about_star_title">在 GitHub 上为我们点亮 Star</string>
     <string name="settings_about_star_value">只需一秒钟，对我们却意义重大。</string>
-    <string name="settings_about_star_url" translatable="false">https://github.com/komes2018/Overdrive-release</string>
+    <string name="settings_about_star_url" translatable="false">https://github.com/komes2018/Overdrive-release-cn</string>
     <string name="settings_about_thanks_title">致谢</string>
     <string name="settings_about_thanks_subtitle">在贡献者和支持者的帮助下打造。</string>
     <string name="settings_about_contributors_title">贡献者</string>

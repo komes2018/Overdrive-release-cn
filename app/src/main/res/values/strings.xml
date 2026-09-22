@@ -692,7 +692,7 @@
     <string name="settings_update_channel_braveheart_toast">Switched to Braveheart. Builds may be unstable — if something breaks, send the daemon log and report it on Discord/GitHub/WhatsApp.</string>
     <!-- Community / report-a-bug links -->
     <string name="community_discord_url" translatable="false">https://discord.gg/PZutk9fg4h</string>
-    <string name="community_github_issues_url" translatable="false">https://github.com/yash-srivastava/Overdrive-release/issues</string>
+    <string name="community_github_issues_url" translatable="false">https://github.com/komes2018/Overdrive-release-cn/issues</string>
     <string name="community_whatsapp_url" translatable="false">https://chat.whatsapp.com/HChmriCWgr9KwAtE6OEkiM</string>
 
     <string name="toast_storage_permission_required">Storage permission required for recordings</string>
@@ -1088,12 +1088,12 @@
     <string name="settings_about_license_title">License</string>
     <string name="settings_about_license_value">MIT — open source. Tap to view full text.</string>
     <string name="settings_about_source_title">Source code</string>
-    <string name="settings_about_source_value">github.com/yash-srivastava/Overdrive-release</string>
-    <string name="settings_about_license_url" translatable="false">https://github.com/yash-srivastava/Overdrive-release/blob/main/LICENSE</string>
-    <string name="settings_about_source_url" translatable="false">https://github.com/yash-srivastava/Overdrive-release</string>
+    <string name="settings_about_source_value">github.com/komes2018/Overdrive-release-cn</string>
+    <string name="settings_about_license_url" translatable="false">https://github.com/komes2018/Overdrive-release-cn/blob/main/LICENSE</string>
+    <string name="settings_about_source_url" translatable="false">https://github.com/komes2018/Overdrive-release-cn</string>
     <string name="settings_about_star_title">Star us on GitHub</string>
     <string name="settings_about_star_value">Takes a second. Means a lot.</string>
-    <string name="settings_about_star_url" translatable="false">https://github.com/yash-srivastava/Overdrive-release</string>
+    <string name="settings_about_star_url" translatable="false">https://github.com/komes2018/Overdrive-release-cn</string>
 
     <string name="settings_about_thanks_title">Thanks</string>
     <string name="settings_about_thanks_subtitle">Built with the help of contributors and supporters.</string>

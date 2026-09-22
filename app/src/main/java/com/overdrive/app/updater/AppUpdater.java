@@ -38,7 +38,7 @@ import okhttp3.Response;
 public class AppUpdater {
 
     private static final String TAG = "AppUpdater";
-    private static final String GITHUB_REPO = "yash-srivastava/Overdrive-release";
+    private static final String GITHUB_REPO = "komes2018/Overdrive-release-cn";
     private static final String PREFS_NAME = "app_updater";
     // LEGACY (pre-channel) baseline key/file. Still read once by
     // migrateBaseline() to seed the per-channel "alpha" slot, then unused.
@@ -550,14 +550,35 @@ public class AppUpdater {
                         .header("Accept", "application/vnd.github.v3+json")
                         .build();
 
+                JSONObject release = null;
                 try (Response response = client.newCall(request).execute()) {
-                    if (!response.isSuccessful()) {
+                    if (response.isSuccessful()) {
+                        String body = response.body().string();
+                        release = new JSONObject(body);
+                    } else if (response.code() == 404) {
+                        // Fallback: If channel tag does not exist, query latest release
+                        Request latestReq = new Request.Builder()
+                                .url("https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest")
+                                .header("Accept", "application/vnd.github.v3+json")
+                                .build();
+                        try (Response latestResp = client.newCall(latestReq).execute()) {
+                            if (latestResp.isSuccessful()) {
+                                String body = latestResp.body().string();
+                                release = new JSONObject(body);
+                            } else {
+                                postError(callback, "GitHub API error: HTTP " + response.code());
+                                return;
+                            }
+                        }
+                    } else {
                         postError(callback, "GitHub API error: HTTP " + response.code());
                         return;
                     }
-
-                    String body = response.body().string();
-                    JSONObject release = new JSONObject(body);
+                }
+                if (release == null) {
+                    postError(callback, "Failed to load release info");
+                    return;
+                }
 
                     releaseNotes = release.optString("body", "Bug fixes and improvements.");
 
@@ -2313,9 +2334,9 @@ public class AppUpdater {
         return cameraStopConfirmed[0];
     }
 
-    /** Strict alpha tag allowlist: bare "alpha" or "alpha-v<semver>". */
+    /** Strict tag allowlist: bare "alpha", "alpha-v<semver>", or version tags like "v48.19-cn-sec". */
     private static final java.util.regex.Pattern VALID_ALPHA_TAG =
-            java.util.regex.Pattern.compile("^alpha(-v\\d+\\.\\d+(\\.\\d+)?)?$");
+            java.util.regex.Pattern.compile("^(alpha(-v\\d+\\.\\d+(\\.\\d+)?)?|v?\\d+\\.\\d+[-A-Za-z0-9.]*)$");
 
     public static boolean isValidAlphaTag(String tag) {
         return tag != null && VALID_ALPHA_TAG.matcher(tag).matches();
@@ -2883,13 +2904,34 @@ public class AppUpdater {
                         .header("Accept", "application/vnd.github.v3+json")
                         .build();
 
+                JSONObject release = null;
                 try (Response response = client.newCall(request).execute()) {
-                    if (!response.isSuccessful()) {
+                    if (response.isSuccessful()) {
+                        release = new JSONObject(response.body().string());
+                    } else if (response.code() == 404) {
+                        Request latestReq = new Request.Builder()
+                                .url("https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest")
+                                .header("Accept", "application/vnd.github.v3+json")
+                                .build();
+                        try (Response latestResp = client.newCall(latestReq).execute()) {
+                            if (latestResp.isSuccessful()) {
+                                release = new JSONObject(latestResp.body().string());
+                            } else {
+                                String err = "GitHub API HTTP " + response.code();
+                                runCallback(() -> callback.onError(err));
+                                return;
+                            }
+                        }
+                    } else {
                         String err = "GitHub API HTTP " + response.code();
                         runCallback(() -> callback.onError(err));
                         return;
                     }
-                    JSONObject release = new JSONObject(response.body().string());
+                }
+                if (release == null) {
+                    runCallback(() -> callback.onError("Failed to load release info"));
+                    return;
+                }
                     JSONArray assets = release.optJSONArray("assets");
                     String label = null;
                     if (assets != null) {
@@ -3014,7 +3056,8 @@ public class AppUpdater {
                         String tag = rel.optString("tag_name", "");
                         boolean isAlphaArchive = tag.startsWith("alpha-v");
                         boolean isLegacyAlpha = tag.equals("alpha");
-                        if (!isAlphaArchive && !isLegacyAlpha) continue;
+                        boolean isVersionTag = tag.startsWith("v") || tag.contains("-cn");
+                        if (!isAlphaArchive && !isLegacyAlpha && !isVersionTag) continue;
 
                         String[] apk = firstApkAsset(rel.optJSONArray("assets"));
                         if (apk == null) continue; // notes-only / draft — skip
