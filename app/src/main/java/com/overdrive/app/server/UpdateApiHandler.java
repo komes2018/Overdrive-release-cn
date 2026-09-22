@@ -520,12 +520,6 @@ public class UpdateApiHandler {
                 HttpResponse.sendJsonError(out, Messages.get("errors.update_channel_tag_mismatch"));
                 return;
             }
-            if (!AppUpdater.CHANNEL_ALPHA.equals(activeChannel)) {
-                AppUpdater.endInstall();
-                try { updater.close(); } catch (Exception ignored) {}
-                HttpResponse.sendJsonError(out, Messages.get("errors.update_channel_tag_mismatch"));
-                return;
-            }
             try {
                 updater.prepareInstall(version);
             } catch (Exception e) {

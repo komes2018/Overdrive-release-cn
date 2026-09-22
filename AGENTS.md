@@ -310,6 +310,7 @@ python scripts/i18n_check.py --strict
 | 门锁状态反了 | BYD SDK `1=UNLOCKED, 2=LOCKED`，Web API `1=LOCKED`，转换在 `cloudLockToApi()` |
 | BYD 云登录报 `String index out of range: -1`，或想用手机号登录 | 标识符打码见 `BydCloudConfig.maskIdentifier()`；CN 登录的 `loginType` 由 `bydCloud.cnLoginType` 控制（`auto`=含 `@` 走 0 邮箱、否则 1 手机号），改 `/data/local/tmp/overdrive_config.json` 即可实测其它值 |
 | 检查更新报 HTTP 404 或误拉原版 APK | `AppUpdater.GITHUB_REPO` 必须指向 `komes2018/Overdrive-release-cn`；请求渠道 tag 404 时会自动 fallback 到 `/releases/latest`；`VALID_ALPHA_TAG` 支持 `v*` 与 `-cn-` 发版 tag |
+| Web 历史版本选版定向安装被拒 | `UpdateApiHandler` 与 `SurveillanceIpcServer` 移除了 `CHANNEL_ALPHA` 强锁，放行合法版本 Tag；CI 构建对齐 `-PoverdriveVersionName=48.19` 与 `-PoverdriveUpdateChannel=alpha` |
 
 ---
 

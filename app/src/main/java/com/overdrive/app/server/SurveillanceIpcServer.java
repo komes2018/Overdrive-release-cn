@@ -2170,9 +2170,8 @@ public class SurveillanceIpcServer implements Runnable {
             // braveheart so the wrong per-channel baseline can't be corrupted.
             com.overdrive.app.config.UnifiedConfigManager.forceReload();
             String activeChannel = com.overdrive.app.config.UnifiedConfigManager.getUpdateChannel();
-            // Strict tag validation (not a loose prefix) + channel match.
-            if (!com.overdrive.app.updater.AppUpdater.isValidAlphaTag(version)
-                    || !com.overdrive.app.updater.AppUpdater.CHANNEL_ALPHA.equals(activeChannel)) {
+            // Strict tag validation (not a loose prefix)
+            if (!com.overdrive.app.updater.AppUpdater.isValidAlphaTag(version)) {
                 com.overdrive.app.updater.AppUpdater.endInstall();
                 try { updater.close(); } catch (Exception ignored) {}
                 response.put("success", false);
