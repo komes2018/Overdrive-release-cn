@@ -4,6 +4,7 @@ import com.overdrive.app.byd.cloud.crypto.BydCryptoUtils;
 import com.overdrive.app.byd.cloud.crypto.EnvelopeCodec;
 import com.overdrive.app.byd.cloud.crypto.EnvelopeCodecFactory;
 import com.overdrive.app.byd.routing.DrivingSafetyGuard;
+import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.logging.DaemonLogger;
 
 import org.json.JSONArray;
@@ -33,6 +34,9 @@ public final class BydCloudClient {
     private BydCloudTransport transport;
     private BydCloudSession session;
     private boolean commandsVerified = false;
+    private volatile boolean isShared;
+    private volatile String targetBrand;
+    private volatile boolean vehicleAttributesDiscovered = false;
 
     private static final long CAPABILITY_CACHE_TTL_MS = 30L * 60L * 1000L;
     private volatile CloudCapabilities cloudCapabilities;
@@ -44,8 +48,20 @@ public final class BydCloudClient {
 
     public BydCloudClient(BydCloudConfig config) {
         this.config = config;
+        this.isShared = config.isShared;
+        this.targetBrand = (config.targetBrand != null && !config.targetBrand.trim().isEmpty())
+                ? config.targetBrand.trim() : BydCloudConfig.CN_TARGET_BRAND;
         // Region selects the transport codec: WBSK for China, Bangcle otherwise.
         this.codec = EnvelopeCodecFactory.createCodec(config.isChinaRegion());
+    }
+
+    public boolean isSharedVehicle() {
+        return isShared;
+    }
+
+    public String getTargetBrand() {
+        return (targetBrand != null && !targetBrand.trim().isEmpty())
+                ? targetBrand.trim() : BydCloudConfig.CN_TARGET_BRAND;
     }
 
     /**
@@ -126,7 +142,20 @@ public final class BydCloudClient {
             String brandUserId = "";
             JSONObject rel = token.optJSONObject("superBindRelationDtoMap");
             if (rel != null) {
-                JSONObject entry = rel.optJSONObject(BydCloudConfig.CN_TARGET_BRAND);
+                String tb = getTargetBrand();
+                JSONObject entry = rel.optJSONObject(tb);
+                if (entry == null) {
+                    Iterator<String> it = rel.keys();
+                    while (it.hasNext()) {
+                        String k = it.next();
+                        JSONObject cand = rel.optJSONObject(k);
+                        if (cand != null && !cand.optString("userId", "").isEmpty()) {
+                            entry = cand;
+                            this.targetBrand = k;
+                            break;
+                        }
+                    }
+                }
                 if (entry != null) {
                     String uid = entry.optString("userId", "");
                     if (!uid.isEmpty() && !"null".equals(uid)) {
@@ -178,6 +207,9 @@ public final class BydCloudClient {
                 }
             }
         }
+        if (config.isChinaRegion() && !vehicleAttributesDiscovered && !config.vin.isEmpty()) {
+            discoverVehicleAttributes();
+        }
         return session;
     }
 
@@ -188,6 +220,89 @@ public final class BydCloudClient {
     }
 
     // ── Vehicle List ────────────────────────────────────────────────────
+
+    public static final class VehicleSummary {
+        public final String vin;
+        public final String energyType;
+        public final boolean isShared;
+        public final String targetBrand;
+        public VehicleSummary(String vin, String energyType, boolean isShared, String targetBrand) {
+            this.vin = vin;
+            this.energyType = energyType;
+            this.isShared = isShared;
+            this.targetBrand = targetBrand;
+        }
+    }
+
+    public void applyVehicleAttributes(JSONObject vehicle) {
+        if (vehicle == null) return;
+        String empowerId = vehicle.optString("empowerId", "").trim();
+        if (!empowerId.isEmpty() && !"null".equalsIgnoreCase(empowerId)) {
+            this.isShared = true;
+        }
+        int channel = vehicle.optInt("channel", 0);
+        if (channel > 0) {
+            this.targetBrand = String.valueOf(channel);
+        } else {
+            String tb = vehicle.optString("targetBrand", "").trim();
+            if (!tb.isEmpty() && !"null".equalsIgnoreCase(tb)) {
+                this.targetBrand = tb;
+            }
+        }
+    }
+
+    public VehicleSummary fetchFirstVehicleSummary() throws IOException {
+        JSONArray list = fetchVehicleList();
+
+        for (int i = 0; i < list.length(); i++) {
+            JSONObject vehicle = list.optJSONObject(i);
+            if (vehicle != null) {
+                String vin = vehicle.optString("vin", "");
+                if (!vin.isEmpty()) {
+                    String energyType = vehicle.optString("energyType", "");
+                    applyVehicleAttributes(vehicle);
+                    logger.info("Found vehicle: VIN=***" + vin.substring(Math.max(0, vin.length() - 4))
+                            + " energyType=" + energyType
+                            + " isShared=" + this.isShared
+                            + " targetBrand=" + this.targetBrand);
+                    return new VehicleSummary(vin, energyType, this.isShared, getTargetBrand());
+                }
+            }
+        }
+
+        throw new IOException("No vehicle with VIN found");
+    }
+
+    public synchronized void discoverVehicleAttributes() {
+        if (!config.isChinaRegion() || vehicleAttributesDiscovered) return;
+        vehicleAttributesDiscovered = true;
+        try {
+            JSONArray list = fetchVehicleList();
+            for (int i = 0; i < list.length(); i++) {
+                JSONObject v = list.optJSONObject(i);
+                if (v != null) {
+                    String vVin = v.optString("vin", "");
+                    if (config.vin.isEmpty() || config.vin.equalsIgnoreCase(vVin)) {
+                        applyVehicleAttributes(v);
+                        logger.info("Discovered vehicle attributes: VIN=***"
+                                + vVin.substring(Math.max(0, vVin.length() - 4))
+                                + " isShared=" + this.isShared + " targetBrand=" + this.targetBrand);
+                        try {
+                            JSONObject delta = new JSONObject();
+                            delta.put("isShared", this.isShared);
+                            delta.put("targetBrand", getTargetBrand());
+                            UnifiedConfigManager.updateSection("bydCloud", delta);
+                        } catch (Throwable t) {
+                            logger.debug("Failed to persist discovered vehicle attributes: " + t.getMessage());
+                        }
+                        break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("discoverVehicleAttributes failed: " + e.getMessage());
+        }
+    }
 
     /**
      * Fetch all vehicles and return the first VIN.
@@ -201,22 +316,8 @@ public final class BydCloudClient {
      * Fetch all vehicles and return [VIN, energyType].
      */
     public String[] fetchFirstVinAndEnergyType() throws IOException {
-        JSONArray list = fetchVehicleList();
-
-        for (int i = 0; i < list.length(); i++) {
-            JSONObject vehicle = list.optJSONObject(i);
-            if (vehicle != null) {
-                String vin = vehicle.optString("vin", "");
-                if (!vin.isEmpty()) {
-                    String energyType = vehicle.optString("energyType", "");
-                    logger.info("Found vehicle: VIN=***" + vin.substring(Math.max(0, vin.length() - 4))
-                            + " energyType=" + energyType);
-                    return new String[]{vin, energyType};
-                }
-            }
-        }
-
-        throw new IOException("No vehicle with VIN found");
+        VehicleSummary vs = fetchFirstVehicleSummary();
+        return new String[]{vs.vin, vs.energyType};
     }
 
     private JSONArray fetchVehicleList() throws IOException {
@@ -1148,6 +1249,25 @@ public final class BydCloudClient {
     }
 
     /**
+     * Send remote awake request to wake up vehicle T-box (China DiLink stack).
+     */
+    public void remoteAwake(String vin) {
+        if (!config.isChinaRegion()) return;
+        try {
+            BydCloudSession s = ensureSession();
+            long nowMs = System.currentTimeMillis();
+            JSONObject inner = buildInner(nowMs);
+            inner.put("vin", vin);
+            TokenEnvelope env = buildTokenOuterEnvelope(nowMs, s, inner);
+            JSONObject resp = transport.postSecure("/control/rc/remoteAwakeRequest", env.outer);
+            logger.info("remoteAwake for VIN=***" + vin.substring(Math.max(0, vin.length() - 4))
+                    + " code=" + resp.optString("code", "") + " message=" + resp.optString("message", ""));
+        } catch (Exception e) {
+            logger.warn("remoteAwake failed (non-fatal): " + e.getMessage());
+        }
+    }
+
+    /**
      * Router-facing variant that exposes the BYD response code for failure
      * classification (e.g., 6024 = "previous command in progress" → caller
      * should NOT fall back to SDK).
@@ -1219,6 +1339,9 @@ public final class BydCloudClient {
         }
         if (Thread.currentThread().isInterrupted()) {
             throw new IOException("remote command cancelled");
+        }
+        if (config.isChinaRegion()) {
+            remoteAwake(vin);
         }
         String endpoint = config.isChinaRegion() ? "/control/rc/remoteControl" : "/control/remoteControl";
         JSONObject response = transport.postSecure(endpoint, env.outer);
@@ -1508,8 +1631,8 @@ public final class BydCloudClient {
     }
 
     /** CN EMQ broker response field for the configured targetBrand. */
-    private static String cnBrokerField() {
-        switch (BydCloudConfig.CN_TARGET_BRAND) {
+    private String cnBrokerField() {
+        switch (getTargetBrand()) {
             case "2": return "oceanEmqBroker";
             case "3": return "denzaEmqBroker";
             case "4": return "yangwangEmqBroker";
@@ -1523,14 +1646,14 @@ public final class BydCloudClient {
      * Build MQTT credentials for connecting to BYD's EMQ broker.
      * Returns [clientId, username, password].
      *
-     * CN uses the "dynasty" client-id prefix + topic root and the effective API
+     * CN uses the brand prefix + topic root and the effective API
      * identifier (superId preferred); overseas keeps "oversea" + userId. The
      * password derivation (ts + MD5(signToken+clientId+uid+ts)) is identical.
      */
     public String[] buildMqttCredentials() throws IOException {
         BydCloudSession s = ensureSession();
         boolean cn = config.isChinaRegion();
-        String prefix = cn ? "dynasty" : "oversea";
+        String prefix = cn ? ("2".equals(getTargetBrand()) ? "ocean" : "dynasty") : "oversea";
         String uid = cn ? s.effectiveApiIdentifier() : s.userId;
         String clientId = prefix + "_" + config.imeiMd5.toUpperCase();
         long tsSeconds = System.currentTimeMillis() / 1000;
@@ -1545,7 +1668,8 @@ public final class BydCloudClient {
     public String getMqttTopic() throws IOException {
         BydCloudSession s = ensureSession();
         if (config.isChinaRegion()) {
-            return "dynasty/res/" + s.effectiveApiIdentifier();
+            String prefix = "2".equals(getTargetBrand()) ? "ocean" : "dynasty";
+            return prefix + "/res/" + s.effectiveApiIdentifier();
         }
         return "oversea/res/" + s.userId;
     }
@@ -1688,7 +1812,8 @@ public final class BydCloudClient {
             signFields.put("identifier", config.username);
             signFields.put("loginType", config.cnLoginType);
             signFields.put("reqTimestamp", reqTimestamp);
-            signFields.put("targetBrand", BydCloudConfig.CN_TARGET_BRAND);
+            String targetBrand = getTargetBrand();
+            signFields.put("targetBrand", targetBrand);
 
             String sign = BydCryptoUtils.sha1Mixed(
                     BydCryptoUtils.buildCnSignString(signFields, config.signPassword));
@@ -1702,7 +1827,7 @@ public final class BydCloudClient {
             outer.put("loginType", config.cnLoginType);
             outer.put("reqTimestamp", reqTimestamp);
             outer.put("sign", sign);
-            outer.put("targetBrand", BydCloudConfig.CN_TARGET_BRAND);
+            outer.put("targetBrand", targetBrand);
             // Common device fields
             outer.put("ostype", "and");
             outer.put("imei", "BANGCLE01234");
@@ -1849,7 +1974,9 @@ public final class BydCloudClient {
 
             String vin = inner.optString("vin", "");
             boolean hasVin = !vin.isEmpty();
-            int idType = hasVin ? 0 : 2;
+            boolean shared = this.isShared || config.isShared;
+            int idType = hasVin ? (shared ? 1 : 0) : 2;
+            String targetBrand = getTargetBrand();
 
             // Sign fields: inner + CN outer context.
             JSONObject signFields = new JSONObject(inner.toString());
@@ -1858,8 +1985,8 @@ public final class BydCloudClient {
             signFields.put("identifierType", idType);
             signFields.put("imeiMD5", config.imeiMd5);
             signFields.put("reqTimestamp", reqTimestamp);
-            signFields.put("targetBrand", BydCloudConfig.CN_TARGET_BRAND);
-            signFields.put("vehicleBrand", BydCloudConfig.CN_VEHICLE_BRAND);
+            signFields.put("targetBrand", targetBrand);
+            signFields.put("vehicleBrand", targetBrand);
             if (hasVin) {
                 signFields.put("objective", vin);
             }
@@ -1878,8 +2005,8 @@ public final class BydCloudClient {
             outer.put("reqTimestamp", reqTimestamp);
             outer.put("sign", sign);
             outer.put("softType", JSONObject.NULL);
-            outer.put("targetBrand", BydCloudConfig.CN_TARGET_BRAND);
-            outer.put("vehicleBrand", BydCloudConfig.CN_VEHICLE_BRAND);
+            outer.put("targetBrand", targetBrand);
+            outer.put("vehicleBrand", targetBrand);
             outer.put("version", JSONObject.NULL);
             // Common device fields
             outer.put("ostype", "and");

@@ -60,11 +60,14 @@ public final class BydCloudConfig {
     public final boolean cloudDataMerge; // Toggle: merge cloud telemetry into vehicle data
     public final String energyType;      // From vehicle list: PHEV/BEV identifier
     public final int cnLoginType;        // CN only; always emitted as an int on the wire
+    public final boolean isShared;       // CN: true if vehicle has empowerId (authorized/shared account)
+    public final String targetBrand;     // CN: 1=dynasty, 2=ocean, 3=denza, 4=yangwang, 5=fangchengbao
 
     private BydCloudConfig(boolean enabled, String username, String loginKey,
                            String signPassword, String commandPwd, String rawPassword,
                            String vin, String countryCode, String language, String region,
-                           boolean cloudDataMerge, String energyType, int cnLoginType) {
+                           boolean cloudDataMerge, String energyType, int cnLoginType,
+                           boolean isShared, String targetBrand) {
         this.enabled = enabled;
         this.username = username;
         this.loginKey = loginKey;
@@ -89,6 +92,9 @@ public final class BydCloudConfig {
         this.cloudDataMerge = cloudDataMerge;
         this.energyType = energyType != null ? energyType : "";
         this.cnLoginType = resolveCnLoginType(cnLoginType, username);
+        this.isShared = isShared;
+        this.targetBrand = (targetBrand != null && !targetBrand.trim().isEmpty())
+                ? targetBrand.trim() : CN_TARGET_BRAND;
         // Device fingerprint derived from username (matches Niek/BYD-re)
         this.imeiMd5 = (username != null && !username.isEmpty())
                 ? com.overdrive.app.byd.cloud.crypto.BydCryptoUtils.md5Hex(username)
@@ -162,7 +168,7 @@ public final class BydCloudConfig {
                     BydCloudRegionCatalog.DEFAULT_COUNTRY_CODE,
                     BydCloudRegionCatalog.DEFAULT_LANGUAGE,
                     BydCloudRegionCatalog.DEFAULT_REGION, false, "",
-                    CN_LOGIN_TYPE_AUTO);
+                    CN_LOGIN_TYPE_AUTO, false, CN_TARGET_BRAND);
         }
 
         String storedRawPassword = bydCloud.optString("rawPassword", "");
@@ -193,7 +199,9 @@ public final class BydCloudConfig {
                 bydCloud.optString("region", BydCloudRegionCatalog.DEFAULT_REGION),
                 bydCloud.optBoolean("cloudDataMerge", false),
                 bydCloud.optString("energyType", ""),
-                parseCnLoginType(bydCloud.optString("cnLoginType", ""))
+                parseCnLoginType(bydCloud.optString("cnLoginType", "")),
+                bydCloud.optBoolean("isShared", false),
+                bydCloud.optString("targetBrand", CN_TARGET_BRAND)
         );
     }
 
@@ -271,6 +279,17 @@ public final class BydCloudConfig {
                                        String vin, String countryCode, String language,
                                        String region, String energyType,
                                        boolean cloudDataMerge) {
+        saveCredentials(username, loginKey, signPassword, commandPwd, rawPassword,
+                vin, countryCode, language, region, energyType, cloudDataMerge, false, CN_TARGET_BRAND);
+    }
+
+    public static void saveCredentials(String username, String loginKey,
+                                       String signPassword, String commandPwd,
+                                       String rawPassword,
+                                       String vin, String countryCode, String language,
+                                       String region, String energyType,
+                                       boolean cloudDataMerge, boolean isShared,
+                                       String targetBrand) {
         JSONObject bydCloud = new JSONObject();
         try {
             bydCloud.put("enabled", true);
@@ -304,6 +323,10 @@ public final class BydCloudConfig {
             bydCloud.put("cloudDataMerge", cloudDataMerge);
             if (energyType != null && !energyType.isEmpty()) {
                 bydCloud.put("energyType", energyType);
+            }
+            bydCloud.put("isShared", isShared);
+            if (targetBrand != null && !targetBrand.trim().isEmpty()) {
+                bydCloud.put("targetBrand", targetBrand.trim());
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to build config JSON", e);

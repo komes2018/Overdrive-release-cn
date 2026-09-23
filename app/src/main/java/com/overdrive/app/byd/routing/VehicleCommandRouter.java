@@ -403,15 +403,17 @@ public final class VehicleCommandRouter {
         public final boolean rateLimited;
         public final boolean unsupported;
         public final boolean blockedDriving;
-        private CloudOutcome(boolean s, boolean r, boolean u, boolean b) {
-            success = s; rateLimited = r; unsupported = u; blockedDriving = b;
+        public final String errorMessage;
+        private CloudOutcome(boolean s, boolean r, boolean u, boolean b, String msg) {
+            success = s; rateLimited = r; unsupported = u; blockedDriving = b; errorMessage = msg;
         }
-        public static CloudOutcome success() { return new CloudOutcome(true, false, false, false); }
-        public static CloudOutcome failed() { return new CloudOutcome(false, false, false, false); }
-        public static CloudOutcome rateLimited() { return new CloudOutcome(false, true, false, false); }
-        public static CloudOutcome unsupported() { return new CloudOutcome(false, false, true, false); }
+        public static CloudOutcome success() { return new CloudOutcome(true, false, false, false, null); }
+        public static CloudOutcome failed() { return new CloudOutcome(false, false, false, false, null); }
+        public static CloudOutcome failed(String msg) { return new CloudOutcome(false, false, false, false, msg); }
+        public static CloudOutcome rateLimited() { return new CloudOutcome(false, true, false, false, null); }
+        public static CloudOutcome unsupported() { return new CloudOutcome(false, false, true, false, null); }
         public static CloudOutcome blockedDriving() {
-            return new CloudOutcome(false, false, false, true);
+            return new CloudOutcome(false, false, false, true, null);
         }
     }
 
@@ -2115,7 +2117,8 @@ public final class VehicleCommandRouter {
                 return CommandResult.failed(Path.CLOUD_THEN_SDK,
                         msg("both_legs_failed"), elapsed2, cr.error != null ? cr.error : leg.error);
             }
-            return CommandResult.failed(Path.CLOUD, msg("cloud_failed"), elapsed, cr.error);
+            String failMsg = (cr.message != null && !cr.message.isEmpty()) ? cr.message : msg("cloud_failed");
+            return CommandResult.failed(Path.CLOUD, failMsg, elapsed, cr.error);
         }
 
         // Cloud unavailable; SDK fallback if possible.
@@ -2186,18 +2189,20 @@ public final class VehicleCommandRouter {
         if (cr.outcome == CloudOutcomeKind.UNSUPPORTED) {
             return CommandResult.notSupported(msg("not_supported"));
         }
-        return CommandResult.failed(Path.SDK_THEN_CLOUD, msg("cloud_failed"), elapsed, cr.error);
+        String failMsg = (cr.message != null && !cr.message.isEmpty()) ? cr.message : msg("cloud_failed");
+        return CommandResult.failed(Path.SDK_THEN_CLOUD, failMsg, elapsed, cr.error);
     }
 
     private CommandResult mapCloudOnlyResult(CloudCallResult cr, long elapsed) {
+        String failMsg = (cr.message != null && !cr.message.isEmpty()) ? cr.message : msg("cloud_failed");
         switch (cr.outcome) {
             case SUCCESS:      return CommandResult.success(Path.CLOUD, msg("cloud_sent"), elapsed);
             case RATE_LIMITED: return CommandResult.rateLimited(msg("rate_limited"), elapsed);
             case VEHICLE_UNREACHABLE:
-                return CommandResult.vehicleUnreachable(msg("cloud_failed"), elapsed, cr.error);
+                return CommandResult.vehicleUnreachable(failMsg, elapsed, cr.error);
             case BLOCKED_DRIVING: return CommandResult.blocked(msg("blocked_driving"));
             case UNSUPPORTED:  return CommandResult.notSupported(msg("not_supported"));
-            default:           return CommandResult.failed(Path.CLOUD, msg("cloud_failed"), elapsed, cr.error);
+            default:           return CommandResult.failed(Path.CLOUD, failMsg, elapsed, cr.error);
         }
     }
 
@@ -2420,7 +2425,9 @@ public final class VehicleCommandRouter {
     private static final class CloudCallResult {
         final CloudOutcomeKind outcome;
         final Throwable error;
-        CloudCallResult(CloudOutcomeKind o, Throwable e) { outcome = o; error = e; }
+        final String message;
+        CloudCallResult(CloudOutcomeKind o, Throwable e) { this(o, e, null); }
+        CloudCallResult(CloudOutcomeKind o, Throwable e, String msg) { outcome = o; error = e; message = msg; }
     }
 
     private static final class SdkLeg {
@@ -2706,7 +2713,9 @@ public final class VehicleCommandRouter {
                 }
                 if (out.rateLimited) return new CloudCallResult(CloudOutcomeKind.RATE_LIMITED, null);
                 if (out.unsupported) return new CloudCallResult(CloudOutcomeKind.UNSUPPORTED, null);
-                return new CloudCallResult(CloudOutcomeKind.FAILED, null);
+                Throwable err = out.errorMessage != null && !out.errorMessage.isEmpty()
+                        ? new IOException(out.errorMessage) : null;
+                return new CloudCallResult(CloudOutcomeKind.FAILED, err, out.errorMessage);
             } catch (TimeoutException te) {
                 // Mark cancellation before interrupting the worker. The transport
                 // checks the interrupt both before and after registering each
@@ -2754,7 +2763,7 @@ public final class VehicleCommandRouter {
             return CloudOutcome.blockedDriving();
         }
         if (CLOUD_CODE_RATE_LIMITED.equals(r.code)) return CloudOutcome.rateLimited();
-        return CloudOutcome.failed();
+        return CloudOutcome.failed(r.message);
     }
 
     private static boolean isCloudCallCancelled(AtomicBoolean cancelled) {

@@ -251,13 +251,19 @@ public class BydCloudApiHandler {
             // Fetch VIN and vehicle type
             String vin;
             String energyType = "";
+            boolean isShared = false;
+            String targetBrand = "1";
             logger.info("  Step 2/3: Fetching vehicle list...");
             try {
-                String[] vinAndType = client.fetchFirstVinAndEnergyType();
-                vin = vinAndType[0];
-                energyType = vinAndType[1];
+                com.overdrive.app.byd.cloud.BydCloudClient.VehicleSummary summary = client.fetchFirstVehicleSummary();
+                vin = summary.vin;
+                energyType = summary.energyType;
+                isShared = summary.isShared;
+                targetBrand = summary.targetBrand;
                 logger.info("  Step 2/3: Found VIN=***" + vin.substring(Math.max(0, vin.length() - 4))
-                        + " energyType=" + energyType);
+                        + " energyType=" + energyType
+                        + " isShared=" + isShared
+                        + " targetBrand=" + targetBrand);
             } catch (Exception e) {
                 logger.warn("  Step 2/3: FAILED to fetch vehicles: " + e.getMessage());
                 response.put("success", false);
@@ -283,10 +289,10 @@ public class BydCloudApiHandler {
             BydCloudConfig existing2 = BydCloudConfig.fromUnifiedConfig();
             boolean mergeToggle = existing2.cloudDataMerge;
 
-            // Save with VIN and energyType
+            // Save with VIN, energyType, isShared, targetBrand
             BydCloudConfig.saveCredentials(username, loginKey, signPassword,
                     commandPwd, rawPasswordForSave, vin, countryCode, language, region,
-                    energyType, mergeToggle);
+                    energyType, mergeToggle, isShared, targetBrand);
 
             // Reset deterrent so it picks up new credentials
             BydCloudDeterrent.getInstance().reset();
