@@ -266,17 +266,17 @@ public class BydCloudApiHandler {
                 return;
             }
 
-            // Verify control PIN
+            // Verify control PIN (optional / non-fatal for telemetry and state sync)
             logger.info("  Step 3/3: Verifying control PIN...");
+            boolean pinVerified = false;
+            String pinWarning = null;
             try {
                 client.verifyControlPassword(vin);
+                pinVerified = true;
                 logger.info("  Step 3/3: Control PIN verified");
             } catch (Exception e) {
-                logger.warn("  Step 3/3: FAILED to verify PIN: " + e.getMessage());
-                response.put("success", false);
-                response.put("error", Messages.get("errors.bydcloud_login_pin_verify_failed_with_detail", e.getMessage()));
-                HttpResponse.sendJson(out, response.toString());
-                return;
+                pinWarning = e.getMessage();
+                logger.warn("  Step 3/3: Control PIN verification bypassed: " + pinWarning);
             }
 
             // Preserve existing cloudDataMerge toggle state
@@ -298,6 +298,8 @@ public class BydCloudApiHandler {
 
             response.put("success", true);
             response.put("vin", vin);
+            response.put("pinVerified", pinVerified);
+            if (pinWarning != null) response.put("pinWarning", pinWarning);
             if (!energyType.isEmpty()) response.put("energyType", energyType);
             response.put("message", Messages.get("messages.bydcloud_connected"));
 
