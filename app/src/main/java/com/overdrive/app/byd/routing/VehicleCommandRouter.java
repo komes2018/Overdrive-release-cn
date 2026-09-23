@@ -12,6 +12,7 @@ import com.overdrive.app.logging.DaemonLogger;
 
 import org.json.JSONObject;
 
+import java.io.IOException;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
