@@ -1288,31 +1288,25 @@ public final class BydCloudClient {
         if (Thread.currentThread().isInterrupted()) {
             throw new IOException("remote command cancelled");
         }
-        if (!commandsVerified && !config.isChinaRegion()) {
-            throw new IOException("Control PIN not verified. Call verifyControlPassword() first.");
+        if (!commandsVerified) {
+            verifyControlPassword(vin);
         }
 
         BydCloudSession s = ensureSession();
         long nowMs = System.currentTimeMillis();
 
         // Build remote control request
-        JSONObject inner = new JSONObject();
+        JSONObject inner = buildInner(nowMs);
         try {
             inner.put("commandPwd", config.commandPwd);
             inner.put("commandType", commandType);
-            inner.put("deviceType", "0");
-            inner.put("imeiMD5", config.imeiMd5);
-            inner.put("networkType", "wifi");
-            inner.put("random", BydCryptoUtils.randomHex16());
-            inner.put("timeStamp", String.valueOf(nowMs));
-            inner.put("version", config.appInnerVersion);
             inner.put("vin", vin);
             if (config.isChinaRegion()) {
                 inner.put("autoType", "1");
                 inner.put("asyncControl", "0");
                 inner.put("requestSerial", String.valueOf(nowMs % 100000));
                 inner.put("source", "app");
-                inner.put("tboxVersion", "1.0");
+                inner.put("tboxVersion", "3");
                 inner.put("controlParamsMap", extraParams != null ? extraParams.toString() : "{}");
             } else {
                 if (extraParams != null) inner.put("controlParamsMap", extraParams.toString());
@@ -1363,7 +1357,7 @@ public final class BydCloudClient {
         String respondData = response.optString("respondData", "");
         String requestSerial = null;
         JSONObject triggerResult = null;
-        if (!respondData.isEmpty()) {
+        if (!respondData.isEmpty() && !"null".equalsIgnoreCase(respondData)) {
             try {
                 triggerResult = BydCloudTransport.decryptRespondData(respondData, env.contentKey);
                 requestSerial = triggerResult.optString("requestSerial", null);
@@ -1378,9 +1372,9 @@ public final class BydCloudClient {
                 return new CloudCommandResult(triggerState == 1, "0", "");
             }
             if (requestSerial == null || requestSerial.isEmpty()) {
-                logger.warn("Remote command " + commandType
-                        + " did not provide a terminal result or requestSerial");
-                return new CloudCommandResult(false, "0", "missing requestSerial");
+                logger.info("Remote command " + commandType
+                        + " acknowledged by cloud (code 0, no requestSerial)");
+                return new CloudCommandResult(true, "0", "");
             }
             boolean ok = pollRemoteControlResult(vin, requestSerial, commandType, s);
             return new CloudCommandResult(ok, "0", "");
@@ -1428,22 +1422,17 @@ public final class BydCloudClient {
             }
 
             long nowMs = System.currentTimeMillis();
-            JSONObject inner = new JSONObject();
+            JSONObject inner = buildInner(nowMs);
             try {
-                // CRITICAL: The result poll must mirror the trigger request structure.
-                // Per pyBYD reference (jkaberg/pyBYD _api/control.py), the poll uses
-                // the same _build_control_inner as the trigger — including commandPwd
-                // and commandType. Without these, the BYD cloud returns 1009.
-                inner.put("commandPwd", config.commandPwd);
-                inner.put("commandType", commandType);
-                inner.put("deviceType", "0");
-                inner.put("imeiMD5", config.imeiMd5);
-                inner.put("networkType", "wifi");
-                inner.put("random", BydCryptoUtils.randomHex16());
-                inner.put("requestSerial", requestSerial);
-                inner.put("timeStamp", String.valueOf(nowMs));
-                inner.put("version", config.appInnerVersion);
                 inner.put("vin", vin);
+                inner.put("requestSerial", requestSerial);
+                if (config.isChinaRegion()) {
+                    inner.put("source", "app");
+                    inner.put("tboxVersion", "3");
+                } else {
+                    inner.put("commandPwd", config.commandPwd);
+                    inner.put("commandType", commandType);
+                }
             } catch (Exception e) {
                 continue;
             }
