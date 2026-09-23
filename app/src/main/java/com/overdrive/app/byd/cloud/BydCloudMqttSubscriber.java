@@ -226,7 +226,10 @@ public final class BydCloudMqttSubscriber implements MqttCallback {
             opts.setSessionExpiryInterval(0L);
 
             // SSL with proxy support — same pattern as MqttPublisherService.
-            boolean proxyActive = ProxyHelper.isProxyAvailable();
+            // BYD Cloud EMQ in China must connect DIRECTLY to domestic servers.
+            // Overseas instances only use public proxy (sing-box), never Tailscale.
+            boolean isChina = client.getConfig() != null && client.getConfig().isChinaRegion();
+            boolean proxyActive = !isChina && ProxyHelper.isPublicProxyAvailable();
             if (proxyActive) {
                 // Explicitly factory-proxied — immune to the global SOCKS props, so no
                 // props lock needed; connect concurrently with anything.

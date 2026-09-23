@@ -64,6 +64,10 @@ public final class BydCloudClient {
         return codec.isReady() && transport != null;
     }
 
+    public BydCloudConfig getConfig() {
+        return config;
+    }
+
     // ── Authentication ──────────────────────────────────────────────────
 
     /**

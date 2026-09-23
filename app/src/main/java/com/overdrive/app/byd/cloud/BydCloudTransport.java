@@ -64,8 +64,13 @@ public final class BydCloudTransport {
             }
         };
 
-        java.net.Proxy proxy = com.overdrive.app.mqtt.ProxyHelper.getHttpProxy();
+        // China stack talks directly to domestic BYD servers (dilinksuperappserver-cn.byd.auto);
+        // never route through local proxies (e.g. Tailscale SOCKS on 8539).
+        java.net.Proxy proxy = config.isChinaRegion()
+                ? java.net.Proxy.NO_PROXY
+                : com.overdrive.app.mqtt.ProxyHelper.getHttpProxy();
         logger.info("BYD Cloud transport: baseUrl=" + config.getBaseUrl()
+                + " isChina=" + config.isChinaRegion()
                 + " proxy=" + (proxy.equals(java.net.Proxy.NO_PROXY) ? "direct" : proxy.address()));
 
         this.httpClient = new OkHttpClient.Builder()

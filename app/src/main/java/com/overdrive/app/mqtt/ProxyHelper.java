@@ -105,18 +105,17 @@ public class ProxyHelper {
         proxyChecked = true;
         lastProbeTime = now;
 
-        // Probe each candidate port on its OWN socket. A Socket cannot be reconnected after a
-        // failed connect(), so the previous single-socket form made the sing-box fallback throw
-        // "Socket closed" whenever the Tailscale probe missed — reporting "no proxy" even when a
-        // proxy was actually up (and, during the boot window, stranding MQTT on a direct dial).
-        if (probePort(TAILSCALE_PROXY_PORT)) {
-            proxyAvailable = true;
-            proxyPort = TAILSCALE_PROXY_PORT;
-            logger.info("Proxy probe: Tailscale proxy available on port " + TAILSCALE_PROXY_PORT);
-        } else if (probePort(PROXY_PORT)) {
+        // Probe each candidate port on its OWN socket. Prefer sing-box (8119) since it is a full
+        // outbound proxy (supports public internet). Fall back to Tailscale (8539) which is primarily
+        // for internal tailnet/LAN communication (e.g. MQTT broker).
+        if (probePort(PROXY_PORT)) {
             proxyAvailable = true;
             proxyPort = PROXY_PORT;
             logger.info("Proxy probe: sing-box available on port " + PROXY_PORT);
+        } else if (probePort(TAILSCALE_PROXY_PORT)) {
+            proxyAvailable = true;
+            proxyPort = TAILSCALE_PROXY_PORT;
+            logger.info("Proxy probe: Tailscale proxy available on port " + TAILSCALE_PROXY_PORT);
         } else {
             proxyAvailable = false;
         }
@@ -184,23 +183,28 @@ public class ProxyHelper {
     /**
      * Get a Java Proxy object for HTTP clients (OkHttp).
      * Returns Proxy.NO_PROXY if proxy is not available.
+     *
+     * Tailscale (8539) is a tailnet-only SOCKS5 proxy without public exit-node routing.
+     * It rejects public internet domains with SOCKS error 0x01 (general SOCKS server failure).
+     * Therefore, general HTTP requests fall back to direct connection (Proxy.NO_PROXY) unless
+     * a true outbound proxy like sing-box (8119) is available.
      */
     public static Proxy getHttpProxy() {
         if (isProxyAvailable()) {
-            // Proxy TYPE must match the resolved backend port:
-            //  - Tailscale (8539) is a `tailscaled --socks5-server` that ONLY speaks
-            //    SOCKS5 and REJECTS HTTP CONNECT → it needs Proxy.Type.SOCKS.
-            //  - sing-box (8119) is a "mixed" inbound; v26.8 reached it via HTTP CONNECT
-            //    and that is the PROVEN path. The blanket SOCKS swap (added for the
-            //    Tailscale case) regressed sing-box: route/geocode POSTs to the BYOK
-            //    endpoint began failing whenever sing-box was engaged. Restore HTTP for
-            //    the sing-box port; keep SOCKS only for the Tailscale port that requires it.
-            Proxy.Type type = (proxyPort == TAILSCALE_PROXY_PORT)
-                    ? Proxy.Type.SOCKS
-                    : Proxy.Type.HTTP;
-            return new Proxy(type, new InetSocketAddress(PROXY_HOST, proxyPort));
+            if (proxyPort == TAILSCALE_PROXY_PORT) {
+                return Proxy.NO_PROXY;
+            }
+            return new Proxy(Proxy.Type.HTTP, new InetSocketAddress(PROXY_HOST, proxyPort));
         }
         return Proxy.NO_PROXY;
+    }
+
+    /**
+     * Whether a public outbound proxy (sing-box on 8119) is available.
+     * Returns false if only Tailscale (internal tailnet proxy) is running.
+     */
+    public static boolean isPublicProxyAvailable() {
+        return isProxyAvailable() && proxyPort != TAILSCALE_PROXY_PORT;
     }
 
     /**

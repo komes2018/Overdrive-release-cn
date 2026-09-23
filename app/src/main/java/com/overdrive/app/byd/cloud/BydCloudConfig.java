@@ -25,11 +25,11 @@ public final class BydCloudConfig {
     // "cn.byd.auto". Defaults match common CN cloud builds.
     private static final String CN_BASE_URL = "https://dilinksuperappserver-cn.byd.auto";
     public static final String CN_APP_CHANNEL = "99";
-    public static final String CN_APP_VERSION = "9.10.2";
-    public static final String CN_APP_INNER_VERSION = "502";
+    public static final String CN_APP_VERSION = "9.11.2";
+    public static final String CN_APP_INNER_VERSION = "512";
     public static final String CN_TARGET_BRAND = "1";   // 1 = dynasty
     public static final String CN_VEHICLE_BRAND = "1";
-    public static final String CN_NETWORK_OPERATOR = "无"; // 无
+    public static final String CN_NETWORK_OPERATOR = "中国电信";
     public static final String CN_BRAND_FLAG = "dynasty";
 
     // ── CN login identifier type ────────────────────────────────────────
@@ -142,15 +142,12 @@ public final class BydCloudConfig {
 
     /**
      * Resolve the CN login identifier type. An explicit non-negative override
-     * wins; otherwise infer it from the identifier: an '@' means the stock
-     * email/account login (0), anything else is treated as a bare mobile number
-     * (1). An empty identifier also stays on 0 so an unconfigured store never
-     * changes an existing account's behaviour.
+     * wins; otherwise defaults to 0 (matches HA byd_china tested wire behavior
+     * for both mobile numbers and email accounts).
      */
     private static int resolveCnLoginType(int configured, String username) {
         if (configured >= 0) return configured;
-        if (username == null || username.isEmpty()) return CN_LOGIN_TYPE_EMAIL;
-        return username.indexOf('@') > 0 ? CN_LOGIN_TYPE_EMAIL : CN_LOGIN_TYPE_PHONE;
+        return CN_LOGIN_TYPE_EMAIL; // 0
     }
 
     /**
