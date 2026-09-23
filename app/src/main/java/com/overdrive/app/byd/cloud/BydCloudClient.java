@@ -283,6 +283,12 @@ public final class BydCloudClient {
         if (cached != null) return cached;
         if (vin == null || vin.isEmpty()) throw new IOException("vin required");
 
+        if (config.isChinaRegion()) {
+            CloudCapabilities cnCaps = CloudCapabilities.createForChina(vin);
+            cloudCapabilities = cnCaps;
+            return cnCaps;
+        }
+
         JSONObject vehicle = null;
         try {
             JSONArray vehicles = fetchVehicleList();
@@ -1162,7 +1168,7 @@ public final class BydCloudClient {
         if (Thread.currentThread().isInterrupted()) {
             throw new IOException("remote command cancelled");
         }
-        if (!commandsVerified) {
+        if (!commandsVerified && !config.isChinaRegion()) {
             throw new IOException("Control PIN not verified. Call verifyControlPassword() first.");
         }
 
@@ -1181,10 +1187,16 @@ public final class BydCloudClient {
             inner.put("timeStamp", String.valueOf(nowMs));
             inner.put("version", config.appInnerVersion);
             inner.put("vin", vin);
-            // BYD remote-control parameters are a JSON-encoded map. Sending
-            // them as top-level fields makes OPENAIR, BATTERYHEAT and seat
-            // commands look accepted while the vehicle ignores the payload.
-            if (extraParams != null) inner.put("controlParamsMap", extraParams.toString());
+            if (config.isChinaRegion()) {
+                inner.put("autoType", "1");
+                inner.put("asyncControl", "0");
+                inner.put("requestSerial", String.valueOf(nowMs % 100000));
+                inner.put("source", "app");
+                inner.put("tboxVersion", "1.0");
+                inner.put("controlParamsMap", extraParams != null ? extraParams.toString() : "{}");
+            } else {
+                if (extraParams != null) inner.put("controlParamsMap", extraParams.toString());
+            }
         } catch (Exception e) {
             throw new IOException("Failed to build command request", e);
         }
@@ -1208,7 +1220,8 @@ public final class BydCloudClient {
         if (Thread.currentThread().isInterrupted()) {
             throw new IOException("remote command cancelled");
         }
-        JSONObject response = transport.postSecure("/control/remoteControl", env.outer);
+        String endpoint = config.isChinaRegion() ? "/control/rc/remoteControl" : "/control/remoteControl";
+        JSONObject response = transport.postSecure(endpoint, env.outer);
         if (Thread.currentThread().isInterrupted()) {
             throw new IOException("remote command cancelled");
         }
@@ -1314,7 +1327,8 @@ public final class BydCloudClient {
 
             TokenEnvelope env = buildTokenOuterEnvelope(nowMs, s, inner);
             try {
-                JSONObject response = transport.postSecure("/control/remoteControlResult", env.outer);
+                String pollEndpoint = config.isChinaRegion() ? "/control/rc/remoteControlResult" : "/control/remoteControlResult";
+                JSONObject response = transport.postSecure(pollEndpoint, env.outer);
                 String code = response.optString("code", "");
                 
                 if (!"0".equals(code)) continue;

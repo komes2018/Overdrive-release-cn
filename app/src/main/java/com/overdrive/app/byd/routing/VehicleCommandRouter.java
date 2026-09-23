@@ -2633,7 +2633,14 @@ public final class VehicleCommandRouter {
                         // /control/remoteControl commands require the PIN handshake;
                         // /control/smartCharge/* and similar config writes do not.
                         if (cmd.requiresControlPin()) {
-                            cloudClient.verifyControlPassword(vin);
+                            try {
+                                cloudClient.verifyControlPassword(vin);
+                            } catch (Exception e) {
+                                if (cloudClient.getConfig() == null || !cloudClient.getConfig().isChinaRegion()) {
+                                    throw e;
+                                }
+                                logger.info("CN region verifyControlPassword non-fatal: " + e.getMessage());
+                            }
                         }
                         if (isCloudCallCancelled(cancelled)) return CloudOutcome.failed();
                         // The command may have waited behind another cloud

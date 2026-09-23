@@ -184,4 +184,35 @@ public final class CloudCapabilities {
         }
         return null;
     }
+
+    public static CloudCapabilities createForChina(String vin) {
+        Set<String> functionNos = new HashSet<>();
+        // Domestic standard BYD vehicle functions
+        Collections.addAll(functionNos,
+                "1005",     // LOCK
+                "1006",     // UNLOCK
+                "1007",     // FIND_CAR
+                "1008",     // FLASH_LIGHTS
+                "1001",     // CLIMATE
+                "10300001", // CLIMATE (alt)
+                "1015",     // CLIMATE (alt)
+                "1026",     // WINDOWS_CLOSE
+                "1020",     // TRUNK_OPEN
+                "1021",     // TRUNK_CLOSE
+                "10300002", // BATTERY_HEAT
+                "10030001", // SEAT_DRIVER (heat)
+                "10030002", // SEAT_DRIVER (vent)
+                "10300003", // SEAT shared
+                "10030004", // SEAT_PASSENGER (heat)
+                "10030005", // SEAT_PASSENGER (vent)
+                "10030010", // SEAT_STEERING_WHEEL
+                "10300004", // SEAT_STEERING_WHEEL (alt)
+                "1012"      // SMART_CHARGING
+        );
+        Map<String, Integer> learnInfo = new HashMap<>();
+        learnInfo.put("openWindowLearnInfo", 1);
+        learnInfo.put("openWindow499LearnInfo", 1);
+        return new CloudCapabilities(vin, functionNos, learnInfo, true, System.currentTimeMillis());
+    }
 }
+
