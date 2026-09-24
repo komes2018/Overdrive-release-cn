@@ -106,13 +106,14 @@ object AnalyticsPinger {
         }
     }
 
-    /** Proxy-aware OkHttp client: routes through sing-box/Tailscale when one is up
-     *  (ProxyHelper.getHttpProxy() returns NO_PROXY otherwise) — same convention as
+    /** Proxy-aware OkHttp client: routes through sing-box/Tailscale when one is up,
+     *  with a DIRECT fallback leg (ProxyHelper.chainProxySelector()) so a
+     *  tailnet-only Tailscale listener can't wedge the ping — same convention as
      *  CloudflareEdgeSyncProvider / ABRP / AppUpdater. Rebuilt per call because the
      *  proxy comes and goes with ACC/network state and pings are rare. */
     private fun proxiedClient(): OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
-        .proxy(com.overdrive.app.mqtt.ProxyHelper.getHttpProxy())
+        .proxySelector(com.overdrive.app.mqtt.ProxyHelper.chainProxySelector())
         .build()
 }

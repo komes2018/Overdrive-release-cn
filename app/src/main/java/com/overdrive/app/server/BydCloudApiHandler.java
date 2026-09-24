@@ -104,11 +104,18 @@ public class BydCloudApiHandler {
                 return;
             }
 
+            JSONObject delta = new JSONObject();
             if (req.has("cloudDataMerge")) {
-                bydCloud.put("cloudDataMerge", req.optBoolean("cloudDataMerge", false));
+                delta.put("cloudDataMerge", req.optBoolean("cloudDataMerge", false));
             }
 
-            UnifiedConfigManager.updateSection("bydCloud", bydCloud);
+            boolean persisted = UnifiedConfigManager.updateSection("bydCloud", delta);
+            if (!persisted) {
+                response.put("success", false);
+                response.put("error", "Could not save BYD Cloud settings");
+                HttpResponse.sendJson(out, response.toString());
+                return;
+            }
 
             // Sync poller state based on new toggle value
             com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance().syncPollerState();
@@ -299,6 +306,10 @@ public class BydCloudApiHandler {
 
             // Reset cloud data provider so it reconnects with new credentials
             com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance().reset();
+            // If the user enabled the DI5 parked heartbeat before rotating
+            // credentials, re-evaluate the current ACC session immediately.
+            // reset() intentionally stopped the old credential-bound worker.
+            CameraDaemon.reconcileDi5CloudKeepAliveFromConfig();
 
             logger.info("BYD Cloud setup complete: VIN=***" + vin.substring(Math.max(0, vin.length() - 4)));
 

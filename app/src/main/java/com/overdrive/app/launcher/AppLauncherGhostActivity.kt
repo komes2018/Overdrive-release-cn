@@ -21,7 +21,7 @@ import android.os.Looper
  * instance that a newer launch is still relying on. Mirrors the transparent
  * LocationStarterActivity pattern already used by the daemon.
  */
-class AppLauncherGhostActivity : Activity() {
+open class AppLauncherGhostActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
     private val finishRunnable = Runnable { if (!isFinishing) finish() }

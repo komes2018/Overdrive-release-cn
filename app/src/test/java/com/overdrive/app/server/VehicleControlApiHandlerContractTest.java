@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.byd.BydVehicleData;
+
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -19,6 +21,33 @@ import org.junit.Test;
 public class VehicleControlApiHandlerContractTest {
 
     @Test
+    public void lightStateOmitsUnknownDiLink5ValuesButKeepsLegacyShape()
+            throws Exception {
+        BydVehicleData data = new BydVehicleData.Builder()
+                .lowBeam(false)
+                .highBeam(true)
+                .hazard(true)
+                .dayTimeLight(true)
+                .lightKnownMask(BydVehicleData.LIGHT_KNOWN_LOW_BEAM)
+                .build();
+
+        org.json.JSONObject diLink5 = new org.json.JSONObject();
+        VehicleControlApiHandler.putLightState(diLink5, data, true);
+        assertTrue(diLink5.has("lowBeam"));
+        assertFalse(diLink5.getBoolean("lowBeam"));
+        assertFalse(diLink5.has("highBeam"));
+        assertFalse(diLink5.has("hazard"));
+        assertFalse(diLink5.has("dayTimeLight"));
+
+        org.json.JSONObject legacy = new org.json.JSONObject();
+        VehicleControlApiHandler.putLightState(legacy, data, false);
+        assertTrue(legacy.has("lowBeam"));
+        assertTrue(legacy.has("highBeam"));
+        assertTrue(legacy.has("hazard"));
+        assertTrue(legacy.has("dayTimeLight"));
+    }
+
+    @Test
     public void physicalControlEndpointsUseStrictBooleanAndSeatStateValidation() throws IOException {
         String source = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/server/VehicleControlApiHandler.java");
@@ -30,6 +59,8 @@ public class VehicleControlApiHandlerContractTest {
         assertTrue(source.contains("snap.seatClimateAtMs"));
         assertTrue(source.contains("boolean localSeatStateFresh = hasFreshCompleteSeatState(snap);"));
         assertTrue(source.contains("seatStateWithTarget(snap.seatHeat, snap.seatCool,"));
+        assertTrue(source.contains(
+                "v == BydVehicleData.UNAVAILABLE ? JSONObject.NULL : v"));
         assertTrue(source.contains("cloudSeatState[0], cloudSeatState[1]"));
         assertTrue(source.contains("cloudSeatState[2], cloudSeatState[3]"));
         assertTrue(source.contains("cloudSeatState[2], cloudSeatState[3], true,"));
@@ -39,9 +70,63 @@ public class VehicleControlApiHandlerContractTest {
         assertTrue(source.contains("new VehicleCommandRouter.SeatVentCommand(position, level,"));
         assertTrue(source.contains("laneAssist mode must be an integer from 0 to 3"));
         assertTrue(source.contains("childPresenceDetection value must be 1, 2, or 3"));
+        assertTrue(source.contains(
+                "if (data.childPresenceDetection >= 1"));
+        assertTrue(source.contains(
+                "&& data.childPresenceDetection <= 3)"));
         assertTrue(source.contains("new VehicleCommandRouter.BatteryHeatCommand(enabled.booleanValue())"));
         assertFalse(source.contains("req.optBoolean(\"enable\", true)"));
         assertFalse(source.contains("new JSONObject(body).optBoolean(\"enabled\", false)"));
+
+        String collector = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/byd/BydDataCollector.java");
+        assertTrue(collector.contains(
+                "java.util.Arrays.fill(seatHeat, BydVehicleData.UNAVAILABLE)"));
+        assertTrue(collector.contains(
+                "java.util.Arrays.fill(seatCool, BydVehicleData.UNAVAILABLE)"));
+        assertFalse(collector.contains(
+                "getMethod(\"resetSeatParams\", int.class, int.class)"));
+        assertTrue(collector.contains(
+                "isAccStateFreshForSafety()"));
+        assertTrue(collector.contains(
+                "VehicleActuatorBridge.currentDiLink5RequestAccOn()"));
+        assertTrue(collector.contains(
+                "BydFeatureIds.SETTING_LF_MEMORY_LOCATION_WAKE_SET, position"));
+        assertTrue(collector.contains(
+                "BydDeviceHelper.sendSetCommandIntegerResult("));
+        assertTrue(collector.contains("result instanceof Integer"));
+        assertTrue(collector.contains(
+                "getDriverSeatVentilating2aaConfig"));
+        assertTrue(collector.contains(
+                "getPassengerSeatVentilating2aaConfig"));
+        assertTrue(source.contains("ventilatedSupportedBySeat"));
+        assertTrue(collector.contains(
+                "current.seatVentilationSupport[position - 1]"));
+
+        String mqttCatalog = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/mqtt/VehicleControlCatalog.java");
+        assertTrue(mqttCatalog.contains(
+                "snap.childPresenceDetection < 1"));
+        assertTrue(mqttCatalog.contains(
+                "snap.childPresenceDetection > 3"));
+
+        String vehicleControl = readRepositoryFile(
+                "app/src/main/assets/web/shared/vehicle-control.js");
+        assertTrue(vehicleControl.contains(
+                "var seatSupport = data.seats.ventilatedSupportedBySeat"));
+        assertTrue(vehicleControl.contains("seatSupport[ci] === false"));
+
+        String vehicleData = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/byd/BydVehicleData.java");
+        assertTrue(vehicleData.contains(
+                "sh.put(s == UNAVAILABLE ? JSONObject.NULL : (Object) s)"));
+        assertTrue(vehicleData.contains(
+                "sc.put(s == UNAVAILABLE ? JSONObject.NULL : (Object) s)"));
+
+        String mqtt = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/mqtt/MqttConnectionManager.java");
+        assertTrue(mqtt.contains(
+                "a.put(s == BydVehicleData.UNAVAILABLE"));
     }
 
     @Test
@@ -121,6 +206,17 @@ public class VehicleControlApiHandlerContractTest {
         assertTrue(source.contains("volume channel must be media, navigation, voice, phone, call, system, alarm, or ring"));
         assertTrue(source.contains("String zone = optionalAmbientZone(req)"));
         assertTrue(source.contains("climate.put(\"remoteClimateActive\", remoteClimateActive.booleanValue())"));
+        assertTrue(source.contains("(diLink5 || vehiclePoweredOn) && data.acStartState == 1"));
+        assertTrue(source.contains(
+                "if (data.tempUnit != BydVehicleData.UNAVAILABLE)"));
+        assertTrue(source.contains(
+                "data.acSetpointDriver != BydVehicleData.UNAVAILABLE\n"
+                        + "                && (diLink5 || vehiclePoweredOn)"));
+        assertTrue(source.contains(
+                "data.acSetpointPassenger != BydVehicleData.UNAVAILABLE\n"
+                        + "                && (diLink5 || vehiclePoweredOn)"));
+        assertTrue(source.contains("data.tyrePressureState[i] != BydVehicleData.UNAVAILABLE"));
+        assertTrue(source.contains("tyres.put(\"available\", anyTyrePressure)"));
 
         assertTrue((Boolean) invokePrivate("isValidChargingTime",
                 new Class<?>[] {String.class, boolean.class}, "00:00", false));
@@ -193,6 +289,12 @@ public class VehicleControlApiHandlerContractTest {
                 new Class<?>[] {int.class}, 20));
         assertFalse((Boolean) invokePrivate("isValidRemoteClimateDuration",
                 new Class<?>[] {int.class}, 12));
+        assertEquals(22, invokePrivate(
+                "climateSetpointToCelsius",
+                new Class<?>[] {int.class}, 72));
+        assertEquals(22, invokePrivate(
+                "climateSetpointToCelsius",
+                new Class<?>[] {int.class}, 22));
     }
 
     @Test
@@ -306,6 +408,75 @@ public class VehicleControlApiHandlerContractTest {
                 "seatStateWithTarget",
                 new Class<?>[] { int[].class, int[].class, boolean.class, int.class, int.class },
                 heat, cool, true, 2, 0));
+    }
+
+    @Test
+    public void bydDoorLockValuesAreMappedOnlyForDiLink5Telemetry() throws Exception {
+        assertEquals(1, invokePrivate(
+                "cloudLockToApi", new Class<?>[] {int.class}, 2));
+        assertEquals(2, invokePrivate(
+                "cloudLockToApi", new Class<?>[] {int.class}, 1));
+        assertEquals(-1, invokePrivate(
+                "cloudLockToApi", new Class<?>[] {int.class}, 0));
+        assertEquals(2, invokePrivate(
+                "localLockToApi", new Class<?>[] {int.class, boolean.class}, 2, false));
+        assertEquals(1, invokePrivate(
+                "localLockToApi", new Class<?>[] {int.class, boolean.class}, 2, true));
+
+        String source = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/server/VehicleControlApiHandler.java");
+        assertTrue(source.contains(
+                "doors.put(\"rf\", localLockToApi(data.doorLockStatus[0], diLink5))"));
+        assertTrue(source.contains(
+                "localLockToApi(data.doorLockStatus[6], diLink5)"));
+        assertTrue(source.contains(
+                "if (mappedOverall == 1 || mappedOverall == 2)"));
+
+        String launcher = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/server/LauncherApiHandler.java");
+        assertTrue(launcher.contains("VehicleControlApiHandler.localLockToApi("));
+        assertTrue(launcher.contains("if (overall == 1) locked = Boolean.TRUE"));
+        assertTrue(launcher.contains("else if (overall == 2) locked = Boolean.FALSE"));
+    }
+
+    @Test
+    public void windowStatusUsesPreciseLocalDataBeforeCoarseFallbacks() {
+        assertEquals(0, VehicleControlApiHandler.resolveWindowOpenState(0, 1, 2));
+        assertEquals(1, VehicleControlApiHandler.resolveWindowOpenState(37, 0, 1));
+        assertEquals(1, VehicleControlApiHandler.resolveWindowOpenState(-1, 0, 2));
+        assertEquals(1, VehicleControlApiHandler.resolveWindowOpenState(-1, 1, 1));
+        assertEquals(0, VehicleControlApiHandler.resolveWindowOpenState(-1, -1, 1));
+        assertEquals(1, VehicleControlApiHandler.resolveWindowOpenState(-1, -1, 2));
+        assertEquals(0, VehicleControlApiHandler.resolveWindowOpenState(-1, 0, -1));
+        assertEquals(-1, VehicleControlApiHandler.resolveWindowOpenState(-1, 255, 255));
+    }
+
+    @Test
+    public void diLink5ProjectionCannotFallThroughToLegacyCast()
+            throws IOException {
+        String source = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/server/"
+                        + "VehicleControlApiHandler.java");
+        String ui = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/fragment/"
+                        + "ProjectionFragment.kt");
+
+        assertTrue(source.contains(
+                "hasDiLink5CameraHardware()"));
+        assertTrue(source.contains(
+                "boolean modeRequired = installed && diLink5Hardware && !diLink5;"));
+        assertTrue(source.contains(
+                "? \"dilink5_mode_required\""));
+        assertTrue(source.contains(
+                "response.put(\"vehicleMode\""));
+        assertTrue(source.contains(
+                "response.put(\"dilink5Hardware\""));
+        assertTrue(ui.contains(
+                "\"dilink5_mode_required\""));
+        assertTrue(ui.contains(
+                "projection_dilink5_mode_required"));
+        assertTrue(ui.contains(
+                "!casting && !diLink5ModeRequired"));
     }
 
     private static Object invokePrivate(String name, Class<?>[] parameterTypes, Object... args)

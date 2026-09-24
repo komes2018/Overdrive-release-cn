@@ -35,6 +35,8 @@ import java.util.concurrent.TimeUnit;
  */
 public final class AppLauncher {
     private static final DaemonLogger logger = DaemonLogger.getInstance("AppLauncher");
+    // ponytail: one global lock; split by display only if launch contention becomes measurable.
+    private static final Object APP_LAUNCH_LOCK = new Object();
 
     private AppLauncher() {}
 
@@ -49,27 +51,55 @@ public final class AppLauncher {
     }
 
     /**
-     * Launch the given package, optionally into split-screen (multi-window).
+     * Open two selected apps together in split-screen without changing the legacy
+     * one-app split action. The first app is explicitly placed in split-primary,
+     * then the second is explicitly placed in split-secondary. This avoids relying
+     * on Android to promote the current foreground task to the opposite pane, which
+     * is not reliable when either selected app already has a task.
      *
-     * <p>Full-screen ({@code split=false}) keeps the original behaviour: a clean
-     * {@code getLaunchIntentForPackage} + {@code startActivity}, falling back to
-     * {@code monkey}.
-     *
-     * <p>Split-screen ({@code split=true}) is handled by {@link #dockSplitScreen}:
-     * a cold app is docked with the field-tested {@code am start --windowingMode 3
-     * -n <component>}, while an already-running app is re-docked by seeding a
-     * split-screen-primary stack with a transparent ghost activity and moving the
-     * app's task into it (a plain windowing-mode-3 start only splits on first launch).
-     * Windowing mode 3 is SPLIT_SCREEN_PRIMARY. It REQUIRES the explicit launcher
-     * {@code <package>/<activity>} component, so we resolve it first via the
-     * PackageManager, then via {@code cmd package resolve-activity}. If the component
-     * can't be resolved (or the dock fails at any step) we fall back to a normal
-     * full-screen launch rather than silently doing nothing.
-     *
-     * @param pkg   the target application package name
-     * @param split true to dock into split-screen, false for a normal launch
-     * @return true if a launch was dispatched, false otherwise
+     * <p>Unlike {@link #launch(String, boolean)}, this deliberately has no fullscreen
+     * fallback: a two-app automation must report failure if the requested pair was not
+     * dispatched as a split pair.
      */
+    public static boolean launchSplitPair(String primaryPkg, String secondaryPkg) {
+        if (primaryPkg == null || secondaryPkg == null) {
+            logger.warn("openAppPair: missing package");
+            return false;
+        }
+        String primary = primaryPkg.trim();
+        String secondary = secondaryPkg.trim();
+        if (!isValidSplitPair(primary, secondary)) {
+            logger.warn("openAppPair: invalid or duplicate package");
+            return false;
+        }
+
+        // Resolve both before changing the foreground app, so an uninstalled selection
+        // fails without disturbing the user's current screen.
+        String primaryComponent = resolveLauncherComponent(primary);
+        String secondaryComponent = resolveLauncherComponent(secondary);
+        if (primaryComponent == null || secondaryComponent == null) {
+            logger.warn("openAppPair: could not resolve both launcher components");
+            return false;
+        }
+
+        synchronized (APP_LAUNCH_LOCK) {
+            if (!dockSplitScreen(primary, primaryComponent)
+                    || !waitForPackageInWindowingMode(
+                            primary, WINDOWING_MODE_SPLIT_SCREEN_PRIMARY)) {
+                logger.warn("openAppPair: could not dock primary app " + primary);
+                return false;
+            }
+            if (!dockSplitScreenSecondary(secondary, secondaryComponent)
+                    || !waitForPackageInWindowingMode(
+                            primary, WINDOWING_MODE_SPLIT_SCREEN_PRIMARY)) {
+                logger.warn("openAppPair: split pair did not settle into separate panes");
+                return false;
+            }
+        }
+        logger.info("openAppPair: opened " + primary + " + " + secondary + " in split-screen");
+        return true;
+    }
+
     /**
      * Launch {@code pkg} onto a specific display ({@code displayId}: head-unit 0 /
      * cluster 1). Resolves the launcher component (trusted PackageManager/cmd resolver)
@@ -78,6 +108,12 @@ public final class AppLauncher {
      * on a bad package or if the component can't be resolved / the launch fails.
      */
     public static boolean launchOnDisplay(String pkg, int displayId) {
+        synchronized (APP_LAUNCH_LOCK) {
+            return launchOnDisplayLocked(pkg, displayId);
+        }
+    }
+
+    private static boolean launchOnDisplayLocked(String pkg, int displayId) {
         if (pkg == null || pkg.trim().isEmpty() || !isValidPackageName(pkg.trim())) {
             logger.warn("launchOnDisplay: missing/invalid package");
             return false;
@@ -94,7 +130,34 @@ public final class AppLauncher {
         return ok;
     }
 
+    /**
+     * Last-resort DI5 launch recovery: remove an existing task whose old display affinity prevents
+     * {@code --display N} from creating it on the OEM shared projection display. Package names are
+     * validated before reaching the shell. This is intentionally package-private and is used only
+     * after the normal launch + task-move paths have both failed.
+     */
+    static boolean forceStopPackage(String pkg) {
+        synchronized (APP_LAUNCH_LOCK) {
+            if (pkg == null || !isValidPackageName(pkg.trim())) return false;
+            String normalized = pkg.trim();
+            boolean stopped = runShell(
+                    "am force-stop --user 0 " + shellQuote(normalized));
+            logger.info("forceStopPackage: " + normalized + " ok=" + stopped);
+            return stopped;
+        }
+    }
+
+    /**
+     * Launch the given package normally or through the legacy one-app split action.
+     * Split failures retain the existing fullscreen fallback.
+     */
     public static boolean launch(String pkg, boolean split) {
+        synchronized (APP_LAUNCH_LOCK) {
+            return launchLocked(pkg, split);
+        }
+    }
+
+    private static boolean launchLocked(String pkg, boolean split) {
         if (pkg == null || pkg.trim().isEmpty()) {
             logger.warn("openApp: missing package");
             return false;
@@ -121,7 +184,7 @@ public final class AppLauncher {
             } else {
                 logger.warn("openApp: could not resolve launcher component for " + pkg + " — falling back to full-screen");
             }
-            // Fall through to the normal full-screen path below.
+            return launchLocked(pkg, false);
         }
 
         // 1) Intent path via the daemon's app Context (cleanest; no shell).
@@ -168,7 +231,7 @@ public final class AppLauncher {
         //    resort only when the component can't be resolved; such apps were never castable
         //    (ClusterCast.start bails on a null component) so they can't hold a stale
         //    cluster affinity anyway.
-        if (launchOnDisplay(pkg, 0)) {
+        if (launchOnDisplayLocked(pkg, 0)) {
             logger.info("openApp: launched " + pkg + " via am start-activity (display 0)");
             return true;
         }
@@ -184,9 +247,26 @@ public final class AppLauncher {
      *  re-dock path (must match the AndroidManifest entry). */
     private static final String GHOST_COMPONENT =
             "com.overdrive.app/com.overdrive.app.launcher.AppLauncherGhostActivity";
+    private static final String SECONDARY_GHOST_COMPONENT =
+            "com.overdrive.app/com.overdrive.app.launcher.AppLauncherSecondaryGhostActivity";
+    private static final int WINDOWING_MODE_FULLSCREEN = 1;
+    private static final int WINDOWING_MODE_SPLIT_SCREEN_PRIMARY = 3;
+    private static final int WINDOWING_MODE_SPLIT_SCREEN_SECONDARY = 4;
     /** Bounded polls waiting for the ghost stack / re-docked task to materialise. */
     private static final int SPLIT_POLL_ATTEMPTS = 6;
+    private static final int SPLIT_PAIR_POLL_ATTEMPTS = 12;
     private static final long SPLIT_POLL_MS = 250L;
+    private static final int STACK_LOOKUP_FAILED = -2;
+
+    /**
+     * {@link #findTaskId}/{@link #taskIdInDump} tri-state: the dumpsys capture failed or did
+     * not look like a task dump (no {@code Task{}/TaskRecord{}} header at all), so "the task
+     * is absent" could NOT be confirmed. Distinct from -1, which means the dump parsed and
+     * the package has no live task. Boot-time recovery treats -1 as "nothing stranded —
+     * recovered" and this value as "cannot verify — retry", so an early-boot AMS hiccup can
+     * never clear a stranded-task marker while the task might still exist.
+     */
+    static final int TASK_LOOKUP_FAILED = -2;
 
     /**
      * Dock {@code pkg} into split-screen (SPLIT_SCREEN_PRIMARY / windowingMode 3).
@@ -209,28 +289,31 @@ public final class AppLauncher {
      * {@code mWindowingMode=<mode>} on this firmware — verified on-car by
      * ClusterMapProjector), NOT from {@code am stack list} (whose API-29 StackInfo
      * output carries no windowing mode, which is why the previous attempt always
-     * parsed an empty id). We locate the stack by OUR ghost component rather than by
-     * matching a mode string, so we never depend on the exact mode spelling.
+     * parsed an empty id). We require both OUR ghost component and a standard primary
+     * stack, accepting either named or numeric windowing-mode output.
      *
      * <p>Best-effort: ANY failure (no task found, ghost stack didn't appear,
-     * move-task non-zero) returns false so the caller falls through to a normal
-     * full-screen launch — never worse than before this change. Runs on the caller's
-     * daemon/HTTP worker thread (never the UI thread); all shells are bounded by
-     * {@code runShell}'s 5s cap.
+     * move-task non-zero) returns false; the legacy one-app action falls back to
+     * full-screen while the deterministic pair action reports failure. Runs on the
+     * caller's daemon/HTTP worker thread (never the UI thread); all shells are
+     * bounded by {@code runShell}'s 5s cap.
      */
     private static boolean dockSplitScreen(String pkg, String component) {
         // Case 1: app not already running → the original single-shot dock, which is
         // the ONLY thing that works for a cold app. Component is trusted + shell-quoted.
         int existingTask = findTaskId(pkg);
         if (existingTask < 0) {
-            return runShell("am start --user 0 --windowingMode 3 -n " + shellQuote(component));
+            return runShell("am start --user 0 --display 0 --windowingMode "
+                    + WINDOWING_MODE_SPLIT_SCREEN_PRIMARY + " -n " + shellQuote(component));
         }
 
         // Case 2: app already running → seed a split-primary stack with the ghost,
         // then move the app's existing task onto it.
         logger.info("openApp: " + pkg + " already running (task " + existingTask
                 + ") — re-docking via ghost split stack");
-        if (!runShell("am start --user 0 --windowingMode 3 -n " + GHOST_COMPONENT)) {
+        if (!runShell("am start --user 0 --display 0 --windowingMode "
+                + WINDOWING_MODE_SPLIT_SCREEN_PRIMARY + " -n "
+                + shellQuote(GHOST_COMPONENT))) {
             logger.warn("openApp: ghost split-stack launch failed");
             return false;
         }
@@ -241,6 +324,7 @@ public final class AppLauncher {
         for (int i = 0; i < SPLIT_POLL_ATTEMPTS && ghostStack < 0; i++) {
             sleepQuietly(SPLIT_POLL_MS);
             ghostStack = findGhostStackId();
+            if (ghostStack == STACK_LOOKUP_FAILED) return false;
         }
         if (ghostStack < 0) {
             logger.warn("openApp: ghost split stack did not appear — re-dock aborted");
@@ -262,6 +346,167 @@ public final class AppLauncher {
     }
 
     /**
+     * Put the second selected app in the opposite split pane. A mode-4 launch handles
+     * cold tasks. Android deliberately keeps an already-running task in its existing
+     * stack, so verify the secondary stack and reparent that task when necessary.
+     */
+    private static boolean dockSplitScreenSecondary(String pkg, String component) {
+        if (!runShell("am start --user 0 --display 0 --windowingMode "
+                + WINDOWING_MODE_SPLIT_SCREEN_SECONDARY + " -n " + shellQuote(component))) {
+            return false;
+        }
+
+        if (waitForPackageInWindowingMode(
+                pkg, WINDOWING_MODE_SPLIT_SCREEN_SECONDARY)) {
+            return true;
+        }
+
+        int stack = findSplitStackOnDisplay(
+                pkg, WINDOWING_MODE_SPLIT_SCREEN_SECONDARY, false);
+        if (stack == STACK_LOOKUP_FAILED) return false;
+        if (stack < 0) stack = seedSecondarySplitStack();
+        int task = findTaskId(pkg);
+        if (stack < 0 || task < 0) {
+            logger.warn("openAppPair: secondary task/stack did not materialise for " + pkg);
+            return false;
+        }
+        if (!runShell("am stack move-task " + task + " " + stack + " true")) {
+            logger.warn("openAppPair: could not move task " + task
+                    + " into secondary stack " + stack);
+            return false;
+        }
+        return waitForPackageInWindowingMode(
+                pkg, WINDOWING_MODE_SPLIT_SCREEN_SECONDARY);
+    }
+
+    private static int seedSecondarySplitStack() {
+        if (!runShell("am start --user 0 --display 0 --windowingMode "
+                + WINDOWING_MODE_SPLIT_SCREEN_SECONDARY + " -n "
+                + shellQuote(SECONDARY_GHOST_COMPONENT))) {
+            return -1;
+        }
+        int stack = -1;
+        for (int i = 0; i < SPLIT_POLL_ATTEMPTS && stack < 0; i++) {
+            sleepQuietly(SPLIT_POLL_MS);
+            stack = findSecondaryGhostStackId();
+            if (stack == STACK_LOOKUP_FAILED) return -1;
+        }
+        return stack;
+    }
+
+    private static boolean waitForPackageInWindowingMode(String pkg, int windowingMode) {
+        for (int i = 0; i < SPLIT_PAIR_POLL_ATTEMPTS; i++) {
+            int stack = findSplitStackOnDisplay(pkg, windowingMode, true);
+            if (stack >= 0) {
+                return true;
+            }
+            if (stack == STACK_LOOKUP_FAILED) return false;
+            sleepQuietly(SPLIT_POLL_MS);
+        }
+        return false;
+    }
+
+    private static int findSplitStackOnDisplay(
+            String pkg, int windowingMode, boolean requirePackage) {
+        String out = runShellCapture(
+                "dumpsys activity activities | grep -E 'Display #|Stack #|ActivityStack|"
+                        + "mWindowingMode|windowingMode|mode=|mActivityType|activityType|type=|"
+                        + pkg + "/'");
+        if (out == null) return STACK_LOOKUP_FAILED;
+        return splitStackIdInDump(
+                out, 0, windowingMode, requirePackage ? pkg : null);
+    }
+
+    /** Package-private parser seam for the JVM regression test. */
+    static int splitStackIdInDump(
+            String out, int displayId, int windowingMode, String requiredPkg) {
+        if (windowingMode != WINDOWING_MODE_SPLIT_SCREEN_PRIMARY
+                && windowingMode != WINDOWING_MODE_SPLIT_SCREEN_SECONDARY) {
+            return -1;
+        }
+        if (requiredPkg != null && !isValidPackageName(requiredPkg)) return -1;
+        return standardStackIdInDump(
+                out, displayId, windowingMode,
+                requiredPkg == null ? null : requiredPkg + "/");
+    }
+
+    private static int standardStackIdInDump(
+            String out, int displayId, int windowingMode, String requiredComponentToken) {
+        if (out == null
+                || displayId < 0
+                || (windowingMode != WINDOWING_MODE_FULLSCREEN
+                        && windowingMode != WINDOWING_MODE_SPLIT_SCREEN_PRIMARY
+                        && windowingMode != WINDOWING_MODE_SPLIT_SCREEN_SECONDARY)) {
+            return -1;
+        }
+        String displayHeader = "display #" + displayId;
+        boolean inDisplay = false;
+        int stack = -1;
+        boolean modeMatches = false;
+        boolean standardMatches = false;
+        boolean componentMatches = requiredComponentToken == null;
+        for (String rawLine : out.split("\\r?\\n")) {
+            String line = rawLine.trim();
+            String low = line.toLowerCase(java.util.Locale.US);
+            int display = low.indexOf("display #");
+            if (display >= 0) {
+                if (inDisplay && stack >= 0 && modeMatches
+                        && standardMatches && componentMatches) return stack;
+                inDisplay = low.startsWith(displayHeader, display)
+                        && !Character.isDigit(charAt(
+                                low, display + displayHeader.length()));
+                stack = -1;
+                modeMatches = false;
+                standardMatches = false;
+                componentMatches = requiredComponentToken == null;
+                continue;
+            }
+            if (!inDisplay) continue;
+
+            int nextStack = extractStackId(line);
+            if (nextStack >= 0 && nextStack != stack) {
+                if (stack >= 0 && modeMatches && standardMatches && componentMatches) return stack;
+                stack = nextStack;
+                modeMatches = false;
+                standardMatches = false;
+                componentMatches = requiredComponentToken == null;
+            }
+            if (stack < 0) continue;
+            modeMatches |= lineHasWindowingMode(low, windowingMode);
+            standardMatches |= lineHasStandardActivityType(low);
+            componentMatches |= requiredComponentToken != null
+                    && lineContainsComponentToken(line, requiredComponentToken);
+        }
+        return inDisplay && stack >= 0 && modeMatches && standardMatches && componentMatches
+                ? stack : -1;
+    }
+
+    private static boolean lineHasWindowingMode(String low, int windowingMode) {
+        String name = windowingMode == WINDOWING_MODE_FULLSCREEN
+                ? "fullscreen"
+                : windowingMode == WINDOWING_MODE_SPLIT_SCREEN_PRIMARY
+                        ? "split-screen-primary" : "split-screen-secondary";
+        if (low.contains(name)) return true;
+        String numeric = Integer.toString(windowingMode);
+        return hasAssignment(low, "mwindowingmode=", numeric)
+                || hasAssignment(low, "windowingmode=", numeric);
+    }
+
+    private static boolean lineHasStandardActivityType(String low) {
+        return low.contains("type=standard")
+                || hasAssignment(low, "mactivitytype=", "1")
+                || hasAssignment(low, "activitytype=", "1");
+    }
+
+    private static boolean hasAssignment(String line, String key, String value) {
+        int at = line.indexOf(key);
+        if (at < 0) return false;
+        int start = at + key.length();
+        return line.startsWith(value, start)
+                && !Character.isDigit(charAt(line, start + value.length()));
+    }
+
+    /**
      * Task id of the (top) task hosting {@code pkg}, or -1 if the package has no task
      * (i.e. not currently running). Parsed from {@code dumpsys activity activities},
      * whose task headers look like {@code * Task{... #123 ... A=<affinity> U=0 ...}}
@@ -277,49 +522,94 @@ public final class AppLauncher {
         // over-match is benign; attribution below re-checks with a literal "<pkg>/".)
         String out = runShellCapture(
                 "dumpsys activity activities | grep -E 'TaskRecord\\{|Task\\{|" + pkg + "/'");
-        if (out == null) return -1;
+        return taskIdInDump(out, pkg);
+    }
+
+    /**
+     * True only when a PARSED dump proves {@code pkg} has no live task. False both when a
+     * task exists and when the lookup itself failed ({@link #TASK_LOOKUP_FAILED}) — callers
+     * use this as the post-{@code force-stop} "the task is really gone" proof, and a failed
+     * dumpsys must never pass for proof.
+     */
+    static boolean taskConfirmedAbsent(String pkg) {
+        return findTaskId(pkg) == -1;
+    }
+
+    /** Package-private parser seam for the JVM regression test. */
+    static int taskIdInDump(String out, String pkg) {
+        if (!isValidPackageName(pkg)) return -1;
+        if (out == null) return TASK_LOOKUP_FAILED;   // shell/dumpsys failure — unverifiable
         int pendingTaskId = -1;
+        boolean sawTaskHeader = false;
         for (String line : out.split("\\r?\\n")) {
             line = line.trim();
             int hashTask = extractTaskId(line);
             if (hashTask >= 0) {
+                sawTaskHeader = true;
                 pendingTaskId = hashTask;          // remember the task we're inside
                 continue;
             }
             // A component line "<pkg>/<activity>" inside the current task block.
             // Literal "<pkg>/" (not a bare contains(pkg)) so a sibling package like
             // "com.foobar" can't be mistaken for "com.foo".
-            if (pendingTaskId >= 0 && line.contains(pkg + "/")) {
+            if (pendingTaskId >= 0 && lineContainsComponentToken(line, pkg + "/")) {
                 return pendingTaskId;
             }
         }
-        return -1;
+        // A live system always has at least one task (home/SystemUI), so a capture with
+        // ZERO task headers is dumpsys erroring out (AMS not up yet, permission refusal),
+        // not proof of absence. Only a parsed dump that contains other tasks but none for
+        // this package confirms the task is gone.
+        return sawTaskHeader ? -1 : TASK_LOOKUP_FAILED;
+    }
+
+    private static boolean lineContainsComponentToken(String line, String token) {
+        if (!token.endsWith("/")) return line.contains(token);
+        for (int at = line.indexOf(token); at >= 0; at = line.indexOf(token, at + 1)) {
+            if (at == 0 || !isPackageNameChar(line.charAt(at - 1))) return true;
+        }
+        return false;
+    }
+
+    private static boolean isPackageNameChar(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                || (c >= '0' && c <= '9') || c == '.' || c == '_';
     }
 
     /**
-     * Stack id of the split-screen-primary stack we just seeded — the stack that
-     * currently hosts OUR ghost activity. Located by ghost component, not by a
-     * windowing-mode string, so it is robust to mode-name spelling. -1 if not found.
+     * Stack id of the display-0 standard split-primary stack hosting OUR ghost activity.
+     * Named and numeric windowing-mode output are both accepted. -1 if not found.
      */
     private static int findGhostStackId() {
-        // Ghost activity's simple name is enough to pin the block; scan upward from it
-        // to the enclosing "Stack #<id>:" / "ActivityStack{... #<id>" header.
         String out = runShellCapture(
-                "dumpsys activity activities | grep -E 'Stack #|ActivityStack|AppLauncherGhostActivity'");
-        if (out == null) return -1;
-        int currentStack = -1;
-        for (String line : out.split("\\r?\\n")) {
-            line = line.trim();
-            int stackId = extractStackId(line);
-            if (stackId >= 0) {
-                currentStack = stackId;
-                continue;
-            }
-            if (line.contains("AppLauncherGhostActivity") && currentStack >= 0) {
-                return currentStack;
-            }
-        }
-        return -1;
+                "dumpsys activity activities | grep -E 'Display #|Stack #|ActivityStack|"
+                        + "mWindowingMode|windowingMode|mode=|mActivityType|activityType|type=|"
+                        + "AppLauncherGhostActivity'");
+        if (out == null) return STACK_LOOKUP_FAILED;
+        return ghostStackIdInDump(out);
+    }
+
+    /** Package-private parser seam for the JVM regression test. */
+    static int ghostStackIdInDump(String out) {
+        return standardStackIdInDump(
+                out, 0, WINDOWING_MODE_SPLIT_SCREEN_PRIMARY,
+                "AppLauncherGhostActivity");
+    }
+
+    private static int findSecondaryGhostStackId() {
+        String out = runShellCapture(
+                "dumpsys activity activities | grep -E 'Display #|Stack #|ActivityStack|"
+                        + "mWindowingMode|windowingMode|mode=|mActivityType|activityType|type=|"
+                        + "AppLauncherSecondaryGhostActivity'");
+        if (out == null) return STACK_LOOKUP_FAILED;
+        return secondaryGhostStackIdInDump(out);
+    }
+
+    /** Package-private parser seam for the JVM regression test. */
+    static int secondaryGhostStackIdInDump(String out) {
+        return standardStackIdInDump(
+                out, 0, WINDOWING_MODE_SPLIT_SCREEN_SECONDARY,
+                "AppLauncherSecondaryGhostActivity");
     }
 
     /**
@@ -344,18 +634,39 @@ public final class AppLauncher {
      * (never a foregrounding fallback that could surface the app while driving). Runs on the
      * caller's daemon/HTTP worker thread; all shells are bounded by {@link #runShell}'s 5s cap.
      *
-     * @return true if a move-task was dispatched (exit 0), false otherwise
+     * @return true when the package is confirmed OFF the cluster: either a move-task was
+     *   dispatched (exit 0), or the parsed dump proves the package has NO live task — an
+     *   absent task carries no display affinity, so there is nothing stranded to recover
+     *   and callers may clear their recovery markers. False when the move could not be
+     *   dispatched OR the task lookup itself failed ({@link #TASK_LOOKUP_FAILED}), in which
+     *   case the task may still be stranded and recovery must be retried. The previous
+     *   contract returned false for a confirmed-absent task too, which made boot recovery
+     *   retry forever on every boot where the stranded app was simply not running
+     *   (log_2MEH8B86: "no live task ... nothing to reparent" → permanent
+     *   "legacy projection boot recovery incomplete").
      */
     static boolean reparentToDisplay0(String pkg) {
+        synchronized (APP_LAUNCH_LOCK) {
+            return reparentToDisplay0Locked(pkg);
+        }
+    }
+
+    private static boolean reparentToDisplay0Locked(String pkg) {
         if (pkg == null || pkg.trim().isEmpty() || !isValidPackageName(pkg.trim())) {
             logger.warn("reparentToDisplay0: missing/invalid package");
             return false;
         }
         pkg = pkg.trim();
         int task = findTaskId(pkg);
-        if (task < 0) {
-            logger.info("reparentToDisplay0: no live task for " + pkg + " — nothing to reparent");
+        if (task == TASK_LOOKUP_FAILED) {
+            logger.warn("reparentToDisplay0: task lookup failed for " + pkg
+                    + " — cannot verify the task is gone, keeping recovery pending");
             return false;
+        }
+        if (task < 0) {
+            logger.info("reparentToDisplay0: no live task for " + pkg
+                    + " — nothing stranded, treating as recovered");
+            return true;
         }
         int stack = findFullscreenStackIdOnDisplay(0);
         if (stack < 0) {
@@ -371,40 +682,20 @@ public final class AppLauncher {
     }
 
     /**
-     * Stack id of a stack on {@code displayId}, parsed from {@code dumpsys activity
-     * activities}. Uses the {@code Display #<id>} block boundary — the SAME structure
-     * {@link ClusterCast#isResumedOnDisplay} parses and which is VALIDATED on this firmware
-     * (per-stack {@code mDisplayId=}/{@code mWindowingMode=} field names are NOT relied on,
-     * as their presence/ordering is firmware-specific and unverified here). We enter the
-     * target display's block on its {@code Display #<id>} header, leave it on the next
-     * {@code Display #} header, and return the FIRST {@code Stack #<id>} inside it (on a car
-     * head unit, display 0's top stack is the standard/fullscreen stack — the right reparent
-     * target). Returns -1 if the block or a stack within it isn't found → caller no-ops
-     * safely (never a foregrounding fallback).
+     * Standard fullscreen stack id on {@code displayId}. Split-screen and home stacks are
+     * deliberately rejected so a cluster-affinity cleanup cannot replace one of an active
+     * split pair. Returns -1 when no safe target exists.
      */
     private static int findFullscreenStackIdOnDisplay(int displayId) {
         String out = runShellCapture(
-                "dumpsys activity activities | grep -E 'Display #|Stack #'");
-        if (out == null) return -1;
-        String displayHeader = "display #" + displayId;
-        boolean inTargetDisplay = false;
-        for (String line : out.split("\\r?\\n")) {
-            line = line.trim();
-            String low = line.toLowerCase(java.util.Locale.US);
-            int hdr = low.indexOf("display #");
-            if (hdr >= 0) {
-                // Enter the target display's block; leave it at any other Display # header.
-                // The trailing non-digit guard stops "Display #1" matching "Display #10".
-                inTargetDisplay = low.startsWith(displayHeader, hdr)
-                        && !Character.isDigit(charAt(low, hdr + displayHeader.length()));
-                continue;
-            }
-            if (inTargetDisplay) {
-                int stackId = extractStackId(line);
-                if (stackId >= 0) return stackId;   // first stack inside Display #<id>
-            }
-        }
-        return -1;
+                "dumpsys activity activities | grep -E 'Display #|Stack #|ActivityStack|"
+                        + "mWindowingMode|windowingMode|mode=|mActivityType|activityType|type='");
+        return fullscreenStackIdInDump(out, displayId);
+    }
+
+    /** Package-private parser seam for the JVM regression test. */
+    static int fullscreenStackIdInDump(String out, int displayId) {
+        return standardStackIdInDump(out, displayId, WINDOWING_MODE_FULLSCREEN, null);
     }
 
     /** Char at index {@code i}, or a space if out of range (safe bounds for the
@@ -582,26 +873,43 @@ public final class AppLauncher {
      */
     private static String runShellCapture(String cmd) {
         Process p = null;
+        InputStream is = null;
         try {
             p = new ProcessBuilder("sh", "-c", cmd).redirectErrorStream(true).start();
-            StringBuilder sb = new StringBuilder();
-            InputStream is = p.getInputStream();
-            byte[] buf = new byte[4096];
-            int n;
-            while ((n = is.read(buf)) != -1) {
-                if (sb.length() < SHELL_CAPTURE_CAP_BYTES) {
-                    sb.append(new String(buf, 0, n));
+            is = p.getInputStream();
+            final InputStream captureStream = is;
+            final StringBuffer sb = new StringBuffer();
+            Thread reader = new Thread(() -> {
+                byte[] buf = new byte[4096];
+                try {
+                    int n;
+                    while ((n = captureStream.read(buf)) != -1) {
+                        int remaining = SHELL_CAPTURE_CAP_BYTES - sb.length();
+                        if (remaining > 0) {
+                            sb.append(new String(buf, 0, Math.min(n, remaining)));
+                        }
+                        // Keep draining past the cap so the child never blocks on a full pipe.
+                    }
+                } catch (Throwable ignored) {
                 }
-                // keep draining past the cap so the child never blocks on a full pipe
-            }
+            }, "applauncher-capture");
+            reader.setDaemon(true);
+            reader.start();
+
             boolean done = p.waitFor(5, TimeUnit.SECONDS);
-            try { is.close(); } catch (Throwable ignored) { }
-            if (!done) { p.destroyForcibly(); return null; }
+            if (!done) p.destroyForcibly();
+            reader.join(500);
+            if (reader.isAlive()) {
+                try { is.close(); } catch (Throwable ignored) { }
+                reader.join(500);
+            }
+            if (!done) return null;
             return sb.toString();
         } catch (Throwable t) {
             logger.warn("runShellCapture failed: " + t.getMessage());
             return null;
         } finally {
+            if (is != null) { try { is.close(); } catch (Throwable ignored) { } }
             if (p != null) { try { p.destroy(); } catch (Throwable ignored) { } }
         }
     }
@@ -634,17 +942,11 @@ public final class AppLauncher {
         }
         // Shell fallback: parse `cmd package resolve-activity --brief` for the component.
         try {
-            Process p = new ProcessBuilder("sh", "-c",
-                    "cmd package resolve-activity --brief -c android.intent.category.LAUNCHER " + shellQuote(pkg))
-                    .redirectErrorStream(true).start();
-            StringBuilder sb = new StringBuilder();
-            InputStream is = p.getInputStream();
-            byte[] buf = new byte[4096];
-            int n;
-            while ((n = is.read(buf)) != -1) sb.append(new String(buf, 0, n));
-            p.waitFor(5, TimeUnit.SECONDS);
-            try { is.close(); } catch (Throwable ignored) { }
-            for (String line : sb.toString().split("\\r?\\n")) {
+            String out = runShellCapture(
+                    "cmd package resolve-activity --brief -c android.intent.category.LAUNCHER "
+                            + shellQuote(pkg));
+            if (out == null) return null;
+            for (String line : out.split("\\r?\\n")) {
                 line = line.trim();
                 // A resolved component line looks like "pkg/.Activity" or "pkg/pkg.Activity".
                 if (line.startsWith(pkg + "/")) return line;
@@ -675,12 +977,14 @@ public final class AppLauncher {
     static boolean isValidPackageName(String s) {
         if (s == null || s.isEmpty() || s.length() > 255) return false;
         for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            boolean ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-                    || (c >= '0' && c <= '9') || c == '.' || c == '_';
-            if (!ok) return false;
+            if (!isPackageNameChar(s.charAt(i))) return false;
         }
         return true;
     }
-}
 
+    static boolean isValidSplitPair(String primaryPkg, String secondaryPkg) {
+        return isValidPackageName(primaryPkg)
+                && isValidPackageName(secondaryPkg)
+                && !primaryPkg.equals(secondaryPkg);
+    }
+}

@@ -128,7 +128,12 @@ public final class ClusterMapProjector {
     }
 
     /** True while the map is (being) projected onto the cluster. */
-    public static boolean isActive() { return active; }
+    public static boolean isActive() {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            return active && com.overdrive.app.launcher.DiLink5ClusterCast.isMapActive();
+        }
+        return active;
+    }
 
     /**
      * Begin projecting the map onto the cluster. Idempotent. Acquires the
@@ -136,16 +141,39 @@ public final class ClusterMapProjector {
      * map Activity onto it. Runs the wait+launch off the caller's thread.
      */
     public static synchronized void start() {
-        if (active) return;
+        if (active) {
+            if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                    || com.overdrive.app.launcher.DiLink5ClusterCast.isMapActive()) {
+                return;
+            }
+            active = false;
+            publishActiveFlag(false);
+        }
         active = true;
         logger.info("cluster map projection: start");
         // Mark active BEFORE launch so the Activity's first poll sees true and
         // doesn't immediately self-finish on a fast startup.
         publishActiveFlag(true);
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            if (!com.overdrive.app.launcher.DiLink5ClusterCast.startMap()) {
+                active = false;
+                publishActiveFlag(false);
+                logger.warn("DI5 cluster map projection was not accepted");
+            }
+            return;
+        }
+        boolean acquired = false;
         try {
-            ClusterProjectionController.getInstance().acquireSustained();
+            acquired = ClusterProjectionController.getInstance()
+                    .acquireSustained();
         } catch (Throwable t) {
             logger.warn("acquireSustained failed: " + t.getMessage());
+        }
+        if (!acquired) {
+            active = false;
+            publishActiveFlag(false);
+            logger.warn("legacy cluster map projection was not admitted");
+            return;
         }
         launchThread = new Thread(ClusterMapProjector::waitAndLaunch, "ClusterMapLaunch");
         launchThread.setDaemon(true);
@@ -157,21 +185,59 @@ public final class ClusterMapProjector {
      *  finish signal the Activity stays parked on the still-alive fission display
      *  and re-surfaces under the blind-spot card on the next turn-signal projection
      *  open — the "map shows on the cluster even when disabled" bug. */
-    public static synchronized void stop() {
-        if (!active) return;
+    public static synchronized boolean stop() {
+        if (!active) return true;
         active = false;
         logger.info("cluster map projection: stop");
         // Tell the cluster Activity to finish (it polls navMap.clusterMapActive).
         // Done first so the Activity is dismissed even if releaseSustained throws.
         publishActiveFlag(false);
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            return com.overdrive.app.launcher.DiLink5ClusterCast.stopMap();
+        }
         try {
             ClusterProjectionController.getInstance().releaseSustained();
         } catch (Throwable t) {
             logger.warn("releaseSustained failed: " + t.getMessage());
+            return false;
+        }
+        return true;
+    }
+
+    public static void onDiLink5ProjectionFailed() {
+        if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) return;
+        synchronized (ClusterMapProjector.class) {
+            if (!active
+                    || com.overdrive.app.launcher.DiLink5ClusterCast.isMapActive()) {
+                return;
+            }
+            active = false;
+            launchThread = null;
+        }
+        publishActiveFlag(false);
+    }
+
+    /**
+     * Authoritative legacy projection-close hook. Several safety paths close
+     * the controller directly (relayout, retarget, blind-spot disable) instead
+     * of routing through {@link #stop()}; invalidate the pending launch and its
+     * keep-alive identity before the fission display is retired.
+     */
+    public static void onLegacyProjectionForceClosed() {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) return;
+        boolean wasActive;
+        synchronized (ClusterMapProjector.class) {
+            wasActive = active || launchThread != null;
+            active = false;
+            launchThread = null;
+        }
+        if (wasActive) {
+            publishActiveFlag(false);
         }
     }
 
     private static void waitAndLaunch() {
+        final Thread self = Thread.currentThread();
         // Wait for the OEM projection to actually establish the fission display.
         int waited = 0;
         int displayId = -1;
@@ -180,13 +246,14 @@ public final class ClusterMapProjector {
         // an early resolve transiently returns -1; and it's NEVER display 0 (that's
         // the built-in head unit). Requiring >0 means we wait for the real cluster
         // display instead of aborting on a transient/misparse 0.
-        while (active && waited < READY_TIMEOUT_MS) {
+        while (active && launchThread == self
+                && waited < READY_TIMEOUT_MS) {
             int id = resolveFissionDisplayId();
             if (id > 0) { displayId = id; break; }
             try { Thread.sleep(READY_POLL_MS); } catch (InterruptedException e) { return; }
             waited += READY_POLL_MS;
         }
-        if (!active) return;
+        if (!active || launchThread != self) return;
         if (displayId <= 0) {
             // No fission display ever materialised within the budget (non-fission /
             // Atto-class cluster, or the OEM projection never established). Do NOT
@@ -195,7 +262,11 @@ public final class ClusterMapProjector {
             // Abort + RELEASE the sustained hold so the controller restores gauges.
             logger.warn("fission display not resolved (>0) in " + READY_TIMEOUT_MS
                     + "ms — aborting cluster map projection (no clobber of display 0)");
-            active = false;
+            synchronized (ClusterMapProjector.class) {
+                if (launchThread != self) return;
+                active = false;
+                launchThread = null;
+            }
             publishActiveFlag(false);   // dismiss any Activity that did come up
             try { com.overdrive.app.surveillance.ClusterProjectionController.getInstance().releaseSustained(); }
             catch (Throwable ignored) {}
@@ -203,14 +274,15 @@ public final class ClusterMapProjector {
         }
         // Final race guard: a stop() may have fired during the resolve above. Don't
         // launch the Activity if the projection was torn down in the meantime.
-        if (!active) {
+        if (!active || launchThread != self
+                || !isSustainedProjectionHeld()) {
             logger.info("stop() raced the display resolve — skipping cluster map launch");
             // stop() already cleared the flag; re-assert to cover a launch that
             // slipped onto the display just before this guard.
             publishActiveFlag(false);
             return;
         }
-        launchMapOnDisplay(displayId);
+        launchMapOnDisplay(displayId, self);
     }
 
     /**
@@ -287,17 +359,28 @@ public final class ClusterMapProjector {
      * thread (off the 250ms BS loop / GL thread). On a genuine non-fission trim we
      * never get here (waitAndLaunch already aborted on displayId<=0).
      */
-    private static void launchMapOnDisplay(int displayId) {
-        for (int attempt = 1; active && attempt <= LAUNCH_VERIFY_ATTEMPTS; attempt++) {
+    private static void launchMapOnDisplay(
+            int displayId, Thread ownerThread) {
+        for (int attempt = 1;
+                active
+                        && launchThread == ownerThread
+                        && attempt <= LAUNCH_VERIFY_ATTEMPTS;
+                attempt++) {
             if (!issueLaunch(displayId, attempt)) {
                 // am start itself failed (non-zero exit / exception). Brief backoff
                 // then retry — a transient AMS hiccup during the ACC-on storm.
-                if (!sleepWhileActive(LAUNCH_VERIFY_POLL_MS)) return;
+                if (!sleepWhileActive(LAUNCH_VERIFY_POLL_MS)
+                        || launchThread != ownerThread) return;
                 continue;
             }
             // Give AMS a moment to resume the Activity, then verify foreground-on-display.
-            for (int poll = 0; active && poll < LAUNCH_VERIFY_POLLS_PER_ATTEMPT; poll++) {
-                if (!sleepWhileActive(LAUNCH_VERIFY_POLL_MS)) return;
+            for (int poll = 0;
+                    active
+                            && launchThread == ownerThread
+                            && poll < LAUNCH_VERIFY_POLLS_PER_ATTEMPT;
+                    poll++) {
+                if (!sleepWhileActive(LAUNCH_VERIFY_POLL_MS)
+                        || launchThread != ownerThread) return;
                 if (isMapResumedOnDisplay(displayId)) {
                     logger.info("cluster map RESUMED on displayId " + displayId
                             + " (attempt " + attempt + ")");
@@ -312,7 +395,8 @@ public final class ClusterMapProjector {
                     + " after attempt " + attempt + " (likely lost the resume race to the "
                     + "head-unit home) — re-launching");
         }
-        if (active) {
+        if (active && launchThread == ownerThread
+                && isSustainedProjectionHeld()) {
             logger.warn("cluster map failed to reach foreground on displayId " + displayId
                     + " after " + LAUNCH_VERIFY_ATTEMPTS + " attempts — entering keep-alive "
                     + "watchdog anyway (projection stays up; gauges restore on the normal "

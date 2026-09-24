@@ -5,17 +5,93 @@
 
 const ABRP = {
     refreshInterval: null,
+    enabled: false,
+    _hydrated: false,
+    _writeQueue: Promise.resolve(),
+    _configWriteVersion: 0,
+    _configWritesPending: 0,
 
-    init() {
-        this.loadConfig();
+    async init() {
+        this._hydrated = await this.loadConfig();
+        if (BYD.utils && BYD.utils.unlockSettingsHydration) {
+            BYD.utils.unlockSettingsHydration();
+        }
         this.loadStatus();
         this.startAutoRefresh();
     },
 
+    _enqueueWrite(task) {
+        const run = () => task();
+        const next = this._writeQueue.then(run, run);
+        this._writeQueue = next.catch(() => {});
+        return next;
+    },
+
+    async _ensureHydrated() {
+        if (this._hydrated) return true;
+        this._hydrated = await this.loadConfig();
+        return this._hydrated;
+    },
+
+    async _reloadConfigWhenIdle() {
+        let queue;
+        do {
+            queue = this._writeQueue;
+            await queue;
+        } while (queue !== this._writeQueue);
+        return this.loadConfig();
+    },
+
+    async _postConfig(data) {
+        this._configWriteVersion++;
+        this._configWritesPending++;
+        try {
+            return await this._enqueueWrite(async () => {
+                try {
+                    const resp = await fetch('/api/abrp/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                    const result = await resp.json();
+                    if (!resp.ok || !result || result.success !== true) {
+                        throw new Error(result && result.error ? result.error : 'ABRP config rejected');
+                    }
+                    return result;
+                } catch (e) {
+                    console.warn('[ABRP] Failed to save config:', e);
+                    return null;
+                }
+            });
+        } finally {
+            this._configWritesPending--;
+        }
+    },
+
+    _setDataSavingDisabled(disabled) {
+        [
+            'abrpChangeOnly', 'abrpMinInterval', 'abrpMaxInterval',
+            'abrpGateOnApp', 'abrpAppMode', 'abrpAppGrace'
+        ].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.disabled = disabled;
+        });
+    },
+
+    _toastSaveFailed() {
+        if (BYD.utils && BYD.utils.toast) {
+            BYD.utils.toast(BYD.i18n.t('common.error'), 'error');
+        }
+    },
+
     async loadConfig() {
+        if (this._configWritesPending > 0) return false;
+        const writeVersion = this._configWriteVersion;
         try {
             const resp = await fetch('/api/abrp/config');
             const data = await resp.json();
+            if (this._configWritesPending > 0
+                    || writeVersion !== this._configWriteVersion) return false;
             if (data.success && data.config) {
                 const cfg = data.config;
                 const hasToken = cfg.user_token && cfg.user_token.length > 0;
@@ -30,6 +106,7 @@ const ABRP = {
                 }
 
                 document.getElementById('abrpEnabled').checked = cfg.enabled || false;
+                this.enabled = !!cfg.enabled;
 
                 // Data-saving + app-gate controls
                 var set = function (id, v) { var el = document.getElementById(id); if (el) el.value = v; };
@@ -42,10 +119,12 @@ const ABRP = {
                 set('abrpAppGrace', cfg.app_grace_seconds || 90);
                 this.onSlider();
                 this.onGateToggle();
+                return true;
             }
         } catch (e) {
             console.warn('[ABRP] Failed to load config:', e);
         }
+        return false;
     },
 
     // Human-friendly interval label: 45 -> "45s", 120 -> "2m".
@@ -82,14 +161,17 @@ const ABRP = {
         if (data.max_interval_seconds < data.min_interval_seconds) {
             data.max_interval_seconds = data.min_interval_seconds;
         }
+        this._setDataSavingDisabled(true);
         try {
-            await fetch('/api/abrp/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
-        } catch (e) {
-            console.warn('[ABRP] Failed to save data-saving settings:', e);
+            if (!await this._ensureHydrated()) {
+                this._toastSaveFailed();
+                return;
+            }
+            const saved = await this._postConfig(data);
+            await this._reloadConfigWhenIdle();
+            if (!saved) this._toastSaveFailed();
+        } finally {
+            this._setDataSavingDisabled(false);
         }
     },
 
@@ -154,18 +236,16 @@ const ABRP = {
         }
 
         try {
-            const resp = await fetch('/api/abrp/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token: token, enabled: true })
-            });
-            const data = await resp.json();
-            if (data.success) {
+            const data = await this._postConfig({ token: token, enabled: true });
+            if (data && data.success !== false) {
                 this.setTokenStatus(BYD.i18n.t('abrp.token_saved'), 'success');
                 if (field) field.value = '';
-                this.loadConfig();
+                await this._reloadConfigWhenIdle();
             } else {
-                this.setTokenStatus(data.error || BYD.i18n.t('abrp.token_save_failed'), 'error');
+                this.setTokenStatus(
+                    (data && data.error) || BYD.i18n.t('abrp.token_save_failed'),
+                    'error'
+                );
             }
         } catch (e) {
             this.setTokenStatus(BYD.i18n.t('abrp.token_network_save'), 'error');
@@ -173,12 +253,28 @@ const ABRP = {
     },
 
     async deleteToken() {
+        this._configWriteVersion++;
+        this._configWritesPending++;
+        let data = null;
         try {
-            const resp = await fetch('/api/abrp/token', { method: 'DELETE' });
-            const data = await resp.json();
+            data = await this._enqueueWrite(async () => {
+                const resp = await fetch('/api/abrp/token', { method: 'DELETE' });
+                const result = await resp.json();
+                if (!resp.ok || !result || result.success !== true) {
+                    throw new Error(result && result.error ? result.error : 'ABRP token delete rejected');
+                }
+                return result;
+            });
+        } catch (e) {
+            this.setTokenStatus(BYD.i18n.t('abrp.token_network_delete'), 'error');
+            return;
+        } finally {
+            this._configWritesPending--;
+        }
+        try {
             if (data.success) {
                 this.setTokenStatus(BYD.i18n.t('abrp.token_deleted'), 'success');
-                this.loadConfig();
+                await this._reloadConfigWhenIdle();
             } else {
                 this.setTokenStatus(data.error || BYD.i18n.t('abrp.token_delete_failed'), 'error');
             }
@@ -188,15 +284,27 @@ const ABRP = {
     },
 
     async toggleEnabled() {
-        const checked = document.getElementById('abrpEnabled').checked;
+        const toggle = document.getElementById('abrpEnabled');
+        if (!toggle) return;
+        const checked = toggle.checked;
+        toggle.disabled = true;
         try {
-            await fetch('/api/abrp/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled: checked })
-            });
-        } catch (e) {
-            console.warn('[ABRP] Failed to toggle enabled:', e);
+            if (!await this._ensureHydrated()) {
+                toggle.checked = this.enabled;
+                this._toastSaveFailed();
+                return;
+            }
+            const previous = this.enabled;
+            const data = await this._postConfig({ enabled: checked });
+            if (data) {
+                this.enabled = checked;
+                toggle.checked = checked;
+            } else {
+                toggle.checked = previous;
+                this._toastSaveFailed();
+            }
+        } finally {
+            toggle.disabled = false;
         }
     },
 

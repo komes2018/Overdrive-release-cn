@@ -185,10 +185,26 @@ public class CameraDaemonClient {
         try {
             JSONObject cmd = new JSONObject();
             cmd.put("cmd", "stop");
+            cmd.put("explicit", cameraIds == null);
             if (cameraIds != null) {
                 cmd.put("cameras", new JSONArray(cameraIds));
             }
-            sendCommandAsync(cmd, callback);
+            sendCommandAsync(cmd, callback == null ? null : new ResponseCallback() {
+                @Override
+                public void onResponse(JSONObject response) {
+                    if ("ok".equals(response.optString("status"))) {
+                        callback.onResponse(response);
+                    } else {
+                        callback.onError(response.optString(
+                                "message", "Camera stop was not confirmed"));
+                    }
+                }
+
+                @Override
+                public void onError(String error) {
+                    callback.onError(error);
+                }
+            });
         } catch (Exception e) {
             if (callback != null) callback.onError(e.getMessage());
         }

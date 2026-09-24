@@ -41,6 +41,11 @@
 -keepclassmembers class * extends android.hardware.bydauto.instrument.AbsBYDAutoInstrumentListener { *; }
 -keepclassmembers class * extends android.hardware.bydauto.charging.AbsBYDAutoChargingListener { *; }
 -keepclassmembers class * extends android.hardware.bydauto.energy.AbsBYDAutoEnergyListener { *; }
+-keepclassmembers class * extends android.hardware.bydauto.speed.AbsBYDAutoSpeedListener { *; }
+-keepclassmembers class * extends android.hardware.bydauto.tyre.AbsBYDAutoTyreListener { *; }
+-keepclassmembers class * extends android.hardware.bydauto.statistic.AbsBYDAutoStatisticListener { *; }
+-keepclassmembers class * extends android.hardware.bydauto.collectdata.AbsBYDAutoCollectDataListener { *; }
+-keepclassmembers class * extends android.hardware.bydauto.setting.AbsBYDAutoSettingListener { *; }
 
 # ==================== Daemon Entry Points (app_process) ====================
 # ONLY keep class names and main() - everything else gets obfuscated
@@ -179,6 +184,10 @@
 # System.loadLibrary lookup then misses the .so export and NoSuchMethodErrors.
 # Keep the class name (and its native methods) explicitly first.
 -keep class com.overdrive.app.od.Od {
+    native <methods>;
+}
+-keep class com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend {
+    public static void onNativeFrameAvailable(long);
     native <methods>;
 }
 # JNI method names must match native function signatures exactly

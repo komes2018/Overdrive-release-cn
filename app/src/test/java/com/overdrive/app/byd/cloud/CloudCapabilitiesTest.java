@@ -34,11 +34,13 @@ public class CloudCapabilitiesTest {
     }
 
     @Test
-    public void windowOpenRequiresBothFunctionAndPositiveLearnInfo() throws Exception {
+    public void windowOpenHonorsExplicitNonPositiveLearnInfo() throws Exception {
         JSONObject latest = new JSONObject().put("cfFixedList", new JSONArray()
                 .put(new JSONObject().put("functionNo", "1026")));
         JSONObject vehicle = new JSONObject().put("vehicleFunLearnInfo",
-                new JSONObject().put("openWindowLearnInfo", 0));
+                new JSONObject()
+                        .put("openWindowLearnInfo", 0)
+                        .put("openWindow499LearnInfo", -1));
 
         CloudCapabilities capabilities = CloudCapabilities.fromResponses(
                 "VIN", latest, vehicle, 1L);
@@ -48,12 +50,37 @@ public class CloudCapabilitiesTest {
     }
 
     @Test
-    public void windowOpenFailsClosedWhenVehicleLearnInfoCouldNotBeFetched() throws Exception {
+    public void windowOpenFallsBackToFunctionWhenVehicleLearnInfoCouldNotBeFetched()
+            throws Exception {
         JSONObject latest = new JSONObject().put("cfFixedList", new JSONArray()
                 .put(new JSONObject().put("functionNo", "1026")));
 
         CloudCapabilities capabilities = CloudCapabilities.fromResponses(
                 "VIN", latest, null, 1L);
+
+        assertTrue(capabilities.supports(CloudCapabilities.Feature.WINDOWS_OPEN_VENT));
+    }
+
+    @Test
+    public void windowOpenTreatsEmptyVehicleLearnInfoAsUnavailable() throws Exception {
+        JSONObject latest = new JSONObject().put("cfFixedList", new JSONArray()
+                .put(new JSONObject().put("functionNo", "1026")));
+        JSONObject vehicle = new JSONObject()
+                .put("vehicleFunLearnInfo", new JSONObject());
+
+        CloudCapabilities capabilities = CloudCapabilities.fromResponses(
+                "VIN", latest, vehicle, 1L);
+
+        assertTrue(capabilities.supports(CloudCapabilities.Feature.WINDOWS_OPEN_VENT));
+    }
+
+    @Test
+    public void windowOpenStillRequiresFunction1026() throws Exception {
+        JSONObject vehicle = new JSONObject().put("vehicleFunLearnInfo",
+                new JSONObject().put("openWindowLearnInfo", 1));
+
+        CloudCapabilities capabilities = CloudCapabilities.fromResponses(
+                "VIN", new JSONObject(), vehicle, 1L);
 
         assertFalse(capabilities.supports(CloudCapabilities.Feature.WINDOWS_OPEN_VENT));
     }

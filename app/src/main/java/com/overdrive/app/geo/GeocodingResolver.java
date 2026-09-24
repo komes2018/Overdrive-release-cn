@@ -441,6 +441,56 @@ public final class GeocodingResolver {
         // Our call won the token and is about to issue the HTTP request — so a
         // subsequent null IS a genuine reach-but-empty result, not a throttle.
         if (reachedNominatim != null) reachedNominatim[0] = true;
+
+        // Honour the local proxy when running, with ONE direct retry on an
+        // IO-level proxied failure. The probe behind getHttpProxy() is a blind
+        // loopback connect: it prefers the Tailscale SOCKS listener, which on
+        // most cars is tailnet-only — public OSM hosts are unreachable THROUGH
+        // it while the listener itself probes healthy, so without the retry
+        // every reverse-geocode wedged for as long as it was up. Server HTTP
+        // codes (429/5xx) are NOT retried — they arrived over a working route.
+        // Both attempts share the single rate-limiter token acquired above.
+        java.net.Proxy proxy = com.overdrive.app.mqtt.ProxyHelper.getHttpProxy();
+        boolean viaProxy = proxy != null
+                && proxy.type() != java.net.Proxy.Type.DIRECT;
+        try {
+            return nominatimAttempt(lat, lng, locale, proxy);
+        } catch (java.io.IOException ioe) {
+            if (!viaProxy) {
+                NominatimRateLimiter.recordFailure();
+                logger.warn("Nominatim error: " + ioe.getMessage());
+                return null;
+            }
+            com.overdrive.app.mqtt.ProxyHelper.invalidateCache();
+            logger.warn("Nominatim via proxy failed (" + ioe.getMessage()
+                    + "); retrying direct");
+            try {
+                return nominatimAttempt(lat, lng, locale, java.net.Proxy.NO_PROXY);
+            } catch (Throwable t) {
+                NominatimRateLimiter.recordFailure();
+                logger.warn("Nominatim error: " + t.getMessage());
+                return null;
+            }
+        } catch (Throwable t) {
+            NominatimRateLimiter.recordFailure();
+            logger.warn("Nominatim error: " + t.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * One Nominatim reverse-geocode request over ONE route. On bad mobile data
+     * (or in regions where the OSM endpoint is firewalled) the sing-box tunnel
+     * is the only working egress — every other outbound HTTP path in the
+     * codebase (BYD Cloud, MQTT, AppUpdater) routes through ProxyHelper for
+     * the same reason. The custom-Nominatim self-host case still works:
+     * sing-box's routing config exempts internal IPs by default. IO-level
+     * failures propagate so the caller can decide whether a direct retry is
+     * warranted; server-code and parse failures are terminal here.
+     */
+    private PlaceResult nominatimAttempt(
+            double lat, double lng, String locale, java.net.Proxy route)
+            throws java.io.IOException {
         HttpURLConnection conn = null;
         try {
             String base = nominatimBaseUrl();
@@ -452,17 +502,7 @@ public final class GeocodingResolver {
                     + "&addressdetails=1";
 
             URL u = new URL(url);
-            // Honour the sing-box proxy when running. On bad mobile data
-            // (or in regions where the OSM endpoint is firewalled) the
-            // sing-box tunnel is the only working egress — every other
-            // outbound HTTP path in the codebase (BYD Cloud, MQTT,
-            // AppUpdater) routes through ProxyHelper for the same reason.
-            // Falls back to Proxy.NO_PROXY when sing-box isn't running,
-            // which is identical to the previous direct-connect behaviour.
-            // The custom-Nominatim self-host case still works: sing-box's
-            // routing config exempts internal IPs by default.
-            java.net.Proxy proxy = com.overdrive.app.mqtt.ProxyHelper.getHttpProxy();
-            conn = (HttpURLConnection) u.openConnection(proxy);
+            conn = (HttpURLConnection) u.openConnection(route);
             conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
             conn.setReadTimeout(READ_TIMEOUT_MS);
             conn.setRequestMethod("GET");
@@ -518,9 +558,14 @@ public final class GeocodingResolver {
             return new PlaceResult(displayName, district, city, country, cc,
                     locale, PlaceResult.Source.NOMINATIM,
                     System.currentTimeMillis());
+        } catch (java.io.IOException ioe) {
+            // Route-level failure — propagate so the caller can decide
+            // whether the other route deserves the one retry.
+            throw ioe;
         } catch (Throwable t) {
+            // Parse/JSON failures arrived over a WORKING route — terminal.
             NominatimRateLimiter.recordFailure();
-            logger.warn("Nominatim error: " + t.getMessage());
+            logger.warn("Nominatim parse error: " + t.getMessage());
             return null;
         } finally {
             if (conn != null) {
@@ -587,9 +632,11 @@ public final class GeocodingResolver {
     // ---- Config gates -----------------------------------------------------
 
     /**
-     * Per-flow enable gate. {@code flow} must be {@code "recording"} or
-     * {@code "surveillance"} — see {@link UnifiedConfigManager#getGeocoding()}
-     * for the schema.
+     * Per-flow enable gate. {@code flow} is {@code "recording"},
+     * {@code "surveillance"} or {@code "parking"} (Parking Intelligence; that
+     * section only exists once the user set it explicitly, see
+     * {@code DaemonParkingEnvironment.geocodingFlow}) — see
+     * {@link UnifiedConfigManager#getGeocoding()} for the schema.
      */
     private static boolean isFlowEnabled(String flow) {
         return UnifiedConfigManager.isGeocodingEnabledForFlow(flow);

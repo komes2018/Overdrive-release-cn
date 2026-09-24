@@ -60,6 +60,25 @@ public class LiveViewDashboardAssetTest {
         assertTrue(english.contains("\"back_to_cameras\": \"Back to cameras\""));
     }
 
+    @Test
+    public void portraitPhonesKeepCameraLabelsVisibleWithoutADoubleSafeArea() throws Exception {
+        String liveView = readWebAsset("local/live-view.html");
+
+        assertTrue(liveView.contains(
+                ".live-view-page .live-tabs-view { padding-bottom: 0; }"));
+        assertTrue(liveView.contains(
+                "padding-bottom: calc(12px + var(--safe-bottom, 0px));"));
+        assertTrue(liveView.contains(
+                "@media (max-width: 768px) and (orientation: portrait)"));
+        assertTrue(liveView.contains(
+                "flex: 0 0 calc(220px + var(--safe-bottom, 0px));"));
+        assertTrue(liveView.contains("flex: 0 0 58%;"));
+        assertTrue(liveView.contains("padding: 4px 8px 0;"));
+        assertTrue(liveView.contains("width: 124px;"));
+        assertTrue(liveView.contains(
+                "bottom: calc(16px + var(--safe-bottom, 0px));"));
+    }
+
     private static String readWebAsset(String relativePath) throws Exception {
         Path current = Paths.get("").toAbsolutePath();
         Path fromModule = current.resolve("src/main/assets/web").resolve(relativePath);

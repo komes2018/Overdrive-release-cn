@@ -302,7 +302,7 @@ public class ChargingFrontendContractTest {
                 "'Energy estimated'"));
         assertTrue(charging.contains(
                 "this._t('charge.not_measured', 'Not measured')"));
-        assertTrue(html.contains("charging.js?v=43"));
+        assertTrue(html.contains("charging.js?v=44"));
     }
 
     @Test

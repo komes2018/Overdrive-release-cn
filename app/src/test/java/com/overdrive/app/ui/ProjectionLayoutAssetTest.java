@@ -172,7 +172,8 @@ public class ProjectionLayoutAssetTest {
         String fragment = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/ui/fragment/ProjectionFragment.kt");
         assertTrue(fragment.contains("appToast = AppToast(view)"));
-        assertTrue(fragment.contains("notifyToast(getString(R.string.projection_cast_failed)"));
+        assertTrue(fragment.contains("result.error.ifEmpty"));
+        assertTrue(fragment.contains("getString(R.string.projection_cast_failed)"));
         assertTrue(fragment.contains("notifyStickyError(getString(R.string.projection_status_unsupported))"));
         assertTrue(fragment.contains("notifyStickyError(getString(R.string.projection_status_service_down))"));
         assertFalse(fragment.contains("setStatus(getString(R.string.projection_cast_failed))"));

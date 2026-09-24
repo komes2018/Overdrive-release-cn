@@ -1,6 +1,7 @@
 #pragma once
-#include <stdint.h>
+
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -9,76 +10,75 @@ extern "C" {
 #define FAST_CAM_API __attribute__((visibility("default")))
 
 typedef struct {
-    uint32_t cam_id;        // 0: Front, 1: Right, 2: Rear, 3: Left
-    uint32_t width;         // 1920
-    uint32_t height;        // 1300
-    uint32_t stride;        // 3840 (bytes per row)
-    uint64_t timestamp_ns;  // Hardware capture timestamp in nanoseconds
-    const uint8_t* pixels;  // Direct Zero-Copy mapped pointer in RAM (no memcpy)
+    uint32_t cam_id;
+    uint32_t width;
+    uint32_t height;
+    uint32_t stride;
+    uint32_t buffer_bytes;
+    uint32_t buffer_index;
+    uint32_t buffer_slot;
+    uint32_t sequence_no;
+    uint64_t timestamp_ns;
+    int dma_buf_fd;
+    const uint8_t* pixels;
 } FastCamFrame;
 
-// Client handle opaque structure
 typedef struct FastCamClientCtx FastCamClientCtx;
 
 FAST_CAM_API FastCamClientCtx* fast_cam_client_create(void);
 FAST_CAM_API void fast_cam_client_destroy(FastCamClientCtx* ctx);
-
-FAST_CAM_API bool fast_cam_client_connect(FastCamClientCtx* ctx, const char* sock_path);
+FAST_CAM_API bool fast_cam_client_connect(
+        FastCamClientCtx* ctx,
+        const char* socket_path,
+        int expected_server_pid);
 FAST_CAM_API void fast_cam_client_disconnect(FastCamClientCtx* ctx);
-
-// Waits for the next hardware frame from any active camera (timeout in milliseconds)
-FAST_CAM_API bool fast_cam_client_wait_frame(FastCamClientCtx* ctx, FastCamFrame* out_frame, int timeout_ms);
-
-// Ultra-fast 2x2 Compositor in UYVY (4 cameras decimated into 1920x1300 standard canvas)
-FAST_CAM_API void fast_cam_compose_2x2(
-    const uint8_t* cam0, const uint8_t* cam1,
-    const uint8_t* cam3, const uint8_t* cam2,
-    uint8_t* out_grid_1080p
-);
-
-// 4K Ultra-HD Native Compositor in UYVY (3840x2600, 100% native pixels preserved, zero downsampling)
-FAST_CAM_API void fast_cam_compose_4k(
-    const uint8_t* cam0, const uint8_t* cam1,
-    const uint8_t* cam3, const uint8_t* cam2,
-    uint8_t* out_4k_grid
-);
+FAST_CAM_API bool fast_cam_client_is_connected(
+        const FastCamClientCtx* ctx);
+FAST_CAM_API bool fast_cam_client_wait_frame(
+        FastCamClientCtx* ctx,
+        FastCamFrame* out_frame,
+        int timeout_ms);
+FAST_CAM_API bool fast_cam_client_supports_release_fence(
+        const FastCamClientCtx* ctx);
+FAST_CAM_API bool fast_cam_client_release_frame(
+        FastCamClientCtx* ctx,
+        const FastCamFrame* frame,
+        int fence_fd);
 
 #ifdef __cplusplus
 }
 
-// Convenient C++ RAII Wrapper for Android / NDK integration
 class FastCamClient {
 public:
-    FastCamClient() : m_ctx(fast_cam_client_create()) {}
-    ~FastCamClient() { fast_cam_client_destroy(m_ctx); }
+    FastCamClient() : context_(fast_cam_client_create()) {}
+    ~FastCamClient() { fast_cam_client_destroy(context_); }
 
-    bool connect(const char* sock_path = "@fast_cam.sock") {
-        return fast_cam_client_connect(m_ctx, sock_path);
+    bool connect(const char* socket_path, int expected_server_pid) {
+        return fast_cam_client_connect(
+                context_, socket_path, expected_server_pid);
     }
 
     void disconnect() {
-        fast_cam_client_disconnect(m_ctx);
+        fast_cam_client_disconnect(context_);
     }
 
-    bool waitForFrame(FastCamFrame* out_frame, int timeout_ms = 100) {
-        return fast_cam_client_wait_frame(m_ctx, out_frame, timeout_ms);
+    bool isConnected() const {
+        return fast_cam_client_is_connected(context_);
     }
 
-    // 2x2 Standard Decimated Compositor (1920x1300 canvas)
-    static void compose2x2(const uint8_t* cam0, const uint8_t* cam1,
-                           const uint8_t* cam3, const uint8_t* cam2,
-                           uint8_t* out_grid_1080p) {
-        fast_cam_compose_2x2(cam0, cam1, cam3, cam2, out_grid_1080p);
+    bool waitForFrame(FastCamFrame* frame, int timeout_ms = 100) {
+        return fast_cam_client_wait_frame(context_, frame, timeout_ms);
     }
 
-    // 4K Ultra-HD Full-Resolution Compositor (3840x2600 canvas)
-    static void compose4K(const uint8_t* cam0, const uint8_t* cam1,
-                          const uint8_t* cam3, const uint8_t* cam2,
-                          uint8_t* out_4k_grid) {
-        fast_cam_compose_4k(cam0, cam1, cam3, cam2, out_4k_grid);
+    bool supportsReleaseFence() const {
+        return fast_cam_client_supports_release_fence(context_);
+    }
+
+    bool releaseFrame(const FastCamFrame* frame, int fence_fd = -1) {
+        return fast_cam_client_release_frame(context_, frame, fence_fd);
     }
 
 private:
-    FastCamClientCtx* m_ctx;
+    FastCamClientCtx* context_;
 };
 #endif

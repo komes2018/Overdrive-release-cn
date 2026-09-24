@@ -28,6 +28,15 @@ public class ZrokRuntimeProbeTest {
     }
 
     @Test
+    public void healthyShareRequiresARealNonGatewayResponse() {
+        assertTrue(ZrokRuntimeProbe.isHealthyStatus(200));
+        assertTrue(ZrokRuntimeProbe.isHealthyStatus(404));
+        assertFalse(ZrokRuntimeProbe.isHealthyStatus(502));
+        assertFalse(ZrokRuntimeProbe.isHealthyStatus(0));
+        assertFalse(ZrokRuntimeProbe.isHealthyStatus(null));
+    }
+
+    @Test
     public void latestPublicShareUrlWins() {
         String log = "ready https://old-name.share.zrok.io then "
                 + "https://new-name.share.zrok.io";

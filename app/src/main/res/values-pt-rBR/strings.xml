@@ -240,7 +240,7 @@
     <string name="onboarding_camera_windshield_skip">Não, obrigado.</string>
     <!-- Vehicle profile chapter -->
     <string name="onboarding_vehicle_title">Conte Overdrive sua bateria</string>
-    <string name="onboarding_vehicle_body">Escolha seu modelo e nós preenchemos os kWh, ou digite você mesmo (15–120). Isto torna as estimativas de autonomia e carregamento precisas. Você pode pular e configurar isso mais tarde.</string>
+    <string name="onboarding_vehicle_body">Escolha seu modelo e nós preenchemos os kWh, ou digite você mesmo (5–120). Isto torna as estimativas de autonomia e carregamento precisas. Você pode pular e configurar isso mais tarde.</string>
     <string name="onboarding_vehicle_primary">Definir bateria</string>
     <!-- Dashboard orientation chapter -->
     <string name="onboarding_dash_tiles_title">Seu cockpit em um relance</string>
@@ -740,6 +740,7 @@
     <string name="rail_vehicle">Veículo</string>
     <string name="rail_projection">Projeção</string>
     <string name="rail_trips">Viagens</string>
+    <string name="rail_parking">Estacionamento</string>
     <string name="rail_charging">Carregando</string>
     <string name="rail_automations">Automações</string>
     <string name="rail_key_mapping">Mapeamento de Botões</string>
@@ -912,7 +913,6 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Monitorando</string>
-    <string name="dashboard_modern_vehicle_status">Status do veículo</string>
     <string name="dashboard_subtitle_all_systems">Todos os sistemas online</string>
     <string name="dashboard_subtitle_some_offline">%1$d de %2$d serviços online</string>
     <string name="dashboard_subtitle_no_tunnel">Acesso remoto offline</string>
@@ -932,15 +932,12 @@
     <string name="vehicle_dialog_title">Definir capacidade da bateria</string>
     <string name="vehicle_dialog_capacity_label">Capacidade</string>
     <string name="vehicle_dialog_capacity_suffix">kWh</string>
-    <string name="vehicle_dialog_capacity_helper">15 a 120 kWh. Deixe em branco para usar o padrão do modelo.</string>
+    <string name="vehicle_dialog_capacity_helper">5 a 120 kWh. Deixe em branco para usar o padrão do modelo.</string>
     <string name="vehicle_dialog_model_label">Modelo</string>
     <string name="vehicle_model_seagull">BYD Dolphin Mini</string>
     <string name="vehicle_dialog_save">Salvar</string>
     <string name="vehicle_dialog_reset">Redefinir para detecção automática</string>
-    <string name="vehicle_dialog_detection">Detecção: %1$s</string>
-    <string name="vehicle_dialog_detection_auto">Automática</string>
-    <string name="vehicle_dialog_detection_manual">Manual</string>
-    <string name="vehicle_dialog_invalid_capacity">A capacidade deve ser de 15 a 120 kWh</string>
+    <string name="vehicle_dialog_invalid_capacity">A capacidade deve ser de 5 a 120 kWh</string>
     <string name="vehicle_dialog_summary_effective">Efetiva: %1$.1f kWh</string>
     <string name="vehicle_dialog_summary_calibration">Última calibração: %1$.1f%% em %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">indisponível</string>
@@ -1370,6 +1367,10 @@
     <string name="projection_preset_right">Metade direita</string>
     <string name="projection_preset_center">Centro</string>
     <string name="projection_lock_aspect">Manter aspecto do painel</string>
+    <string name="dashboard_modern_vehicle_status">Status do veículo</string>
+    <string name="vehicle_dialog_detection">Detecção: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automática</string>
+    <string name="vehicle_dialog_detection_manual">Manual</string>
     <!-- Rail category headers -->
     <string name="rail_section_cameras">Câmeras</string>
     <string name="rail_section_controls">Controles</string>

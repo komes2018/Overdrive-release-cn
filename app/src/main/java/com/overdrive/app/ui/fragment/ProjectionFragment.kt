@@ -91,6 +91,7 @@ class ProjectionFragment : Fragment() {
     private val appPackages = ArrayList<String>()
 
     @Volatile private var casting = false
+    @Volatile private var diLink5ModeRequired = false
     // The package ACTUALLY on the cluster, per the daemon (empty when none). The resize box acts on
     // THIS app, not on the spinner selection — the two diverge the moment the user browses the app
     // list during a live cast. All geometry persistence/restore is keyed to this while casting, so a
@@ -166,7 +167,7 @@ class ProjectionFragment : Fragment() {
                 "layout inflate failed (stale resources after update?) — degrading", t)
             inflateFailed = true
             TextView(inflater.context).apply {
-                text = "Projection is temporarily unavailable. Please reopen the app."
+                text = inflater.context.getString(R.string.projection_temporarily_unavailable)
                 val pad = (16 * resources.displayMetrics.density).toInt()
                 setPadding(pad, pad, pad, pad)
             }
@@ -895,6 +896,13 @@ class ProjectionFragment : Fragment() {
     }
 
     private fun onCastClicked() {
+        if (diLink5ModeRequired) {
+            notifyToast(
+                getString(R.string.projection_dilink5_mode_required),
+                AppToast.Kind.ERROR
+            )
+            return
+        }
         val idx = spinnerApps?.selectedItemPosition ?: -1
         if (idx < 0 || idx >= appPackages.size) return
         val pkg = appPackages[idx]
@@ -912,11 +920,30 @@ class ProjectionFragment : Fragment() {
                 if (!result.success) {
                     // Distinguish "app no longer installed" from a generic failure so the
                     // user knows to pick another (and refresh the picker to drop it).
-                    if (result.reason == "not_installed") {
-                        notifyToast(getString(R.string.projection_app_uninstalled), AppToast.Kind.ERROR)
-                        loadApps()
-                    } else {
-                        notifyToast(getString(R.string.projection_cast_failed), AppToast.Kind.ERROR)
+                    when (result.reason) {
+                        "not_installed" -> {
+                            notifyToast(
+                                getString(R.string.projection_app_uninstalled),
+                                AppToast.Kind.ERROR
+                            )
+                            loadApps()
+                        }
+                        "dilink5_mode_required" -> {
+                            diLink5ModeRequired = true
+                            updateButtons()
+                            notifyToast(
+                                getString(R.string.projection_dilink5_mode_required),
+                                AppToast.Kind.ERROR
+                            )
+                        }
+                        else -> {
+                            notifyToast(
+                                result.error.ifEmpty {
+                                    getString(R.string.projection_cast_failed)
+                                },
+                                AppToast.Kind.ERROR
+                            )
+                        }
                     }
                 }
             }
@@ -987,6 +1014,7 @@ class ProjectionFragment : Fragment() {
         val wasCasting = casting
         val previousCastPackage = castPackage
         casting = st.casting
+        diLink5ModeRequired = st.diLink5ModeRequired
         castPackage = st.castPackage
         // The cast target changed under us (a new cast started, or one ended) — rebind the box to
         // whatever is on the cluster now so it never shows/persists another app's geometry.
@@ -1011,6 +1039,14 @@ class ProjectionFragment : Fragment() {
         if (!st.casting) {
             cancelPendingMirrorRestart()
             if (wasCasting || mirrorMode != MODE_STOPPED) detachMirror()
+            if (diLink5ModeRequired) {
+                val message = getString(R.string.projection_dilink5_mode_required)
+                setStatus(message)
+                setStatusDot(R.drawable.status_dot_offline)
+                notifyStickyError(message)
+                applyBoundsMode()
+                return
+            }
             renderMirrorState(MODE_STOPPED)
             return
         }
@@ -1130,7 +1166,8 @@ class ProjectionFragment : Fragment() {
     // ── UI helpers ─────────────────────────────────────────────────────────────────
 
     private fun updateButtons() {
-        btnCast?.isEnabled = !casting && appPackages.isNotEmpty()
+        btnCast?.isEnabled =
+            !casting && !diLink5ModeRequired && appPackages.isNotEmpty()
         btnStop?.isEnabled = casting
         if (!casting) btnAdjust?.isEnabled = false
     }
@@ -1338,33 +1375,61 @@ class ProjectionFragment : Fragment() {
     }
 
     private class Status(
-        val casting: Boolean, val panelW: Int, val panelH: Int, val castPackage: String)
+        val casting: Boolean,
+        val panelW: Int,
+        val panelH: Int,
+        val castPackage: String,
+        val diLink5ModeRequired: Boolean
+    )
 
     private fun fetchStatus(): Status? {
         return try {
             val body = httpGet("/api/vehicle/cluster-mirror-status") ?: return null
             val j = JSONObject(body)
             if (!j.optBoolean("success", false)) return null
-            Status(j.optBoolean("casting", false), j.optInt("panelW", 0), j.optInt("panelH", 0),
-                j.optString("castPackage", ""))
+            val modeRequired =
+                j.optBoolean("dilink5Hardware", false) &&
+                        !j.optString("vehicleMode", "default")
+                            .equals("dilink5", ignoreCase = true)
+            Status(
+                j.optBoolean("casting", false),
+                j.optInt("panelW", 0),
+                j.optInt("panelH", 0),
+                j.optString("castPackage", ""),
+                modeRequired
+            )
         } catch (_: Throwable) { null }
     }
 
-    private class CastResult(val success: Boolean, val reason: String)
+    private class CastResult(
+        val success: Boolean,
+        val reason: String,
+        val error: String
+    )
 
     private fun postCast(pkg: String): CastResult {
         var conn: java.net.HttpURLConnection? = null
         return try {
-            conn = DaemonHttpClient.open("/api/vehicle/cluster-cast", "POST", 2000, 4000)
+            // DI5 waits for compositor enable, display discovery, launch and
+            // resumed-on-display verification before returning success.
+            conn = DaemonHttpClient.open("/api/vehicle/cluster-cast", "POST", 2000, 70000)
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")
             val os: OutputStream = conn.outputStream
             os.write(JSONObject().put("package", pkg).toString().toByteArray()); os.flush(); os.close()
-            if (conn.responseCode != 200) return CastResult(false, "")
+            if (conn.responseCode != 200) return CastResult(false, "", "")
             val resp = conn.inputStream.bufferedReader().use { it.readText() }
             val j = JSONObject(resp)
-            CastResult(j.optBoolean("success", false), j.optString("reason", ""))
-        } catch (_: Throwable) { CastResult(false, "") } finally { conn?.disconnect() }
+            CastResult(
+                j.optBoolean("success", false),
+                j.optString("reason", ""),
+                j.optString("error", "")
+            )
+        } catch (_: Throwable) {
+            CastResult(false, "", "")
+        } finally {
+            conn?.disconnect()
+        }
     }
 
     private fun postStop() { httpPostSuccess("/api/vehicle/cluster-stop", JSONObject()) }

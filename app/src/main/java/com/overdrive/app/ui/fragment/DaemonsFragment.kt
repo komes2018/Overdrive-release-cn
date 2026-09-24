@@ -26,6 +26,8 @@ import com.overdrive.app.R
 import com.overdrive.app.config.UnifiedConfigManager
 import com.overdrive.app.ui.model.DaemonStatus
 import com.overdrive.app.ui.util.QrCodeGenerator
+import com.overdrive.app.util.DaemonHttpClient
+import org.json.JSONObject
 import java.util.concurrent.Executors
 
 /**
@@ -113,16 +115,18 @@ class DaemonsFragment : Fragment() {
     private fun persistWifiAutoEnable(enabled: Boolean) {
         swWifiAutoEnable.isEnabled = false
         wifiSettingsWorker.execute {
-            val saved = runCatching {
-                UnifiedConfigManager.setWifiAutoEnableEnabled(enabled)
-            }.getOrDefault(false)
+            val applied = setWifiEnabledThroughDaemon(enabled)
+            val persistedState = runCatching {
+                UnifiedConfigManager.forceReload()
+                UnifiedConfigManager.isWifiAutoEnableEnabled()
+            }.getOrDefault(!enabled)
             handler.post {
                 if (view == null || !::swWifiAutoEnable.isInitialized) return@post
                 applyingWifiAutoEnable = true
-                if (!saved) swWifiAutoEnable.isChecked = !enabled
+                swWifiAutoEnable.isChecked = persistedState
                 swWifiAutoEnable.isEnabled = true
                 applyingWifiAutoEnable = false
-                if (!saved) {
+                if (!applied || persistedState != enabled) {
                     context?.let {
                         Toast.makeText(
                             it,
@@ -132,6 +136,29 @@ class DaemonsFragment : Fragment() {
                     }
                 }
             }
+        }
+    }
+
+    private fun setWifiEnabledThroughDaemon(enabled: Boolean): Boolean {
+        var connection: java.net.HttpURLConnection? = null
+        return try {
+            connection = DaemonHttpClient.open("/api/keymap/fire", "POST", 2000, 7000)
+            connection.doOutput = true
+            connection.setRequestProperty("Content-Type", "application/json")
+            val payload = JSONObject()
+                .put("kind", "radio")
+                .put("radio", "wifi")
+                .put("enable", enabled)
+            connection.outputStream.use {
+                it.write(payload.toString().toByteArray(Charsets.UTF_8))
+            }
+            if (connection.responseCode !in 200..299) return false
+            JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                .optBoolean("success", false)
+        } catch (_: Throwable) {
+            false
+        } finally {
+            connection?.disconnect()
         }
     }
     
@@ -176,7 +203,7 @@ class DaemonsFragment : Fragment() {
             activity?.runOnUiThread {
                 if (!hasToken) {
                     // Update Zrok state to show configuration needed
-                    daemonsViewModel.updateZrokNeedsConfig("No token configured. Tap to set up.")
+                    daemonsViewModel.updateZrokNeedsConfig(getString(R.string.daemon_config_no_token))
                 }
             }
         }
@@ -354,14 +381,14 @@ class DaemonsFragment : Fragment() {
                     val enableAdb = adbSwitch.isChecked
                     val enableHttps = httpsSwitch.isChecked
 
-                    // Settled on its own, outside the ADB/proxy chain: it only
-                    // ever raises a toast, so it cannot stack a dialog on top of
-                    // theirs. Publishing the web UI over TLS exposes nothing the
-                    // tailnet address does not already expose over plain HTTP,
-                    // so unlike remote ADB it needs no confirmation.
+                    // HTTPS does not broaden access beyond the existing tailnet dashboard, so it
+                    // needs no warning dialog. The launcher verifies the exact TLS+PROXY rule
+                    // before persisting ON, and reports a failed capability/port check here.
                     daemonsViewModel.tailscaleController.isHttpsEnabled { httpsWasEnabled ->
                         activity?.runOnUiThread {
-                            if (enableHttps != httpsWasEnabled) saveTailscaleHttpsSettings(enableHttps)
+                            if (enableHttps != httpsWasEnabled) {
+                                saveTailscaleHttpsSettings(enableHttps)
+                            }
                         }
                     }
                     // Settle the ADB toggle first, then the proxy. Both are
@@ -450,24 +477,19 @@ class DaemonsFragment : Fragment() {
             activity?.runOnUiThread {
                 val ctx = context ?: return@runOnUiThread
                 if (!saved) {
-                    // Almost always the tailnet lacking HTTPS Certificates, which
-                    // only the admin console can fix — so the toast says so rather
-                    // than reporting a bare failure.
-                    Toast.makeText(ctx, getString(R.string.toast_tailscale_https_save_failed), Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        ctx,
+                        getString(R.string.toast_tailscale_https_save_failed),
+                        Toast.LENGTH_LONG
+                    ).show()
                     return@runOnUiThread
                 }
-                val msg = if (enabled) R.string.toast_tailscale_https_enabled
-                          else R.string.toast_tailscale_https_disabled
-                Toast.makeText(ctx, getString(msg), Toast.LENGTH_SHORT).show()
-
-                // Push the URL through now that the share is live/withdrawn.
-                // getTunnelUrl prefers the served https:// URL and falls back to the
-                // plain tailnet address, so this flips the connect URL and the
-                // dashboard remote-access QR (which observes tunnelUrl) to match the
-                // new state at once. Without it the QR keeps showing the old scheme
-                // until the next ~30s daemon-status poll — and on enable that stale
-                // URL is plain HTTP, which lacks the secure context (camera, QR
-                // pairing, service worker) that HTTPS was turned on to provide.
+                val message = if (enabled) {
+                    R.string.toast_tailscale_https_enabled
+                } else {
+                    R.string.toast_tailscale_https_disabled
+                }
+                Toast.makeText(ctx, getString(message), Toast.LENGTH_SHORT).show()
                 daemonsViewModel.tailscaleController.refreshTunnelUrl()
             }
         }

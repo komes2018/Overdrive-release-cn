@@ -33,7 +33,7 @@ public class CmdBean implements Parcelable {
     }
 
     @Override
-    public void writeToParcel(Parcel dest, int flags) {
+    public void writeToParcel(Parcel dest, int parcelableFlags) {
         dest.writeInt(header);
         dest.writeInt(payLoadSize);
         dest.writeInt(srcId);
@@ -64,7 +64,6 @@ public class CmdBean implements Parcelable {
         }
     };
 
-    // Getters and setters
     public int getId() { return id; }
     public void setId(int id) { this.id = id; }
     public int[] getValue() { return value; }

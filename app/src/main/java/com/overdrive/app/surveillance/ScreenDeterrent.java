@@ -305,21 +305,10 @@ public final class ScreenDeterrent {
     }
 
     private static boolean isAccUnsafe() {
-        if (!com.overdrive.app.monitor.AccMonitor.isAccStateAuthoritative()
-                || com.overdrive.app.monitor.AccMonitor.isAccOn()) {
-            return true;
-        }
-        try {
-            com.overdrive.app.byd.BydDataCollector collector = com.overdrive.app.byd.BydDataCollector.getInstance();
-            if (collector != null) {
-                com.overdrive.app.byd.BydVehicleData vd = collector.getData();
-                if (vd != null) {
-                    if (vd.speedKmh > 0 && vd.speedKmh != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE) return true;
-                    if (vd.gearMode > com.overdrive.app.monitor.GearMonitor.GEAR_P && vd.gearMode <= com.overdrive.app.monitor.GearMonitor.GEAR_S) return true;
-                }
-            }
-        } catch (Throwable ignored) {}
-        return false;
+        return !com.overdrive.app.monitor.AccMonitor.isAccStateAuthoritative()
+                || com.overdrive.app.monitor.AccMonitor.isAccOn()
+                || (com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()
+                    && com.overdrive.app.monitor.AccMonitor.isVehicleActive());
     }
 
     /**
@@ -1517,20 +1506,5 @@ public final class ScreenDeterrent {
         } catch (Throwable t) {
             return null;
         }
-    }
-
-    private static boolean isVehicleActive() {
-        if (com.overdrive.app.monitor.AccMonitor.isAccOn()) return true;
-        try {
-            com.overdrive.app.byd.BydDataCollector collector = com.overdrive.app.byd.BydDataCollector.getInstance();
-            if (collector != null) {
-                com.overdrive.app.byd.BydVehicleData vd = collector.getData();
-                if (vd != null) {
-                    if (vd.speedKmh > 0 && vd.speedKmh != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE) return true;
-                    if (vd.gearMode > com.overdrive.app.monitor.GearMonitor.GEAR_P && vd.gearMode <= com.overdrive.app.monitor.GearMonitor.GEAR_S) return true;
-                }
-            }
-        } catch (Throwable ignored) {}
-        return false;
     }
 }

@@ -66,12 +66,47 @@ public final class BatteryVoltageMonitorV2 {
     private static final int MSG_SCHEDULE_MONITOR = 1;
     private static final int MSG_DEFERRED_MCU_SLEEP = 3;
     private static final int MSG_WAKEUP_LOOP = 7;
+    private static final int MSG_VOLTAGE_SAMPLE = 8;
 
     private static volatile boolean running = false;
     private static volatile boolean isWakeupMcu = true;
     private static volatile double lastPowerVoltage = -1.0;
     private static volatile double highPowerVoltage = -1.0;
     private static volatile long lastSleepTime = 0L;
+    private static volatile long lastWakeAttemptElapsedMs = -REARM_INTERVAL_MS;
+    private static volatile long lastWakeEvaluationElapsedMs = -REARM_INTERVAL_MS;
+    private static volatile boolean lowVoltageEpisodeWakeIssued = false;
+
+    /**
+     * Live HAL callbacks can arrive on collector/Binder threads while the
+     * periodic seed runs on this class's handler. Keep the state machine
+     * single-threaded by coalescing callback samples into one handler message.
+     * The high-water sample is retained separately so coalescing cannot erase
+     * a healthy-voltage observation.
+     */
+    private static final Object voltageQueueLock = new Object();
+    private static boolean voltageMessageQueued = false;
+    private static double pendingLatestVoltage = Double.NaN;
+    private static double pendingHighVoltage = -1.0;
+    private static boolean pendingNonHealthyVoltage = false;
+    private static final java.util.concurrent.atomic.AtomicLong
+            nonHealthyVoltageEpoch =
+            new java.util.concurrent.atomic.AtomicLong(0L);
+    private static volatile long deferredSleepNonHealthyEpoch = 0L;
+
+    /**
+     * Monotonic lifecycle fence for delayed/in-flight sleep writes.
+     *
+     * <p>{@link HandlerThread#quitSafely()} cannot cancel a callback that is
+     * already inside a vendor Binder call. A stopped session must therefore
+     * remain distinguishable from a rapidly-started replacement session; a
+     * boolean {@link #running} alone has an ABA window (true → false → true).
+     */
+    private static final java.util.concurrent.atomic.AtomicLong
+            monitorLifecycleEpoch =
+            new java.util.concurrent.atomic.AtomicLong(0L);
+    private static volatile long deferredSleepLifecycleEpoch = -1L;
+    private static volatile long uncompensatedTerminalSleepEpoch = -1L;
 
     private static HandlerThread handlerThread;
     private static Handler handler;
@@ -119,22 +154,20 @@ public final class BatteryVoltageMonitorV2 {
     /**
      * True when the user has selected DiLink 4 (byd_apa) camera mode.
      *
-     * <p>Reads the config directly rather than calling into {@code AccSentryDaemon}
-     * — this monitor must work in whichever process boots it, exactly as
-     * {@link #isKeepUsbPowerOnAccOff()} above already does. Mirrors
-     * {@code AccSentryDaemon.isDilink4CameraMode()}: same section, same key, same
-     * fail-closed default so a read glitch can never suppress MCU sleep on the
-     * legacy fleet (which would silently change their battery behaviour).
+     * <p>Uses the cross-process active-mode fence rather than the newly saved
+     * configuration, so an aborted mode restart cannot arm legacy MCU sleep.
      */
     private static boolean isDilink4CameraMode() {
         try {
-            org.json.JSONObject c = com.overdrive.app.config.UnifiedConfigManager.loadConfig()
-                    .optJSONObject("camera");
-            if (c == null) return false;
-            return "dilink4".equalsIgnoreCase(c.optString("cameraMode", "default"));
+            return com.overdrive.app.camera.dilink5.DiLink5Platform
+                    .isDiLink4Selected();
         } catch (Throwable t) {
             return false;
         }
+    }
+
+    private static boolean isDilink5Mode() {
+        return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
     }
 
     public static synchronized void startMonitor(Context context) {
@@ -156,31 +189,54 @@ public final class BatteryVoltageMonitorV2 {
         // Hand the context to McuPowerHal so its sentry-mode writes
         // (BYDAutoSpecialDevice 1901/1902) can resolve the device.
         McuPowerHal.setAppContext(context);
-        running = true;
-        logger.info("startMonitor: BEGIN");
 
         handlerThread = new HandlerThread("BatteryVoltageMonitorV2");
         handlerThread.start();
         handler = new Handler(handlerThread.getLooper(), BatteryVoltageMonitorV2::onMessage);
+        resetSessionState();
+        monitorLifecycleEpoch.incrementAndGet();
+        // Publish running only after the handler and all session state exist.
+        // notifyBatteryPowerVoltage() reads this volatile before reading handler.
+        running = true;
+        logger.info("startMonitor: BEGIN");
 
         registerOtaListener();
         registerPowerListener();
 
-        // Seed the loop: ask current voltage + MCU status so we don't sit
-        // idle waiting for a callback that may not fire for a minute.
-        seedFromCurrentReadings();
-
-        // Arm the recurring monitor tick.
-        scheduleMonitor(REARM_INTERVAL_MS);
+        // Seed and arm from the handler thread. Device getters are synchronous
+        // Binder calls and must never run on a HAL callback or lifecycle thread.
+        handler.sendEmptyMessage(MSG_SCHEDULE_MONITOR);
 
         // Acquire the recovery-window wake-lock.
         acquireWakeLock(context);
     }
 
     public static synchronized void stopMonitor() {
+        stopMonitorInternal(false);
+    }
+
+    /**
+     * Terminal variant used only when the caller is deliberately putting the
+     * head unit to sleep and terminating every daemon. A sleep Binder write
+     * already in flight for this exact monitor epoch must not be followed by
+     * the normal compensating wake after {@code goToSleep()}.
+     */
+    public static synchronized void stopMonitorForShutdown() {
+        stopMonitorInternal(true);
+    }
+
+    private static void stopMonitorInternal(boolean terminalSleep) {
         if (!running) return;
         running = false;
-        logger.info("stopMonitor: END");
+        long stoppedEpoch = monitorLifecycleEpoch.get();
+        if (terminalSleep) {
+            uncompensatedTerminalSleepEpoch = stoppedEpoch;
+        }
+        // Invalidate any vendor write that was already in flight before we
+        // tear down the handler or allow a replacement session to start.
+        monitorLifecycleEpoch.incrementAndGet();
+        logger.info("stopMonitor: END"
+                + (terminalSleep ? " (terminal sleep)" : ""));
 
         try { releaseWakeLock(); } catch (Throwable ignored) {}
         try { unregisterOtaListener(); } catch (Throwable ignored) {}
@@ -198,6 +254,15 @@ public final class BatteryVoltageMonitorV2 {
         powerListener = null;
         cachedOtaDevice = null;
         appContext = null;
+        synchronized (voltageQueueLock) {
+            voltageMessageQueued = false;
+            pendingLatestVoltage = Double.NaN;
+            pendingHighVoltage = -1.0;
+            pendingNonHealthyVoltage = false;
+        }
+        nonHealthyVoltageEpoch.set(0L);
+        deferredSleepNonHealthyEpoch = 0L;
+        deferredSleepLifecycleEpoch = -1L;
     }
 
     // ── Public callback hook ────────────────────────────────────────
@@ -215,19 +280,116 @@ public final class BatteryVoltageMonitorV2 {
      */
     public static void notifyBatteryPowerVoltage(double voltage) {
         if (!running) return;
-        onBatteryPowerVoltageChanged(voltage);
+        enqueueVoltageSample(voltage);
     }
 
     // ── Voltage / MCU state machine ─────────────────────────────────
 
-    private static void onBatteryPowerVoltageChanged(double voltage) {
+    private static void resetSessionState() {
+        isWakeupMcu = true;
+        lastPowerVoltage = -1.0;
+        highPowerVoltage = -1.0;
+        lastSleepTime = 0L;
+        lastWakeAttemptElapsedMs = -REARM_INTERVAL_MS;
+        lastWakeEvaluationElapsedMs = -REARM_INTERVAL_MS;
+        lowVoltageEpisodeWakeIssued = false;
+        synchronized (voltageQueueLock) {
+            voltageMessageQueued = false;
+            pendingLatestVoltage = Double.NaN;
+            pendingHighVoltage = -1.0;
+            pendingNonHealthyVoltage = false;
+        }
+        nonHealthyVoltageEpoch.set(0L);
+        deferredSleepNonHealthyEpoch = 0L;
+        deferredSleepLifecycleEpoch = -1L;
+    }
+
+    private static void enqueueVoltageSample(double voltage) {
+        if (!running || Double.isNaN(voltage) || Double.isInfinite(voltage)) {
+            return;
+        }
+        Handler target = handler;
+        if (target == null) return;
+
+        boolean shouldPost = false;
+        synchronized (voltageQueueLock) {
+            if (!running || handler != target) return;
+            pendingLatestVoltage = voltage;
+            if (voltage > pendingHighVoltage) {
+                pendingHighVoltage = voltage;
+            }
+            if (voltage <= SLEEP_ALLOW_VOLTAGE) {
+                pendingNonHealthyVoltage = true;
+                nonHealthyVoltageEpoch.incrementAndGet();
+            }
+            if (!voltageMessageQueued) {
+                voltageMessageQueued = true;
+                shouldPost = true;
+            }
+        }
+        if (shouldPost && !target.sendEmptyMessage(MSG_VOLTAGE_SAMPLE)) {
+            synchronized (voltageQueueLock) {
+                if (handler == target) {
+                    voltageMessageQueued = false;
+                }
+            }
+        }
+    }
+
+    private static void drainVoltageSample() {
+        final double voltage;
+        final double observedHigh;
+        final boolean observedNonHealthy;
+        synchronized (voltageQueueLock) {
+            voltage = pendingLatestVoltage;
+            observedHigh = pendingHighVoltage;
+            observedNonHealthy = pendingNonHealthyVoltage;
+            pendingLatestVoltage = Double.NaN;
+            pendingHighVoltage = -1.0;
+            pendingNonHealthyVoltage = false;
+            voltageMessageQueued = false;
+        }
+        if (!Double.isNaN(voltage)) {
+            onBatteryPowerVoltageChanged(
+                    voltage, observedHigh, observedNonHealthy);
+        }
+    }
+
+    private static void onBatteryPowerVoltageChanged(
+            double voltage,
+            double observedHigh,
+            boolean observedNonHealthy) {
         if (!running) return;
         lastPowerVoltage = voltage;
-        if (voltage > highPowerVoltage) {
+        if (observedHigh > highPowerVoltage) {
+            highPowerVoltage = observedHigh;
+        } else if (voltage > highPowerVoltage) {
             highPowerVoltage = voltage;
         }
-        logger.info("onBatteryPowerVoltageChanged: " + voltage
-                + " V  (high=" + highPowerVoltage + ")");
+
+        // A genuinely healthy sample ends the current low-voltage episode.
+        // Only then (or after a deliberate sleep below) may another episode
+        // issue a wake command.
+        if (Math.max(voltage, observedHigh) > SLEEP_ALLOW_VOLTAGE) {
+            lowVoltageEpisodeWakeIssued = false;
+            lastWakeAttemptElapsedMs = -REARM_INTERVAL_MS;
+            lastWakeEvaluationElapsedMs = -REARM_INTERVAL_MS;
+        }
+
+        // A deferred sleep is valid only while the latest voltage remains in
+        // the healthy range. Without this cancellation, a sleep armed at a
+        // healthy peak can fire up to 15 minutes after voltage has fallen,
+        // immediately undoing low-voltage recovery and creating a sleep/wake
+        // rail cycle. Reset the high-water mark to the latest state so a later
+        // genuine recovery can arm a fresh full defer window.
+        if (observedNonHealthy || voltage <= SLEEP_ALLOW_VOLTAGE) {
+            if (handler != null) {
+                handler.removeMessages(MSG_DEFERRED_MCU_SLEEP);
+            }
+        }
+        if (voltage <= SLEEP_ALLOW_VOLTAGE) {
+            highPowerVoltage = voltage;
+        }
 
         // High-voltage path: schedule MCU sleep after the defer window.
         if (allowSleep(voltage)) {
@@ -235,8 +397,8 @@ public final class BatteryVoltageMonitorV2 {
         }
 
         // Low-voltage path: wake MCU and reset the high-water mark.
-        if (shouldWake(voltage)) {
-            forceWake();
+        if (shouldEvaluateWake(voltage)) {
+            evaluateLowVoltageWake();
         }
     }
 
@@ -244,9 +406,57 @@ public final class BatteryVoltageMonitorV2 {
         return voltage >= highPowerVoltage && voltage > SLEEP_ALLOW_VOLTAGE;
     }
 
-    private static boolean shouldWake(double voltage) {
-        return System.currentTimeMillis() - lastSleepTime >= REARM_INTERVAL_MS
-                && voltage <= WAKE_TRIGGER_VOLTAGE;
+    private static boolean shouldEvaluateWake(double voltage) {
+        if (voltage > WAKE_TRIGGER_VOLTAGE
+                || lowVoltageEpisodeWakeIssued) {
+            return false;
+        }
+        long now = android.os.SystemClock.elapsedRealtime();
+        long lastGate = Math.max(
+                lastWakeEvaluationElapsedMs, lastWakeAttemptElapsedMs);
+        return now - lastGate >= REARM_INTERVAL_MS;
+    }
+
+    /**
+     * Runs only on the V2 handler thread. The physical-status getter is a
+     * synchronous vendor Binder call, so keeping it here prevents a slow HAL
+     * response from blocking the OTA/collector callback thread.
+     */
+    private static void evaluateLowVoltageWake() {
+        if (!running || lowVoltageEpisodeWakeIssued) return;
+        long now = android.os.SystemClock.elapsedRealtime();
+        long lastGate = Math.max(
+                lastWakeEvaluationElapsedMs, lastWakeAttemptElapsedMs);
+        if (now - lastGate < REARM_INTERVAL_MS) {
+            return;
+        }
+        lastWakeEvaluationElapsedMs = now;
+
+        Integer status = null;
+        try {
+            if (appContext != null) {
+                status = AccOffReaders.getMcuStatus(appContext);
+            }
+        } catch (Throwable t) {
+            logger.debug("low-voltage MCU status read failed: " + t.getMessage());
+        }
+
+        // Field-observed ready values. A ready MCU needs no write; re-probe
+        // after the normal cadence in case the BCM later auto-sleeps it.
+        if (status != null && (status == 1 || status == 10)) {
+            isWakeupMcu = true;
+            logger.debug("low-voltage recovery skipped: MCU already ready (status="
+                    + status + ")");
+            return;
+        }
+
+        boolean committed = forceWake();
+        if (committed) {
+            lowVoltageEpisodeWakeIssued = true;
+        } else {
+            logger.warn("low-voltage wake was not confirmed; retry remains armed after "
+                    + REARM_INTERVAL_MS + "ms");
+        }
     }
 
     private static void scheduleDeferredMcuSleep() {
@@ -264,10 +474,9 @@ public final class BatteryVoltageMonitorV2 {
         // floor is unaffected: the low-voltage forceWake() recovery and
         // SocCutoffMonitor (<=10% SoC self-shutdown) still run. Every other
         // variant keeps the full V2 hysteresis model byte-for-byte.
-        if (isDilink4CameraMode()) {
+        if (isDilink4CameraMode() || isDilink5Mode()) {
             if (handler != null) handler.removeMessages(MSG_DEFERRED_MCU_SLEEP);
-            logger.info("scheduleDeferredMcuSleep: SUPPRESSED — dilink4 mirrors reference-app "
-                    + "V1 (no MCU sleep; AVM/ISP rail must stay held for pano cameras)");
+            logger.info("scheduleDeferredMcuSleep: SUPPRESSED for selected platform");
             return;
         }
         // Keep-USB-powered gate. When the user opted to keep USB powered while
@@ -298,6 +507,8 @@ public final class BatteryVoltageMonitorV2 {
             return;
         }
         Message msg = handler.obtainMessage(MSG_DEFERRED_MCU_SLEEP);
+        deferredSleepNonHealthyEpoch = nonHealthyVoltageEpoch.get();
+        deferredSleepLifecycleEpoch = monitorLifecycleEpoch.get();
         handler.sendMessageDelayed(msg, MCU_SLEEP_DEFER_MS);
         logger.info("scheduleDeferredMcuSleep: in " + MCU_SLEEP_DEFER_MS + " ms");
     }
@@ -308,9 +519,8 @@ public final class BatteryVoltageMonitorV2 {
         // sleep message queued before that gate was evaluated must ALSO be refused
         // at execution time, or the AVM/ISP rail still collapses mid-park. Same
         // execution-time-honouring pattern as the keep-USB check below.
-        if (isDilink4CameraMode()) {
-            logger.info("doMcuSleep: SKIPPED — dilink4 never sleeps the MCU "
-                    + "(queued sleep cancelled at execution)");
+        if (isDilink4CameraMode() || isDilink5Mode()) {
+            logger.info("doMcuSleep: SKIPPED for selected platform");
             return;
         }
         // Belt-and-suspenders to scheduleDeferredMcuSleep's gate: if a sleep
@@ -323,30 +533,143 @@ public final class BatteryVoltageMonitorV2 {
             logger.info("doMcuSleep: SKIPPED — Keep-USB-powered is ON (queued sleep cancelled at execution)");
             return;
         }
+        // Execution-time voltage guard. The delayed message may have been
+        // dequeued just before a newer sample tried to remove it, so message
+        // cancellation alone cannot prove the original healthy condition is
+        // still true.
+        if (!Double.isFinite(lastPowerVoltage)
+                || lastPowerVoltage <= SLEEP_ALLOW_VOLTAGE) {
+            logger.info("doMcuSleep: SKIPPED — latest voltage is no longer healthy ("
+                    + lastPowerVoltage + "V)");
+            return;
+        }
+        long expectedNonHealthyEpoch = deferredSleepNonHealthyEpoch;
+        long expectedLifecycleEpoch = deferredSleepLifecycleEpoch;
+        if (!isDeferredSleepStillCurrent(
+                expectedLifecycleEpoch, expectedNonHealthyEpoch)) {
+            logger.info("doMcuSleep: SKIPPED — the armed sleep is no longer "
+                    + "current (lifecycle or voltage changed)");
+            return;
+        }
         boolean ok = McuPowerHal.requestMcuSleep();
+        if (!isDeferredSleepStillCurrent(
+                expectedLifecycleEpoch, expectedNonHealthyEpoch)) {
+            compensateStaleSleepWrite(
+                    "after MCU sleep write",
+                    expectedLifecycleEpoch,
+                    expectedNonHealthyEpoch);
+            return;
+        }
         // sentry-mode mirror — sleep variant
         boolean sentryOk = McuPowerHal.requestSentrySleep();
+        if (!isDeferredSleepStillCurrent(
+                expectedLifecycleEpoch, expectedNonHealthyEpoch)) {
+            compensateStaleSleepWrite(
+                    "after sentry sleep write",
+                    expectedLifecycleEpoch,
+                    expectedNonHealthyEpoch);
+            return;
+        }
+        boolean committed = ok || sentryOk;
+        if (!committed) {
+            // Neither HAL surface confirmed the sleep. Keep the logical MCU
+            // state awake and arm one fresh full defer window; otherwise one
+            // transient Binder failure suppresses every later sleep attempt
+            // for the entire park and can leave CPU/rails powered indefinitely.
+            isWakeupMcu = true;
+            highPowerVoltage = lastPowerVoltage;
+            logger.warn("doMcuSleep: neither sleep write was confirmed; "
+                    + "retrying after a fresh defer window");
+            scheduleDeferredMcuSleep();
+            return;
+        }
         lastSleepTime = System.currentTimeMillis();
         isWakeupMcu = false;
         highPowerVoltage = -1.0;
+        lowVoltageEpisodeWakeIssued = false;
+        lastWakeEvaluationElapsedMs = android.os.SystemClock.elapsedRealtime();
         logger.info("doMcuSleep: power=" + ok + " sentry=" + sentryOk);
     }
 
-    private static void forceWake() {
-        if (!running) return;
+    private static boolean isDeferredSleepStillCurrent(
+            long expectedLifecycleEpoch,
+            long expectedNonHealthyEpoch) {
+        return running
+                && monitorLifecycleEpoch.get() == expectedLifecycleEpoch
+                && nonHealthyVoltageEpoch.get() == expectedNonHealthyEpoch;
+    }
+
+    private static void compensateStaleSleepWrite(
+            String stage,
+            long expectedLifecycleEpoch,
+            long expectedNonHealthyEpoch) {
+        logger.warn("doMcuSleep: armed sleep became stale " + stage
+                + " (lifecycle=" + expectedLifecycleEpoch + "->"
+                + monitorLifecycleEpoch.get()
+                + ", voltageEpoch=" + expectedNonHealthyEpoch + "->"
+                + nonHealthyVoltageEpoch.get()
+                + "); issuing compensating wake");
+
+        if (expectedLifecycleEpoch == uncompensatedTerminalSleepEpoch) {
+            // SocCutoffMonitor has intentionally stopped this exact monitor
+            // epoch immediately before PowerManager.goToSleep + process exit.
+            // Re-waking here would undo the battery-safety shutdown and can
+            // produce the same visible boot-like flash this monitor prevents
+            // during ordinary park transitions.
+            logger.info("doMcuSleep: terminal shutdown owns stale sleep epoch "
+                    + expectedLifecycleEpoch
+                    + " — compensating wake suppressed");
+            return;
+        }
+
+        // Do not call forceWake(): stopMonitor() deliberately flips running
+        // before a blocked Binder write returns. The physical wake must still
+        // be sent to undo that stale sleep, while monitor bookkeeping and
+        // wakelock re-arming remain limited to a live matching session.
         boolean ok = McuPowerHal.requestMcuWake();
         boolean sentryOk = McuPowerHal.requestSentryWake();
-        isWakeupMcu = true;
-        logger.info("forceWake: power=" + ok + " sentry=" + sentryOk);
+        boolean committed = ok || sentryOk;
+        logger.info("compensateStaleSleepWrite: power=" + ok
+                + " sentry=" + sentryOk + " committed=" + committed);
+
+        if (running
+                && monitorLifecycleEpoch.get() == expectedLifecycleEpoch) {
+            isWakeupMcu = committed;
+            if (!committed) {
+                return;
+            }
+            lowVoltageEpisodeWakeIssued = true;
+            lastWakeAttemptElapsedMs =
+                    android.os.SystemClock.elapsedRealtime();
+            if (appContext != null) acquireWakeLock(appContext);
+            ensureMonitorTickScheduled();
+        }
+    }
+
+    private static boolean forceWake() {
+        if (!running) return false;
+        // A wake decision supersedes any healthy-voltage sleep which may have
+        // been armed earlier in the same monitor session.
+        if (handler != null) {
+            handler.removeMessages(MSG_DEFERRED_MCU_SLEEP);
+        }
+        // Stamp before either Binder write. A re-entrant callback or another
+        // queued sample cannot issue a duplicate wake while these calls run.
+        lastWakeAttemptElapsedMs = android.os.SystemClock.elapsedRealtime();
+        boolean ok = McuPowerHal.requestMcuWake();
+        boolean sentryOk = McuPowerHal.requestSentryWake();
+        boolean committed = ok || sentryOk;
+        isWakeupMcu = committed;
+        logger.info("forceWake: power=" + ok + " sentry=" + sentryOk
+                + " committed=" + committed);
         // Re-arm the wake-lock window since we just had to recover.
         // Use the caller-supplied context — V2 may run in any daemon process.
         if (appContext != null) acquireWakeLock(appContext);
-        // Re-arm the wakeup loop tick.
-        if (handler != null) {
-            handler.removeMessages(MSG_WAKEUP_LOOP);
-            handler.sendMessageDelayed(
-                    handler.obtainMessage(MSG_WAKEUP_LOOP), REARM_INTERVAL_MS);
-        }
+        // The recurring monitor tick already performs this same seed. Ensure
+        // one exists instead of adding a second permanent 60-second polling
+        // loop after the first low-voltage recovery.
+        ensureMonitorTickScheduled();
+        return committed;
     }
 
     // ── Handler loop ────────────────────────────────────────────────
@@ -365,9 +688,14 @@ public final class BatteryVoltageMonitorV2 {
             case MSG_WAKEUP_LOOP:
                 if (running) {
                     seedFromCurrentReadings();
-                    handler.removeMessages(MSG_WAKEUP_LOOP);
-                    handler.sendMessageDelayed(
-                            handler.obtainMessage(MSG_WAKEUP_LOOP), REARM_INTERVAL_MS);
+                    // Drain any message armed by an older session/build into
+                    // the single canonical monitor cadence.
+                    ensureMonitorTickScheduled();
+                }
+                return true;
+            case MSG_VOLTAGE_SAMPLE:
+                if (running) {
+                    drainVoltageSample();
                 }
                 return true;
             default:
@@ -380,6 +708,17 @@ public final class BatteryVoltageMonitorV2 {
         handler.removeMessages(MSG_SCHEDULE_MONITOR);
         handler.sendMessageDelayed(
                 handler.obtainMessage(MSG_SCHEDULE_MONITOR), delayMs);
+    }
+
+    private static void ensureMonitorTickScheduled() {
+        Handler target = handler;
+        if (target == null || !running) return;
+        target.removeMessages(MSG_WAKEUP_LOOP);
+        if (!target.hasMessages(MSG_SCHEDULE_MONITOR)) {
+            target.sendMessageDelayed(
+                    target.obtainMessage(MSG_SCHEDULE_MONITOR),
+                    REARM_INTERVAL_MS);
+        }
     }
 
     /**
@@ -420,7 +759,12 @@ public final class BatteryVoltageMonitorV2 {
             Object v = BydDeviceHelper.callGetter(ota, "getBatteryPowerVoltage");
             if (v instanceof Number) {
                 double voltage = ((Number) v).doubleValue();
-                onBatteryPowerVoltageChanged(voltage);
+                boolean nonHealthy = voltage <= SLEEP_ALLOW_VOLTAGE;
+                if (nonHealthy) {
+                    nonHealthyVoltageEpoch.incrementAndGet();
+                }
+                onBatteryPowerVoltageChanged(
+                        voltage, voltage, nonHealthy);
             } else {
                 logger.debug("seed: getBatteryPowerVoltage returned " + v);
             }
@@ -444,35 +788,10 @@ public final class BatteryVoltageMonitorV2 {
     }
 
     private static void registerPowerListener() {
-        // Mirrors sibling-app m8240m().registerListener(mPowerListener) and
-        // mPowerListener.onMcuStatusChanged(getMcuStatus()) seed.
-        // Resolves the device directly from appContext — same rationale as
-        // resolveOtaDevice (cross-process safe).
-        //
-        // {@link #isWakeupMcu} tracks "did WE issue a sleep request this
-        // session" — NOT the MCU's current physical state. We start true
-        // (haven't issued one yet) regardless of what getMcuStatus reads.
-        // Otherwise: daemon boots into a session where MCU is auto-slept by
-        // the BCM, isWakeupMcu starts false, every {@link #scheduleDeferredMcuSleep}
-        // call early-returns, and we never issue our sentry-mode sleep
-        // request — leaving the MCU in BCM's vanilla sleep, not our
-        // deeper sentry-mode sleep with keys 1901/1902.
-        try {
-            if (appContext == null) return;
-            Class<?> cls = Class.forName("android.hardware.bydauto.power.BYDAutoPowerDevice");
-            java.lang.reflect.Method getInstance = cls.getMethod(
-                    "getInstance", android.content.Context.class);
-            Object power = getInstance.invoke(null, appContext);
-            if (power == null) return;
-            Object status = BydDeviceHelper.callGetter(power, "getMcuStatus");
-            if (status instanceof Number) {
-                int s = ((Number) status).intValue();
-                logger.info("registerPowerListener: getMcuStatus=" + s
-                        + " (isWakeupMcu retained as true — flag tracks our intent, not MCU physical state)");
-            }
-        } catch (Throwable t) {
-            logger.debug("registerPowerListener: " + t.getMessage());
-        }
+        // No direct listener is registered. Physical MCU status is read only
+        // when a low-voltage sample needs a recovery decision, and that read is
+        // serialized on this class's handler thread.
+        logger.info("registerPowerListener: handler-serialized status polling armed");
     }
 
     private static void unregisterPowerListener() {

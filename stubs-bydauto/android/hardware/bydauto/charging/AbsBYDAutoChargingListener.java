@@ -16,6 +16,7 @@ public abstract class AbsBYDAutoChargingListener {
     public void onChargerStateChanged(int state) {}
     public void onChargerWorkStateChanged(int state) {}
     public void onChargingCapStateChanged(int state, int value) {}
+    public void onChargingCapacityChanged(float capacity) {}
     public void onChargingCapacityChanged(double capacity) {}
     public void onChargingGunNotInsertedStateChanged(int state) {}
     public void onChargingGunStateChanged(int state) {}

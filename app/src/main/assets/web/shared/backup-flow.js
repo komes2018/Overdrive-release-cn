@@ -75,7 +75,16 @@
         .bk-opt { display:flex; align-items:flex-start; gap:10px; padding:10px 14px; margin-top:8px;
                   background:var(--bg-elevated,#0e1218); border:1px solid var(--border-subtle,#232a35);
                   border-radius:10px; cursor:pointer; }
-        .bk-opt input { margin-top:2px; flex:none; }
+        .bk-opt > * + * { margin-left:10px; }
+        .bk-opt input { position:absolute; width:1px; height:1px; opacity:0; overflow:hidden; }
+        .bk-check { position:relative; width:20px; height:20px; margin-top:1px; flex:none;
+                    border:1px solid var(--border-default,#394150); border-radius:5px;
+                    background:var(--bg-surface,#111720); box-sizing:border-box; }
+        .bk-opt input:checked + .bk-check { background:var(--brand-primary,#00d4aa); border-color:var(--brand-primary,#00d4aa); }
+        .bk-opt input:checked + .bk-check::after { content:""; position:absolute; left:6px; top:2px;
+                    width:5px; height:10px; border:solid var(--on-primary,#06130f);
+                    border-width:0 2px 2px 0; transform:rotate(45deg); }
+        .bk-opt input:focus + .bk-check { outline:2px solid var(--primary,#00d4aa); outline-offset:2px; }
         .bk-opt-text { font-size:13px; color:var(--text-secondary,#9aa6b3); line-height:1.4; }
         .bk-opt-text b { color:var(--text-primary,#e8eef5); font-weight:600; display:block; margin-bottom:2px; }
         `;
@@ -121,6 +130,7 @@
             '</div>' +
             '<label class="bk-opt" for="bkInclTrips">' +
               '<input type="checkbox" id="bkInclTrips">' +
+              '<span class="bk-check" aria-hidden="true"></span>' +
               '<span class="bk-opt-text">' +
                 '<b data-i18n="backup.trips_opt_title">Include trip history</b>' +
                 '<span data-i18n="backup.trips_opt_desc">' +
@@ -212,7 +222,8 @@
 
     // ─────────────────────── Restore ───────────────────────
 
-    var MAX_IMPORT_BYTES = 16 * 1024 * 1024;   // matches native cap + server body cap
+    // Trip-history bundles can be much larger than settings-only backups.
+    var MAX_IMPORT_BYTES = 32 * 1024 * 1024;   // matches native cap + backup HTTP cap
 
     function onFileChosen(ev) {
         var file = ev.target && ev.target.files && ev.target.files[0];

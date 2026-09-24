@@ -33,7 +33,7 @@ public final class OverlayPermissionChecker {
                 && mismatchLogged.compareAndSet(false, true)) {
             logger.warn("Permission APIs disagree: appOps=" + appOpsAllowed
                     + ", framework=" + frameworkAllowed
-                    + "; using AppOps");
+                    + "; using explicit AppOps result");
         }
         return granted;
     }
@@ -54,32 +54,48 @@ public final class OverlayPermissionChecker {
                     (AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
             if (appOps == null) return null;
 
+            String opPackageName = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                    ? context.getOpPackageName()
+                    : context.getPackageName();
             int mode;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 mode = appOps.unsafeCheckOpRawNoThrow(
                         AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW,
                         context.getApplicationInfo().uid,
-                        context.getOpPackageName());
+                        opPackageName);
             } else {
                 mode = appOps.checkOpNoThrow(
                         AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW,
                         context.getApplicationInfo().uid,
-                        context.getOpPackageName());
+                        opPackageName);
             }
-            if (mode == AppOpsManager.MODE_ALLOWED
+            Boolean decision = appOpsDecision(
+                    mode,
+                    com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected(),
+                    context.getApplicationInfo().targetSdkVersion);
+            if (decision != null || mode == AppOpsManager.MODE_DEFAULT
                     || mode == AppOpsManager.MODE_FOREGROUND) {
-                return Boolean.TRUE;
-            }
-            if (mode == AppOpsManager.MODE_IGNORED
-                    || mode == AppOpsManager.MODE_ERRORED
-                    || mode == AppOpsManager.MODE_DEFAULT) {
-                return Boolean.FALSE;
+                return decision;
             }
             logger.warn("Unknown SYSTEM_ALERT_WINDOW AppOps mode: " + mode);
         } catch (Throwable error) {
             logger.warn("SYSTEM_ALERT_WINDOW AppOps check failed: "
                     + error.getMessage());
         }
+        return null;
+    }
+
+    static Boolean appOpsDecision(
+            int mode, boolean diLink5, int targetSdkVersion) {
+        if (mode == AppOpsManager.MODE_ALLOWED) return Boolean.TRUE;
+        if (mode == AppOpsManager.MODE_IGNORED) return Boolean.FALSE;
+        if (mode == AppOpsManager.MODE_ERRORED) return Boolean.FALSE;
+        if (!diLink5) {
+            if (mode == AppOpsManager.MODE_DEFAULT) return Boolean.FALSE;
+            if (mode == AppOpsManager.MODE_FOREGROUND) return Boolean.TRUE;
+        }
+        // On DiLink 5, DEFAULT and FOREGROUND do not settle this special
+        // permission; the framework check evaluates the current grant.
         return null;
     }
 }

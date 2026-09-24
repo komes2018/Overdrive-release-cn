@@ -3,6 +3,7 @@ package com.overdrive.app.monitor;
 import android.content.Context;
 import android.os.SystemClock;
 
+import com.overdrive.app.byd.BydVehicleData;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -32,6 +33,11 @@ public class GearMonitor {
     
     private static final long POLL_INTERVAL_MS = 200;  // 5 Hz polling
     private static final long CACHED_GEAR_MAX_AGE_MS = 1000L;
+    private static final long DILINK5_BRIDGE_GEAR_MAX_AGE_MS = 5000L;
+    private static final long DILINK5_CARSVC_GEAR_MAX_AGE_MS =
+            com.overdrive.app.byd.CarSvcTelemetry.DUMP_TTL_MS + 1_000L;
+    private static final long DILINK5_GEAR_PROBE_THROTTLE_MS =
+            CACHED_GEAR_MAX_AGE_MS;
     
     private static GearMonitor instance;
     
@@ -46,10 +52,20 @@ public class GearMonitor {
     private volatile int currentGear = GEAR_P;
     /** Elapsed-realtime timestamp of the last valid gear observation. */
     private volatile long lastUpdateTime = 0;
+    private volatile long lastUpdateMaxAgeMs = CACHED_GEAR_MAX_AGE_MS;
+    private volatile long lastDiLink5ProbeTime = 0;
+    private volatile int cachedDiLink5ProbeGear = BydVehicleData.UNAVAILABLE;
+    private volatile long cachedDiLink5ProbeObservedAt = 0;
+    private volatile long cachedDiLink5ProbeMaxAgeMs =
+            CACHED_GEAR_MAX_AGE_MS;
 
     /** Whether the 200ms poll thread is active — i.e. getCurrentGear() is fresh
      *  to within ~POLL_INTERVAL_MS rather than a cold initial value. */
-    public boolean isActive() { return isRunning; }
+    public boolean isActive() {
+        return isRunning
+                && (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                    || getCurrentGearIfFresh() != BydVehicleData.UNAVAILABLE);
+    }
     
     // TelemetryDataCollector reference — when set, read gear from its cached snapshot
     // instead of polling the BYD device directly (avoids duplicate CAN bus reads)
@@ -101,60 +117,47 @@ public class GearMonitor {
             return;
         }
 
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            startDiLink5();
+            return;
+        }
+
         try {
             logger.info("Starting gear monitor...");
             
-            // 1. Try BYDAutoGearboxDevice via BydDeviceHelper
-            try {
-                gearboxDevice = com.overdrive.app.byd.BydDeviceHelper.getDevice("android.hardware.bydauto.gearbox.BYDAutoGearboxDevice", context);
-                if (gearboxDevice == null) {
-                    Class<?> gearboxClass = Class.forName("android.hardware.bydauto.gearbox.BYDAutoGearboxDevice");
-                    Method getInstance = gearboxClass.getMethod("getInstance", Context.class);
-                    gearboxDevice = getInstance.invoke(null, context);
-                }
-                if (gearboxDevice != null) {
-                    getGearMethod = gearboxDevice.getClass().getMethod("getGearboxAutoModeType");
-                }
-            } catch (Throwable t) {
-                logger.info("BYDAutoGearboxDevice reflection skipped: " + t.getMessage());
+            // Get gearbox device instance via reflection
+            Class<?> gearboxClass = Class.forName("android.hardware.bydauto.gearbox.BYDAutoGearboxDevice");
+            Method getInstance = gearboxClass.getMethod("getInstance", Context.class);
+            gearboxDevice = getInstance.invoke(null, context);
+            
+            if (gearboxDevice == null) {
+                logger.error("BYDAutoGearboxDevice.getInstance() returned null");
+                return;
             }
-
-            int initialGearRead = -1;
-            if (getGearMethod != null && gearboxDevice != null) {
-                try {
-                    Object initialReadObj = getGearMethod.invoke(gearboxDevice);
-                    if (initialReadObj instanceof Number) {
-                        initialGearRead = ((Number) initialReadObj).intValue();
-                    }
-                } catch (Throwable ignored) {}
-            }
-
+            
+            // Cache the getter method
+            getGearMethod = gearboxClass.getMethod("getGearboxAutoModeType");
+            
+            // Get initial gear state
+            int initialGearRead =
+                    (int) getGearMethod.invoke(gearboxDevice);
             if (!isValidGearMode(initialGearRead)) {
-                initialGearRead = readFromCarAdapter();
+                logger.error("Invalid initial gear read: "
+                        + initialGearRead);
+                gearboxDevice = null;
+                getGearMethod = null;
+                return;
             }
-            if (!isValidGearMode(initialGearRead)) {
-                initialGearRead = readFromBydDataCollector();
-            }
-            if (!isValidGearMode(initialGearRead) && com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
-                initialGearRead = readGearFromDumpsys();
-            }
-            // Hardware interlock: if the vehicle is charging, gear is unconditionally P
-            try {
-                if (com.overdrive.app.monitor.ChargingDetector.getInstance().isCharging()) {
-                    initialGearRead = GEAR_P;
-                }
-            } catch (Throwable ignored) {}
-
-            if (!isValidGearMode(initialGearRead)) {
-                initialGearRead = GEAR_P; // Safe fallback
-            }
-
             currentGear = initialGearRead;
             lastUpdateTime = SystemClock.elapsedRealtime();
-            logger.info("Initial gear: " + gearToString(currentGear) + (gearboxDevice != null ? " (HAL)" : " (Multi-source fallback)"));
+            logger.info("Initial gear: " + gearToString(currentGear));
             
             isRunning = true;
             
+            // Build the poller first, but publish the hardware state before it
+            // can run. Starting the thread first allowed a fast P -> D shift to
+            // update currentGear before this initial callback, permanently
+            // collapsing the P edge during async trip-manager startup.
             final int initialGear = currentGear;
             pollThread = new Thread(() -> {
                 while (isRunning) {
@@ -162,77 +165,45 @@ public class GearMonitor {
                         Thread.sleep(POLL_INTERVAL_MS);
                         if (!isRunning) break;
 
-                        int gear = -1;
-                        long gearObservedAtElapsedRealtimeMs = SystemClock.elapsedRealtime();
-
-                        // Hardware interlock: if the vehicle is charging, gear is unconditionally P
-                        try {
-                            if (com.overdrive.app.monitor.ChargingDetector.getInstance().isCharging()) {
-                                gear = GEAR_P;
-                            }
-                        } catch (Throwable ignored) {}
-
-                        // 1. Try CarAdapterManager / CarBodyManager (DiLink 5.0 / TS framework)
-                        if (!isValidGearMode(gear)) {
-                            int carAdapterGear = readFromCarAdapter();
-                            if (isValidGearMode(carAdapterGear)) {
-                                gear = carAdapterGear;
-                                gearObservedAtElapsedRealtimeMs = SystemClock.elapsedRealtime();
-                            }
-                        }
-
-                        // 2. Prefer TelemetryDataCollector's cached snapshot
-                        if (!isValidGearMode(gear)) {
-                            com.overdrive.app.telemetry.TelemetryDataCollector src = telemetrySource;
-                            com.overdrive.app.telemetry.TelemetrySnapshot snap =
-                                (src != null) ? src.getLatestSnapshot() : null;
-                            long gearAgeMs = snap != null
-                                    && snap.gearReadElapsedRealtimeMs >= 0L
-                                    ? SystemClock.elapsedRealtime()
-                                            - snap.gearReadElapsedRealtimeMs
-                                    : Long.MAX_VALUE;
-                            if (snap != null
-                                    && snap.gearValid
-                                    && isValidGearMode(snap.gearMode)
-                                    && gearAgeMs >= 0L
-                                    && gearAgeMs < CACHED_GEAR_MAX_AGE_MS) {
-                                gear = snap.gearMode;
-                                gearObservedAtElapsedRealtimeMs =
-                                        snap.gearReadElapsedRealtimeMs;
-                            }
-                        }
-
-                        // 3. Try BydDataCollector fast dynamics / CAN poll
-                        if (!isValidGearMode(gear)) {
-                            int g = readFromBydDataCollector();
-                            if (isValidGearMode(g)) gear = g;
-                        }
-
-                        // 4. Try BYDAutoGearboxDevice getter if available
-                        if (!isValidGearMode(gear)) {
+                        int gear;
+                        long gearObservedAtElapsedRealtimeMs;
+                        // Prefer TelemetryDataCollector's cached snapshot to avoid
+                        // duplicate CAN bus reads when the overlay poller is running
+                        com.overdrive.app.telemetry.TelemetryDataCollector src = telemetrySource;
+                        com.overdrive.app.telemetry.TelemetrySnapshot snap =
+                            (src != null) ? src.getLatestSnapshot() : null;
+                        long gearAgeMs = snap != null
+                                && snap.gearReadElapsedRealtimeMs >= 0L
+                                ? SystemClock.elapsedRealtime()
+                                        - snap.gearReadElapsedRealtimeMs
+                                : Long.MAX_VALUE;
+                        if (snap != null
+                                && snap.gearValid
+                                && isValidGearMode(snap.gearMode)
+                                && gearAgeMs >= 0L
+                                && gearAgeMs
+                                        < CACHED_GEAR_MAX_AGE_MS) {
+                            // Only a recent successful gear read is cacheable.
+                            gear = snap.gearMode;
+                            gearObservedAtElapsedRealtimeMs =
+                                    snap.gearReadElapsedRealtimeMs;
+                        } else {
+                            // Snapshot the reflection refs to locals: stop() is
+                            // synchronized and nullifies these mid-iteration. Without
+                            // local snapshot, getGearMethod.invoke would NPE and
+                            // produce a bogus "Gear poll error: null" log on every
+                            // race. Cleanly exit the loop on null instead.
                             Method getter = getGearMethod;
                             Object device = gearboxDevice;
-                            if (getter != null && device != null) {
-                                try {
-                                    Object res = getter.invoke(device);
-                                    if (res instanceof Number) {
-                                        int g = ((Number) res).intValue();
-                                        if (isValidGearMode(g)) gear = g;
-                                    }
-                                } catch (Throwable ignored) {}
-                            }
-                        }
-
-                        // 5. DiLink 5.0 HAL property / dumpsys fallback
-                        if (!isValidGearMode(gear) && com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
-                            int g = readGearFromDumpsys();
-                            if (isValidGearMode(g)) {
-                                gear = g;
-                                gearObservedAtElapsedRealtimeMs = SystemClock.elapsedRealtime();
-                            }
+                            if (getter == null || device == null) break;
+                            gear = (int) getter.invoke(device);
+                            gearObservedAtElapsedRealtimeMs =
+                                    SystemClock.elapsedRealtime();
                         }
 
                         if (!isValidGearMode(gear)) {
+                            logger.debug("Ignoring invalid gear read: "
+                                    + gear);
                             continue;
                         }
                         int previousGear = currentGear;
@@ -246,13 +217,14 @@ public class GearMonitor {
                     } catch (InterruptedException e) {
                         break;
                     } catch (Exception e) {
+                        // Don't crash the poll thread — just log and retry
                         logger.debug("Gear poll error: " + e.getMessage());
                         try { Thread.sleep(1000); } catch (InterruptedException ie) { break; }
                     }
                 }
-                logger.info("Gear poll thread stopped");
             }, "GearPoll");
             pollThread.setDaemon(true);
+            // Notify initial state
             CameraDaemon.onGearChanged(initialGear);
             pollThread.start();
             
@@ -264,142 +236,157 @@ public class GearMonitor {
         }
     }
 
-    private int readFromCarAdapter() {
-        try {
-            Class<?> camCls = Class.forName("com.ts.lib.caradapter.CarAdapterManager");
-            Method getInst = camCls.getMethod("getInstance", Context.class);
-            Object cam = getInst.invoke(null, context != null ? context : CameraDaemon.getAppContext());
-            if (cam != null) {
-                // Check if car service is bound
+    /**
+     * DiLink5 keeps the BYD SDK producer in the app process. Consume that
+     * timestamped bridge first and use a throttled car-service probe only as
+     * a fallback. No unknown state is ever manufactured into Park.
+     */
+    private void startDiLink5() {
+        logger.info("Starting DiLink5 gear monitor...");
+        lastUpdateTime = 0L;
+        lastUpdateMaxAgeMs = CACHED_GEAR_MAX_AGE_MS;
+        lastDiLink5ProbeTime = 0L;
+        cachedDiLink5ProbeGear = BydVehicleData.UNAVAILABLE;
+        cachedDiLink5ProbeObservedAt = 0L;
+        cachedDiLink5ProbeMaxAgeMs = CACHED_GEAR_MAX_AGE_MS;
+        isRunning = true;
+
+        pollThread = new Thread(() -> {
+            while (isRunning) {
                 try {
-                    Method isBound = camCls.getMethod("isCarServiceBound");
-                    Object boundObj = isBound.invoke(cam);
-                    if (boundObj instanceof Boolean && !((Boolean) boundObj)) {
-                        // Reconnect / reset singleton if unbound
-                        try {
-                            Method connect = camCls.getMethod("connect");
-                            connect.invoke(cam);
-                        } catch (Throwable ignored) {}
-                    }
-                } catch (Throwable ignored) {}
-
-                Method getMgr = camCls.getMethod("getCarAdapterManager", String.class);
-                
-                // 1. DiLink 5.0 / SL7: CarBodyManager ("body") -> getShiftMode()
-                try {
-                    Object bodyMgr = getMgr.invoke(cam, "body");
-                    if (bodyMgr != null) {
-                        try {
-                            Method m = bodyMgr.getClass().getMethod("getShiftMode");
-                            Object res = m.invoke(bodyMgr);
-                            if (res instanceof Number) {
-                                int shift = ((Number) res).intValue();
-                                // Shift values: 0=parked/charging, 1=P, 2=R, 3=N, 4=D
-                                switch (shift) {
-                                    case 0:
-                                    case 1: return GEAR_P;
-                                    case 2: return GEAR_R;
-                                    case 3: return GEAR_N;
-                                    case 4: return GEAR_D;
-                                }
-                            }
-                        } catch (Throwable ignored) {}
-                    }
-                } catch (Throwable ignored) {}
-
-                // 2. Legacy DiLink / Cabin adapter fallback
-                try {
-                    Object cabinMgr = getMgr.invoke(cam, "cabin");
-                    if (cabinMgr != null) {
-                        try {
-                            Method m = cabinMgr.getClass().getMethod("getGearboxAutoModeType");
-                            Object res = m.invoke(cabinMgr);
-                            if (res instanceof Number) {
-                                int g = ((Number) res).intValue();
-                                if (isValidGearMode(g)) return g;
-                            }
-                        } catch (Throwable ignored) {}
-                        try {
-                            Method m = cabinMgr.getClass().getMethod("getGear");
-                            Object res = m.invoke(cabinMgr);
-                            if (res instanceof Number) {
-                                int g = ((Number) res).intValue();
-                                if (isValidGearMode(g)) return g;
-                            }
-                        } catch (Throwable ignored) {}
-                    }
-                } catch (Throwable ignored) {}
-            }
-        } catch (Throwable ignored) {}
-        return -1;
-    }
-
-    private int readFromBydDataCollector() {
-        try {
-            com.overdrive.app.byd.BydDataCollector collector = com.overdrive.app.byd.BydDataCollector.getInstance();
-            if (collector != null) {
-                int g = collector.readGearNow();
-                if (isValidGearMode(g)) return g;
-            }
-        } catch (Throwable ignored) {}
-        return -1;
-    }
-
-    private volatile long lastDumpsysReadTime = 0;
-    private volatile int lastDumpsysGear = -1;
-
-    private int readGearFromDumpsys() {
-        try {
-            if (com.overdrive.app.monitor.ChargingDetector.getInstance().isCharging()) {
-                return GEAR_P;
-            }
-        } catch (Throwable ignored) {}
-
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastDumpsysReadTime < 250 && isValidGearMode(lastDumpsysGear)) {
-            return lastDumpsysGear;
-        }
-        try {
-            // 1. First try CarPropertyBridge if available
-            try {
-                com.overdrive.app.byd.CarPropertyBridge bridge = com.overdrive.app.byd.CarPropertyBridge.getInstance();
-                if (bridge != null) {
-                    com.overdrive.app.byd.CarPropertyBridge.ReadResult rr = bridge.readProperty("SHIFT_MODE");
-                    if (rr != null && rr.success && rr.intValue != null) {
-                        int shift = rr.intValue;
-                        int decoded = decodeShiftMode(shift);
-                        if (isValidGearMode(decoded)) {
-                            lastDumpsysReadTime = now;
-                            lastDumpsysGear = decoded;
-                            return decoded;
+                    GearSample sample = readDiLink5GearSample();
+                    long now = SystemClock.elapsedRealtime();
+                    if (sample != null
+                            && isValidGearMode(sample.gear)
+                            && isObservationFresh(
+                                    true, now, sample.observedAtElapsedMs,
+                                    sample.maxAgeMs)) {
+                        boolean firstObservation = lastUpdateTime <= 0L;
+                        int previousGear = currentGear;
+                        currentGear = sample.gear;
+                        // Keep the source observation time. Polling a cached
+                        // value must not make it fresh again.
+                        lastUpdateTime = sample.observedAtElapsedMs;
+                        lastUpdateMaxAgeMs = sample.maxAgeMs;
+                        if (firstObservation || sample.gear != previousGear) {
+                            logger.info("Gear changed: "
+                                    + (firstObservation
+                                        ? "UNKNOWN"
+                                        : gearToString(previousGear))
+                                    + " -> " + gearToString(sample.gear));
+                            CameraDaemon.onGearChanged(sample.gear);
                         }
                     }
-                }
-            } catch (Throwable ignored) {}
-
-            // 2. Fallback: dumpsys car_service
-            String propDump = com.overdrive.app.monitor.AccMonitor.execShell(
-                "dumpsys car_service 2>/dev/null | grep -E '0x21406407|0x21403a06|0x21403a0a' | grep 'lastEvent'");
-            if (propDump != null && !propDump.isEmpty()) {
-                if (propDump.contains("0x21406407") || propDump.contains("0x21403a06") || propDump.contains("0x21403a0a")) {
-                    int decoded = -1;
-                    if (propDump.contains("int32Values: [4]")) decoded = GEAR_D;
-                    else if (propDump.contains("int32Values: [2]")) decoded = GEAR_R;
-                    else if (propDump.contains("int32Values: [3]")) decoded = GEAR_N;
-                    else if (propDump.contains("int32Values: [1]") || propDump.contains("int32Values: [0]")) decoded = GEAR_P;
-                    
-                    if (isValidGearMode(decoded)) {
-                        lastDumpsysReadTime = now;
-                        lastDumpsysGear = decoded;
-                        return decoded;
+                    Thread.sleep(POLL_INTERVAL_MS);
+                } catch (InterruptedException e) {
+                    break;
+                } catch (Throwable t) {
+                    logger.debug("DiLink5 gear poll error: " + t.getMessage());
+                    try {
+                        Thread.sleep(1000L);
+                    } catch (InterruptedException interrupted) {
+                        break;
                     }
                 }
             }
-        } catch (Throwable ignored) {}
-        return -1;
+            logger.info("DiLink5 gear poll thread stopped");
+        }, "GearPoll");
+        pollThread.setDaemon(true);
+        pollThread.start();
+        logger.info("DiLink5 gear monitor started");
     }
 
-    private static int decodeShiftMode(int shift) {
+    private GearSample readDiLink5GearSample() {
+        long now = SystemClock.elapsedRealtime();
+
+        try {
+            com.overdrive.app.byd.BydDataCollector.DiLink5GearObservation
+                    bridged = com.overdrive.app.byd.BydDataCollector
+                            .getInstance().readDiLink5GearObservation();
+            if (bridged != null
+                    && isValidGearMode(bridged.gear)
+                    && isObservationFresh(
+                            true, now, bridged.observedAtElapsedMs,
+                            DILINK5_BRIDGE_GEAR_MAX_AGE_MS)) {
+                return new GearSample(
+                        bridged.gear, bridged.observedAtElapsedMs,
+                        DILINK5_BRIDGE_GEAR_MAX_AGE_MS);
+            }
+        } catch (Throwable ignored) {
+        }
+
+        return readDiLink5Probe(now);
+    }
+
+    private GearSample readDiLink5Probe(long now) {
+        if (lastDiLink5ProbeTime > 0L
+                && now - lastDiLink5ProbeTime
+                        < DILINK5_GEAR_PROBE_THROTTLE_MS) {
+            return cachedDiLink5ProbeSample();
+        }
+        lastDiLink5ProbeTime = now;
+
+        int observedGear = BydVehicleData.UNAVAILABLE;
+        try {
+            com.overdrive.app.byd.CarPropertyBridge bridge =
+                    com.overdrive.app.byd.CarPropertyBridge.getInstance();
+            if (bridge != null) {
+                com.overdrive.app.byd.CarPropertyBridge.ReadResult result =
+                        bridge.readProperty("SHIFT_MODE");
+                if (result != null && result.success
+                        && result.statusCode
+                                == com.byd.datasource.feature.Status.STATUS_SUCCESS
+                        && result.intValue != null) {
+                    observedGear = decodeShiftMode(result.intValue);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        if (!isValidGearMode(observedGear)) {
+            try {
+                com.overdrive.app.byd.CarSvcTelemetry.DynamicObservation
+                        observation =
+                        com.overdrive.app.byd.CarSvcTelemetry.INSTANCE
+                                .currentDynamics();
+                if (observation != null) {
+                    observedGear = observation.gear;
+                    long observedAt =
+                            com.overdrive.app.byd.BydDataCollector
+                                    .observedAtFromAge(
+                                            now, observation.ageMs);
+                    if (isValidGearMode(observedGear)
+                            && observedAt > 0L) {
+                        cachedDiLink5ProbeGear = observedGear;
+                        cachedDiLink5ProbeObservedAt = observedAt;
+                        cachedDiLink5ProbeMaxAgeMs =
+                                DILINK5_CARSVC_GEAR_MAX_AGE_MS;
+                        return cachedDiLink5ProbeSample();
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+
+        if (isValidGearMode(observedGear)) {
+            cachedDiLink5ProbeGear = observedGear;
+            cachedDiLink5ProbeObservedAt = now;
+            cachedDiLink5ProbeMaxAgeMs = CACHED_GEAR_MAX_AGE_MS;
+        }
+        return cachedDiLink5ProbeSample();
+    }
+
+    private GearSample cachedDiLink5ProbeSample() {
+        return isValidGearMode(cachedDiLink5ProbeGear)
+                && cachedDiLink5ProbeObservedAt > 0L
+                ? new GearSample(
+                        cachedDiLink5ProbeGear,
+                        cachedDiLink5ProbeObservedAt,
+                        cachedDiLink5ProbeMaxAgeMs)
+                : null;
+    }
+
+    static int decodeShiftMode(int shift) {
         switch (shift) {
             case 0:
             case 1: return GEAR_P;
@@ -408,7 +395,19 @@ public class GearMonitor {
             case 4: return GEAR_D;
             case 5: return GEAR_M;
             case 6: return GEAR_S;
-            default: return -1;
+            default: return BydVehicleData.UNAVAILABLE;
+        }
+    }
+
+    private static final class GearSample {
+        final int gear;
+        final long observedAtElapsedMs;
+        final long maxAgeMs;
+
+        GearSample(int gear, long observedAtElapsedMs, long maxAgeMs) {
+            this.gear = gear;
+            this.observedAtElapsedMs = observedAtElapsedMs;
+            this.maxAgeMs = maxAgeMs;
         }
     }
     
@@ -434,7 +433,31 @@ public class GearMonitor {
      * Get current gear.
      */
     public int getCurrentGear() {
-        return currentGear;
+        return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                ? getCurrentGearIfFresh() : currentGear;
+    }
+
+    /** Return only a gear that came from the currently active, fresh poller. */
+    public int getCurrentGearIfFresh() {
+        long now = SystemClock.elapsedRealtime();
+        return isObservationFresh(
+                isRunning, now, lastUpdateTime, lastUpdateMaxAgeMs)
+                ? currentGear : BydVehicleData.UNAVAILABLE;
+    }
+
+    static boolean isObservationFresh(
+            boolean running, long nowElapsedMs, long observedAtElapsedMs) {
+        return isObservationFresh(
+                running, nowElapsedMs, observedAtElapsedMs,
+                CACHED_GEAR_MAX_AGE_MS);
+    }
+
+    static boolean isObservationFresh(
+            boolean running, long nowElapsedMs, long observedAtElapsedMs,
+            long maxAgeMs) {
+        long age = nowElapsedMs - observedAtElapsedMs;
+        return running && maxAgeMs > 0L && observedAtElapsedMs > 0L
+                && age >= 0L && age < maxAgeMs;
     }
     
     /**
@@ -466,7 +489,7 @@ public class GearMonitor {
         }
     }
 
-    private static boolean isValidGearMode(int gear) {
+    public static boolean isValidGearMode(int gear) {
         return gear >= GEAR_P && gear <= GEAR_S;
     }
 }

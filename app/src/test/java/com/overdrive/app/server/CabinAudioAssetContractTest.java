@@ -93,8 +93,7 @@ public class CabinAudioAssetContractTest {
         assertTrue(live.contains("html.is-app-webview .cabin-listen-btn"));
         assertTrue(live.contains(
                 "document.documentElement.classList.add('is-app-webview')"));
-        assertTrue(live.contains("max-width: 92px"));
-        assertTrue(live.contains("width: 108px"));
+        assertTrue(live.contains("width: 124px"));
         assertTrue(communicate.contains("id=\"cabinListenerToggle\""));
         assertTrue(communicate.contains("shared/cabin-audio.js"));
         assertTrue(communicateJs.contains("CabinAudio.setLocalPaused(true)"));

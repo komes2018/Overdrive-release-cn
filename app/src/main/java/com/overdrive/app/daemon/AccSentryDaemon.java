@@ -79,6 +79,14 @@ public class AccSentryDaemon {
 
     private static volatile boolean running = true;
     private static volatile boolean inSentryMode = false;
+    // Elapsed-realtime stamp of the most recent ENTRY into sentry mode (0 = never
+    // in this process). The DiLink 5 heartbeat only honours an app-process ignition
+    // broadcast hint that post-dates this, so a hint from an earlier ON→OFF cycle
+    // can never resurrect ACC ON after the driver switched the car off. Elapsed
+    // time (not wall clock): these units step the RTC at ignition. A fresh process
+    // seeds it from the parked marker's epoch (see seedSentryEntryFromParkedMarker)
+    // so a respawned judge does not accept a hint older than the park it woke into.
+    private static volatile long sentryEnteredAtElapsedMs;
     private static final Object shutdownLock = new Object();
     private static boolean shutdownComplete;
     private static final Object sentryTransitionLock = new Object();
@@ -114,6 +122,15 @@ public class AccSentryDaemon {
     // Heartbeat thread for periodic ACC state republish (covers the wedge
     // where CameraDaemon restarts mid-drive and misses our edge-only IPC).
     private static Thread accHeartbeatThread = null;
+    private static final long DILINK5_ACC_POLL_INTERVAL_MS = 5_000L;
+    private static final int DILINK5_FORCE_REPUBLISH_TICKS = 2;
+    // A heartbeat tick whose observation is not admitted (weak IVI-awake with no
+    // corroboration, or no usable source) used to be a silent `null` skip. That
+    // made "the car is on but sentry never exited" indistinguishable from "the
+    // heartbeat is dead" in a log pull. Log the held-back observation on the
+    // first such tick and then every 5 min (60 ticks) so a parked IVI that
+    // stays awake all night does not flood the log.
+    private static final int DILINK5_UNDECIDED_LOG_EVERY_TICKS = 60;
     // Last accOff value the heartbeat actually published. -1 = nothing
     // published yet; 0 = ACC ON; 1 = ACC OFF. Heartbeat short-circuits
     // when its tick would re-publish the same state, because each IPC
@@ -151,6 +168,13 @@ public class AccSentryDaemon {
     private static final Object systemKeepAliveLock = new Object();
     // Interval from  (C0004a0)
     private static final long SYSTEM_KEEPALIVE_INTERVAL_MS = 10000;
+    private static final long PANEL_REDARKEN_AWAIT_MS = 5_000L;
+    private static final int SD_RECOVERY_FALSE_CONFIRM_SAMPLES = 3;
+    private static final int ADB_TCP_PORT = 5555;
+    private static final long DILINK5_ADB_CHECK_EVERY_TICKS = 6;
+    private static final long DILINK5_ADB_RECOVERY_RETRY_MS = 15 * 60_000L;
+    private static long lastAdbRecoveryAttemptElapsedMs =
+            -DILINK5_ADB_RECOVERY_RETRY_MS;
 
     // Surveillance IPC
     private static final int SURVEILLANCE_IPC_PORT = 19877;
@@ -280,25 +304,28 @@ public class AccSentryDaemon {
      * <p>The previously-working FQN is tried FIRST, so any unit that resolved before
      * resolves identically now (same class, same instance, zero behaviour change).
      *
-     * <p><b>The bare fallback is gated to DiLink 4.</b> It would be wrong to call the
-     * extra candidate "strictly additive because the old path already returned null":
+     * <p><b>The bare fallback is gated to DiLink 4 or a field-verified rail
+     * capability on DiLink 5.</b> It would be wrong to call the extra candidate
+     * "strictly additive because the old path already returned null":
      * {@link #setSpecialConfig} is also reached from the FLEET-WIDE writes in
      * {@link #applyPeripheralPowerBatch} (782237711 / 782237728) and
      * {@link #applySentryIspPowerVote} (the 409 pair), which run on every variant. On
      * a legacy trim that ships only the bare class, all of those are currently inert
      * no-ops; making them start landing would newly drive BCM peripheral-power and
      * camera/ISP flags on hardware they have never been exercised against. Gating
-     * keeps the legacy write set byte-identical while DiLink 4 gets the real device.
+     * keeps the legacy write set byte-identical while the two verified targets get
+     * the real device.
      */
     private static final String[] SPECIAL_DEVICE_CLASS_CANDIDATES = {
         // Tried first: preserves bit-exact behaviour on every trim that already
         // resolved this class (the 90% legacy fleet).
         "android.hardware.bydauto.special.BYDAutoSpecialDevice",
-        // DiLink4 reality — verified in raw dex (see above). DiLink 4 ONLY.
+        // Verified fallback on DiLink 4; on DiLink 5 only behind a
+        // field-verified rail capability (see VERIFIED_DILINK5_RAIL_SIGNATURES).
         "android.hardware.special.BYDAutoSpecialDevice",
     };
 
-    /** Number of leading {@link #SPECIAL_DEVICE_CLASS_CANDIDATES} probed on non-dilink4. */
+    /** Number of leading candidates probed on targets without verified fallback support. */
     private static final int SPECIAL_DEVICE_LEGACY_CANDIDATE_COUNT = 1;
 
     /**
@@ -323,8 +350,9 @@ public class AccSentryDaemon {
             return null;
         }
 
-        // Probe all candidate packages on DiLink 4 and DiLink 5
-        int limit = (isDilink4CameraMode() || com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported())
+        // Other platforms probe ONLY the historically-resolved FQN so their write set
+        // is byte-identical to before this change.
+        int limit = (isDilink4CameraMode() || isVerifiedDilink5RailCapability())
                 ? SPECIAL_DEVICE_CLASS_CANDIDATES.length
                 : SPECIAL_DEVICE_LEGACY_CANDIDATE_COUNT;
         for (int i = 0; i < limit; i++) {
@@ -362,6 +390,7 @@ public class AccSentryDaemon {
      * @param value The value to set (typically 0=OFF, 1=ON)
      */
     private static boolean setSpecialConfig(int configId, int value) {
+        if (isDilink5CameraMode() && !isVerifiedDilink5RailCapability()) return false;
         Object device = getSpecialDevice();
         if (device == null) {
             log("Cannot set Special Config - device unavailable");
@@ -420,6 +449,7 @@ public class AccSentryDaemon {
      * @param value The value to set
      */
     private static boolean setPowerConfig(int configId, int value) {
+        if (isDilink5CameraMode() && !isVerifiedDilink5RailCapability()) return false;
         BYDAutoPowerDevice device = getPowerDevice();
         if (device == null) {
             log("Cannot set Power Config - device unavailable");
@@ -496,15 +526,21 @@ public class AccSentryDaemon {
             long generation, boolean enabled) {
         SentryTransitionState latest = latestSentryTransition;
         return latest.generation == generation
-                && latest.keepAwakeEnabled() == enabled
+                && shouldApplyHardwarePeripheralPower(latest) == enabled
                 && peripheralPowerReconciler.isDesired(
                         generation, enabled);
+    }
+
+    private static boolean shouldApplyHardwarePeripheralPower(
+            SentryTransitionState state) {
+        return state.keepAwakeEnabled() && isVehicleRailControlSupported();
     }
 
     private static void requestPeripheralPowerCompensation() {
         SentryTransitionState latest = latestSentryTransition;
         peripheralPowerReconciler.requestReapply(
-                latest.generation, latest.keepAwakeEnabled());
+                latest.generation,
+                shouldApplyHardwarePeripheralPower(latest));
     }
 
     private interface BoundedCall<T> {
@@ -1117,6 +1153,14 @@ public class AccSentryDaemon {
                 + (enable ? "ON" : "OFF")
                 + " generation=" + generation);
 
+        if (!isVehicleRailControlSupported()) {
+            if (enable) {
+                log("DI5 vehicle-rail control requires a field-verified rail "
+                        + "capability; failing closed on this firmware");
+            }
+            return batch.finish();
+        }
+
         Boolean dilink4Value = batch.readDilink4Mode();
         if (dilink4Value == null) {
             return batch.abortResult();
@@ -1461,6 +1505,12 @@ public class AccSentryDaemon {
             if (context != null) {
                 log("Got context: " + context);
                 appContext = context;
+                if (isDilink5CameraMode()
+                        && !com.overdrive.app.byd.dilink5.Dilink5SdkInjector
+                                .ensure(context)) {
+                    log("WARNING: DiLink 5 BYD SDK injection failed; "
+                            + "typed OEM telemetry/power calls may be unavailable");
+                }
 
                 // Debug: Dump sleep reason constants to identify correct values for this firmware
                 //logAllSleepReasonFields();
@@ -1507,12 +1557,32 @@ public class AccSentryDaemon {
                 // not recoverable by the user. turnOn() self-skips when the
                 // screen already reads on, so this is a no-op on a normal boot.
                 try {
-                    if (!com.overdrive.app.monitor.AccMonitor.probeAccState(appContext)) {
+                    boolean startupAccOff =
+                            com.overdrive.app.monitor.AccMonitor.probeAccState(appContext);
+                    if (!startupAccOff) {
                         requestPanelForLatestTransition();
+                        // Judge duty at start-up: only a TRUSTWORTHY ON (clean bodywork
+                        // level, or an admitted DiLink 5 observation) may end a park.
+                        // The panel wake above is deliberately fail-visible on an
+                        // unknown reading; erasing the marker must not be.
+                        if (com.overdrive.app.monitor.AccMonitor.wasLastProbeTrustworthy()) {
+                            scheduleParkedMarkerReconcileForAccOn("startup probe");
+                        }
                     }
                 } catch (Throwable t) {
                     log("Stealth panel boot recovery failed: " + t.getMessage());
                 }
+                // Started while a park is on disk: ignition hints from before that
+                // park must not count (see seedSentryEntryFromParkedMarker).
+                seedSentryEntryFromParkedMarker();
+
+                // DiLink 5 parked keep-alive (Experimental): install the lease
+                // controller and run marker-scoped start-up hygiene. Installed on
+                // every platform — the toggle is the platform declaration, not
+                // the camera-mode selection (two DiLink 5 head-unit flavours) —
+                // and inert until the user's master toggle is ON; the lease
+                // re-reads it on every sentry transition and keep-alive tick.
+                installDi5ParkedKeepAlive();
 
                 // CRITICAL: Whitelist our app from ACC power management killing
                 whitelistAppPackageOld();
@@ -1531,10 +1601,6 @@ public class AccSentryDaemon {
                 // Start periodic status monitoring
                 startStatusMonitoring();
 
-                // Prevent Wi-Fi sleep policy from disconnecting when display is darkened
-                execShell("settings put global wifi_sleep_policy 2");
-                execShell("settings put global wifi_suspend_optimizations_enabled 0");
-                
                 // BYD traffic monitor: user-opt-in only. TrafficMonitorPolicy owns the
                 // toggle, and CameraDaemon re-applies it on boot when the user opted in.
 
@@ -1544,24 +1610,24 @@ public class AccSentryDaemon {
                 log("WARNING: Running without context");
             }
 
-            // Registration can enter a vendor Binder call that never returns.
-            // Keep startup moving while a bounded supervisor retries it.
-            startBodyworkListenerRegistrationSupervisor(context);
+            if (isDilink5CameraMode()) {
+                // DiLink 5 virtualizes the legacy bodywork HAL and can report
+                // sentinel/false-ON values. Poll its local Automotive power
+                // state instead so parked sentry cannot be disarmed by DiLink 4
+                // compatibility APIs.
+                startDiLink5AccStateHeartbeat();
+            } else {
+                // Registration can enter a vendor Binder call that never returns.
+                // Keep startup moving while a bounded supervisor retries it.
+                startBodyworkListenerRegistrationSupervisor(context);
 
-            // Oem-parity: ALSO register BYDAutoPowerDevice
-            // onPowerCtlStatusChanged listener for event id 0x99000037
-            // (= -1728053193). Oem's sentry/camera pipeline gates on this
-            // signal (oem bk/C1478c.java:71-75 and p111dh/C4995i.java
-            // FlameoutService). The bodywork onPowerLevelChanged signal is
-            // different in timing/state from the power-ctl signal on
-            // byd_apa firmware. Both listeners fan into the same
-            // idempotent enterSentryMode/exitSentryMode — whichever
-            // fires first wins, the other is a no-op.
-            //
-            // Gated to dilink4 — legacy fleet keeps the bodywork-only
-            // path bit-exact unchanged.
-            if (isDilink4CameraMode()) {
-                startPowerListenerRegistrationSupervisor(context);
+                // Oem-parity: ALSO register BYDAutoPowerDevice
+                // onPowerCtlStatusChanged listener for event id 0x99000037
+                // (= -1728053193). Gated to dilink4 — legacy fleet keeps the
+                // bodywork-only path bit-exact unchanged.
+                if (isDilink4CameraMode()) {
+                    startPowerListenerRegistrationSupervisor(context);
+                }
             }
 
             log("Daemon running, entering persistence loop...");
@@ -1695,20 +1761,23 @@ public class AccSentryDaemon {
     }
 
     private static synchronized void acquireWifiLock() {
-        if (wifiLock != null && wifiLock.isHeld()) return;
-        if (appContext == null) return;
-
+        if (!isDilink5CameraMode()
+                || (wifiLock != null && wifiLock.isHeld())
+                || appContext == null) {
+            return;
+        }
         try {
             Context permissiveContext = new PermissionBypassContext(appContext);
-            android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager)
-                    permissiveContext.getSystemService(Context.WIFI_SERVICE);
+            android.net.wifi.WifiManager wm =
+                    (android.net.wifi.WifiManager) permissiveContext
+                            .getSystemService(Context.WIFI_SERVICE);
             if (wm != null) {
                 wifiLock = wm.createWifiLock(
                         android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF,
                         "AccSentry:Wifi");
                 wifiLock.setReferenceCounted(false);
                 wifiLock.acquire();
-                log("WifiLock Acquired");
+                log("WifiLock Acquired [dilink5]");
             }
         } catch (Throwable e) {
             log("WifiLock Error: " + e.getMessage());
@@ -1720,7 +1789,8 @@ public class AccSentryDaemon {
             try {
                 wifiLock.release();
                 log("WifiLock Released");
-            } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {
+            }
         }
     }
 
@@ -1733,12 +1803,13 @@ public class AccSentryDaemon {
      * 
      * Fallback: direct binder transact with TX code 2 (confirmed working).
      */
-    private static void whitelistAppPackageOld() {
-        whitelistAccPackage(APP_PACKAGE_NAME());
+    private static boolean whitelistAppPackageOld() {
+        boolean appWhitelisted = whitelistAccPackage(APP_PACKAGE_NAME());
         whitelistAccPackage("com.byd.warning");
+        return appWhitelisted;
     }
 
-    private static void whitelistAccPackage(String pkg) {
+    private static boolean whitelistAccPackage(String pkg) {
         log("Whitelisting package " + pkg + " via accmodemanager...");
 
         boolean success = false;
@@ -1787,25 +1858,37 @@ public class AccSentryDaemon {
         if (!success) {
             log("WARNING: All whitelist strategies failed - app may be killed during ACC OFF");
         }
+        return success;
     }
 
     /**
-     * Direct binder transact fallback using TX code 2 (confirmed working).
-     * If TX code 2 fails, scans codes 1-5 for firmware variations.
+     * DiLink 5 uses only the verified interface/code. Older firmware keeps its
+     * historical transaction scan because the whitelist code varies by build.
      */
     private static boolean whitelistViaDirectTransact(IBinder binder, String packageName) {
+        if (isDilink5CameraMode()) {
+            try {
+                if (!"android.os.IAccModeManager".equals(
+                        binder.getInterfaceDescriptor())) {
+                    log("Direct transact: unexpected binder interface");
+                    return false;
+                }
+            } catch (Exception e) {
+                log("Direct transact: could not verify binder interface");
+                return false;
+            }
+            return tryTransactCode(binder, packageName, 2);
+        }
+
         if (tryTransactCode(binder, packageName, 2)) {
             return true;
         }
-
         log("TX code 2 failed, scanning codes 1-5...");
         for (int code = 1; code <= 5; code++) {
-            if (code == 2) continue;
-            if (tryTransactCode(binder, packageName, code)) {
+            if (code != 2 && tryTransactCode(binder, packageName, code)) {
                 return true;
             }
         }
-
         log("Direct transact: no working transaction code found");
         return false;
     }
@@ -1840,24 +1923,19 @@ public class AccSentryDaemon {
     /**
      * Whitelist app UID with BYD background data-cache services.
      *
-     * BYD's BgDataCacheService accepts the shell UID (2000), so calls from this
-     * daemon succeed where the same call from MainActivity (UID 10xxx) hits the
-     * AppOps gate. Mirrors the secondary reference app's vanss daemon, which arrives at shell UID via
-     * an ADB-localhost tunnel and then makes this exact call.
+     * The service accepts the shell UID used by this daemon, while the normal
+     * application UID can be rejected by the system-service permission gate.
      *
      * SDK ≥ 31 → byd_datacached.setAppStartupData(uid, 0)
      * SDK < 31 → bg_datacache.setAppOpsData(uid, 0)
      *
-     * Threshold matches oem's C0241c.m941c() — earlier we used >= 32, but
-     * BYD DiLink 4 ROMs that ship Android 12 (API 31) base have the new
-     * byd_datacached service available, and the old bg_datacache.setAppOpsData
-     * gates on ACCESS_APPOPSDATA (denied to shell UID 2000 → frames all-black
-     * post ACC OFF on byd_apa).
+     * Android 12 uses the newer service. Both names are still probed because
+     * some firmware exposes the newer binder before updating its SDK marker.
      */
-    private static void applyDataCacheWhitelist() {
+    private static boolean applyDataCacheWhitelist() {
         if (appContext == null) {
             log("applyDataCacheWhitelist: no context");
-            return;
+            return false;
         }
 
         String pkg = APP_PACKAGE_NAME();
@@ -1866,7 +1944,7 @@ public class AccSentryDaemon {
             appUid = appContext.getPackageManager().getApplicationInfo(pkg, 0).uid;
         } catch (Exception e) {
             log("applyDataCacheWhitelist: failed to resolve UID: " + e.getMessage());
-            return;
+            return false;
         }
         String uidStr = String.valueOf(appUid);
         log("Applying data-cache whitelist for " + pkg + " (uid=" + appUid + ")");
@@ -1888,7 +1966,7 @@ public class AccSentryDaemon {
                 Method m = service.getClass().getMethod("setAppStartupData", String.class, Integer.TYPE);
                 m.invoke(service, uidStr, 0);
                 log("setAppStartupData OK (uid=" + appUid + ")");
-                return;
+                return true;
             }
             log("byd_datacached service unavailable — falling through to bg_datacache");
         } catch (java.lang.reflect.InvocationTargetException ite) {
@@ -1905,7 +1983,7 @@ public class AccSentryDaemon {
                 Method m = service.getClass().getMethod("setAppOpsData", String.class, Integer.TYPE);
                 m.invoke(service, uidStr, 0);
                 log("setAppOpsData OK (uid=" + appUid + ")");
-                return;
+                return true;
             }
             log("bg_datacache service unavailable");
         } catch (java.lang.reflect.InvocationTargetException ite) {
@@ -1913,6 +1991,145 @@ public class AccSentryDaemon {
         } catch (Exception e) {
             log("setAppOpsData failed: " + e.getMessage());
         }
+        return false;
+    }
+
+    private static boolean applyBackgroundAccessCommand(
+            String label, String command) {
+        ShellResult result = execShellResult(
+                command, DEFAULT_SHELL_TIMEOUT_MS, null);
+        if (!result.success) {
+            log(label + " failed: " + result.describeFailure());
+        }
+        return result.success;
+    }
+
+    private static boolean applyStartupAppAccess(String packageName) {
+        Object device = com.overdrive.app.byd.BydDeviceHelper.getDevice(
+                "android.hardware.bydauto.startup.BYDAutoStartupAppDevice",
+                appContext);
+        return com.overdrive.app.byd.BydDeviceHelper.verifyStartupAppAccess(
+                device, packageName, 20, 100L);
+    }
+
+    /** Reapply DiLink 5 background-survival grants from the daemon's shell identity. */
+    public static JSONObject applyBackgroundAccess() {
+        JSONObject result = new JSONObject();
+        try {
+            if (!isDilink5CameraMode()) {
+                result.put("success", false);
+                result.put("error", "DiLink 5 mode is not active");
+                return result;
+            }
+            if (appContext == null) {
+                appContext = CameraDaemon.getAppContext();
+            }
+            if (appContext == null) {
+                result.put("success", false);
+                result.put("error", "Daemon context is not ready");
+                return result;
+            }
+
+            String pkg = APP_PACKAGE_NAME();
+            boolean accWhitelist = whitelistAppPackageOld();
+            boolean dataCache = applyDataCacheWhitelist();
+            boolean backgroundAppOps =
+                    applyBackgroundAccessCommand(
+                            "RUN_IN_BACKGROUND",
+                            "appops set " + pkg
+                                    + " RUN_IN_BACKGROUND allow")
+                    & applyBackgroundAccessCommand(
+                            "RUN_ANY_IN_BACKGROUND",
+                            "appops set " + pkg
+                                    + " RUN_ANY_IN_BACKGROUND allow")
+                    & applyBackgroundAccessCommand(
+                            "WAKE_LOCK",
+                            "appops set " + pkg + " WAKE_LOCK allow");
+            boolean deviceIdle = applyBackgroundAccessCommand(
+                    "device-idle whitelist",
+                    "dumpsys deviceidle whitelist +" + pkg);
+            boolean startupProvider = applyBackgroundAccessCommand(
+                    "startup provider",
+                    "content call --uri "
+                            + "content://com.byd.appstartup/whitelist "
+                            + "--method add --arg '" + pkg + "'");
+            boolean startupApp = applyStartupAppAccess(pkg);
+            boolean startupManager =
+                    applyBackgroundAccessCommand(
+                            "AUTO_START",
+                            "cmd appops set " + pkg + " AUTO_START allow"
+                                    + " && cmd appops get " + pkg
+                                    + " AUTO_START 2>/dev/null"
+                                    + " | grep -Eq "
+                                    + "'(^|[[:space:]:])allow([[:space:]]|$)'")
+                    | applyBackgroundAccessCommand(
+                            "BOOT_COMPLETED",
+                            "cmd appops set " + pkg
+                                    + " BOOT_COMPLETED allow"
+                                    + " && cmd appops get " + pkg
+                                    + " BOOT_COMPLETED 2>/dev/null"
+                                    + " | grep -Eq "
+                                    + "'(^|[[:space:]:])allow([[:space:]]|$)'");
+            boolean sscWhitelist =
+                    applyBackgroundAccessCommand(
+                            "global startup whitelist",
+                            "CUR=$(settings get global ssc_whitelist); "
+                                    + "[ \"$CUR\" = null ] && CUR=; "
+                                    + "case \",$CUR,\" in *," + pkg
+                                    + ",*) ;; *) settings put global "
+                                    + "ssc_whitelist \"${CUR:+$CUR,}" + pkg
+                                    + "\" || exit 1;; esac; "
+                                    + "CUR=$(settings get global ssc_whitelist); "
+                                    + "case \",$CUR,\" in *," + pkg
+                                    + ",*) exit 0;; *) exit 1;; esac")
+                    | applyBackgroundAccessCommand(
+                            "secure startup whitelist",
+                            "CUR=$(settings get secure ssc_whitelist); "
+                                    + "[ \"$CUR\" = null ] && CUR=; "
+                                    + "case \",$CUR,\" in *," + pkg
+                                    + ",*) ;; *) settings put secure "
+                                    + "ssc_whitelist \"${CUR:+$CUR,}" + pkg
+                                    + "\" || exit 1;; esac; "
+                                    + "CUR=$(settings get secure ssc_whitelist); "
+                                    + "case \",$CUR,\" in *," + pkg
+                                    + ",*) exit 0;; *) exit 1;; esac");
+            // ADB "status memory": the BYD test tool's own switch that keeps the
+            // ADB state remembered across a power cycle (controllers 13/18 lack
+            // it). ADB is this app's launch/privilege lane, so re-assert it here
+            // with the other survival grants. ISOLATED item: it has no
+            // power-lifecycle role, is reported under its own key and never
+            // feeds the aggregate `success` verdict; its metric is "ADB still
+            // enabled after the next power cycle", checked by read-back.
+            boolean adbStatusMemory = applyBackgroundAccessCommand(
+                    "adb status memory",
+                    "setprop persist.sys.adb.status_memory_enable true"
+                            + " && [ \"$(getprop persist.sys.adb.status_memory_enable)\""
+                            + " = true ]");
+            result.put("accWhitelist", accWhitelist);
+            result.put("dataCache", dataCache);
+            result.put("backgroundAppOps", backgroundAppOps);
+            result.put("deviceIdle", deviceIdle);
+            result.put("startupProvider", startupProvider);
+            result.put("startupApp", startupApp);
+            result.put("startupManager", startupManager);
+            result.put("startupWhitelist", sscWhitelist);
+            result.put("adbStatusMemory", adbStatusMemory);
+            result.put(
+                    "success",
+                    accWhitelist
+                            && dataCache
+                            && backgroundAppOps
+                            && deviceIdle
+                            && startupApp
+                            && (startupManager || sscWhitelist));
+        } catch (Throwable failure) {
+            try {
+                result.put("success", false);
+                result.put("error", failure.getMessage());
+            } catch (Exception ignored) {
+            }
+        }
+        return result;
     }
 
     // ==================== ACC STATE DETECTION ====================
@@ -1922,7 +2139,7 @@ public class AccSentryDaemon {
             Class.forName("android.hardware.bydauto.bodywork.BYDAutoBodyworkDevice");
             Class.forName("android.hardware.bydauto.bodywork.AbsBYDAutoBodyworkListener");
             return true;
-        } catch (Throwable t) {
+        } catch (Throwable ignored) {
             return false;
         }
     }
@@ -1932,7 +2149,7 @@ public class AccSentryDaemon {
             Class.forName("android.hardware.bydauto.power.BYDAutoPowerDevice");
             Class.forName("android.hardware.bydauto.power.AbsBYDAutoPowerListener");
             return true;
-        } catch (Throwable t) {
+        } catch (Throwable ignored) {
             return false;
         }
     }
@@ -1982,7 +2199,7 @@ public class AccSentryDaemon {
             return;
         }
         if (!isBodyworkSupported()) {
-            log("BYD bodywork SDK classes (AbsBYDAutoBodyworkListener) not available on this ROM — skipping bodywork listener and enabling ACC fallback heartbeat");
+            log("BYD bodywork SDK unavailable; using ACC fallback heartbeat");
             synchronized (bodyworkRegistrationLock) {
                 bodyworkRegistered = true;
             }
@@ -2021,7 +2238,7 @@ public class AccSentryDaemon {
             while (isBodyworkLifecycleCurrent(
                     lifecycleGeneration)) {
                 if (!isBodyworkSupported()) {
-                    log("Bodywork SDK no longer available — stopping bodywork supervisor");
+                    log("Bodywork SDK no longer available; using ACC fallback heartbeat");
                     synchronized (bodyworkRegistrationLock) {
                         bodyworkRegistered = true;
                     }
@@ -2084,8 +2301,9 @@ public class AccSentryDaemon {
                 retryDelayMs = Math.min(
                         retryDelayMs * 2L, 60_000L);
             }
-        } catch (Throwable t) {
-            log("Bodywork registration supervisor encountered fatal error: " + t.getMessage());
+        } catch (Throwable failure) {
+            log("Bodywork registration supervisor failed: "
+                    + failure.getMessage());
         } finally {
             synchronized (bodyworkRegistrationLock) {
                 if (bodyworkRegistrationThread
@@ -2250,7 +2468,7 @@ public class AccSentryDaemon {
             return;
         }
         if (!isPowerListenerSupported()) {
-            log("BYD power SDK classes (AbsBYDAutoPowerListener) not available on this ROM — skipping power listener");
+            log("BYD power SDK unavailable; skipping power listener");
             return;
         }
         synchronized (powerListenerRegistrationLock) {
@@ -2318,7 +2536,7 @@ public class AccSentryDaemon {
             while (isPowerListenerLifecycleCurrent(
                     lifecycleGeneration)) {
                 if (!isPowerListenerSupported()) {
-                    log("Power SDK no longer available — stopping power supervisor");
+                    log("Power SDK no longer available; stopping power supervisor");
                     return;
                 }
                 final long attemptGeneration;
@@ -2388,8 +2606,9 @@ public class AccSentryDaemon {
                 retryDelayMs = Math.min(
                         retryDelayMs * 2L, 60_000L);
             }
-        } catch (Throwable t) {
-            log("Power-listener registration supervisor encountered fatal error: " + t.getMessage());
+        } catch (Throwable failure) {
+            log("Power-listener registration supervisor failed: "
+                    + failure.getMessage());
         } finally {
             boolean restart = false;
             synchronized (powerListenerRegistrationLock) {
@@ -2481,16 +2700,26 @@ public class AccSentryDaemon {
     }
 
     private static final class PowerListenerRegistrar {
-        static boolean register(Context context, long lifecycleGeneration, long attemptGeneration) {
-            OemStylePowerListener listener = new OemStylePowerListener(lifecycleGeneration, attemptGeneration);
-            return registerPowerListener(context, listener);
+        static boolean register(
+                Context context,
+                long lifecycleGeneration,
+                long attemptGeneration) {
+            return registerPowerListener(
+                    context,
+                    new OemStylePowerListener(
+                            lifecycleGeneration, attemptGeneration));
         }
     }
 
     private static final class BodyworkListenerRegistrar {
-        static boolean register(Context context, long lifecycleGeneration, long attemptGeneration) {
-            AccListener listener = new AccListener(lifecycleGeneration, attemptGeneration);
-            return registerBodyworkListener(context, listener);
+        static boolean register(
+                Context context,
+                long lifecycleGeneration,
+                long attemptGeneration) {
+            return registerBodyworkListener(
+                    context,
+                    new AccListener(
+                            lifecycleGeneration, attemptGeneration));
         }
     }
 
@@ -2598,6 +2827,196 @@ public class AccSentryDaemon {
         }
 
         lastPowerLevel = level;
+
+        if (level >= POWER_LEVEL_ON) {
+            // Judge duty: a definitive ON reading with the parked marker still on
+            // disk means the parked window is over. Runs off this (possibly HAL
+            // listener) thread; the cheap stat inside the helper is what decides
+            // whether any work happens at all.
+            scheduleParkedMarkerReconcileForAccOn("power level "
+                    + powerLevelToString(level));
+        }
+    }
+
+    // ==================== PARKED MARKER — JUDGE DUTY ====================
+
+    /**
+     * Erase a "Vehicle ON only" parked-shutdown marker that has outlived its park.
+     *
+     * <p>This daemon is the parked ACC judge: it is the only process with a
+     * hardware view of ACC while parked, and the app-side startup paths all honour
+     * the marker until it is gone. exitSentryMode's park-reaper cancellation
+     * already erases the marker for the OFF→ON edge this process itself owned. This
+     * covers every other definitive ON reading that never runs exitSentryMode — a
+     * daemon that (re)started with the car already on (generation 0, sentryMode
+     * false, so the heartbeat sees "state agrees" and only republishes IPC), or a
+     * cancellation that lost its token race. Without it the app has no
+     * hardware-backed signal to recover on when the BYD ACC broadcasts are not
+     * delivered on a given firmware, and the car drives with the whole stack down.
+     *
+     * <p>Never fights a park in progress: while this process is in sentry mode or
+     * a park reaper execution is live, the marker is left alone.
+     */
+    private static void reconcileParkedMarkerForAccOn(String source) {
+        try {
+            java.io.File marker = new java.io.File(
+                    com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH);
+            if (!marker.isFile()) return;
+            if (inSentryMode) return;
+            // A marker planted moments ago is a park that is BEGINNING, not a stale
+            // one: on the DiLink 5 OFF edge CameraDaemon commits the marker from its
+            // own power-mode dampener a tick or two before this daemon's confirms OFF,
+            // and in that gap the heartbeat can still admit a weak ON. Leave any
+            // marker younger than PARKED_MARKER_MIN_STALE_MS alone; our own OFF
+            // admission follows within seconds and re-plants/keeps it.
+            Long parkedAtMs = readParkedMarkerEpochMs(marker);
+            if (parkedAtMs != null) {
+                long age = System.currentTimeMillis() - parkedAtMs;
+                if (age >= 0L && age < PARKED_MARKER_MIN_STALE_MS) {
+                    log("ACC ON (" + source + ") with a parked marker only " + age
+                            + " ms old — a park is beginning; not erasing");
+                    return;
+                }
+            }
+            if (hasLiveParkReaperExecution()) {
+                log("ACC ON (" + source + ") with parked marker present — "
+                        + "park reaper still running; leaving marker to its cancellation");
+                return;
+            }
+            // Serialise with every other marker writer in this daemon (the reaper's
+            // atomic_write, writeParkedShutdownMarkerIfOwned, the cancellation) and
+            // re-check the state we are acting on immediately before the delete.
+            ParkReaperLease lease = acquireParkReaperLease();
+            if (lease == null) {
+                log("ACC ON (" + source + ") with parked marker present — "
+                        + "park-reaper lease busy; retrying on the next reading");
+                return;
+            }
+            boolean erased;
+            try {
+                if (inSentryMode || !marker.isFile()) return;
+                erased = marker.delete();
+                if (erased) {
+                    publishParkEndedBreadcrumb();
+                }
+            } finally {
+                lease.close();
+            }
+            log("ACC ON (" + source + ") with parked marker present — "
+                    + (erased
+                            ? "erased stale parked-shutdown marker (park is over)"
+                            : "WARNING: could not erase parked-shutdown marker"));
+            if (erased) {
+                kickAppProcessAfterParkEnd();
+            }
+        } catch (Throwable t) {
+            log("Parked-marker reconcile failed: " + t.getMessage());
+        }
+    }
+
+    /** A parked marker younger than this is a park in progress, never a stale one. */
+    private static final long PARKED_MARKER_MIN_STALE_MS = 60_000L;
+
+    /** The marker's content is the park epoch (millis); null when unreadable. */
+    private static Long readParkedMarkerEpochMs(java.io.File marker) {
+        try {
+            String raw = readSmallAsciiFile(marker);
+            if (raw == null) return null;
+            String trimmed = raw.trim();
+            if (trimmed.isEmpty() || trimmed.length() > 20) return null;
+            return Long.parseLong(trimmed);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * A judge that (re)starts INTO a park must not accept an ignition hint older than
+     * that park: {@link #sentryEnteredAtElapsedMs} is 0 in a fresh process, which
+     * would honour any hint ≤ MAX_AGE_MS old even if the car was switched off again
+     * since. Seed it from the marker's epoch, translated into elapsed time.
+     */
+    private static void seedSentryEntryFromParkedMarker() {
+        try {
+            java.io.File marker = new java.io.File(
+                    com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH);
+            if (!marker.isFile()) return;
+            Long parkedAtMs = readParkedMarkerEpochMs(marker);
+            if (parkedAtMs == null) return;
+            long ageMs = System.currentTimeMillis() - parkedAtMs;
+            if (ageMs < 0L) return;
+            long seeded = Math.max(0L,
+                    android.os.SystemClock.elapsedRealtime() - ageMs);
+            if (seeded > sentryEnteredAtElapsedMs) {
+                sentryEnteredAtElapsedMs = seeded;
+                log("Started into a park (marker " + (ageMs / 1000) + " s old) — "
+                        + "ignition hints older than it will be ignored");
+            }
+        } catch (Throwable t) {
+            log("Park-entry seed from marker failed: " + t.getMessage());
+        }
+    }
+
+    /**
+     * After this daemon ends a park by erasing the marker, make sure the app process
+     * actually rebuilds the stack. Every app-side start path is a REACTION to an
+     * Android event, and while parked the keepalive service has stopped itself, the
+     * revival alarms are cancelled and the boot health check is down — so if the
+     * BYD ignition broadcasts are not delivered on this firmware, nothing would run
+     * until some passive broadcast happened by. Starting the keepalive service is
+     * the same channel SurveillanceIpcServer/TsAvmCoordinator already use from UID
+     * 2000; its onStartCommand finds the marker gone and runs startOnBoot, which
+     * consumes the park-END breadcrumb and rebuilds (or defers to a live
+     * MainActivity manager). Best-effort and bounded.
+     */
+    private static void kickAppProcessAfterParkEnd() {
+        try {
+            ShellResult result = execShellResult(
+                    "am start-foreground-service -n "
+                            + com.overdrive.app.BuildConfig.APPLICATION_ID
+                            + "/.services.DaemonKeepaliveService",
+                    DEFAULT_SHELL_TIMEOUT_MS, null);
+            log("Park ended — app keepalive kick "
+                    + (result.success ? "sent" : "failed: " + result.describeFailure()));
+        } catch (Throwable t) {
+            log("Park ended — app keepalive kick failed: " + t.getMessage());
+        }
+    }
+
+    /**
+     * Tell the app process that a park just ended. The app is kept resident across
+     * a park and its process-lifetime start guard is still set; when this daemon
+     * ends the park with no app-side trigger in flight (a driving-telemetry ACC-on
+     * on DiLink 5, or the BYD broadcast losing the race to the HAL edge), the
+     * breadcrumb is how the next startOnBoot learns a rebuild is due. Epoch millis,
+     * world-readable, consumed by value on the app side; the next park reaper
+     * removes it. Best-effort.
+     */
+    private static void publishParkEndedBreadcrumb() {
+        try {
+            writeParkReaperToken(
+                    com.overdrive.app.ui.model.ParkedShutdown.ENDED_PATH,
+                    Long.toString(System.currentTimeMillis()));
+        } catch (Throwable t) {
+            log("Park-ended breadcrumb write failed: " + t.getMessage());
+        }
+    }
+
+    /** Same, but dispatched off the caller's thread; a stat decides whether to bother. */
+    private static void scheduleParkedMarkerReconcileForAccOn(String source) {
+        try {
+            if (!new java.io.File(
+                    com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).isFile()) {
+                return;
+            }
+            Thread worker = new Thread(
+                    () -> reconcileParkedMarkerForAccOn(source),
+                    "ParkedMarkerReconcile");
+            worker.setDaemon(true);
+            worker.start();
+        } catch (Throwable t) {
+            log("Parked-marker reconcile dispatch failed: " + t.getMessage());
+        }
     }
 
     private static class AccListener extends AbsBYDAutoBodyworkListener {
@@ -2651,19 +3070,132 @@ public class AccSentryDaemon {
             // suppressed too — the system is meant to sleep and rely on the vehicle's own
             // BMS for low-SoC protection, consistent with the mode's contract.
             if (level == 0) {
-                SentryTransitionState transition = latestSentryTransition;
+                SentryTransitionState transition =
+                        snapshotSentryTransitionForBatteryCallback();
                 if (transition.sentryMode) {
+                    beginOrGetLowBatteryWakeEpisode(
+                            transition.generation);
                     log("LOW BATTERY - scheduling authoritative surveillance stop");
-                    lowBatteryStopReconciler.requestReapply(
+                    lowBatteryStopReconciler.request(
                             transition.generation, true);
 
                     if (!transition.vehicleOnOnly) {
                         log("CRITICAL: Battery level LOW - scheduling emergency wake");
-                        lowBatteryWakeReconciler.requestReapply(
+                        lowBatteryWakeReconciler.request(
                                 transition.generation, true);
                     }
                 }
+            } else if (level == 1) {
+                SentryTransitionState transition =
+                        snapshotSentryTransitionForBatteryCallback();
+                if (clearLowBatteryWakeEpisode(
+                        transition.generation)) {
+                    // Only the wake is episode-scoped. A low-battery
+                    // surveillance stop remains latched for this park.
+                    lowBatteryWakeReconciler.request(
+                            transition.generation, false);
+                }
             }
+        }
+    }
+
+    /**
+     * A battery Binder callback must not observe the brief interval where
+     * beginSentryTransition() has changed inSentryMode/generation but has not
+     * yet published the matching immutable transition snapshot. Serializing
+     * only this edge-sensitive read prevents a stale LOW request from
+     * overwriting the new transition's reset, or a legitimate entering LOW
+     * edge from being dropped against the prior non-sentry snapshot.
+     */
+    private static SentryTransitionState
+            snapshotSentryTransitionForBatteryCallback() {
+        synchronized (sentryTransitionLock) {
+            return latestSentryTransition;
+        }
+    }
+
+    private static final Object lowBatteryWakeEpisodeLock = new Object();
+    private static final long LOW_BATTERY_WAKE_RETRY_INTERVAL_MS = 60_000L;
+    private static long lowBatteryWakeEpisodeGeneration = -1L;
+    private static long lowBatteryWakeEpisodeId = 0L;
+    private static boolean lowBatteryWakeEpisodeActive = false;
+    private static long lowBatterySystemWakeCommittedEpisode = -1L;
+
+    private static long beginOrGetLowBatteryWakeEpisode(long generation) {
+        synchronized (lowBatteryWakeEpisodeLock) {
+            if (!lowBatteryWakeEpisodeActive
+                    || lowBatteryWakeEpisodeGeneration != generation) {
+                lowBatteryWakeEpisodeGeneration = generation;
+                lowBatteryWakeEpisodeId++;
+                lowBatteryWakeEpisodeActive = true;
+                lowBatterySystemWakeCommittedEpisode = -1L;
+            }
+            return lowBatteryWakeEpisodeId;
+        }
+    }
+
+    private static boolean clearLowBatteryWakeEpisode(long generation) {
+        synchronized (lowBatteryWakeEpisodeLock) {
+            if (!lowBatteryWakeEpisodeActive
+                    || lowBatteryWakeEpisodeGeneration != generation) {
+                return false;
+            }
+            lowBatteryWakeEpisodeActive = false;
+            lowBatteryWakeEpisodeId++;
+            lowBatterySystemWakeCommittedEpisode = -1L;
+            return true;
+        }
+    }
+
+    private static void resetLowBatteryWakeEpisode() {
+        synchronized (lowBatteryWakeEpisodeLock) {
+            lowBatteryWakeEpisodeGeneration = -1L;
+            lowBatteryWakeEpisodeActive = false;
+            lowBatteryWakeEpisodeId++;
+            lowBatterySystemWakeCommittedEpisode = -1L;
+        }
+    }
+
+    private static long currentLowBatteryWakeEpisode(long generation) {
+        synchronized (lowBatteryWakeEpisodeLock) {
+            return lowBatteryWakeEpisodeActive
+                    && lowBatteryWakeEpisodeGeneration == generation
+                    ? lowBatteryWakeEpisodeId : -1L;
+        }
+    }
+
+    private static boolean isLowBatteryWakeEpisodeCurrent(
+            long generation, long episodeId) {
+        if (!isLowBatteryWakeCurrent(generation)) {
+            return false;
+        }
+        synchronized (lowBatteryWakeEpisodeLock) {
+            return lowBatteryWakeEpisodeActive
+                    && lowBatteryWakeEpisodeGeneration == generation
+                    && lowBatteryWakeEpisodeId == episodeId;
+        }
+    }
+
+    private static boolean isLowBatterySystemWakeCommitted(
+            long generation, long episodeId) {
+        synchronized (lowBatteryWakeEpisodeLock) {
+            return lowBatteryWakeEpisodeActive
+                    && lowBatteryWakeEpisodeGeneration == generation
+                    && lowBatteryWakeEpisodeId == episodeId
+                    && lowBatterySystemWakeCommittedEpisode == episodeId;
+        }
+    }
+
+    private static boolean markLowBatterySystemWakeCommitted(
+            long generation, long episodeId) {
+        synchronized (lowBatteryWakeEpisodeLock) {
+            if (!lowBatteryWakeEpisodeActive
+                    || lowBatteryWakeEpisodeGeneration != generation
+                    || lowBatteryWakeEpisodeId != episodeId) {
+                return false;
+            }
+            lowBatterySystemWakeCommittedEpisode = episodeId;
+            return true;
         }
     }
 
@@ -2683,10 +3215,11 @@ public class AccSentryDaemon {
     }
 
     private static boolean sleepForLowBatteryWake(
-            long generation, long delayMs) {
+            long generation, long episodeId, long delayMs) {
         long deadline = android.os.SystemClock.elapsedRealtime() + delayMs;
         while (android.os.SystemClock.elapsedRealtime() < deadline) {
-            if (!isLowBatteryWakeCurrent(generation)) {
+            if (!isLowBatteryWakeEpisodeCurrent(
+                    generation, episodeId)) {
                 return false;
             }
             long remaining =
@@ -2695,41 +3228,68 @@ public class AccSentryDaemon {
                 Thread.sleep(Math.min(remaining, 50L));
             } catch (InterruptedException interrupted) {
                 Thread.interrupted();
-                if (!isLowBatteryWakeCurrent(generation)) {
+                if (!isLowBatteryWakeEpisodeCurrent(
+                        generation, episodeId)) {
                     return false;
                 }
             }
         }
-        return isLowBatteryWakeCurrent(generation);
+        return isLowBatteryWakeEpisodeCurrent(
+                generation, episodeId);
     }
 
     private static boolean applyLowBatteryWake(long generation) {
-        if (!isLowBatteryWakeCurrent(generation)) {
+        long episodeId = currentLowBatteryWakeEpisode(generation);
+        if (episodeId < 0L
+                || !isLowBatteryWakeEpisodeCurrent(
+                        generation, episodeId)) {
             return true;
         }
-        return runBoundedHardwareBoolean(
+        java.util.concurrent.atomic.AtomicBoolean
+                systemWakeCommittedThisAttempt =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        boolean applied = runBoundedHardwareBoolean(
                 "Low-battery emergency wake",
-                () -> isLowBatteryWakeCurrent(generation),
+                () -> isLowBatteryWakeEpisodeCurrent(
+                        generation, episodeId),
                 () -> {
-                    if (!isLowBatteryWakeCurrent(generation)) {
+                    if (!isLowBatteryWakeEpisodeCurrent(
+                            generation, episodeId)) {
                         return true;
                     }
                     lastMcuWakeTime = System.currentTimeMillis();
                     boolean success = true;
-                    if (isKeepUsbPowerOnAccOff()) {
+                    if (isKeepUsbPowerOnAccOff()
+                            && !isLowBatterySystemWakeCommitted(
+                                    generation, episodeId)) {
                         success = performSystemWakeUp();
+                        if (success
+                                && markLowBatterySystemWakeCommitted(
+                                        generation, episodeId)) {
+                            systemWakeCommittedThisAttempt.set(true);
+                        }
                     }
-                    if (!isLowBatteryWakeCurrent(generation)) {
+                    if (!isLowBatteryWakeEpisodeCurrent(
+                            generation, episodeId)) {
                         return true;
                     }
                     boolean mcuWoke = wakeUpMcu();
-                    if (!sleepForLowBatteryWake(generation, 500L)) {
+                    if (!sleepForLowBatteryWake(
+                            generation, episodeId, 500L)) {
                         return true;
                     }
                     mcuWoke |= wakeUpMcu();
                     return success && mcuWoke;
                 },
                 AccSentryDaemon::requestPanelForLatestTransition);
+        // Wait only after the bounded hardware lane has been released; panel
+        // reconciliation uses that same lane. Even if the MCU write failed,
+        // a committed full AP wake already relit the panel and must be hidden.
+        if (systemWakeCommittedThisAttempt.get()) {
+            requestAndAwaitPanelDarkAfterWake(
+                    generation, "Low-battery emergency wake");
+        }
+        return applied;
     }
 
     private static void requestLatestSurveillanceIntentReconciliation() {
@@ -3308,7 +3868,26 @@ public class AccSentryDaemon {
             new LatestBooleanReconciler("LowBatteryWake") {
                 @Override
                 protected boolean apply(long generation, boolean active) {
-                    return !active || applyLowBatteryWake(generation);
+                    if (!active) return true;
+                    boolean applied = applyLowBatteryWake(generation);
+                    if (applied) return true;
+
+                    // The first attempt already performs the legacy double-tap.
+                    // A trim with an unavailable/rejecting MCU HAL must not then
+                    // repeat two Binder writes every reconciler backoff (~5s)
+                    // for the entire LOW episode. Pace later attempts at the
+                    // same one-minute cadence as BatteryVoltageMonitorV2. The
+                    // episode-aware sleep checks ownership every 50ms, so NORMAL
+                    // or any ACC generation change cancels immediately.
+                    long episodeId =
+                            currentLowBatteryWakeEpisode(generation);
+                    if (episodeId >= 0L) {
+                        sleepForLowBatteryWake(
+                                generation,
+                                episodeId,
+                                LOW_BATTERY_WAKE_RETRY_INTERVAL_MS);
+                    }
+                    return !isLowBatteryWakeCurrent(generation);
                 }
             };
 
@@ -3361,6 +3940,23 @@ public class AccSentryDaemon {
                 }
             };
 
+    // DiLink 5 parked keep-alive lease (Experimental). Requested with the same
+    // keepAwake verdict as the keep-alive loop (parked && onAndOff) on every
+    // platform; the lease itself decides whether the user's master toggle, the
+    // kill switch and the 12 V guard permit any write. Transient hardware
+    // conditions are retried by the 10 s tick, not by this reconciler's backoff,
+    // so apply() reports success whenever the request was accepted.
+    private static final LatestBooleanReconciler di5KeepAliveReconciler =
+            new LatestBooleanReconciler("Di5KeepAliveState") {
+                @Override
+                protected boolean apply(long generation, boolean enabled) {
+                    com.overdrive.app.power.Di5ParkedPowerHold hold =
+                            com.overdrive.app.power.Di5ParkedPowerHold.installedInstance();
+                    if (hold == null) return true;
+                    return hold.requestForTransition(generation, enabled);
+                }
+            };
+
     private static final LatestBooleanReconciler telegramReconciler =
             new LatestBooleanReconciler("TelegramState") {
                 @Override
@@ -3404,10 +4000,20 @@ public class AccSentryDaemon {
             }
 
             inSentryMode = entering;
-            if (!entering) {
+            if (entering) {
+                sentryEnteredAtElapsedMs = android.os.SystemClock.elapsedRealtime();
+            } else {
                 surveillanceEnabled = false;
             }
             generation = sentryTransitionGeneration.incrementAndGet();
+            // Initialize the episode-scoped low-battery reconcilers before
+            // publishing the new sentry generation. A HAL callback can run on
+            // another Binder thread immediately after publication; resetting
+            // outside this lock would let that legitimate LOW request land
+            // first and then be overwritten by our stale initialization.
+            resetLowBatteryWakeEpisode();
+            lowBatteryStopReconciler.request(generation, false);
+            lowBatteryWakeReconciler.request(generation, false);
             latestSentryTransition = new SentryTransitionState(
                     generation, entering, entering && vehicleOnOnly);
             parkReaperTokenReconciler.request(
@@ -3417,8 +4023,6 @@ public class AccSentryDaemon {
                 keepAlive.interrupt();
             }
         }
-        lowBatteryStopReconciler.request(generation, false);
-        lowBatteryWakeReconciler.request(generation, false);
         return generation;
     }
 
@@ -3427,13 +4031,18 @@ public class AccSentryDaemon {
         parkReaperTokenReconciler.request(
                 state.generation,
                 state.sentryMode && state.vehicleOnOnly);
-        peripheralPowerReconciler.request(state.generation, keepAwake);
+        peripheralPowerReconciler.request(
+                state.generation,
+                shouldApplyHardwarePeripheralPower(state));
         sentrySetupReconciler.request(state.generation, keepAwake);
         parkReaperReconciler.request(
                 state.generation, state.sentryMode && state.vehicleOnOnly);
         notifyAccState(state.generation, state.sentryMode, false);
         monitorReconciler.request(state.generation, keepAwake);
         keepAliveReconciler.request(state.generation, keepAwake);
+        // Not keyed to the camera-mode selection (see installDi5ParkedKeepAlive);
+        // the lease is inert while the user's master toggle is OFF.
+        di5KeepAliveReconciler.request(state.generation, keepAwake);
         telegramReconciler.request(state.generation, keepAwake);
         panelReconciler.request(state.generation, !state.sentryMode);
     }
@@ -3441,6 +4050,35 @@ public class AccSentryDaemon {
     private static void requestPanelForLatestTransition() {
         SentryTransitionState latest = latestSentryTransition;
         panelReconciler.requestReapply(latest.generation, !latest.sentryMode);
+    }
+
+    /**
+     * Re-darkens after a full AP wake and waits only after the bounded hardware
+     * lane has been released. Intentional panel owners (screen deterrent or a
+     * legacy display-coupled camera lease) keep reconciliation pending without
+     * stalling the keepalive thread on a timeout.
+     */
+    private static void requestAndAwaitPanelDarkAfterWake(
+            long generation, String source) {
+        if (!isSentryTransitionCurrent(generation, true)) return;
+        panelReconciler.requestReapply(generation, false);
+        if (!isSentryTransitionCurrent(generation, true)) return;
+
+        if (isScreenDeterrentActive()) {
+            log(source + ": panel re-darkening deferred to active deterrent");
+            return;
+        }
+        boolean verifiedPanelMode =
+                isDilink4CameraMode() || isDilink5CameraMode();
+        if (!verifiedPanelMode && isCameraPipelineActive()) {
+            log(source + ": panel re-darkening deferred to active camera lease");
+            return;
+        }
+        if (!panelReconciler.awaitApplied(
+                generation, false, PANEL_REDARKEN_AWAIT_MS)) {
+            log(source + ": panel-off reconciliation still pending after "
+                    + PANEL_REDARKEN_AWAIT_MS + "ms");
+        }
     }
 
     private static boolean isSentryTransitionGenerationCurrent(long generation) {
@@ -3515,6 +4153,8 @@ public class AccSentryDaemon {
             log("Sentry mode setup wake was not confirmed; retrying");
             return false;
         }
+        requestAndAwaitPanelDarkAfterWake(
+                generation, "Sentry setup wake");
         log("Sentry mode setup complete");
         return true;
     }
@@ -3638,6 +4278,12 @@ public class AccSentryDaemon {
                     && heartbeat != Thread.currentThread()) {
                 heartbeat.interrupt();
             }
+
+            // DiLink 5 parked keep-alive lease: release synchronously while the
+            // HAL binders are still healthy so no sentry flag, heartbeat or AP
+            // token outlives this process. Idempotent; no-op when nothing is held.
+            com.overdrive.app.power.Di5ParkedPowerHold
+                    .releaseForProcessExit("daemon shutdown");
 
             SentryTransitionState shutdownTransition =
                     beginShutdownAccOnTransition();
@@ -4241,6 +4887,30 @@ public class AccSentryDaemon {
                 }
             }
 
+            // Verified-panel platforms (DiLink 4/5) park with the vendor
+            // TurnBacklightOffWithLock held. Everything above is backlight-API
+            // only and shares its blind spot: getPowerScreenStatus() reports
+            // the screen POLICY, which reads ON while the lock keeps the rail
+            // dark, so a status-gated wake can report "verified" over a black
+            // panel. StealthPanel.turnOn now releases the lock unconditionally;
+            // this escalation adds the levers that do not consult the flag at
+            // all and verifies the result once. Legacy units are untouched.
+            //
+            // Only for a DEFINITIVE ON: a real ACC-on transition (generation > 0)
+            // or a start-up whose probe was trustworthy. The generation-0 start-up
+            // wake on an UNKNOWN reading is deliberately fail-visible for the
+            // backlight tiers, but it also runs on every respawn of a parked
+            // daemon — and a full PowerManager.wakeUp there would light and wake
+            // a sleeping car every time the watchdog respawns it.
+            boolean definitiveOn = generation > 0L
+                    || com.overdrive.app.monitor.AccMonitor.wasLastProbeTrustworthy();
+            if (definitiveOn
+                    && isPanelRequestCurrent(generation, true)
+                    && (isDilink4CameraMode() || isDilink5CameraMode())) {
+                panelWriteCommitted |=
+                        escalatePanelWakeAfterVendorRelease(generation);
+            }
+
             if (isPanelRequestCurrent(generation, true)) {
                 try {
                     if (!isPanelRequestCurrent(generation, true)) {
@@ -4283,8 +4953,9 @@ public class AccSentryDaemon {
             return true;
         }
 
-        boolean dilink4 = isDilink4CameraMode();
-        if (!dilink4) {
+        boolean verifiedPanelMode =
+                isDilink4CameraMode() || isDilink5CameraMode();
+        if (!verifiedPanelMode) {
             if (!isScreenDeterrentActive() && !isCameraPipelineActive()) {
                 if (!isPanelRequestCurrent(generation, false)) {
                     return true;
@@ -4329,19 +5000,149 @@ public class AccSentryDaemon {
         return false;
     }
 
+    /**
+     * ACC-ON wake escalation for the verified-panel platforms (DiLink 4/5), run
+     * after {@code StealthPanel.turnOn} and the tier-1 {@code setBacklightState}
+     * retries inside {@link #applyPanelState}.
+     *
+     * <p>Why it exists: the parked panel is held dark by the vendor
+     * {@code TurnBacklightOffWithLock}, and the only verification available —
+     * {@code getPowerScreenStatus()} — reports the display policy, not the rail.
+     * Field symptom: ignition, cluster on, centre screen black for the whole
+     * drive, recoverable only by a head-unit reboot. The two levers below do not
+     * consult that flag: {@code PowerManager.wakeUp} (the same AP wake the
+     * keep-alive casts every 8 min, which its own comments record as lighting
+     * the panel) and, on DiLink 5, {@code KEYCODE_WAKEUP}. Then verify once and,
+     * if the panel still reads OFF, re-assert the vendor release + wake a single
+     * time. Deliberately bounded to ONE extra pass with no reconciler retry: the
+     * whole ON apply must fit the 15 s hardware-lane budget, and looping the
+     * full sequence (two config writes per pass) every 5 s for a lock keyed to a
+     * token this process cannot supply would be churn with no upside.
+     *
+     * @return true when at least one wake lever was actually issued.
+     */
+    private static boolean escalatePanelWakeAfterVendorRelease(long generation) {
+        ShellOwnership ownership =
+                () -> isPanelRequestCurrent(generation, true);
+        boolean issued = wakeApplicationProcessorForPanel(ownership);
+        if (!issued && isDilink5CameraMode() && isShellOwnershipCurrent(ownership)) {
+            // KEYCODE_WAKEUP ends in the same PowerManagerService.wakeUp; it is only
+            // worth an `input` process spawn (1-3 s on a head unit at ignition) when
+            // the reflective call itself failed. Keeping it a fallback protects the
+            // 15 s hardware-lane budget, which the 3x setBacklightState loop above
+            // already spends on `input keyevent` when the reflection tiers are absent.
+            ShellResult keyResult = execShellResult(
+                    "input keyevent 224",
+                    PANEL_WAKE_KEYEVENT_TIMEOUT_MS, ownership);
+            if (keyResult.success) {
+                issued = true;
+            } else {
+                log("ACC-ON wake escalation: KEYCODE_WAKEUP failed: "
+                        + keyResult.describeFailure());
+            }
+        }
+        if (!sleepForPanelRequest(generation, true, 1000L)) {
+            return issued;
+        }
+        boolean stillOff;
+        try {
+            stillOff = com.overdrive.app.power.StealthPanel
+                    .isPanelOff(appContext);
+        } catch (Throwable t) {
+            stillOff = false;
+        }
+        if (!stillOff) {
+            return issued;
+        }
+        log("WARN: panel still reads OFF after ACC-ON wake escalation — "
+                + "re-asserting vendor lock release + wake once");
+        if (!isPanelRequestCurrent(generation, true)) {
+            return issued;
+        }
+        try {
+            issued |= com.overdrive.app.power.StealthPanel.turnOn(appContext);
+        } catch (Throwable t) {
+            log("ACC-ON wake escalation: second StealthPanel.turnOn failed: "
+                    + t.getMessage());
+        }
+        issued |= wakeApplicationProcessorForPanel(ownership);
+        try {
+            if (com.overdrive.app.power.StealthPanel.isPanelOff(appContext)) {
+                log("WARN: panel STILL reads OFF after second ACC-ON escalation "
+                        + "pass — vendor backlight lock may be held by a token "
+                        + "this process cannot supply");
+            }
+        } catch (Throwable ignored) {}
+        return issued;
+    }
+
+    // KEYCODE_WAKEUP is a belt-and-braces lever inside the 15 s ON apply; a
+    // wedged `input` binary must not eat the lane budget the way the 10 s
+    // DEFAULT_SHELL_TIMEOUT_MS would.
+    private static final long PANEL_WAKE_KEYEVENT_TIMEOUT_MS = 3_000L;
+
+    /**
+     * {@code PowerManager.wakeUp} WITHOUT the trailing
+     * {@code requestPanelForLatestTransition()} that {@link #performSystemWakeUp}
+     * adds. Called from inside {@link #applyPanelState}, that re-request would
+     * bump the PanelState reconciler's revision and make it re-run this very
+     * apply — an infinite ON loop. Runs inline on the lane's worker thread, so it
+     * is already bounded by applyPanelStateBounded's 15 s.
+     */
+    private static boolean wakeApplicationProcessorForPanel(
+            ShellOwnership ownership) {
+        if (appContext == null) return false;
+        try {
+            Context permissiveContext = new PermissionBypassContext(appContext);
+            PowerManager pm = (PowerManager)
+                    permissiveContext.getSystemService(Context.POWER_SERVICE);
+            if (pm == null) return false;
+            if (pmWakeUp3ArgMethod == null) {
+                pmWakeUp3ArgMethod = PowerManager.class.getMethod(
+                        "wakeUp", Long.TYPE, Integer.TYPE, String.class);
+            }
+            if (!isShellOwnershipCurrent(ownership)) return false;
+            pmWakeUp3ArgMethod.invoke(
+                    pm,
+                    android.os.SystemClock.uptimeMillis(),
+                    getSystemSleepReasonCode(),
+                    "ACC_ON");
+            log("ACC-ON wake escalation: PowerManager.wakeUp sent");
+            return true;
+        } catch (Throwable t) {
+            log("ACC-ON wake escalation: PowerManager.wakeUp failed: "
+                    + t.getMessage());
+            return false;
+        }
+    }
+
     private static boolean setBacklightState(boolean on) {
-        return setBacklightState(on, null);
+        return setBacklightState(on, null, false);
     }
 
     private static boolean setBacklightState(
             long generation, boolean on) {
         ShellOwnership ownership =
                 () -> isPanelRequestCurrent(generation, on);
-        return setBacklightState(on, ownership);
+        // A parked keep-USB session requires an awake AP: KEYCODE_SLEEP would
+        // collapse CPU/radios/USB and make the next periodic wake look like a
+        // boot animation. Device sleep remains available only when the user
+        // explicitly disabled parked USB power.
+        boolean allowDeviceSleep = !on
+                && isSentryTransitionCurrent(generation, true)
+                && !isKeepUsbPowerOnAccOff();
+        return setBacklightState(on, ownership, allowDeviceSleep);
     }
 
     private static boolean setBacklightState(
             boolean on, ShellOwnership ownership) {
+        return setBacklightState(on, ownership, false);
+    }
+
+    private static boolean setBacklightState(
+            boolean on,
+            ShellOwnership ownership,
+            boolean allowDeviceSleep) {
         log("Setting backlight: " + (on ? "ON" : "OFF"));
 
         // Try PowerManager reflection
@@ -4349,6 +5150,29 @@ public class AccSentryDaemon {
             try {
                 PowerManager pm = (PowerManager) appContext.getSystemService(Context.POWER_SERVICE);
                 Class<?> pmClass = pm.getClass();
+
+                // Legacy keepalive asks for panel OFF every 10 seconds so it
+                // can recover from external relights. When this firmware
+                // exposes getPowerScreenStatus(), avoid firing another vendor
+                // backlight write if the panel is already confirmed dark.
+                // This turns the steady state into one read instead of one or
+                // two mutating Binder calls per tick.
+                if (!on) {
+                    resolvePmGetPowerScreenStatus();
+                    if (pmGetPowerScreenStatusResolved) {
+                        try {
+                            Object value =
+                                    pmGetPowerScreenStatusMethod.invoke(pm);
+                            if (value instanceof Number
+                                    && ((Number) value).intValue() == 0) {
+                                return true;
+                            }
+                        } catch (Throwable ignored) {
+                            // Transient status failure must not suppress the
+                            // existing darken fallback.
+                        }
+                    }
+                }
 
                 // First-call probe of lowercase variant; cached thereafter.
                 // Original semantics: lowercase invoke-time exceptions
@@ -4407,7 +5231,36 @@ public class AccSentryDaemon {
             }
         }
 
-        // Fallback: Settings brightness & StealthPanel
+        // DiLink 5 fallback: never write Settings.System screen_brightness.
+        // That value is the user's persistent slider, so using it as a panel
+        // power control clobbers the driver's preference on every parked
+        // re-darken tick. Wake with the non-persistent key event; darken with
+        // the verified StealthPanel path that leaves brightness untouched.
+        if (isDilink5CameraMode()) {
+            if (on) {
+                ShellResult keyResult = execShellResult(
+                        "input keyevent 224",
+                        DEFAULT_SHELL_TIMEOUT_MS, ownership);
+                if (!keyResult.success) {
+                    log("Backlight shell fallback failed: keyevent="
+                            + keyResult.describeFailure());
+                }
+                return keyResult.success;
+            }
+            if (!isShellOwnershipCurrent(ownership)) {
+                return false;
+            }
+            try {
+                return com.overdrive.app.power.StealthPanel
+                        .turnOff(appContext);
+            } catch (Throwable failure) {
+                log("DiLink 5 stealth panel fallback failed: "
+                        + failure.getMessage());
+                return false;
+            }
+        }
+
+        // Legacy fallback: Settings brightness
         int brightness = on ? 128 : 0;
         ShellResult brightnessResult = execShellResult(
                 "settings put system screen_brightness " + brightness,
@@ -4420,19 +5273,26 @@ public class AccSentryDaemon {
                     "input keyevent 224",
                     DEFAULT_SHELL_TIMEOUT_MS, ownership);
             if (!keyResult.success) {
-                log("Backlight shell fallback failed: keyevent=" + keyResult.describeFailure());
+                log("Backlight shell fallback failed: keyevent="
+                        + keyResult.describeFailure());
             }
             return keyResult.success;
-        } else {
-            // CRITICAL: Do NOT send "input keyevent 223" (KEYCODE_SLEEP).
-            // KEYCODE_SLEEP forces mWakefulness to Asleep, which triggers mHalAutoSuspendModeEnabled
-            // and kernel suspend-to-RAM, freezing CPU, Wi-Fi, and LTE.
-            // Brightness 0 + turnBacklightOff keeps mWakefulness Awake while display is fully dark.
-            try {
-                com.overdrive.app.power.StealthPanel.turnOff(appContext);
-            } catch (Throwable ignored) {}
+        }
+        if (!allowDeviceSleep) {
+            log("Panel-only fallback applied; KEYCODE_SLEEP suppressed "
+                    + "to preserve parked AP/USB wakefulness");
             return true;
         }
+        // KEYCODE_SLEEP moves Android to Asleep, so this remains a
+        // legacy-only fallback. DiLink 5 returned through StealthPanel above.
+        ShellResult keyResult = execShellResult(
+                "input keyevent 223",
+                DEFAULT_SHELL_TIMEOUT_MS, ownership);
+        if (!keyResult.success) {
+            log("Backlight shell fallback failed: keyevent="
+                    + keyResult.describeFailure());
+        }
+        return keyResult.success;
     }
 
     /**
@@ -4451,7 +5311,7 @@ public class AccSentryDaemon {
             return;
         }
 
-        // DiLink 4: use the verified two-tier backlight path rather than
+        // DiLink 4/5: use the verified two-tier backlight path rather than
         // goToSleep. goToSleep is a full AP sleep request, which the reference
         // app reserves for its own shutdown path — for "dark panel, CPU alive"
         // it uses TurnBacklightOff(+WithLock) and verifies with
@@ -4463,12 +5323,52 @@ public class AccSentryDaemon {
         // state"), so the next person to wire it up gets the verified path
         // instead of an unverified one. Legacy pano_h/pano_l units are
         // unaffected and keep the original goToSleep behaviour.
+        boolean dilink4 = isDilink4CameraMode();
+        if (!dilink4 && isDilink5CameraMode()) {
+            try {
+                boolean darkened =
+                        com.overdrive.app.power.StealthPanel
+                                .turnOff(appContext);
+                if (darkened) {
+                    log("enforceSmartSleep: used verified backlight-off path");
+                } else {
+                    log("enforceSmartSleep: panel-off verification failed; retrying");
+                    requestPanelForLatestTransition();
+                }
+            } catch (Throwable t) {
+                log("enforceSmartSleep backlight-off failed: " + t.getMessage());
+                requestPanelForLatestTransition();
+            }
+            return;
+        }
+        if (dilink4) {
+            try {
+                com.overdrive.app.power.StealthPanel.turnOff(appContext);
+                log("enforceSmartSleep: used verified backlight-off path");
+            } catch (Throwable t) {
+                log("enforceSmartSleep backlight-off failed: " + t.getMessage());
+            }
+            return;
+        }
+
         try {
-            com.overdrive.app.power.StealthPanel.turnOff(appContext);
-            setBacklightState(false);
-            log("enforceSmartSleep: display darkened without triggering Asleep state");
-        } catch (Throwable t) {
-            log("enforceSmartSleep failed: " + t.getMessage());
+            Context permissiveContext = new PermissionBypassContext(appContext);
+            PowerManager pm = (PowerManager) permissiveContext.getSystemService(Context.POWER_SERVICE);
+
+            // Method signature: goToSleep(long time, int reason, int flags)
+            Method method = PowerManager.class.getMethod("goToSleep", Long.TYPE, Integer.TYPE, Integer.TYPE);
+
+            // Dynamically retrieve the system-specific reason code (Compatibility Mode)
+            // This ensures the command is accepted by the Body Control Module
+            int reasonID = getSystemSleepReasonCode();
+
+            // Execute with Flag 1 (GO_TO_SLEEP_FLAG_NO_DOZE)
+            // Flag 1 is the critical component: Screen OFF, but CPU/Radio remain ACTIVE.
+            method.invoke(pm, android.os.SystemClock.uptimeMillis(), reasonID, 1);
+
+        } catch (Exception e) {
+            log("Smart sleep state enforcement failed: " + e.getMessage());
+            // Graceful fallback to basic backlight control if reflection fails
             setBacklightState(false);
         }
     }
@@ -4495,6 +5395,22 @@ public class AccSentryDaemon {
 
         final Thread keepAliveThread = new Thread(() -> {
             log("System Persistence Service started");
+            if (isDilink5CameraMode()) {
+                // Read-only observability probe: records what this firmware
+                // reports so a future field-verified signature can be added to
+                // VERIFIED_DILINK5_RAIL_SIGNATURES. Runs on this background
+                // thread only; the synchronous gate never touches the HAL.
+                String railSignature = probeDilink5RailSignature();
+                if (isVerifiedDilink5RailCapability()) {
+                    log("DI5 vehicle-rail keep-alive enabled "
+                            + "(verified rail capability: " + railSignature + ")");
+                } else {
+                    log("DI5 keep-alive is limited to Android CPU/network holds "
+                            + "and periodic AP wake; rail control fails closed "
+                            + "(observed " + railSignature
+                            + " has no field-verified rail write)");
+                }
+            }
 
             // Re-assert cadence for the OEM 409 camera/ISP power vote. The
             // loop ticks every SYSTEM_KEEPALIVE_INTERVAL_MS (10s); the ISP
@@ -4538,6 +5454,13 @@ public class AccSentryDaemon {
             // a negative value and the backoff gate would never open. Seeding
             // one backoff below zero makes the first eligible tick pass exactly.
             long lastSdRecoveryTick = -SD_RECOVERY_BASE_BACKOFF_TICKS;
+            SdMountedLeaseSnapshot sdMountedLease =
+                    readSdMountedLeaseSnapshot();
+            int sdExplicitFalseSamples = 0;
+            if (isSdConfiguredAsStorageTarget()) {
+                log("SD reactive recovery evidence at sentry entry: "
+                        + sdMountedLease.evidence);
+            }
             // Cellular keep-alive arming snapshot (issue #209). The sentry rail hold
             // keeps the modem POWERED across ACC-OFF, but on some firmware (reported
             // on Seal 2025 / system 2506) the system still flips the mobile-data
@@ -4562,7 +5485,21 @@ public class AccSentryDaemon {
             long tick = 0;
 
             while (running && isKeepAliveCommitCurrent(transitionGeneration)) {
+                boolean panelReapplyRequestedThisTick = false;
                 try {
+                    if (isDilink5CameraMode()) {
+                        acquireWakeLock();
+                        if (tick % DILINK5_ADB_CHECK_EVERY_TICKS == 0) {
+                            recoverDilink5AdbIfNeeded(transitionGeneration);
+                        }
+                    }
+                    // Parked keep-alive lease (Experimental): re-reads the
+                    // toggle, samples 12 V, re-asserts or releases its levers.
+                    // Runs on every platform — DiLink 5 head units exist with
+                    // and without the QCarCam camera stack, so the lease keys
+                    // off the user's master toggle, never off the camera-mode
+                    // selection. Inert (one config read) while the toggle is off.
+                    di5KeepAliveTick(transitionGeneration);
                     // 1. Maintain Network Interface Stability
                     if (!isKeepAliveCommitCurrent(transitionGeneration)) break;
                     ensureWifiEnabled(transitionGeneration);
@@ -4590,6 +5527,7 @@ public class AccSentryDaemon {
                                         transitionGeneration),
                                 AccSentryDaemon::requestPanelForLatestTransition);
                         requestPanelForLatestTransition();
+                        panelReapplyRequestedThisTick = true;
                     }
 
                     // ScreenDeterrent gate: if a screen deterrent is currently
@@ -4616,7 +5554,7 @@ public class AccSentryDaemon {
                     // timer. So dilink4 parked with a fully-lit screen.
                     //
                     // The fix is NOT to suppress display power. Verified against
-                    // the byd_apa reference app (
+                    // the platform camera implementation (
                     // BacklightController + DeviceWakeupMonitor): it turns the
                     // backlight genuinely OFF at park entry WHILE its
                     // AVMCameraRecordAgent is recording, so backlight-off is not
@@ -4675,7 +5613,8 @@ public class AccSentryDaemon {
                     // local (the obvious-looking cleanup) would force a ~10 KB JSON
                     // re-parse every 10 s on EVERY unit — the ≈3.6 MB/hour churn
                     // that isScreenDeterrentActive's own javadoc exists to avoid.
-                    if (isKeepAliveCommitCurrent(transitionGeneration)) {
+                    if (isKeepAliveCommitCurrent(transitionGeneration)
+                            && !panelReapplyRequestedThisTick) {
                         panelReconciler.requestReapply(
                                 transitionGeneration, false);
                     }
@@ -4709,7 +5648,8 @@ public class AccSentryDaemon {
                     // enterSentryMode vote. ALWAYS on — this is the CAMERA/ISP
                     // rail, not the USB rail; the USB toggle never gates it.
                     if (tick % ISP_VOTE_REASSERT_EVERY_TICKS == 0
-                            && isKeepAliveCommitCurrent(transitionGeneration)) {
+                            && isKeepAliveCommitCurrent(transitionGeneration)
+                            && isVehicleRailControlSupported()) {
                         peripheralPowerReconciler.requestReapply(
                                 transitionGeneration, true);
                     }
@@ -4729,21 +5669,85 @@ public class AccSentryDaemon {
                     // rail is confirmed dead, SD is a configured storage target,
                     // the backoff window has elapsed, and keep-USB is ON.
                     boolean sdRecoveryTick = false;
+                    boolean sdRecoveryConfigured =
+                            isKeepUsbPowerOnAccOff()
+                                    && isSdConfiguredAsStorageTarget();
+                    SdRailState sdRailState = SdRailState.UNKNOWN;
+                    if (sdRecoveryConfigured) {
+                        sdRailState = readSdRailState();
+                        if (sdRailState == SdRailState.ABSENT) {
+                            SdMountedLeaseSnapshot observedLease =
+                                    readSdMountedLeaseSnapshot();
+                            boolean mountedHeartbeatAdvanced =
+                                    observedLease.evidence
+                                            == SdMountedLeaseEvidence.FRESH_MOUNT
+                                    && observedLease.deadlineMs
+                                            > sdMountedLease.deadlineMs;
+                            sdMountedLease = observedLease;
+                            if (mountedHeartbeatAdvanced) {
+                                // The vendor property is false, but
+                                // CameraDaemon just reconfirmed the mounted
+                                // volume. Treat this as a false property, not
+                                // a dead rail.
+                                sdExplicitFalseSamples = 0;
+                                sdRecoveryBackoffTicks =
+                                        SD_RECOVERY_BASE_BACKOFF_TICKS;
+                            } else {
+                                sdExplicitFalseSamples++;
+                            }
+                        } else {
+                            // UNKNOWN breaks the "consecutive explicit false"
+                            // contract; PRESENT also starts a new outage and
+                            // refreshes the last known mounted evidence.
+                            sdExplicitFalseSamples = 0;
+                            if (sdRailState == SdRailState.PRESENT) {
+                                sdRecoveryBackoffTicks =
+                                        SD_RECOVERY_BASE_BACKOFF_TICKS;
+                                sdMountedLease =
+                                        readSdMountedLeaseSnapshot();
+                            }
+                        }
+                    } else {
+                        sdExplicitFalseSamples = 0;
+                    }
+
+                    boolean sdAbsenceConfirmed;
+                    if (sdMountedLease.evidence
+                            == SdMountedLeaseEvidence.FRESH_MOUNT) {
+                        // Three unchanged samples span two full 10-second
+                        // intervals, longer than the healthy 15-second mounted
+                        // heartbeat cadence. A continuously mounted card
+                        // advances the lease and resets this sequence.
+                        sdAbsenceConfirmed = sdExplicitFalseSamples
+                                >= SD_RECOVERY_FALSE_CONFIRM_SAMPLES;
+                    } else if (sdMountedLease.evidence
+                            == SdMountedLeaseEvidence.UNAVAILABLE) {
+                        // Compatibility fallback for mixed-version installs or
+                        // a filesystem-permission failure. Keep recovery
+                        // available, but require the same consecutive-false
+                        // debounce: SD_RECOVERY_MIN_TICK already means a real
+                        // continuous outage still recovers at the original
+                        // ~30-second boundary, while one late/glitched false can
+                        // no longer authorize a full AP wake.
+                        sdAbsenceConfirmed = sdExplicitFalseSamples
+                                >= SD_RECOVERY_FALSE_CONFIRM_SAMPLES;
+                    } else {
+                        // A current publisher explicitly has no fresh mounted
+                        // evidence. Do not wake for a property known to report
+                        // false on seated SCSI/USB-bridged cards; the periodic
+                        // 8-minute re-assert remains the backstop.
+                        sdAbsenceConfirmed = false;
+                    }
                     if (tick >= SD_RECOVERY_MIN_TICK
                             && (tick - lastSdRecoveryTick) >= sdRecoveryBackoffTicks
-                            && isKeepUsbPowerOnAccOff()
-                            && isSdConfiguredAsStorageTarget()) {
-                        if (isSdRailDead()) {
-                            sdRecoveryTick = true;
-                            lastSdRecoveryTick = tick;
-                            // Exponential backoff, capped at the periodic cadence.
-                            sdRecoveryBackoffTicks = Math.min(
-                                sdRecoveryBackoffTicks * 2, MCU_REWAKE_EVERY_TICKS);
-                        } else {
-                            // Rail alive — reset so a later mid-park drop gets the
-                            // fast 30s response again.
-                            sdRecoveryBackoffTicks = SD_RECOVERY_BASE_BACKOFF_TICKS;
-                        }
+                            && sdRecoveryConfigured
+                            && sdAbsenceConfirmed) {
+                        sdRecoveryTick = true;
+                        sdExplicitFalseSamples = 0;
+                        lastSdRecoveryTick = tick;
+                        // Exponential backoff, capped at the periodic cadence.
+                        sdRecoveryBackoffTicks = Math.min(
+                            sdRecoveryBackoffTicks * 2, MCU_REWAKE_EVERY_TICKS);
                     }
                     if ((sdRecoveryTick || (tick > 0 && tick % MCU_REWAKE_EVERY_TICKS == 0))
                             && isKeepUsbPowerOnAccOff()
@@ -4756,8 +5760,10 @@ public class AccSentryDaemon {
                                     : "8-min cadence") + ")");
                             // Re-assert the MCU + peripheral rails (idempotent;
                             // self-wakes the MCU if the BCM slept it).
-                            peripheralPowerReconciler.requestReapply(
-                                    transitionGeneration, true);
+                            if (isVehicleRailControlSupported()) {
+                                peripheralPowerReconciler.requestReapply(
+                                        transitionGeneration, true);
+                            }
                             if (!isKeepAliveCommitCurrent(transitionGeneration)) {
                                 break;
                             }
@@ -4814,7 +5820,15 @@ public class AccSentryDaemon {
                                     }
                                 } catch (Throwable ignored) {}
                             }
-                            requestPanelForLatestTransition();
+                            if (wakeCommitted) {
+                                requestAndAwaitPanelDarkAfterWake(
+                                        transitionGeneration,
+                                        sdRecoveryTick
+                                                ? "SD recovery wake"
+                                                : "Periodic keepalive wake");
+                            } else {
+                                requestPanelForLatestTransition();
+                            }
                         } catch (Throwable t) {
                             log("Periodic MCU re-wake / rail re-assert failed: " + t.getMessage());
                         }
@@ -4936,6 +5950,60 @@ public class AccSentryDaemon {
             }
             log("System Persistence Service failed to start: "
                     + startFailure.getMessage());
+            return false;
+        }
+    }
+
+    private static void recoverDilink5AdbIfNeeded(long transitionGeneration)
+            throws InterruptedException {
+        if (!isDilink5CameraMode()
+                || !isKeepAliveCommitCurrent(transitionGeneration)) {
+            return;
+        }
+        if (isLoopbackPortOpen(ADB_TCP_PORT)) {
+            lastAdbRecoveryAttemptElapsedMs =
+                    -DILINK5_ADB_RECOVERY_RETRY_MS;
+            return;
+        }
+
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (now - lastAdbRecoveryAttemptElapsedMs
+                < DILINK5_ADB_RECOVERY_RETRY_MS) {
+            return;
+        }
+        lastAdbRecoveryAttemptElapsedMs = now;
+        log("DI5 ADB port 5555 is closed; applying scoped recovery settings");
+        ShellResult result = execShellResult(
+                "settings put global adb_enabled 1"
+                        + " && settings put global adb_wifi_enabled 1"
+                        + " && settings put global adb_allowed_connection_time 0",
+                DEFAULT_SHELL_TIMEOUT_MS,
+                () -> isKeepAliveCommitCurrent(transitionGeneration));
+        if (!result.success) {
+            log("DI5 ADB recovery failed: " + result.describeFailure());
+            return;
+        }
+
+        Thread.sleep(1000L);
+        if (!isKeepAliveCommitCurrent(transitionGeneration)) {
+            return;
+        }
+        if (isLoopbackPortOpen(ADB_TCP_PORT)) {
+            lastAdbRecoveryAttemptElapsedMs =
+                    -DILINK5_ADB_RECOVERY_RETRY_MS;
+            log("DI5 ADB port 5555 recovered");
+        } else {
+            log("DI5 ADB recovery settings applied, but port 5555 remains closed");
+        }
+    }
+
+    private static boolean isLoopbackPortOpen(int port) {
+        try (Socket socket = new Socket()) {
+            socket.connect(
+                    new java.net.InetSocketAddress("127.0.0.1", port),
+                    250);
+            return true;
+        } catch (Exception ignored) {
             return false;
         }
     }
@@ -5101,21 +6169,310 @@ public class AccSentryDaemon {
      * True when the user has selected DiLink 4 mode for the camera. On
      * byd_apa firmware the AVMCamera HAL tears down the preview surface
      * whenever the display backlight goes off, so the keepalive's
-     * setBacklightState(false) tick must be suppressed entirely. Reads
-     * the same UnifiedConfigManager cross-UID cache as the screen-deterrent
-     * gate; cheap (~0 GC churn between writes since loadConfig() is mtime-
-     * gated). Returns false on any failure so a stuck flag can never
-     * keep the legacy fleet's screen on permanently.
+     * setBacklightState(false) tick must be suppressed entirely. Uses the
+     * active-mode fence so a staged mode change cannot alter power behavior
+     * before the replacement daemon commits it.
      */
     private static boolean isDilink4CameraMode() {
         try {
-            org.json.JSONObject c = com.overdrive.app.config.UnifiedConfigManager.loadConfig()
-                    .optJSONObject("camera");
-            if (c == null) return false;
-            return "dilink4".equalsIgnoreCase(c.optString("cameraMode", "default"));
+            return com.overdrive.app.camera.dilink5.DiLink5Platform
+                    .isDiLink4Selected();
         } catch (Throwable t) {
             return false;
         }
+    }
+
+    private static boolean isDilink5CameraMode() {
+        return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
+    }
+
+    // ==================== DILINK 5 PARKED KEEP-ALIVE LEASE (EXPERIMENTAL) ====================
+    //
+    // Opt-in (Surveillance → General → "DiLink 5 parked keep-alive (Experimental)",
+    // default OFF). The lease controller lives in com.overdrive.app.power
+    // .Di5ParkedPowerHold; this daemon only supplies its hardware/shell/voltage
+    // seam, installs it at start-up, requests it on sentry transitions and ticks
+    // it from the 10 s keep-alive loop. Every write it can issue goes through
+    // McuPowerHal's lease-only path, so the legacy DI5 fail-closed gates
+    // (VERIFIED_DILINK5_RAIL_SIGNATURES, McuPowerHal.isDilink5Mode()) are untouched.
+    //
+    // NOT keyed to the camera-mode selection. DiLink 5 head units come in two
+    // flavours: with the QCarCam camera stack (the user selects the "dilink5"
+    // camera mode) and without it (the user keeps another camera mode). The
+    // MCU/sentry flags are a vehicle-power lever, not a camera one, so the
+    // user's Experimental master toggle is the only platform declaration —
+    // isDilink5CameraMode() must never gate this section, and it is independent
+    // of the separate di5CloudKeepAlive experiment as well.
+
+    /**
+     * Install the lease controller and run marker-scoped hygiene. Runs on every
+     * platform; the controller is inert until the master toggle is ON.
+     */
+    private static void installDi5ParkedKeepAlive() {
+        if (appContext == null) {
+            log("Di5 keep-alive: no context — lease not installed");
+            return;
+        }
+        try {
+            com.overdrive.app.power.Di5ParkedPowerHold hold =
+                    new com.overdrive.app.power.Di5ParkedPowerHold(
+                            new Di5KeepAliveHardware(),
+                            generation -> isSentryTransitionCurrent(generation, true),
+                            AccSentryDaemon::di5ParkedKeepAliveSettingsSnapshot);
+            com.overdrive.app.power.Di5ParkedPowerHold.install(hold);
+            com.overdrive.app.power.Di5ParkedKeepAliveSettings settings =
+                    di5ParkedKeepAliveSettingsSnapshot();
+            log("Di5 keep-alive lease installed (" + settings + ")");
+            // probeAccState() returns true only when ACC is CONFIRMED OFF; any
+            // failure reads as ON here, which is the safe direction for hygiene:
+            // releasing flags a dead predecessor recorded can only be re-done by
+            // the next parked transition, whereas leaving them set cannot.
+            // The probe is lazy: it only runs when an ownership marker exists.
+            hold.onDaemonStart(() ->
+                    !com.overdrive.app.monitor.AccMonitor.probeAccState(appContext));
+        } catch (Throwable t) {
+            log("Di5 keep-alive: lease install failed: " + t.getMessage());
+        }
+    }
+
+    /** 10 s keep-alive tick for the lease. No-op when not installed. */
+    private static void di5KeepAliveTick(long transitionGeneration) {
+        com.overdrive.app.power.Di5ParkedPowerHold hold =
+                com.overdrive.app.power.Di5ParkedPowerHold.installedInstance();
+        if (hold == null) return;
+        try {
+            hold.tick(transitionGeneration);
+        } catch (Throwable t) {
+            log("Di5 keep-alive tick failed: " + t.getMessage());
+        }
+    }
+
+    /** Fresh settings snapshot: flat surveillance.* keys plus the kill switch. */
+    private static com.overdrive.app.power.Di5ParkedKeepAliveSettings
+            di5ParkedKeepAliveSettingsSnapshot() {
+        org.json.JSONObject surveillance = null;
+        try {
+            surveillance = com.overdrive.app.config.UnifiedConfigManager.getSurveillance();
+        } catch (Throwable ignored) {
+        }
+        boolean killSwitch = com.overdrive.app.power.Di5ParkedKeepAliveSettings
+                .isKillSwitchValue(readSystemPropertyForKeepAlive(
+                        com.overdrive.app.power.Di5ParkedKeepAliveSettings.KILL_SWITCH_PROPERTY));
+        return com.overdrive.app.power.Di5ParkedKeepAliveSettings
+                .fromSurveillance(surveillance, killSwitch);
+    }
+
+    private static String readSystemPropertyForKeepAlive(String key) {
+        try {
+            Class<?> sp = Class.forName("android.os.SystemProperties");
+            Object v = sp.getMethod("get", String.class).invoke(null, key);
+            return v == null ? "" : v.toString();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /** Daemon-side hardware seam for the lease. */
+    private static final class Di5KeepAliveHardware
+            implements com.overdrive.app.power.Di5ParkedPowerHold.Hardware {
+
+        private volatile com.overdrive.app.power.PanoramaWorkModeOwner panorama;
+
+        private com.overdrive.app.power.McuPowerHal.Di5LeaseToken token(long generation) {
+            return com.overdrive.app.power.McuPowerHal.newDi5LeaseToken(
+                    generation, () -> isSentryTransitionCurrent(generation, true));
+        }
+
+        @Override
+        public int getMcuStatus(long generation) {
+            com.overdrive.app.power.McuPowerHal.ensureAppContext(
+                    new PermissionBypassContext(appContext));
+            return com.overdrive.app.power.McuPowerHal.readMcuStatusForLease(token(generation));
+        }
+
+        @Override
+        public boolean wakeUpMcu(long generation) {
+            com.overdrive.app.power.McuPowerHal.ensureAppContext(
+                    new PermissionBypassContext(appContext));
+            return com.overdrive.app.power.McuPowerHal.wakeUpMcuForLease(token(generation));
+        }
+
+        @Override
+        public int[] writeSentryFlags(long generation, boolean assertFlags) {
+            com.overdrive.app.power.McuPowerHal.ensureAppContext(
+                    new PermissionBypassContext(appContext));
+            return com.overdrive.app.power.McuPowerHal
+                    .writeSentryFlagsForLease(token(generation), assertFlags);
+        }
+
+        @Override
+        public int writeMcuPowerHold(long generation, boolean hold) {
+            com.overdrive.app.power.McuPowerHal.ensureAppContext(
+                    new PermissionBypassContext(appContext));
+            return com.overdrive.app.power.McuPowerHal
+                    .writeMcuPowerHoldForLease(token(generation), hold);
+        }
+
+        private com.overdrive.app.power.PanoramaWorkModeOwner panorama() {
+            com.overdrive.app.power.PanoramaWorkModeOwner p = panorama;
+            if (p == null) {
+                p = new com.overdrive.app.power.PanoramaWorkModeOwner(
+                        new PermissionBypassContext(appContext));
+                panorama = p;
+            }
+            return p;
+        }
+
+        @Override
+        public int writePanoramaWorkMode(int value) {
+            return panorama().writeWorkMode(value);
+        }
+
+        @Override
+        public Integer readPanoramaWorkMode() {
+            return panorama().readWorkMode();
+        }
+
+        @Override
+        public Double readBatteryVoltage() {
+            try {
+                Object ota = com.overdrive.app.byd.BydDeviceHelper.getDevice(
+                        "android.hardware.bydauto.ota.BYDAutoOtaDevice", appContext);
+                if (ota == null) return null;
+                Object v = com.overdrive.app.byd.BydDeviceHelper
+                        .callGetter(ota, "getBatteryPowerVoltage");
+                if (!(v instanceof Number)) return null;
+                double volts = ((Number) v).doubleValue();
+                return volts > 0.0 && !Double.isNaN(volts) ? Double.valueOf(volts) : null;
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+
+        @Override
+        public com.overdrive.app.power.Di5ParkedPowerHold.ShellOutcome shell(String command) {
+            ShellResult r = execShellResult(command, DEFAULT_SHELL_TIMEOUT_MS, null);
+            int exit = r.success ? 0 : (r.exitCode != 0 ? r.exitCode : -1);
+            String out = r.output;
+            if (!r.success && r.error != null && !r.error.isEmpty()) {
+                out = (out == null || out.isEmpty()) ? r.error : out + "\n" + r.error;
+            }
+            return new com.overdrive.app.power.Di5ParkedPowerHold.ShellOutcome(exit, out);
+        }
+
+        @Override
+        public boolean isChargingConfirmed() {
+            try {
+                return com.overdrive.app.monitor.ChargingDetector.getInstance().isCharging();
+            } catch (Throwable t) {
+                return false;
+            }
+        }
+
+        @Override
+        public String powerModeLine() {
+            String dump = null;
+            try {
+                dump = com.overdrive.app.byd.CarSvcTelemetry.powerModeLine();
+            } catch (Throwable ignored) {
+            }
+            String prop = readSystemPropertyForKeepAlive("sys.byd.power_mode");
+            if (dump == null && prop.isEmpty()) return null;
+            return "sys.byd.power_mode=" + (prop.isEmpty() ? "<empty>" : prop)
+                    + " dump=" + (dump == null ? "<none>" : dump);
+        }
+
+        @Override
+        public long nowMs() {
+            return System.currentTimeMillis();
+        }
+
+        @Override
+        public int pid() {
+            return android.os.Process.myPid();
+        }
+
+        @Override
+        public void sleepMs(long ms) throws InterruptedException {
+            Thread.sleep(ms);
+        }
+
+        @Override
+        public void log(String message) {
+            AccSentryDaemon.log(message);
+        }
+    }
+
+    /**
+     * Field-VERIFIED DiLink 5 rail capability signatures, as produced by
+     * {@link #probeDilink5RailSignature()}. A Di5 rail write is authorized
+     * only when the firmware's observed signature appears here.
+     *
+     * <p>DELIBERATELY EMPTY: no DiLink 5 firmware has a field-verified rail
+     * write today. The on-car power investigation (Sealion 7, Android 11
+     * IVI) found the legacy bydauto HAL virtualized behind sentinel values
+     * and the IVI power lifecycle owned by the vendor LCM/SUSD stack with no
+     * public Android-side setter — a held partial wakelock, Doze disable and
+     * whitelists did not stop the STANDBY→STR→shutdown progression. Until a
+     * rail signature is proven effective AND safe on-device (before/after
+     * evidence), unknown Di5 firmware fails closed. This replaces the
+     * earlier hardcoded model-string grant, which attested user intent but
+     * proved nothing about the firmware.
+     */
+    private static final String[] VERIFIED_DILINK5_RAIL_SIGNATURES = {};
+
+    /**
+     * One-shot cache of the observed Di5 rail signature. Written only by the
+     * keep-alive background probe; read by the synchronous gate. Stays null
+     * until a real observation lands, so the gate fails closed by default.
+     */
+    private static volatile String observedDilink5RailSignature;
+
+    /**
+     * Read-only Di5 rail hardware observation: resolves the legacy power
+     * device and reads {@code getMcuStatus()}. Never writes. Called from the
+     * keep-alive background thread only — HAL binder reads can stall, and
+     * {@link #isVerifiedDilink5RailCapability()} must stay non-blocking for
+     * its legacy call sites. Transient failures (no context yet, device not
+     * up) are returned but not cached so a later probe can still succeed.
+     */
+    private static String probeDilink5RailSignature() {
+        String cached = observedDilink5RailSignature;
+        if (cached != null) return cached;
+        try {
+            if (appContext == null) return "powerDevice=noContext";
+            BYDAutoPowerDevice device = getPowerDevice();
+            if (device == null) return "powerDevice=absent";
+            String signature = "mcuStatus=" + getMcuStatus();
+            observedDilink5RailSignature = signature;
+            return signature;
+        } catch (Throwable t) {
+            return "powerDevice=error";
+        }
+    }
+
+    /**
+     * Fail-closed Di5 rail-write authorization. A DiLink 5 rail write
+     * requires three conditions: Di5 selected (the diagnostic camera mode),
+     * the parked keep-awake user toggle (enforced by
+     * {@link #shouldApplyHardwarePeripheralPower}), and THIS check — the
+     * observed firmware signature matching a field-verified entry in
+     * {@link #VERIFIED_DILINK5_RAIL_SIGNATURES}. Pure registry lookup, no
+     * HAL access, so every call site keeps its original latency. Non-Di5
+     * platforms never reach the registry and are byte-identical to before.
+     */
+    private static boolean isVerifiedDilink5RailCapability() {
+        if (!isDilink5CameraMode()) return false;
+        String observed = observedDilink5RailSignature;
+        if (observed == null) return false;
+        for (String verified : VERIFIED_DILINK5_RAIL_SIGNATURES) {
+            if (verified.equals(observed)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isVehicleRailControlSupported() {
+        return !isDilink5CameraMode() || isVerifiedDilink5RailCapability();
     }
 
     /**
@@ -5153,25 +6510,84 @@ public class AccSentryDaemon {
         }
     }
 
+    private enum SdRailState {
+        PRESENT,
+        ABSENT,
+        UNKNOWN
+    }
+
+    private enum SdMountedLeaseEvidence {
+        FRESH_MOUNT,
+        STALE_OR_NOT_MOUNTED,
+        UNAVAILABLE
+    }
+
+    private static final class SdMountedLeaseSnapshot {
+        final SdMountedLeaseEvidence evidence;
+        final long deadlineMs;
+
+        SdMountedLeaseSnapshot(
+                SdMountedLeaseEvidence evidence, long deadlineMs) {
+            this.evidence = evidence;
+            this.deadlineMs = deadlineMs;
+        }
+    }
+
+    private static final String SD_MOUNTED_LEASE_PATH =
+            "/data/local/tmp/overdrive_sd_mounted_lease";
+    private static final long SD_MOUNTED_LEASE_MAX_HORIZON_MS =
+            5 * 60_000L;
+
     /**
-     * True when the vendor SD card-detect prop reports the card ABSENT. On the
-     * affected fleet the USB-bridged SD reader loses power during the ACC-OFF
-     * transition; the MCU's card-detect pin then drives sys.byd.isSDExist to
-     * 'false' even though a card is physically inserted. The keepalive loop
-     * uses this as the "rail is dead" trigger for a reactive MCU+rail
-     * re-assert. Deliberately conservative: only an EXPLICIT 'false' counts —
-     * an empty/unreadable prop (trim without the vendor prop, reflection
-     * blocked) returns false here so those units never wake the MCU on a
-     * signal they don't actually have.
+     * Three-state vendor card-detect read. Only literal true/false is
+     * actionable; an unavailable or unexpected value breaks the consecutive
+     * absence sequence and never authorizes a reactive wake.
      */
-    private static boolean isSdRailDead() {
+    private static SdRailState readSdRailState() {
         try {
             Class<?> sp = Class.forName("android.os.SystemProperties");
             java.lang.reflect.Method get = sp.getMethod("get", String.class, String.class);
             String v = (String) get.invoke(null, "sys.byd.isSDExist", "");
-            return "false".equalsIgnoreCase(v);
+            if ("true".equalsIgnoreCase(v)) {
+                return SdRailState.PRESENT;
+            }
+            if ("false".equalsIgnoreCase(v)) {
+                return SdRailState.ABSENT;
+            }
+            return SdRailState.UNKNOWN;
         } catch (Throwable t) {
-            return false;
+            return SdRailState.UNKNOWN;
+        }
+    }
+
+    /**
+     * Reads CameraDaemon/StorageManager's mounted-SD sidecar. A live deadline
+     * proves that the selected SD volume was mounted and writable shortly
+     * before the ACC-off rail transition. A present but expired/zero file is
+     * an explicit "no fresh proof" result. Missing or unreadable keeps
+     * compatibility with older/mixed builds by returning UNAVAILABLE.
+     */
+    private static SdMountedLeaseSnapshot readSdMountedLeaseSnapshot() {
+        java.io.File lease = new java.io.File(SD_MOUNTED_LEASE_PATH);
+        if (!lease.isFile()) {
+            return new SdMountedLeaseSnapshot(
+                    SdMountedLeaseEvidence.UNAVAILABLE, Long.MIN_VALUE);
+        }
+        try {
+            byte[] raw = java.nio.file.Files.readAllBytes(lease.toPath());
+            long deadline = Long.parseLong(new String(
+                    raw, java.nio.charset.StandardCharsets.US_ASCII).trim());
+            long now = System.currentTimeMillis();
+            if (deadline > now
+                    && deadline <= now + SD_MOUNTED_LEASE_MAX_HORIZON_MS) {
+                return new SdMountedLeaseSnapshot(
+                        SdMountedLeaseEvidence.FRESH_MOUNT, deadline);
+            }
+            return new SdMountedLeaseSnapshot(
+                    SdMountedLeaseEvidence.STALE_OR_NOT_MOUNTED, deadline);
+        } catch (Throwable t) {
+            return new SdMountedLeaseSnapshot(
+                    SdMountedLeaseEvidence.UNAVAILABLE, Long.MIN_VALUE);
         }
     }
 
@@ -5460,7 +6876,8 @@ public class AccSentryDaemon {
     private static void resolvePmUserActivity3Arg() {
         if (pmUserActivity3ArgResolved || pmUserActivity3ArgFailed) return;
         try {
-            pmUserActivity3ArgMethod = PowerManager.class.getMethod("userActivity", long.class, int.class, int.class);
+            pmUserActivity3ArgMethod = PowerManager.class.getMethod(
+                    "userActivity", long.class, int.class, int.class);
             pmUserActivity3ArgResolved = true;
         } catch (NoSuchMethodException e) {
             pmUserActivity3ArgFailed = true;
@@ -5617,45 +7034,50 @@ public class AccSentryDaemon {
         try {
             Context permissiveContext = new PermissionBypassContext(appContext);
             PowerManager pm = (PowerManager) permissiveContext.getSystemService(Context.POWER_SERVICE);
+            boolean screenConfirmedOn = false;
 
-            // Android 11+ / DiLink 5 (Snapdragon SA8155P) stealth userActivity
-            // Signature: userActivity(long when, int event, int flags)
-            // event=0 (USER_ACTIVITY_EVENT_OTHER), flags=1 (USER_ACTIVITY_FLAG_NO_CHANGE_LIGHTS)
-            resolvePmUserActivity3Arg();
-            if (pmUserActivity3ArgResolved) {
-                if (!isKeepAliveGenerationCurrent(transitionGeneration)) {
+            if (isDilink5CameraMode()) {
+                // Android 11 overload: event=OTHER, flag=NO_CHANGE_LIGHTS.
+                // It refreshes wakefulness without relighting the panel.
+                resolvePmUserActivity3Arg();
+                if (pmUserActivity3ArgResolved) {
+                    if (!isKeepAliveGenerationCurrent(transitionGeneration)) {
+                        return true;
+                    }
+                    pmUserActivity3ArgMethod.invoke(
+                            pm, android.os.SystemClock.uptimeMillis(), 0, 1);
+                    log("userActivity(long, 0, NO_CHANGE_LIGHTS) called [dilink5]");
                     return true;
                 }
-                pmUserActivity3ArgMethod.invoke(
-                    pm, android.os.SystemClock.uptimeMillis(), 0, 1);
-                log("userActivity(long, 0, NO_CHANGE_LIGHTS) called [Android 11 stealth]");
-                return true;
+                resolvePmUserActivity2Arg();
+                if (pmUserActivity2ArgResolved) {
+                    if (!isKeepAliveGenerationCurrent(transitionGeneration)) {
+                        return true;
+                    }
+                    pmUserActivity2ArgMethod.invoke(
+                            pm, android.os.SystemClock.uptimeMillis(), true);
+                    log("userActivity(long, noChangeLights=true) called [dilink5 fallback]");
+                    return true;
+                }
             }
 
-            // CRITICAL: Check screen status for legacy 1-arg method
-            // On legacy 1-arg PowerManager, userActivity() turns on the screen,
-            // so we skip 1-arg if screen is OFF.
+            // CRITICAL: Check screen status FIRST ( pattern)
+            // On some BYD firmware, calling userActivity() when screen is OFF fails
             resolvePmGetPowerScreenStatus();
             if (pmGetPowerScreenStatusResolved) {
                 try {
                     int screenStatus = (Integer) pmGetPowerScreenStatusMethod.invoke(pm);
-                    if (screenStatus == 0 && !isDilink4CameraMode()) {
-                        // For legacy 1-arg fallback, try 2-arg stealth before giving up
-                        resolvePmUserActivity2Arg();
-                        if (pmUserActivity2ArgResolved) {
-                            if (!isKeepAliveGenerationCurrent(transitionGeneration)) {
-                                return true;
-                            }
-                            pmUserActivity2ArgMethod.invoke(pm, android.os.SystemClock.uptimeMillis(), true);
-                            log("userActivity(long, boolean) called [stealth fallback]");
-                            return true;
-                        }
-                        log("Screen OFF - skipping legacy 1-arg userActivity");
+                    if (screenStatus == 0) {
+                        // Screen is OFF - userActivity may fail or be ignored
+                        // Skip it - the wakeUp call in performSystemWakeUp() handles keeping CPU alive
+                        log("Screen OFF - skipping userActivity");
                         return true;
                     }
+                    screenConfirmedOn = screenStatus == 1;
                 } catch (Exception e) {
                     // Per-call invocation failure (transient binder/access issue);
-                    // do NOT mark resolution failed — proceed anyway.
+                    // do NOT mark resolution failed — proceed anyway, matching
+                    // the original try/catch semantics.
                 }
             }
 
@@ -5665,6 +7087,21 @@ public class AccSentryDaemon {
             // loop's own comment has always claimed it used, but the 1-arg
             // branch below returns first, so on any firmware that exposes
             // 1-arg (i.e. all of them) the noChangeLights call was unreachable.
+            //
+            // Why it matters on dilink4: this pump is the reason the parked panel
+            // came back on. The 1-arg call resets the display's dim/off state
+            // machine — i.e. it actively fights the backlight-off we just
+            // performed. (The platform implementation sidesteps this entirely: it
+            // never calls userActivity at all, holding the AP awake with
+            // PowerManager.wakeUp on a 60 s cadence instead. We keep the pump
+            // because our USB-VBUS-follows-wakefulness requirement depends on
+            // it, and just stop it from touching the lights.)
+            //
+            // Strictly gated: legacy pano_h/pano_l units keep the original
+            // 1-arg-first order while the panel is positively known ON.
+            // Ambiguous/off-intent firmware is handled by the narrow safety
+            // branch below so it cannot relight the panel accidentally.
+            // Falls through if this firmware has no 2-arg overload.
             if (isDilink4CameraMode()) {
                 resolvePmUserActivity2Arg();
                 if (pmUserActivity2ArgResolved) {
@@ -5676,6 +7113,34 @@ public class AccSentryDaemon {
                     log("userActivity(long, noChangeLights=true) called [dilink4 stealth]");
                     return true;
                 }
+            }
+
+            // Di3 safety edge: when getPowerScreenStatus is unavailable or its
+            // Binder call failed, the old code fell straight into one-arg
+            // userActivity every 10s. That overload may relight a panel which
+            // the reconciler intentionally owns as OFF, producing random
+            // boot-like flashes. In only that ambiguous/off-intent case, use
+            // the already-supported no-change-lights overload. If the firmware
+            // lacks it too, skip the risky one-arg call and let the retained
+            // periodic full wake provide the USB/AP backstop.
+            if (!screenConfirmedOn
+                    && panelReconciler.isDesired(
+                            transitionGeneration, false)
+                    && !isScreenDeterrentActive()) {
+                resolvePmUserActivity2Arg();
+                if (pmUserActivity2ArgResolved) {
+                    if (!isKeepAliveGenerationCurrent(transitionGeneration)) {
+                        return true;
+                    }
+                    pmUserActivity2ArgMethod.invoke(
+                            pm, android.os.SystemClock.uptimeMillis(), true);
+                    log("userActivity(long, noChangeLights=true) called "
+                            + "[panel-off safety fallback]");
+                    return true;
+                }
+                log("Panel-off state is not verifiable and no no-change-lights "
+                        + "userActivity overload exists; skipping one-arg call");
+                return true;
             }
 
             // 1-arg version ( style). Original semantics: only
@@ -5693,7 +7158,11 @@ public class AccSentryDaemon {
                 log("userActivity(long) called");
                 return true;
             } else {
-                log("userActivity 1-arg not found, trying 2-arg fallback");
+                // Preserved verbatim from the original ordering: on firmware with
+                // no 1-arg overload this line fired BEFORE the 2-arg fallback was
+                // attempted. Keeping it here (rather than folding it into an else
+                // on the 2-arg branch) keeps the legacy log stream identical.
+                log("userActivity: no compatible method found");
             }
 
             // Fallback: Try 2-arg version (stealth mode - doesn't turn on screen)
@@ -5809,6 +7278,23 @@ public class AccSentryDaemon {
                 }
                 if (!isMonitorRequestCurrent(generation, true)) {
                     return true;
+                }
+
+                if (isDilink5CameraMode()) {
+                    cancelBatteryVoltageFutureUpTo(generation);
+                    if (batteryVoltageMonitorOwnerGeneration >= 0L) {
+                        try {
+                            com.overdrive.app.power.BatteryVoltageMonitorV2.stopMonitor();
+                            batteryVoltageMonitorOwnerGeneration = -1L;
+                        } catch (Throwable t) {
+                            log("BatteryVoltageMonitorV2 stop failed: "
+                                    + t.getMessage());
+                            success = false;
+                        }
+                    }
+                    log("DI5 voltage-driven MCU monitor disabled; "
+                            + "SoC cutoff and verified-capability rail reassert remain active");
+                    return success;
                 }
 
                 if (batteryVoltageMonitorOwnerGeneration >= 0L) {
@@ -6344,22 +7830,10 @@ public class AccSentryDaemon {
      */
     private static int readPowerLevel() {
         if (appContext == null) return -1;
-        try {
-            // DiLink 5.0's legacy bodywork HAL is stuck at POWER_LEVEL_ON(2) even
-            // when the car is off, so preserve the established OFF override on that
-            // platform even if its richer boot probe temporarily falls through
-            // without marking AccMonitor authoritative. On legacy DiLink 3/4,
-            // however, a non-authoritative false is only the process default and
-            // must not fabricate ACC-OFF or override a genuine listener ON.
-            if (AccPowerLevelPolicy.shouldOverrideBodyworkWithOff(
-                    com.overdrive.app.monitor.AccMonitor
-                            .isAccStateAuthoritative(),
-                    com.overdrive.app.monitor.AccMonitor.isAccOn(),
-                    com.overdrive.app.camera.dilink5
-                            .DiLink5QCarCamBackend.isSupported())) {
-                return POWER_LEVEL_OFF;
-            }
-        } catch (Throwable ignored) {}
+        // Do not short-circuit this legacy HAL read through process-local
+        // AccMonitor state. Its false default is non-authoritative and would
+        // fabricate ACC-OFF before this daemon receives a real observation.
+        // DiLink 5 is routed through startDiLink5AccStateHeartbeat() instead.
         try {
             Class<?> deviceClass = Class.forName(
                 "android.hardware.bydauto.bodywork.BYDAutoBodyworkDevice");
@@ -6375,6 +7849,18 @@ public class AccSentryDaemon {
 
     private static void applyHeartbeatPowerLevel(
             int level, long callbackSequenceBeforeRead) {
+        applyHeartbeatPowerLevel(
+                level,
+                callbackSequenceBeforeRead,
+                HEARTBEAT_FORCE_REPUBLISH_TICKS,
+                "~1min");
+    }
+
+    private static void applyHeartbeatPowerLevel(
+            int level,
+            long callbackSequenceBeforeRead,
+            int forceRepublishTicks,
+            String forceRepublishWindow) {
         if (level == POWER_LEVEL_ACC) {
             log("ACC heartbeat: level=ACC (1) is a transient; "
                     + "skipping publish");
@@ -6425,7 +7911,7 @@ public class AccSentryDaemon {
                         == lastHeartbeatPublishedAccOff) {
                     heartbeatDedupRunLength++;
                     if (heartbeatDedupRunLength
-                            >= HEARTBEAT_FORCE_REPUBLISH_TICKS) {
+                            >= forceRepublishTicks) {
                         heartbeatDedupRunLength = 0;
                         publish = true;
                         forced = true;
@@ -6441,8 +7927,9 @@ public class AccSentryDaemon {
                         latest.generation, isAccOff, true);
                 if (forced) {
                     log("ACC heartbeat: forced republish after "
-                            + HEARTBEAT_FORCE_REPUBLISH_TICKS
-                            + " dedup ticks (~1min) accOff="
+                            + forceRepublishTicks
+                            + " dedup ticks (" + forceRepublishWindow
+                            + ") accOff="
                             + isAccOff
                             + "; covers CameraDaemon process restart");
                 } else {
@@ -6498,6 +7985,92 @@ public class AccSentryDaemon {
         accHeartbeatThread.start();
     }
 
+    private static synchronized void startDiLink5AccStateHeartbeat() {
+        if (accHeartbeatThread != null && accHeartbeatThread.isAlive()) {
+            return;
+        }
+        accHeartbeatThread = new Thread(() -> {
+            log("DiLink 5 ACC state heartbeat started (5s interval)");
+            int undecidedTicks = 0;
+            while (running
+                    && !Thread.currentThread().isInterrupted()) {
+                try {
+                    pumpFallbackReconcilerRetries();
+                    long observationSequence =
+                            currentAccObservationSequence();
+                    SentryTransitionState current =
+                            latestSentryTransition;
+                    // Independent second source for a WEAK IVI-awake reading. A
+                    // running car reads "10=PowerMode DisPlay on" here, which the
+                    // admission rule alone must not turn into ACC ON (a parked
+                    // cloud wake / deep-sleep resume looks identical). The app
+                    // process receives BYD's unambiguous ACC_ON / IGN_ON
+                    // broadcasts and publishes them cross-process; a fresh hint
+                    // that post-dates this sentry entry corroborates the weak
+                    // reading so sentry exits (and the panel relights) while the
+                    // driver is still in P, instead of waiting for driving
+                    // telemetry. Strong OFF is never overridden by the hint.
+                    boolean ignitionBroadcast =
+                            com.overdrive.app.power.IgnitionBroadcastHint
+                                    .isFresh(sentryEnteredAtElapsedMs);
+                    Boolean isOn = com.overdrive.app.monitor.AccMonitor
+                            .probeDiLink5AccOnForTransition(
+                                    appContext,
+                                    current.generation > 0L
+                                            && !current.sentryMode,
+                                    ignitionBroadcast);
+                    if (isOn != null) {
+                        if (ignitionBroadcast
+                                && isOn.booleanValue()
+                                && current.sentryMode) {
+                            log("DiLink 5 ACC heartbeat: IVI power mode "
+                                    + "corroborated by app-process ignition "
+                                    + "broadcast — admitting ACC ON: "
+                                    + com.overdrive.app.monitor.AccMonitor
+                                            .describeLastDiLink5AccObservation());
+                        }
+                        undecidedTicks = 0;
+                        applyHeartbeatPowerLevel(
+                                isOn ? POWER_LEVEL_ON : POWER_LEVEL_OFF,
+                                observationSequence,
+                                DILINK5_FORCE_REPUBLISH_TICKS,
+                                "~10s");
+                        if (isOn.booleanValue()) {
+                            // Judge duty (already on a background thread): a
+                            // definitive ON with the parked marker still on disk
+                            // ends the park. Covers the fresh-daemon case where
+                            // applyHeartbeatPowerLevel sees "state agrees" and
+                            // never runs exitSentryMode.
+                            reconcileParkedMarkerForAccOn("DiLink 5 heartbeat");
+                        }
+                    } else {
+                        undecidedTicks++;
+                        if (undecidedTicks == 1
+                                || undecidedTicks
+                                        % DILINK5_UNDECIDED_LOG_EVERY_TICKS == 0) {
+                            log("DiLink 5 ACC heartbeat: observation NOT admitted"
+                                    + " (sentryMode=" + current.sentryMode
+                                    + ", ignitionBroadcast=" + ignitionBroadcast
+                                    + ", ticks=" + undecidedTicks + "): "
+                                    + com.overdrive.app.monitor.AccMonitor
+                                            .describeLastDiLink5AccObservation());
+                        }
+                    }
+                } catch (Throwable failure) {
+                    log("DiLink 5 ACC heartbeat error: "
+                            + failure.getMessage());
+                }
+                try {
+                    Thread.sleep(DILINK5_ACC_POLL_INTERVAL_MS);
+                } catch (InterruptedException interrupted) {
+                    return;
+                }
+            }
+        }, "AccSentryHeartbeat-DiLink5");
+        accHeartbeatThread.setDaemon(true);
+        accHeartbeatThread.start();
+    }
+
     /**
      * Notify CameraDaemon of ACC state change.
      * This updates AccMonitor so HTTP API returns correct acc status.
@@ -6528,6 +8101,7 @@ public class AccSentryDaemon {
         // operation, let the complete rail-enable batch finish first. The wait
         // is bounded so an unavailable HAL cannot suppress the ACC edge.
         if (accOff && !transition.vehicleOnOnly
+                && isVehicleRailControlSupported()
                 && !peripheralPowerReconciler.awaitApplied(
                         transitionGeneration, true, 5000L)) {
             log("ACC OFF IPC proceeding after bounded rail reconciliation wait");
@@ -7561,16 +9135,22 @@ public class AccSentryDaemon {
 
     /**
      * "Vehicle ON only" parked reaper. Writes a detached shell script and launches it with
-     * {@code nohup ... &} so it reparents to init and OUTLIVES this acc_sentry_daemon (which
-     * it kills). Sequence:
+     * {@code nohup ... &} so it reparents to init and is independent of the daemon
+     * processes it terminates. This acc_sentry_daemon is deliberately NOT one of them: it
+     * stays resident through the park as the ACC judge — the only process with a hardware
+     * view of ACC while parked — relights the panel on the real ACC-on and erases the
+     * parked marker then. Its watchdog respawns it (slowly) if it dies mid-park. Sequence:
      *   1. (Re-)plant the parked-shutdown marker (chmod 666) — the single arbiter that makes
-     *      every watchdog gate-exit and every app-side rebuild path stand down.
-     *   2. rm the watchdog start-scripts + cam_watchdog.pid so nothing can re-exec.
-     *   3. sleep GRACE so (a) CameraDaemon's own parkTerminate (graceful H2 close, up to
-     *      ~15s SD work) finishes and (b) any live watchdog loop re-checks the marker and
-     *      exit 0's (≤2s). The marker is already set, so nothing rebuilds during the grace.
-     *   4. Backstop psAwkKill any survivor (watchdog shells + daemon processes) — excludes
-     *      the reaper's own PID; no pattern matches the reaper script name.
+     *      every other watchdog gate-exit and every app-side rebuild path stand down.
+     *   2. Hold for a grace period so (a) CameraDaemon's own parkTerminate (graceful H2
+     *      close, up to ~15s SD work) finishes and (b) any live watchdog loop re-checks the
+     *      marker and exit 0's. The marker is already set, so nothing rebuilds meanwhile.
+     *   3. Backstop-kill every survivor of the terminated stack (watchdog shells + daemon
+     *      processes) by substring pattern — excluding the reaper's own PID; no pattern
+     *      matches the reaper script name or this daemon.
+     *   4. Terminate the plain sentry_daemon (Wi-Fi enable + 15 s dumpsys loop) by its
+     *      control socket, PID file and an EXACT process-name match — never a substring,
+     *      because "sentry_daemon" is a substring of "acc_sentry_daemon".
      *   5. rm stale *_daemon.lock, then self-delete. Does NOT clear the marker (that is the
      *      whole point — it stays until the ACC-on edge clears it).
      * This mirrors UpdateLifecycle.hardResetDaemons's proven kill cascade, swapped to the
@@ -8437,6 +10017,43 @@ public class AccSentryDaemon {
             sb.append("atomic_write \"$ACK_PATH\" \"$EXPECTED_STATE\" || { release_lease; failed_exit; }\n");
             sb.append("release_lease\n");
         }
+        // The plain sentry_daemon (SentryDaemon.java: Wi-Fi enable at start, then a
+        // `dumpsys` every 15 s) is not part of the substring sweep above on purpose:
+        // "sentry_daemon" is a substring of "acc_sentry_daemon", and this daemon must
+        // survive the park. Terminate it the way its own Stop button does — control
+        // socket STOP, then its PID file — and finish with an EXACT process-name
+        // match (`ps -o NAME` equal to "sentry_daemon"), the same anchored form
+        // SurveillanceIpcServer uses for acc_sentry_daemon; an equality test can
+        // never match the acc_ variant. Every step is best-effort and bounded.
+        sb.append("owned_begin || stale_exit\n");
+        sb.append("run_bounded 30 sh -c 'echo STOP | nc -w 1 127.0.0.1 19879 >/dev/null 2>&1' || true\n");
+        sb.append("release_lease\n");
+        sb.append("sleep 1\n");
+        sb.append("owned_begin || stale_exit\n");
+        // Deliberately NO kill via /data/local/tmp/sentry_daemon.pid: a SIGKILLed
+        // daemon leaves that file behind and the PID can since have been reused by an
+        // unrelated process. The exact-name sweep below is authoritative.
+        sb.append("SENTRY_TARGETS=\"$WORK_PREFIX.targets.sentry_daemon\"\n");
+        sb.append("run_bounded_capture \"$SENTRY_TARGETS\" 30 sh -c '")
+          .append("ps -A -o PID,NAME 2>/dev/null | awk ")
+          .append("'\"'\"'$2 == \"sentry_daemon\" {print $1}'\"'\"''")
+          .append(" || true\n");
+        sb.append("if [ -f \"$SENTRY_TARGETS\" ]; then\n");
+        sb.append("  while IFS= read -r pid; do\n");
+        sb.append("    case \"$pid\" in ''|*[!0-9]*) continue;; esac\n");
+        sb.append("    [ \"$pid\" != \"$$\" ] || continue\n");
+        // Re-validate identity immediately before the kill: the PID was captured up
+        // to 3 s ago and could have been reused. Same exact-name test, one process.
+        sb.append("    SENTRY_NOW=\"$WORK_PREFIX.now.$pid\"\n");
+        sb.append("    run_bounded_capture \"$SENTRY_NOW\" 20 sh -c '")
+          .append("ps -A -o PID,NAME 2>/dev/null | awk -v p=\"$1\" ")
+          .append("'\"'\"'$1 == p {print $2}'\"'\"''")
+          .append(" sh \"$pid\" || continue\n");
+        sb.append("    [ \"$(file_value \"$SENTRY_NOW\")\" = \"sentry_daemon\" ] || continue\n");
+        sb.append("    run_bounded 10 kill -9 \"$pid\" >/dev/null 2>&1 || true\n");
+        sb.append("  done < \"$SENTRY_TARGETS\"\n");
+        sb.append("fi\n");
+        sb.append("release_lease\n");
         sb.append("owned_begin || stale_exit\n");
         sb.append("run_bounded 20 sh -c 'echo GlobalProxyDaemon > /sys/power/wake_unlock 2>/dev/null' || true\n");
         sb.append("release_lease\n");
@@ -8445,8 +10062,12 @@ public class AccSentryDaemon {
         sb.append("release_lease\n");
         sb.append("sleep 1\n");
         sb.append("owned_begin || stale_exit\n");
+        // Also drop the previous park-END breadcrumb: a new park has begun, and the
+        // app must not mistake the old stamp for this park's end.
         sb.append("run_bounded 20 rm -f /data/local/tmp/camera_daemon.lock ")
-          .append("/data/local/tmp/telegram_bot_daemon.lock || true\n");
+          .append("/data/local/tmp/telegram_bot_daemon.lock ")
+          .append(com.overdrive.app.ui.model.ParkedShutdown.ENDED_PATH)
+          .append(" || true\n");
         sb.append("owns_state || { release_lease; stale_exit; }\n");
         sb.append("atomic_write \"$DONE_PATH\" \"$EXPECTED_STATE\" || { release_lease; failed_exit; }\n");
         sb.append("release_lease\n");
@@ -8626,10 +10247,20 @@ public class AccSentryDaemon {
                             new java.io.File(PARK_REAPER_CONTROL_PATH)))) {
                 return false;
             }
-            boolean markerDeleted = deleteFileIfPresent(
+            java.io.File markerFile = new java.io.File(
                     com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH);
+            boolean markerExisted = markerFile.isFile();
+            boolean markerDeleted = deleteFileIfPresent(markerFile.getPath());
             log("Canceled detached parked reaper for generation "
                     + transitionGeneration);
+            if (markerExisted && markerDeleted) {
+                // Only when THIS call ended the park: deleteFileIfPresent also
+                // reports true for "already gone", and a breadcrumb for a park the
+                // app or the reconcile thread already ended would make a resident
+                // app rebuild its boot manager a second time for nothing.
+                publishParkEndedBreadcrumb();
+                kickAppProcessAfterParkEnd();
+            }
             return markerDeleted;
         } catch (Throwable t) {
             log("WARNING: could not clear parked reaper marker: "
@@ -9147,9 +10778,6 @@ public class AccSentryDaemon {
                         logMemoryStatus();
                     }
                     
-                    // Enforce persistent ADB over Wi-Fi and self-heal companion daemons
-                    enforceAdbAndDaemonHealth();
-
                     log("===================");
                     
                 } catch (Exception e) {
@@ -9166,57 +10794,6 @@ public class AccSentryDaemon {
         // Start first check after 60 seconds
         statusHandler.postDelayed(statusCheck, 60000);
         log("Status monitoring started (60s interval)");
-    }
-
-    /**
-     * Periodically enforce persistent ADB over Wi-Fi and self-heal companion daemons.
-     * Runs every 60s as shell UID 2000.
-     */
-    private static void enforceAdbAndDaemonHealth() {
-        try {
-            // 1. Enforce global ADB settings via SettingsProvider (authorized for shell UID 2000)
-            Runtime.getRuntime().exec(new String[]{"settings", "put", "global", "adb_enabled", "1"});
-            Runtime.getRuntime().exec(new String[]{"settings", "put", "global", "adb_wifi_enabled", "1"});
-            Runtime.getRuntime().exec(new String[]{"settings", "put", "global", "adb_allowed_connection_time", "0"});
-            Runtime.getRuntime().exec(new String[]{"settings", "put", "global", "development_settings_enabled", "1"});
-            Runtime.getRuntime().exec(new String[]{"settings", "put", "global", "stay_on_while_plugged_in", "7"});
-
-            // 2. Self-heal CameraDaemon if unexpectedly dead and not explicitly disabled
-            java.io.File camDisabled = new java.io.File("/data/local/tmp/camera_daemon.disabled");
-            java.io.File camScript = new java.io.File("/data/local/tmp/start_cam_daemon.sh");
-            if (!camDisabled.exists() && camScript.exists()) {
-                if (!isProcessRunning("byd_cam_daemon") && !isProcessRunning("CameraDaemon")) {
-                    log("Self-healing: CameraDaemon is dead, respawning watchdog via start_cam_daemon.sh...");
-                    Runtime.getRuntime().exec(new String[]{"sh", "-c", "nohup sh /data/local/tmp/start_cam_daemon.sh > /dev/null 2>&1 &"});
-                }
-            }
-
-            // 3. Self-heal TelegramBotDaemon if unexpectedly dead and not explicitly disabled
-            java.io.File tgDisabled = new java.io.File("/data/local/tmp/telegram_bot_daemon.disabled");
-            java.io.File tgScript = new java.io.File("/data/local/tmp/start_telegram.sh");
-            if (!tgDisabled.exists() && tgScript.exists()) {
-                if (!isProcessRunning("telegram_bot_daemon") && !isProcessRunning("start_telegram.sh")) {
-                    log("Self-healing: TelegramBotDaemon is dead, respawning watchdog via start_telegram.sh...");
-                    Runtime.getRuntime().exec(new String[]{"sh", "-c", "nohup sh /data/local/tmp/start_telegram.sh > /dev/null 2>&1 &"});
-                }
-            }
-        } catch (Throwable t) {
-            log("enforceAdbAndDaemonHealth error: " + t.getMessage());
-        }
-    }
-
-    private static boolean isProcessRunning(String processName) {
-        try {
-            Process p = Runtime.getRuntime().exec(new String[]{"pgrep", "-f", processName});
-            try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()))) {
-                String line = r.readLine();
-                return line != null && !line.trim().isEmpty();
-            } finally {
-                p.waitFor();
-            }
-        } catch (Throwable ignored) {
-            return false;
-        }
     }
     
     /**

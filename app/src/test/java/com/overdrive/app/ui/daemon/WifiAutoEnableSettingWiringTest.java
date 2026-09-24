@@ -25,7 +25,10 @@ public class WifiAutoEnableSettingWiringTest {
         assertTrue(fragment.contains("wifiSettingsWorker.execute"));
         assertTrue(fragment.contains("UnifiedConfigManager.isWifiAutoEnableEnabled()"));
         assertTrue(fragment.contains(
-                "UnifiedConfigManager.setWifiAutoEnableEnabled(enabled)"));
+                "DaemonHttpClient.open(\"/api/keymap/fire\", \"POST\""));
+        assertTrue(fragment.contains(".put(\"kind\", \"radio\")"));
+        assertTrue(fragment.contains(".put(\"radio\", \"wifi\")"));
+        assertTrue(fragment.contains(".put(\"enable\", enabled)"));
     }
 
     @Test

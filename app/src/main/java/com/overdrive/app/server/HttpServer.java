@@ -251,6 +251,93 @@ public class HttpServer {
                 "([?&]token=)[^& ]*", "$1<redacted>");
     }
 
+    static int maxBodyBytesForRequestLine(String requestLine) {
+        final int defaultMax = 16 * 1024 * 1024;
+        if (requestLine == null) return defaultMax;
+
+        final boolean isAudioUpload = requestLine.startsWith("POST /api/audio/library")
+                && !requestLine.startsWith("POST /api/audio/library/");
+        if (isAudioUpload) return 72 * 1024 * 1024;
+
+        final boolean isBackupImport =
+                requestLine.startsWith("POST /api/backup/import ")
+                || requestLine.startsWith("POST /api/backup/import?")
+                || requestLine.startsWith("POST /api/backup/import/preview ");
+        return isBackupImport ? (32 * 1024 * 1024) : defaultMax;
+    }
+
+    /**
+     * Parse the source address from a PROXY protocol v1 line.
+     *
+     * Tailscale Serve's TCP forwarder prepends this line before the HTTP
+     * request. The caller must additionally verify that the socket peer is
+     * loopback before trusting it; a LAN client is not allowed to self-assert
+     * proxy metadata.
+     */
+    static String proxyProtocolV1Source(String line) {
+        // The v1 wire format is capped at 107 characters, excluding CRLF.
+        if (line == null || line.length() > 107 || !line.startsWith("PROXY ")) {
+            return null;
+        }
+
+        String[] parts = line.split(" ", -1);
+        if (parts.length != 6) return null;
+
+        boolean ipv4;
+        if ("TCP4".equals(parts[1])) {
+            ipv4 = true;
+        } else if ("TCP6".equals(parts[1])) {
+            ipv4 = false;
+        } else {
+            // Deliberately reject UNKNOWN: it cannot establish a trustworthy
+            // remote identity and must never regain the loopback auth bypass.
+            return null;
+        }
+
+        if (!isValidProxyAddress(parts[2], ipv4)
+                || !isValidProxyAddress(parts[3], ipv4)
+                || !isValidProxyPort(parts[4])
+                || !isValidProxyPort(parts[5])) {
+            return null;
+        }
+        return parts[2];
+    }
+
+    private static boolean isValidProxyAddress(String value, boolean ipv4) {
+        if (value == null || value.isEmpty()) return false;
+        if (ipv4) {
+            if (!value.matches("[0-9.]+")) return false;
+        } else if (!value.matches("[0-9A-Fa-f:.]+")) {
+            return false;
+        }
+        try {
+            byte[] raw = InetAddress.getByName(value).getAddress();
+            return raw.length == (ipv4 ? 4 : 16);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static boolean isValidProxyPort(String value) {
+        try {
+            int port = Integer.parseInt(value);
+            return port > 0 && port <= 65535;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * Prefer the transport-authenticated PROXY source over an HTTP header that
+     * the remote client can supply itself. Non-PROXY reverse proxies retain the
+     * existing X-Forwarded-For behavior.
+     */
+    static String forwardedForValue(boolean hasProxyProtocol,
+                                    String proxySourceAddress,
+                                    String forwardedHeader) {
+        return hasProxyProtocol ? proxySourceAddress : forwardedHeader;
+    }
+
     private void handleClient(Socket client) {
         try {
             client.setSoTimeout(15000);
@@ -264,6 +351,32 @@ public class HttpServer {
             if (requestLine == null) {
                 client.close();
                 return;
+            }
+
+            // Tailscale runs in userspace-networking mode, so a raw tailnet
+            // connection otherwise arrives from 127.0.0.1 and is
+            // indistinguishable from an in-device caller. The dashboard is
+            // therefore published through `tailscale serve --tcp` with PROXY
+            // protocol v1. Consume its trusted preamble before parsing HTTP
+            // and mark the request as tunnel-originated so AuthMiddleware
+            // disables only the loopback fallback; direct localhost callers
+            // continue to work without a JWT.
+            boolean hasProxyProtocol = false;
+            String proxySourceAddress = null;
+            if (requestLine.startsWith("PROXY")) {
+                proxySourceAddress = proxyProtocolV1Source(requestLine);
+                if (!client.getInetAddress().isLoopbackAddress()
+                        || proxySourceAddress == null) {
+                    HttpResponse.sendError(out, 400, "Invalid proxy protocol");
+                    client.close();
+                    return;
+                }
+                hasProxyProtocol = true;
+                requestLine = reader.readLine();
+                if (requestLine == null) {
+                    client.close();
+                    return;
+                }
             }
             
             // Skip logging high-frequency polling endpoints to keep the daemon log
@@ -292,9 +405,10 @@ public class HttpServer {
             String authHeader = null;
             // Reverse-proxy fingerprints — used by AuthMiddleware to disable
             // the loopback safety net when a tunnel relayed the request.
-            // Cloudflared injects Cf-*, zrok / ngrok injects X-Forwarded-*.
-            boolean hasTunnelHeaders = false;
-            String forwardedFor = null;
+            // Tailscale Serve, zrok and ngrok inject X-Forwarded-*;
+            // Cloudflared injects Cf-*.
+            boolean hasTunnelHeaders = hasProxyProtocol;
+            String forwardedFor = proxySourceAddress;
             String hostHeader = null;
             String originHeader = null;
             // Zrok's HTTP backend rewrites Host: to the backend URL (localhost:8080)
@@ -336,7 +450,10 @@ public class HttpServer {
                     originHeader = line.substring(7).trim();
                 } else if (lower.startsWith("x-forwarded-for:")) {
                     hasTunnelHeaders = true;
-                    forwardedFor = line.substring(16).trim();
+                    forwardedFor = forwardedForValue(
+                            hasProxyProtocol,
+                            proxySourceAddress,
+                            line.substring(16).trim());
                 } else if (lower.startsWith("x-forwarded-host:")) {
                     hasTunnelHeaders = true;
                     // Header value can be a comma list ("a.example, b.example")
@@ -350,7 +467,11 @@ public class HttpServer {
                         || lower.startsWith("forwarded:")
                         || lower.startsWith("cf-connecting-ip:")
                         || lower.startsWith("cf-ray:")
-                        || lower.startsWith("cf-visitor:")) {
+                        || lower.startsWith("cf-visitor:")
+                        || lower.startsWith("tailscale-user-login:")
+                        || lower.startsWith("tailscale-user-name:")
+                        || lower.startsWith("tailscale-user-profile-pic:")
+                        || lower.startsWith("tailscale-headers-info:")) {
                     hasTunnelHeaders = true;
                 }
             }
@@ -362,18 +483,18 @@ public class HttpServer {
             // base64-encoded 8 MB asset (~10.7 MB). Above this we 413 instead of
             // letting an attacker allocate arbitrary heap on the daemon process.
             //
-            // EXCEPTION: the audio-library upload accepts short video clips (48 MB max,
+            // EXCEPTIONS:
+            // - Backup imports allow 32 MB for trip-history bundles.
+            // - The audio-library upload accepts short video clips (48 MB max,
             // see AudioApiHandler.MAX_AUDIO_BYTES) as a base64 JSON body (~64 MB) — raise
             // the cap to 72 MB for JUST that one endpoint so a legitimate clip isn't
             // pre-rejected here, while every other endpoint keeps the tight 16 MB cap.
             // The body is still buffered then decoded (peak ~200 MB transient for a
             // 48 MB clip), which is safe on this head unit; a materially larger limit
             // would require a stream-to-disk upload rewrite rather than this bump.
-            final boolean isAudioUpload = requestLine.startsWith("POST /api/audio/library")
-                    && !requestLine.startsWith("POST /api/audio/library/"); // the /play,/stop subpaths stay tight
-            final int MAX_BODY_BYTES = isAudioUpload ? (72 * 1024 * 1024) : (16 * 1024 * 1024);
+            final int maxBodyBytes = maxBodyBytesForRequestLine(requestLine);
             String body = null;
-            if (contentLength > MAX_BODY_BYTES) {
+            if (contentLength > maxBodyBytes) {
                 HttpResponse.sendError(out, 413, "Payload too large");
                 client.close();
                 return;
@@ -488,7 +609,11 @@ public class HttpServer {
                 } else if (wsPathOnly.equals(GenAiChatWebSocket.PATH)) {
                     GenAiChatWebSocket.handle(client, websocketKey);
                 } else {
-                    handleWebSocketUpgrade(client, websocketKey);
+                    handleWebSocketUpgrade(
+                            client,
+                            websocketKey,
+                            "broadway".equalsIgnoreCase(
+                                    GenAiApiHandler.queryParam(path, "decoder")));
                 }
                 return;
             }
@@ -586,6 +711,10 @@ public class HttpServer {
             } else if (path.equals("/recording.html") || path.equals("/recording")) {
                 if (!serveStaticFile(out, "local/recording.html")) {
                     HttpResponse.sendError(out, 404, "recording.html not found");
+                }
+            } else if (path.equals("/parking.html") || path.equals("/parking")) {
+                if (!serveStaticFile(out, "local/parking.html")) {
+                    HttpResponse.sendError(out, 404, "parking.html not found");
                 }
             } else if (path.equals("/surveillance.html") || path.equals("/surveillance")) {
                 if (!serveStaticFile(out, "local/surveillance.html")) {
@@ -726,13 +855,11 @@ public class HttpServer {
 
     /**
      * Path prefixes an automation {@code ApiAction} is permitted to reach through the auth-free
-     * {@link #automationApiRequest} bypass. This is a hard security boundary: automationApiRequest
-     * skips {@link AuthMiddleware} entirely, so this allowlist — NOT the curated catalog in
-     * Actions.java — is what keeps an ApiAction (existing or a carelessly-added future one) from
-     * reaching sensitive surfaces like /api/debug/* (car-property / light / autoservice writes),
-     * /api/backup/ (device key material), /api/update/ (APK install), /api/telegram/ (bot token),
-     * /api/oem-dashcam/ (shells to pm), /api/logs or /api/keymap. Keep it as tight as the curated
-     * automation actions genuinely need.
+     * {@link #automationApiRequest} bypass. Exact exceptions are handled in
+     * {@link #isAutomationAllowed}. This is a hard security boundary: automationApiRequest skips
+     * {@link AuthMiddleware} entirely, so this policy — NOT the curated catalog in Actions.java —
+     * keeps an ApiAction away from sensitive surfaces like /api/debug/*, /api/backup/,
+     * /api/update/, /api/telegram/, /api/oem-dashcam/, /api/logs and /api/keymap.
      */
     private static final String[] AUTOMATION_ALLOWED_PREFIXES = {
         "/api/vehicle/",       // vehicle controls: setting, window, climate, seat
@@ -748,12 +875,21 @@ public class HttpServer {
                                // (same native camera lane as /api/camview/ above — the card's
                                // own on/off + view knobs, no new capability class)
     };
+    private static final ThreadLocal<Integer> AUTOMATION_REQUEST_DEPTH =
+            ThreadLocal.withInitial(() -> 0);
+
+    static boolean isAutomationRequest() {
+        return AUTOMATION_REQUEST_DEPTH.get() > 0;
+    }
 
     /** Whether an automation-originated request path is inside the allowlist above. */
     private static boolean isAutomationAllowed(String path) {
         if (path == null) return false;
         int q = path.indexOf('?');
         String clean = q >= 0 ? path.substring(0, q) : path;
+        // Destructive system action: exact route only. The handler independently requires
+        // Park and a persisted reboot-loop guard before it starts the reboot command.
+        if (clean.equals("/api/system/ivi-reboot")) return true;
         if (clean.startsWith("/api/surveillance/")) {
             return clean.equals("/api/surveillance/enable")
                     || clean.equals("/api/surveillance/disable")
@@ -769,7 +905,7 @@ public class HttpServer {
     /**
      * Used for automations to have an API action without going through authentication.
      * The request is served in-process (no socket, so this is unreachable from the network) and
-     * is gated by {@link #AUTOMATION_ALLOWED_PREFIXES} so the auth bypass can only ever hit the
+     * is gated by {@link #isAutomationAllowed} so the auth bypass can only ever hit the
      * curated automation control surface, never the sensitive /api/debug|backup|update|... paths.
      *
      * @return The HTTP response as a String, or null if denied by the allowlist or on error
@@ -780,10 +916,18 @@ public class HttpServer {
             return null;
         }
         OutputStream out = new ByteArrayOutputStream();
+        int depth = AUTOMATION_REQUEST_DEPTH.get();
+        AUTOMATION_REQUEST_DEPTH.set(depth + 1);
         try {
             if (!routeToHandlers(method, path, body, null, null, out)) return null;
         } catch (Exception e) {
             return null;
+        } finally {
+            if (depth == 0) {
+                AUTOMATION_REQUEST_DEPTH.remove();
+            } else {
+                AUTOMATION_REQUEST_DEPTH.set(depth);
+            }
         }
         return out.toString();
     }
@@ -814,12 +958,25 @@ public class HttpServer {
             return true;
         } else if (path.startsWith("/api/stop/")) {
             int camId = Integer.parseInt(path.substring(10));
-            CameraDaemon.stopCamera(camId);
-            HttpResponse.sendJson(out, "{\"status\":\"ok\",\"action\":\"stop\",\"camera\":" + camId + "}");
+            if (CameraDaemon.stopAllCamerasForExplicitUserStop()) {
+                HttpResponse.sendJson(out,
+                        "{\"status\":\"ok\",\"action\":\"stopall\","
+                                + "\"requestedCamera\":" + camId + "}");
+            } else {
+                HttpResponse.sendJson(out, 503,
+                        "{\"status\":\"error\",\"action\":\"stopall\","
+                                + "\"requestedCamera\":" + camId + ","
+                                + "\"message\":\"camera shutdown was not confirmed\"}");
+            }
             return true;
         } else if (path.equals("/api/stopall")) {
-            CameraDaemon.stopAllCameras();
-            HttpResponse.sendJson(out, "{\"status\":\"ok\",\"action\":\"stopall\"}");
+            if (CameraDaemon.stopAllCamerasForExplicitUserStop()) {
+                HttpResponse.sendJson(out, "{\"status\":\"ok\",\"action\":\"stopall\"}");
+            } else {
+                HttpResponse.sendJson(out, 503,
+                        "{\"status\":\"error\",\"action\":\"stopall\","
+                                + "\"message\":\"camera shutdown was not confirmed\"}");
+            }
             return true;
         } else if (path.equals("/api/recording/mode")) {
             // Get/Set recording mode
@@ -867,6 +1024,12 @@ public class HttpServer {
         }
         if (path.startsWith("/api/surveillance")) {
             return SurveillanceApiHandler.handle(method, path, body, out);
+        }
+
+        // Parking Intelligence: sessions / neighbours API + session stills
+        // (/parking/asset/ is token-authenticated in AuthMiddleware like /thumb/).
+        if (path.startsWith("/api/parking") || path.startsWith("/parking/asset/")) {
+            return ParkingApiHandler.handle(method, path, body, out);
         }
         
         // BYD Cloud API
@@ -1015,8 +1178,10 @@ public class HttpServer {
             return RemoteCommunicationApiHandler.handle(method, path, body, out);
         }
 
-        // Vehicle Control API
-        if (path.startsWith("/api/vehicle")) {
+        // Vehicle Control API + the parked/cooldown-guarded IVI reboot action.
+        if (path.startsWith("/api/vehicle")
+                || path.startsWith("/api/system/ivi-reboot")
+                || path.startsWith("/api/system/background-access")) {
             return VehicleControlApiHandler.handle(method, path, body, out);
         }
 
@@ -1245,11 +1410,7 @@ public class HttpServer {
         status.put("streaming", TcpCommandServer.getStreamingCameras());
         status.put("available", TcpCommandServer.getAvailableCameras());
         status.put("battery", BatteryMonitor.getBatteryInfo());
-        boolean currentAcc = AccMonitor.isAccOn();
-        if (CameraDaemon.getRecordingModeManager() != null) {
-            currentAcc = CameraDaemon.getRecordingModeManager().isAccOn();
-        }
-        status.put("acc", currentAcc);
+        status.put("acc", AccMonitor.isAccOn());
         
         // Safe zone status (so UI can show suppressed state)
         com.overdrive.app.surveillance.SafeLocationManager safeMgr =
@@ -1367,13 +1528,10 @@ public class HttpServer {
             // SOH not available
         }
         
-        // GPU surveillance status — true when in sentry/surveillance mode or enabled on DiLink 5
+        // GPU surveillance status — only true when actually in sentry/surveillance mode,
+        // not when pipeline is running for normal recording (CONTINUOUS, PROXIMITY_GUARD)
         com.overdrive.app.surveillance.GpuSurveillancePipeline pipeline = CameraDaemon.getGpuPipeline();
-        boolean survEnabled = false;
-        try {
-            survEnabled = com.overdrive.app.config.UnifiedConfigManager.isSurveillanceEnabled();
-        } catch (Throwable ignored) {}
-        status.put("gpuSurveillance", (pipeline != null && pipeline.isSurveillanceMode()) || survEnabled);
+        status.put("gpuSurveillance", pipeline != null && pipeline.isSurveillanceMode());
         
         // Recording mode details (for status overlay)
         try {
@@ -1676,6 +1834,15 @@ public class HttpServer {
             return false;
         }
 
+        // Catalogs are versioned with the APK. Prefer the bundled bytes over
+        // /data/local/tmp so a stale extraction from the previous app version
+        // can never hide a new or corrected translation.
+        if (relativePath.startsWith("i18n/")
+                && relativePath.endsWith(".json")
+                && serveAssetFallback(out, relativePath, ifNoneMatch)) {
+            return true;
+        }
+
         File file = new File(WEB_ROOT, relativePath);
         if (!file.exists() || !file.isFile()) {
             // Fall back to the persistent models cache for GLBs that were downloaded
@@ -1770,37 +1937,57 @@ public class HttpServer {
     }
 
     /**
-     * APK asset fallback when the extracted copy under WEB_ROOT is missing.
-     * Phone installs can't write {@code /data/local/tmp/web}; a car daemon
-     * can also be running a stale extract after an APK update. Only i18n
-     * catalogs — everything else still requires a real extract.
+     * Stable validator for APK assets. Hashing the contents avoids treating a
+     * same-length translation edit as unchanged across app versions.
+     */
+    static String assetContentEtag(byte[] data) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(data);
+            StringBuilder hex = new StringBuilder(digest.length * 2 + 2);
+            hex.append('"');
+            for (byte value : digest) {
+                hex.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
+            }
+            return hex.append('"').toString();
+        } catch (Exception impossible) {
+            return "\"" + Integer.toHexString(java.util.Arrays.hashCode(data)) + "\"";
+        }
+    }
+
+    /**
+     * APK asset fallback for web catalogs. Phone installs may not be able to
+     * create /data/local/tmp/web, and a running daemon may still have files
+     * extracted by an older app version.
      */
     private boolean serveAssetFallback(OutputStream out, String relativePath, String ifNoneMatch) {
-        if (relativePath == null || !relativePath.startsWith("i18n/") || !relativePath.endsWith(".json")) {
+        if (relativePath == null
+                || !relativePath.startsWith("i18n/")
+                || !relativePath.endsWith(".json")) {
             return false;
         }
-        String tag = relativePath.substring("i18n/".length());
-        int dot = tag.lastIndexOf('.');
-        String base = dot > 0 ? tag.substring(0, dot) : tag;
-        base = LocaleManager.resolve(base);
-        if (!LocaleManager.isSupported(base)) return false;
+        String file = relativePath.substring("i18n/".length());
+        String requested = file.substring(0, file.length() - ".json".length());
+        if (!LocaleManager.isSupported(requested)) return false;
 
-        android.content.Context ctx = com.overdrive.app.daemon.DaemonBootstrap.getContext();
-        if (ctx == null || ctx.getAssets() == null) return false;
-        try (java.io.InputStream in = ctx.getAssets().open("web/i18n/" + base + ".json")) {
-            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
-            byte[] data = bos.toByteArray();
+        android.content.Context context =
+                com.overdrive.app.daemon.DaemonBootstrap.getContext();
+        if (context == null || context.getAssets() == null) return false;
+        try (InputStream in = context.getAssets().open(
+                "web/i18n/" + requested + ".json")) {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = in.read(buffer)) != -1) {
+                bytes.write(buffer, 0, count);
+            }
+            byte[] data = bytes.toByteArray();
             String cacheControl = "public, max-age=3600, must-revalidate";
-            String etag = "\"" + Integer.toHexString(data.length)
-                    + "-" + Integer.toHexString(base.hashCode()) + "\"";
+            String etag = assetContentEtag(data);
             if (ifNoneMatch != null && etag.equals(ifNoneMatch.trim())) {
                 out.write(("HTTP/1.1 304 Not Modified\r\n"
                         + "ETag: " + etag + "\r\n"
                         + "Cache-Control: " + cacheControl + "\r\n"
-                        + "Connection: close\r\n\r\n").getBytes());
+                        + "Connection: close\r\n\r\n").getBytes("UTF-8"));
                 out.flush();
                 return true;
             }
@@ -1815,6 +2002,8 @@ public class HttpServer {
             out.flush();
             return true;
         } catch (Exception e) {
+            CameraDaemon.log("Asset catalog error: " + relativePath
+                    + " - " + e.getMessage());
             return false;
         }
     }
@@ -1842,7 +2031,8 @@ public class HttpServer {
     /**
      * Handles WebSocket upgrade on /ws path for single-port streaming.
      */
-    private void handleWebSocketUpgrade(Socket client, String websocketKey) {
+    private void handleWebSocketUpgrade(
+            Socket client, String websocketKey, boolean broadwayDecoder) {
         try {
             CameraDaemon.log("WebSocket upgrade requested");
             
@@ -1857,7 +2047,7 @@ public class HttpServer {
             out.flush();
             
             CameraDaemon.log("WebSocket handshake complete");
-            streamH264ToWebSocket(client);
+            streamH264ToWebSocket(client, broadwayDecoder);
             
         } catch (Exception e) {
             CameraDaemon.log("WebSocket upgrade error: " + e.getMessage());
@@ -1884,8 +2074,9 @@ public class HttpServer {
      * This gives instant stream start with no encoder restart, no frame corruption,
      * and no broken pipe from the client timing out during restart.
      */
-    private void streamH264ToWebSocket(Socket client) {
+    private void streamH264ToWebSocket(Socket client, boolean broadwayDecoder) {
         CameraDaemon.log("Starting H.264 WebSocket stream");
+        final long cameraStartEpoch = CameraDaemon.captureCameraStartEpoch();
         
         final BlockingQueue<byte[]> frameQueue = new ArrayBlockingQueue<>(60);
         final boolean[] running = {true};
@@ -1907,12 +2098,21 @@ public class HttpServer {
             // Auto-start pipeline if needed
             if (!pipeline.isRunning()) {
                 CameraDaemon.log("WS: Auto-starting pipeline");
-                pipeline.start();
+                // The socket can disappear, or stream initialization can fail,
+                // after the camera has started but before WebSocketStreamServer
+                // owns the lifecycle. Arm the same generation-pinned,
+                // exhaustive owner audit used by the HTTP Live View paths so
+                // that partial startup cannot strand a legacy camera/GPU lane.
+                StreamingApiHandler.armLiveViewOrphanWatchdog(pipeline);
+                pipeline.start(false, cameraStartEpoch);
                 Thread.sleep(500);
             }
             
-            GpuPipelineConfig.StreamingQuality q = GpuPipelineConfig.StreamingQuality.fromString(
-                StreamingApiHandler.getStreamingQuality());
+            final boolean diLink5 =
+                    com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
+            final boolean diLink5Broadway = diLink5 && broadwayDecoder;
+            GpuPipelineConfig.StreamingQuality q =
+                    StreamingApiHandler.effectiveStreamingQuality(broadwayDecoder);
             
             // SOTA: Reuse existing encoder if streaming is already enabled at same quality.
             // Only restart if not enabled or quality changed.
@@ -1927,9 +2127,24 @@ public class HttpServer {
                     if (scaler != null) {
                         int currentWidth = scaler.getWidth();
                         int currentHeight = scaler.getHeight();
-                        if (currentWidth != q.width || currentHeight != q.height) {
-                            CameraDaemon.log("WS: Quality changed (" + currentWidth + "x" + currentHeight + 
-                                " → " + q.width + "x" + q.height + ") — restarting encoder");
+                        int expectedHeight = q.height;
+                        if (diLink5) {
+                            expectedHeight = com.overdrive.app.camera.PassiveApaGeometry
+                                    .heightForWidth(q.width);
+                        }
+                        boolean profileChanged =
+                                currentWidth != q.width || currentHeight != expectedHeight;
+                        if (diLink5Broadway) {
+                            profileChanged = profileChanged
+                                    || existingEncoder.getFps() != q.fps
+                                    || existingEncoder.getBitrate() != q.bitrate;
+                        }
+                        if (profileChanged) {
+                            CameraDaemon.log("WS: Quality changed ("
+                                + currentWidth + "x" + currentHeight
+                                + "@" + existingEncoder.getFps()
+                                + " → " + q.width + "x" + expectedHeight
+                                + "@" + q.fps + ") — restarting encoder");
                             needsRestart = true;
                             pipeline.disableStreaming();
                             Thread.sleep(200);

@@ -20,7 +20,7 @@ import com.overdrive.app.server.LocaleManager
  * Language picker rendered as a real M3 [BottomSheetDialog].
  *
  *   - "Auto (follow system)" pinned at the top
- *   - Supported languages in native script with BCP-47 tag on the right
+ *   - Every supported language in native script with BCP-47 tag on the right
  *   - Current pick gets a check mark on the trailing side
  *   - Selection persists via [LocaleManager] so the WebView and the native UI
  *     come back in the same language on the very next launch
@@ -53,6 +53,7 @@ object LanguagePickerDialog {
         "tr" to "Türkçe",
         "ru" to "Русский",
         "ar" to "العربية",
+        "cs" to "Čeština",
         "he" to "עברית"
     )
 
@@ -116,26 +117,18 @@ object LanguagePickerDialog {
      */
     @JvmStatic
     fun applySelection(context: Context, tag: String) {
-        // Broadcast to every visible WebView BEFORE the locale write so the
-        // user sees an instant language flip in any open WebView page,
-        // regardless of whether the activity ends up recreating. The
-        // recreate that follows setApplicationLocales restores the same
-        // page anyway, so the new fragment's onPageFinished -> init() is
-        // a no-op visually.
-        broadcastLocaleToWebViews(context, if (tag == LocaleManager.AUTO_TAG) LocaleManager.get() else tag)
         if (tag == LocaleManager.AUTO_TAG) {
             LocaleManager.setAuto()
+            broadcastLocaleToWebViews(context, LocaleManager.get())
             AppCompatDelegate.setApplicationLocales(LocaleListCompat.getEmptyLocaleList())
         } else {
-            LocaleManager.set(tag)
-            AppCompatDelegate.setApplicationLocales(
-                LocaleListCompat.forLanguageTags(LocaleManager.androidLanguageTags(tag))
-            )
+            val resolved = LocaleManager.set(tag)
+            broadcastLocaleToWebViews(context, resolved)
+            AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(resolved))
         }
-        // The activity recreate above rehydrates Fragments in the new language, but a
-        // running foreground Service (the RoadSense overlay) doesn't get a per-app
-        // locale change delivered, so re-inflate it explicitly if it's up. No-op when
-        // the overlay isn't showing.
+        // Activities recreate automatically, but plain overlay Services do not receive
+        // AppCompat's per-app locale. Re-inflate both overlays against the new locale.
+        com.overdrive.app.overlay.StatusOverlayService.refreshTheme(context)
         com.overdrive.app.roadsense.overlay.RoadSenseOverlayService.relocalizeIfRunning()
     }
 

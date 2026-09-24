@@ -178,7 +178,9 @@ public class TripAnalyticsManager {
         // during the ACC OFF→ON transition
         try {
             int currentGear = GearMonitor.getInstance().getCurrentGear();
-            if (currentGear != GearMonitor.GEAR_P && detector != null && !detector.isTripActive()) {
+            if (GearMonitor.isValidGearMode(currentGear)
+                    && currentGear != GearMonitor.GEAR_P
+                    && detector != null && !detector.isTripActive()) {
                 logger.info("ACC ON + gear already " + GearMonitor.gearToString(currentGear)
                         + " — auto-starting trip");
                 detector.onGearChanged(currentGear);
@@ -224,7 +226,9 @@ public class TripAnalyticsManager {
 
             // If gear is not P, trigger trip detection
             int currentGear = GearMonitor.getInstance().getCurrentGear();
-            if (currentGear != GearMonitor.GEAR_P && detector != null) {
+            if (GearMonitor.isValidGearMode(currentGear)
+                    && currentGear != GearMonitor.GEAR_P
+                    && detector != null) {
                 logger.info("Enabling while gear=" + GearMonitor.gearToString(currentGear)
                         + " — forwarding gear to detector");
                 detector.onGearChanged(currentGear);
@@ -269,8 +273,10 @@ public class TripAnalyticsManager {
      * <p>Call this before a process kill that is NOT a trip end — specifically
      * the UI's {@code prepare-restart} + {@code killall -9} flow, which bypasses
      * the JVM shutdown hook. It flushes buffered telemetry so the
-     * {@code .jsonl.gz} on disk covers everything sampled so far, leaving
-     * next-boot {@code recoverTripsFromDisk} able to rebuild the row.
+     * {@code .jsonl.gz} on disk covers everything sampled so far. The next
+     * process RESUMES the trip from that journal when it starts within
+     * {@link #RESUME_MAX_GAP_MS} (see {@link #tryResumeInterruptedTrip});
+     * otherwise {@code recoverTripsFromDisk} finalizes the row from it.
      *
      * <p>Deliberately NOT {@link #shutdown()}. shutdown() calls
      * finalizeActiveTrip(), which applies the 60s / 0.2km floors and — on a
@@ -311,6 +317,41 @@ public class TripAnalyticsManager {
         if (recorder != null) {
             recorder.setTelemetryDataCollector(collector);
         }
+        // A trip resumed at init (before the collector existed) still needs the
+        // 5 Hz dynamics poll for its scoring stream — acquire the polling ref
+        // now, exactly as handleTripStarted would have. Released by the trip
+        // end/discard handlers like any other trip.
+        if (collector != null && !tripPollingHeld && isTripActive()) {
+            try {
+                collector.startPolling();
+                tripPollingHeld = true;
+                logger.info("TelemetryDataCollector polling acquired late for the resumed trip");
+            } catch (Exception e) {
+                logger.warn("Late polling start for resumed trip failed: " + e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * True while this manager holds a TelemetryDataCollector polling ref on
+     * behalf of the active trip (acquired at trip start / resume, released at
+     * trip end / discard). Keeps start/stop calls paired when the collector is
+     * bound after the trip began.
+     */
+    private volatile boolean tripPollingHeld = false;
+
+    /** Release the trip's polling ref if (and only if) this manager acquired one. */
+    private void releaseTripPolling() {
+        if (!tripPollingHeld) return;
+        tripPollingHeld = false;
+        TelemetryDataCollector collector = telemetryDataCollector;
+        if (collector != null) {
+            try {
+                collector.stopPolling();
+            } catch (Exception e) {
+                logger.warn("Failed to stop TelemetryDataCollector polling: " + e.getMessage());
+            }
+        }
     }
 
     // ==================== PRIVATE ====================
@@ -322,63 +363,31 @@ public class TripAnalyticsManager {
         // Database
         database = new TripDatabase();
         database.init();
-        
-        // Clean up orphaned trips from previous daemon crashes
-        // (trips with no end_time that are older than 24 hours)
-        try {
-            long cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000L;
-            database.deleteOrphanedTrips(cutoff);
-        } catch (Exception e) {
-            logger.warn("Orphaned trip cleanup failed: " + e.getMessage());
-        }
 
-        // FIX: Auto-recover trips from surviving .jsonl.gz files on disk whose
-        // DB row was lost to a mid-drive daemon crash. The crash kills the process
-        // before TripDetector.finalizeActiveTrip() can insert the row, but the
-        // telemetry file survives on USB/SD. recoverTripsFromDisk() is idempotent
-        // (dedup by basename, start-time, signature), skips the currently-active
-        // trip file, and respects minimum-trip thresholds — safe to run at every
-        // startup. Runs on a background thread so it doesn't delay ACC-ON
-        // responsiveness (FUSE listing can take seconds on large trip dirs).
-        try {
-            final StorageManager sm = StorageManager.getInstance();
-            final java.util.List<File> tripsDirs = sm.getAllTripsDirs();
-            boolean haveAnyDir = false;
-            if (tripsDirs != null) {
-                for (File d : tripsDirs) {
-                    if (d != null && d.isDirectory()) { haveAnyDir = true; break; }
-                }
-            }
-            if (haveAnyDir) {
-                final TripDatabase db = database;
-                Thread recoveryThread = new Thread(() -> {
-                    try {
-                        TripDatabase.RecoveryResult r = db.recoverTripsFromDisk(tripsDirs);
-                        if (r.recovered > 0) {
-                            logger.info("Auto-recovery: recovered " + r.recovered
-                                + " orphaned trips from disk (scanned=" + r.scanned
-                                + ", skipped=" + r.skipped + ")");
-                            // Re-enforce storage limit after recovering trips
-                            try { sm.ensureTripsSpace(0); }
-                            catch (Exception ex) {
-                                logger.warn("Post-recovery trips cleanup failed: " + ex.getMessage());
-                            }
-                        }
-                    } catch (Throwable t) {
-                        logger.warn("Auto-recovery failed: " + t.getMessage());
-                    }
-                }, "TripAutoRecover");
-                recoveryThread.setDaemon(true);
-                recoveryThread.start();
-            }
-        } catch (Throwable t) {
-            logger.warn("Trip auto-recovery setup failed: " + t.getMessage());
-        }
+        // NOTE (insert-at-start): the orphaned-row janitor used to run HERE,
+        // synchronously, BEFORE recovery. Trip rows are now inserted at trip
+        // START (end_time=0 until finalize), and a mid-drive SIGKILL leaves
+        // exactly such a row — which recovery FINALIZES in place from the
+        // surviving telemetry, preserving the live start-side snapshots that
+        // telemetry cannot rebuild (SoC, kWh, accumulators, PHEV fields).
+        // Deleting end_time=0 rows before that pass would destroy precisely
+        // the rows recovery exists to complete, so the janitor now runs
+        // INSIDE the recovery thread, strictly AFTER recoverTripsFromDisk.
 
-        // Backfill route_id for existing trips (idempotent — skips already-assigned trips)
-        database.backfillRouteIds();
-
-        // Detector
+        // Auto-recover trips from surviving .jsonl.gz files on disk. Two cases:
+        //  1. A file matching an end_time=0 row (crash mid-trip after the
+        //     start-time insert) → the row is FINALIZED in place, same id.
+        //  2. A file with no row at all (legacy crash, or the start-time
+        //     insert itself failed) → a row is reconstructed and inserted, as
+        //     before. recoverTripsFromDisk() is idempotent (dedup by basename,
+        //     start-time, signature), skips the currently-active trip file,
+        //     and respects minimum-trip thresholds — safe to run at every
+        //     startup. Runs on a background thread so it doesn't delay ACC-ON
+        //     responsiveness (FUSE listing can take seconds on large trip dirs).
+        // Detector + recorder + engines are built BEFORE the recovery thread is
+        // spawned so a same-session resume (below) can re-adopt an interrupted
+        // drive before recovery gets a chance to finalize its row from
+        // telemetry alone.
         detector = new TripDetector();
         detector.setListener(new TripDetector.TripListener() {
             @Override
@@ -411,6 +420,85 @@ public class TripAnalyticsManager {
         // Range estimator
         rangeEstimator = new RangeEstimator(database, sohEstimator);
 
+        // SAME-SESSION RESUME (field incident log_DG87KWQX): a GL-watchdog
+        // process restart landed 6 s into a trip's park debounce. The old
+        // "trip-safe restart" only flushed the journal; this process then let
+        // recovery FINALIZE the row from telemetry — no end SoC/kWh, no
+        // odometer end, no DNA scores, no cost — while the car was still ACC
+        // ON in P for another minute and a half. If the interrupted drive's
+        // journal is fresh, re-adopt it as the ACTIVE trip instead, so the
+        // normal live finalize runs with every end-side read and the engine.
+        // Must run BEFORE the recovery thread starts: it also arms the
+        // in-flight file marker recovery honours.
+        try {
+            tryResumeInterruptedTrip();
+        } catch (Throwable t) {
+            logger.warn("Same-session trip resume failed: " + t.getMessage());
+        }
+
+        try {
+            final StorageManager sm = StorageManager.getInstance();
+            final java.util.List<File> tripsDirs = new java.util.ArrayList<>();
+            java.util.List<File> configured = sm.getAllTripsDirs();
+            if (configured != null) tripsDirs.addAll(configured);
+            // The in-flight journal now lives on internal storage; a crash
+            // leaves its file THERE, so recovery must scan that dir too.
+            final File journalDir = sm.getTripJournalDir();
+            if (journalDir != null && !tripsDirs.contains(journalDir)) tripsDirs.add(journalDir);
+            boolean anyDir = false;
+            for (File d : tripsDirs) {
+                if (d != null && d.isDirectory()) { anyDir = true; break; }
+            }
+            final boolean haveAnyDir = anyDir;
+            final TripDatabase db = database;
+            Thread recoveryThread = new Thread(() -> {
+                try {
+                    if (haveAnyDir) {
+                        TripDatabase.RecoveryResult r = db.recoverTripsFromDisk(tripsDirs);
+                        if (r.recovered > 0) {
+                            logger.info("Auto-recovery: recovered " + r.recovered
+                                + " orphaned trips from disk (scanned=" + r.scanned
+                                + ", skipped=" + r.skipped + ")");
+                            // Re-enforce storage limit after recovering trips
+                            try { sm.ensureTripsSpace(0); }
+                            catch (Exception ex) {
+                                logger.warn("Post-recovery trips cleanup failed: " + ex.getMessage());
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    logger.warn("Auto-recovery failed: " + t.getMessage());
+                }
+                // Janitor strictly LAST: any end_time=0 row still standing
+                // after the finalize pass has no recoverable telemetry — reap
+                // it once older than 24 hours (never the current drive's row,
+                // whose start_time is minutes old).
+                try {
+                    long cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000L;
+                    db.deleteOrphanedTrips(cutoff);
+                } catch (Throwable t) {
+                    logger.warn("Orphaned trip cleanup failed: " + t.getMessage());
+                }
+                // Journal-dir janitor: a journal that recovery could neither
+                // finalize nor insert (below the trip floors with no row,
+                // unreadable) would otherwise sit on /data forever. Anything
+                // older than a week there is dead; the active trip's file is
+                // protected by the in-flight marker regardless of age.
+                try {
+                    reapStaleJournals(journalDir, System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000L);
+                } catch (Throwable t) {
+                    logger.warn("Trip journal cleanup failed: " + t.getMessage());
+                }
+            }, "TripAutoRecover");
+            recoveryThread.setDaemon(true);
+            recoveryThread.start();
+        } catch (Throwable t) {
+            logger.warn("Trip auto-recovery setup failed: " + t.getMessage());
+        }
+
+        // Backfill route_id for existing trips (idempotent — skips already-assigned trips)
+        database.backfillRouteIds();
+
         enabled = true;
         // Surface a dead store LOUDLY. `enabled` is set regardless — detection and
         // telemetry are still worth running, because the .jsonl.gz files let
@@ -428,6 +516,144 @@ public class TripAnalyticsManager {
         logger.info("Trip analytics components initialized");
     }
 
+    // ==================== SAME-SESSION RESUME ====================
+
+    /** A journal whose last sample is older than this belongs to recovery, not to a resume. */
+    static final long RESUME_MAX_GAP_MS = 10L * 60L * 1000L;
+    /** Sanity bound on the age of a resumable row (a genuine drive, not a stale straggler). */
+    static final long RESUME_MAX_TRIP_AGE_MS = 12L * 60L * 60L * 1000L;
+
+    /**
+     * Re-adopt the most recent half-open trip row if its telemetry journal is
+     * fresh enough to be the SAME drive this process was restarted in the
+     * middle of. Arms the in-flight file marker (so the recovery thread skips
+     * the journal), re-attaches the recorder to the journal, and puts the
+     * detector into ACTIVE or PARK_PENDING based on the journal tail / live
+     * gear. Returns true when a trip was resumed.
+     */
+    private boolean tryResumeInterruptedTrip() {
+        if (database == null || detector == null || recorder == null) return false;
+        List<TripRecord> open = database.getUnfinalizedTrips();
+        if (open == null || open.isEmpty()) return false;
+        TripRecord row = open.get(0);   // newest first
+        final long now = System.currentTimeMillis();
+        if (row.startTime <= 0 || row.startTime > now + 60_000L
+                || now - row.startTime > RESUME_MAX_TRIP_AGE_MS) {
+            logger.info("Resume: half-open row id=" + row.id + " is too old ("
+                    + row.startTime + ") — leaving it to recovery");
+            return false;
+        }
+
+        File journal = locateJournal(row.startTime);
+        if (journal == null) {
+            logger.info("Resume: no journal found for half-open row id=" + row.id
+                    + " (start=" + row.startTime + ") — leaving it to recovery");
+            return false;
+        }
+        List<TelemetrySample> history = TelemetryStore.readFromFile(journal);
+        if (history == null || history.isEmpty()) {
+            logger.info("Resume: journal " + journal.getName() + " is empty — leaving row id="
+                    + row.id + " to recovery");
+            return false;
+        }
+        long lastSampleMs = history.get(history.size() - 1).timestampMs;
+        long gapMs = now - lastSampleMs;
+        if (gapMs < 0 || gapMs > RESUME_MAX_GAP_MS) {
+            logger.info("Resume: journal for row id=" + row.id + " last sampled " + (gapMs / 1000)
+                    + "s ago (> " + (RESUME_MAX_GAP_MS / 1000) + "s) — leaving it to recovery");
+            return false;
+        }
+
+        // Where did the car stop, if it did? Same heuristic recovery trims on.
+        int lastMoving = TripDatabase.lastMovingSampleIndex(history);
+        boolean parked = lastMoving < history.size() - 1;
+        long parkStartMs = parked
+                ? history.get(Math.min(lastMoving + 1, history.size() - 1)).timestampMs
+                : 0L;
+        // The live gear wins over the journal tail when GearMonitor already
+        // has a real reading: a driver who kept going through the restart is
+        // still ACTIVE even if the journal ended on a red light in P.
+        try {
+            int liveGear = GearMonitor.getInstance().getCurrentGear();
+            if (GearMonitor.isValidGearMode(liveGear) && liveGear != GearMonitor.GEAR_P) {
+                parked = false;
+                parkStartMs = 0L;
+            }
+        } catch (Throwable ignored) {}
+
+        // Arm the in-flight marker FIRST so the recovery thread (started right
+        // after this) skips the journal instead of finalizing/deleting it.
+        try {
+            StorageManager.getInstance().setActiveTripFile(journal);
+        } catch (Throwable t) {
+            logger.warn("Resume: could not arm the active trip marker: " + t.getMessage());
+        }
+
+        // Polling ref, mirroring handleTripStarted (released in handleTripEnded).
+        // The collector is often still null this early in daemon init;
+        // setTelemetryDataCollector acquires the ref late in that case.
+        if (telemetryDataCollector != null) {
+            try {
+                telemetryDataCollector.startPolling();
+                tripPollingHeld = true;
+            } catch (Exception e) {
+                logger.warn("Resume: failed to start TelemetryDataCollector polling: " + e.getMessage());
+            }
+        }
+
+        recorder.resumeRecording(row.startTime, journal, history);
+        long remainingDebounce = parked
+                ? TripDetector.PARK_DEBOUNCE_MS - (now - parkStartMs)
+                : TripDetector.PARK_DEBOUNCE_MS;
+        detector.resumeTrip(row, parked, parkStartMs, remainingDebounce);
+        logger.info("Resumed interrupted trip id=" + row.id + " from " + journal.getAbsolutePath()
+                + " (" + history.size() + " journaled samples, last " + (gapMs / 1000) + "s ago, "
+                + (parked ? "parked" : "driving") + ")");
+        return true;
+    }
+
+    /**
+     * Find {@code <startTime>.jsonl.gz} for a half-open row: the internal
+     * journal dir first, then every mounted trips dir (journals written before
+     * the journal dir existed). Exact-path probes only — no directory listing,
+     * which can hang on a FUSE-bridged card.
+     */
+    private File locateJournal(long startTime) {
+        String name = startTime + ".jsonl.gz";
+        java.util.List<File> candidates = new java.util.ArrayList<>();
+        try {
+            StorageManager sm = StorageManager.getInstance();
+            File journalDir = sm.getTripJournalDir();
+            if (journalDir != null) candidates.add(journalDir);
+            java.util.List<File> dirs = sm.getAllTripsDirs();
+            if (dirs != null) candidates.addAll(dirs);
+        } catch (Throwable ignored) {}
+        for (File dir : candidates) {
+            if (dir == null) continue;
+            File f = new File(dir, name);
+            try {
+                if (f.isFile() && f.length() > 0) return f;
+            } catch (Throwable ignored) {}
+        }
+        return null;
+    }
+
+    /** Delete journal-dir files older than {@code olderThanMs}, sparing the in-flight one. */
+    private static void reapStaleJournals(File journalDir, long olderThanMs) {
+        if (journalDir == null || !journalDir.isDirectory()) return;
+        File[] files = journalDir.listFiles();
+        if (files == null) return;
+        String active = null;
+        try { active = StorageManager.getInstance().getActiveTripFilePath(); } catch (Throwable ignored) {}
+        int reaped = 0;
+        for (File f : files) {
+            if (!f.isFile() || !f.getName().endsWith(".jsonl.gz")) continue;
+            if (active != null && active.equals(f.getAbsolutePath())) continue;
+            if (f.lastModified() < olderThanMs && f.delete()) reaped++;
+        }
+        if (reaped > 0) logger.info("Reaped " + reaped + " stale trip journal(s)");
+    }
+
     /**
      * Handle trip started event from TripDetector.
      * Start the TripTelemetryRecorder using startTime as the trip ID.
@@ -440,15 +666,45 @@ public class TripAnalyticsManager {
         if (telemetryDataCollector != null) {
             try {
                 telemetryDataCollector.startPolling();
+                tripPollingHeld = true;
                 logger.info("TelemetryDataCollector polling ensured for trip recording");
             } catch (Exception e) {
                 logger.warn("Failed to start TelemetryDataCollector polling: " + e.getMessage());
             }
         }
 
+        // Persist an ACTIVE row NOW (end_time=0, duration=0, distance=0),
+        // finalized in handleTripEnded via UPDATE. Before this, the row was
+        // inserted only at trip end, so a mid-drive process SIGKILL (adbd
+        // cgroup kill, watchdog, OOM) lost the row outright and next-boot
+        // recovery re-derived a degraded duplicate from telemetry under a
+        // fresh id — the field incident's "recovered trip 3302". With the
+        // row durable at start, recovery FINALIZES this same row in place,
+        // keeping its identity and the live start-side snapshots (SoC, kWh,
+        // accumulators, odometer, PHEV flags) that telemetry cannot rebuild.
+        //
+        // insertTrip sets trip.id on success. On failure we log and fall
+        // back to the legacy insert-at-end flow (trip.id stays 0) — trips
+        // must never be blocked on a sick store.
+        if (database != null) {
+            try {
+                long id = database.insertTrip(trip);
+                if (id > 0) {
+                    logger.info("Active trip row inserted at start — id=" + id);
+                } else {
+                    logger.warn("Active-row insert failed at trip start — will fall back"
+                            + " to insert-at-end for this trip");
+                }
+            } catch (Throwable t) {
+                logger.warn("Active-row insert threw at trip start: " + t.getMessage());
+            }
+        }
+
         if (recorder != null) {
-            // Use startTime as the unique trip identifier for the recorder
-            // (before DB insert gives us the auto-increment ID)
+            // The recorder keys its file by startTime regardless of the DB id
+            // (<startTime>.jsonl.gz, renamed to <dbId>.jsonl.gz at finalize) —
+            // unchanged, so recovery's basename matching keeps working for
+            // both the finalize-in-place and the legacy reconstruction case.
             recorder.startRecording(trip.startTime);
         }
     }
@@ -468,17 +724,22 @@ public class TripAnalyticsManager {
         logger.info("Trip ended — duration=" + trip.durationSeconds + "s, distance="
                 + trip.distanceKm + "km");
 
-        // Release telemetry polling ref (acquired in handleTripStarted)
-        if (telemetryDataCollector != null) {
-            telemetryDataCollector.stopPolling();
-        }
+        // Release telemetry polling ref (acquired in handleTripStarted / resume)
+        releaseTripPolling();
 
         String telemetryPath = null;
 
-        // 1. Stop recorder, get samples
+        // 1. Stop recorder, get samples. keepActiveMarker=true: the in-flight
+        //    file marker must stay up CONTINUOUSLY from startRecording until
+        //    the row is finalized + the file renamed (cleared in the finally
+        //    below). The old stop-clear/re-arm sequence left a window — brief
+        //    on this thread, but recovery runs on OTHER threads (startup scan,
+        //    POST /api/trips/recover) — in which the half-open row plus the
+        //    unprotected file could be finalized, duplicated, or deleted
+        //    underneath this finalize.
         List<TelemetrySample> samples = null;
         if (recorder != null) {
-            telemetryPath = recorder.stopRecording();
+            telemetryPath = recorder.stopRecording(true);
             samples = recorder.getSamplesForScoring();
         }
 
@@ -494,19 +755,17 @@ public class TripAnalyticsManager {
             samples.removeIf(s -> s.timestampMs > scoringEndMs);
         }
 
-        // stopRecording() clears the in-flight marker, but the DB row for this
-        // trip isn't inserted until step 4 below. In that gap the <startTime>
-        // .jsonl.gz file is on disk with NO row and NO active-file marker, so a
-        // concurrent /api/trips/recover would rebuild a phantom duplicate.
-        // Re-assert the marker over the file until the row exists; cleared in
-        // the finally after insert+rename.
+        // The marker was KEPT by stopRecording(true) — no cleared window
+        // exists. This re-assert is idempotent belt-and-braces (covers the
+        // recorder having lost the marker to a mid-trip volume-migration
+        // hiccup); the finally clears it once the row is complete.
         boolean reArmedMarker = false;
         if (telemetryPath != null) {
             try {
                 com.overdrive.app.storage.StorageManager.getInstance()
                         .setActiveTripFile(new File(telemetryPath));
-                reArmedMarker = true;
             } catch (Exception ignored) {}
+            reArmedMarker = true;
         }
         try {
 
@@ -731,22 +990,43 @@ public class TripAnalyticsManager {
         }
         // No sidecars in current builds; sidecarSizeBytes stays 0.
 
-        // 4. Insert into database
+        // 4. Finalize (or insert) the database row
         if (database != null) {
-            long dbId = database.insertTrip(trip);
-
-            // ONE retry. insertTrip's own catch calls reconnect() before
-            // returning -1, so by the time we get here a fresh H2 connection may
-            // already be in place — the classic interrupted-MVStore case recovers
-            // on a second attempt, in-process, instead of deferring to next-boot
-            // .jsonl.gz recovery (which re-derives distance from GPS and re-applies
-            // the discard floors, so it can silently drop the trip entirely).
-            if (dbId <= 0) {
-                logger.warn("insertTrip returned " + dbId + " — retrying once after"
-                        + " the failure path's reconnect()");
+            long dbId;
+            if (trip.id > 0) {
+                // Row was inserted at trip START — finalize it in place with a
+                // full-row UPDATE. ONE retry: updateTrip's catch already ran
+                // reconnect(), so a second attempt lands on a fresh H2
+                // connection (same rationale as the legacy insert retry).
+                boolean finalized = database.updateTrip(trip);
+                if (!finalized) {
+                    logger.warn("Trip finalize UPDATE failed for id=" + trip.id
+                            + " — retrying once after the failure path's reconnect()");
+                    finalized = database.updateTrip(trip);
+                }
+                // If the UPDATE cannot land, deliberately DO NOT fall back to
+                // insertTrip: the active row exists, so an insert would create
+                // the exact start-time duplicate the dedup keys guard against.
+                // The end_time=0 row + surviving .jsonl.gz are precisely what
+                // next-boot recovery finalizes.
+                dbId = finalized ? trip.id : -1;
+            } else {
+                // Legacy path (active-row insert failed at trip start).
                 dbId = database.insertTrip(trip);
-                if (dbId > 0) {
-                    logger.info("Trip insert succeeded on retry — id=" + dbId);
+
+                // ONE retry. insertTrip's own catch calls reconnect() before
+                // returning -1, so by the time we get here a fresh H2 connection may
+                // already be in place — the classic interrupted-MVStore case recovers
+                // on a second attempt, in-process, instead of deferring to next-boot
+                // .jsonl.gz recovery (which re-derives distance from GPS and re-applies
+                // the discard floors, so it can silently drop the trip entirely).
+                if (dbId <= 0) {
+                    logger.warn("insertTrip returned " + dbId + " — retrying once after"
+                            + " the failure path's reconnect()");
+                    dbId = database.insertTrip(trip);
+                    if (dbId > 0) {
+                        logger.info("Trip insert succeeded on retry — id=" + dbId);
+                    }
                 }
             }
 
@@ -760,7 +1040,24 @@ public class TripAnalyticsManager {
                     File oldFile = new File(telemetryPath);
                     File newFile = new File(newPath);
                     if (oldFile.exists() && !oldFile.getAbsolutePath().equals(newFile.getAbsolutePath())) {
-                        if (oldFile.renameTo(newFile)) {
+                        // Marker flip + rename run ATOMICALLY under the trips
+                        // cleanup lock (renameActiveTripFile): every reaper
+                        // pass holds that lock and protects the marker's exact
+                        // path, so no pass can observe the mixed state (marker
+                        // moved, file not yet renamed) and delete the source.
+                        // Marker restore on failure lives inside the helper.
+                        // moveActiveTripFile (not rename): the journal lives on
+                        // internal storage and the trips dir is usually the SD
+                        // card, so this is a cross-filesystem move (copy+delete
+                        // fallback) with the same marker atomicity.
+                        boolean renamed = false;
+                        try {
+                            renamed = com.overdrive.app.storage.StorageManager.getInstance()
+                                    .moveActiveTripFile(oldFile, newFile);
+                        } catch (Exception e) {
+                            logger.warn("moveActiveTripFile threw: " + e.getMessage());
+                        }
+                        if (renamed) {
                             trip.telemetryFilePath = newPath;
                             database.updateTrip(trip);
                             logger.info("Telemetry file renamed: " + oldFile.getName()
@@ -793,12 +1090,13 @@ public class TripAnalyticsManager {
                         + " E=" + trip.efficiencyScore
                         + " C=" + trip.consistencyScore + "]");
             } else {
-                // Previously there was no else branch, so a failed insert
-                // produced NO log line at all here — the trip simply vanished
-                // and the only trace was a lower-level "Failed to insert trip".
-                // Say it loudly, and name the artifact that survives, because
-                // the .jsonl.gz is what next-boot recovery rebuilds the row from.
-                logger.error("Trip NOT saved — insertTrip returned " + dbId
+                // Say it loudly, and name the artifacts that survive: the
+                // .jsonl.gz (and, on the finalize path, the still-active row
+                // id) are what next-boot recovery completes the trip from.
+                logger.error("Trip NOT saved — "
+                        + (trip.id > 0
+                            ? "finalize UPDATE failed for active row id=" + trip.id
+                            : "insertTrip returned " + dbId)
                         + " (start=" + trip.startTime + ", distance=" + trip.distanceKm
                         + "km). Telemetry file "
                         + (telemetryPath != null ? telemetryPath : "(none)")
@@ -913,9 +1211,23 @@ public class TripAnalyticsManager {
     private void handleTripDiscarded(TripRecord trip, String reason) {
         logger.info("Trip discarded: " + reason);
 
-        // Release telemetry polling ref (acquired in handleTripStarted)
-        if (telemetryDataCollector != null) {
-            telemetryDataCollector.stopPolling();
+        // Release telemetry polling ref (acquired in handleTripStarted / resume)
+        releaseTripPolling();
+
+        // Remove the active row inserted at trip start — a below-threshold
+        // trip must leave no history. If the delete fails, the end_time=0 row
+        // is reaped by the >24h janitor on a later start (its telemetry file
+        // is deleted just below, so the recovery finalize pass skips it).
+        if (database != null && trip.id > 0) {
+            try {
+                boolean deleted = database.deleteTrip(trip.id);
+                if (!deleted) {
+                    logger.warn("Failed to delete discarded active trip row id=" + trip.id
+                            + " — the >24h orphan janitor will reap it");
+                }
+            } catch (Throwable t) {
+                logger.warn("Discarded-trip row delete threw: " + t.getMessage());
+            }
         }
 
         if (recorder != null) {

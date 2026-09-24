@@ -216,8 +216,9 @@ public final class LauncherApiHandler {
             }
             o.put("gear", gear == null ? JSONObject.NULL : gear);
 
-            // locked: base SDK door-lock array only (index 6 = derived overall;
-            // 1=locked, 2=unlocked, else unknown). Deliberately does NOT trigger
+            // locked: base SDK door-lock array only (index 6 = derived overall).
+            // Normalize the DiLink 5 encoding without changing the legacy API contract
+            // (1=locked, 2=unlocked). Deliberately does NOT trigger
             // the cloud-lock REST refresh VehicleControlApiHandler.handleGetState
             // does — that spawns threads and is too heavy for a ~5s poll. Often
             // null on trims that report INVALID(0) at ACC-off; the launcher tile
@@ -227,9 +228,11 @@ public final class LauncherApiHandler {
                 com.overdrive.app.byd.BydVehicleData vd =
                         com.overdrive.app.byd.BydDataCollector.getInstance().getData();
                 if (vd != null && vd.doorLockStatus != null && vd.doorLockStatus.length >= 7) {
-                    int overall = vd.doorLockStatus[6];
-                    if (overall == 2) locked = Boolean.TRUE;
-                    else if (overall == 1) locked = Boolean.FALSE;
+                    int overall = VehicleControlApiHandler.localLockToApi(
+                            vd.doorLockStatus[6],
+                            com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected());
+                    if (overall == 1) locked = Boolean.TRUE;
+                    else if (overall == 2) locked = Boolean.FALSE;
                 }
             } catch (Throwable ignored) {}
             o.put("locked", locked);
@@ -653,11 +656,31 @@ public final class LauncherApiHandler {
                 }
             } catch (Throwable ignored) {}
             if (tempC == JSONObject.NULL) {
+                // NORMALIZED TELEMETRY FIRST (R25): the collector snapshot is
+                // process-correct on every generation (DI5 bridges it; legacy
+                // reads the same instrument device). The reflection fallback
+                // replaces the previous DIRECT compile-time SDK reference,
+                // which threw NoClassDefFoundError on class-absent firmware.
                 try {
-                    android.hardware.bydauto.instrument.BYDAutoInstrumentDevice inst =
-                            android.hardware.bydauto.instrument.BYDAutoInstrumentDevice.getInstance(null);
+                    com.overdrive.app.byd.BydDataCollector collector =
+                            com.overdrive.app.byd.BydDataCollector.getInstance();
+                    if (collector.isInitialized()) {
+                        com.overdrive.app.byd.BydVehicleData data = collector.getData();
+                        if (data != null && !Double.isNaN(data.outsideTempC)) {
+                            int t = (int) Math.round(data.outsideTempC);
+                            if (t > -60 && t < 80) { tempC = t; any = true; }
+                        }
+                    }
+                } catch (Throwable ignored) {}
+            }
+            if (tempC == JSONObject.NULL) {
+                try {
+                    Class<?> instrumentClass = Class.forName("android.hardware.bydauto.instrument.BYDAutoInstrumentDevice");
+                    java.lang.reflect.Method getInst = instrumentClass.getMethod("getInstance", android.content.Context.class);
+                    Object inst = getInst.invoke(null, (android.content.Context) null);
                     if (inst != null) {
-                        int t = inst.getOutCarTemperature();
+                        java.lang.reflect.Method getTemp = instrumentClass.getMethod("getOutCarTemperature");
+                        int t = (Integer) getTemp.invoke(inst);
                         if (t > -60 && t < 80) { tempC = t; any = true; }
                     }
                 } catch (Throwable ignored) {}

@@ -127,9 +127,11 @@ public final class ClusterMirrorController {
     private int panelW, panelH;           // resolved cluster panel size (buffer size)
     private int fissionStack = BsNativeLayer.STACK_UNRESOLVED;
     private int fissionDisplayId = -1;
+    private boolean holdsProjection;
     private Rect paneRect = new Rect(0, 0, 0, 0);   // head-unit dest rect (screen px)
     private int scaleMode = SCALE_FIT;              // FIT/FILL/ZOOM (from the UI POST)
-    private ScheduledFuture<?> stillFuture;         // still-poll tick (fallback only)
+    private volatile ScheduledFuture<?> stillFuture; // still-poll tick (fallback only)
+    private volatile Process activeStillCapture;     // pre-empted by safety teardown
     private Paint stillPaint;                        // reused in still mode (no per-frame alloc)
 
     private ClusterMirrorController() {
@@ -158,9 +160,9 @@ public final class ClusterMirrorController {
     /** Daemon-exit teardown. No-op if the mirror was never started (instance null).
      *  SYNCHRONOUS so the mirror's virtual display is fully unbound + destroyed before the
      *  VM exits / the OEM projection close runs. */
-    public static void shutdownIfActive() {
+    public static boolean shutdownIfActive() {
         ClusterMirrorController i = instance;
-        if (i != null) i.stopSync();
+        return i == null || i.stopSync();
     }
 
     /** ACC-off / projection-teardown reconcile. No-op if never started.
@@ -168,12 +170,26 @@ public final class ClusterMirrorController {
      *  virtual display (the CONSUMER of the fission layerStack) is torn down before the OEM
      *  fission SOURCE display is closed — eliminating the ACC-off SurfaceFlinger teardown
      *  race that otherwise crashes the daemon + app. */
-    public static void forceCloseIfActive(String reason) {
+    public static boolean forceCloseIfActive(String reason) {
         ClusterMirrorController i = instance;
         if (i != null) {
             logger.info("forceClose(" + reason + ")");
-            i.stopSync();
+            return i.stopSync();
         }
+        return true;
+    }
+
+    /**
+     * Projection-controller close hook. Suppresses the normal sustained-token
+     * release because the caller is already performing an authoritative close
+     * that clears every holder; releasing here would recursively enter
+     * forceClose("sustained-release").
+     */
+    public static boolean detachBeforeProjectionClose(String reason) {
+        ClusterMirrorController i = instance;
+        if (i == null) return true;
+        logger.info("detachBeforeProjectionClose(" + reason + ")");
+        return i.stopSyncBeforeProjectionClose();
     }
 
     // ── Public API (posted onto the single exec thread) ─────────────────────────────
@@ -216,6 +232,7 @@ public final class ClusterMirrorController {
 
     /** Tear everything down. Idempotent, any thread. */
     public void stop() {
+        cancelStillCaptureBeforeStop();
         exec.execute(this::stopOnExec);
     }
 
@@ -226,21 +243,59 @@ public final class ClusterMirrorController {
      *  SurfaceFlinger teardown-race crash. Never throws; a timeout just proceeds (the
      *  detach/destroy is still best-effort correct). Safe from any thread; if called ON the
      *  exec thread it runs inline to avoid self-deadlock. */
-    public void stopSync() {
+    public boolean stopSync() {
+        return stopSyncInternal(false);
+    }
+
+    private boolean stopSyncInternal(boolean suppressProjectionRelease) {
         if (Thread.currentThread().getName() != null
                 && Thread.currentThread().getName().startsWith("ClusterMirror")) {
             // Already on the exec thread — run inline (awaiting our own thread would deadlock).
+            if (suppressProjectionRelease) holdsProjection = false;
             stopOnExec();
-            return;
+            return true;
         }
+        cancelStillCaptureBeforeStop();
         final CountDownLatch latch = new CountDownLatch(1);
         try {
-            exec.execute(() -> { try { stopOnExec(); } finally { latch.countDown(); } });
+            exec.execute(() -> {
+                try {
+                    if (suppressProjectionRelease) holdsProjection = false;
+                    stopOnExec();
+                } finally {
+                    latch.countDown();
+                }
+            });
         } catch (Throwable t) {
-            // Executor already shut down / rejected — nothing running to await.
-            return;
+            logger.warn("mirror stop dispatch failed: " + t.getMessage());
+            return false;
         }
-        try { latch.await(2500, TimeUnit.MILLISECONDS); } catch (InterruptedException ignored) {}
+        try {
+            boolean completed = latch.await(2500, TimeUnit.MILLISECONDS);
+            if (!completed) {
+                logger.warn("mirror detach was not confirmed within 2500ms; "
+                        + "projection source close must wait");
+            }
+            return completed;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    private boolean stopSyncBeforeProjectionClose() {
+        return stopSyncInternal(true);
+    }
+
+    private void cancelStillCaptureBeforeStop() {
+        ScheduledFuture<?> future = stillFuture;
+        if (future != null) {
+            try { future.cancel(true); } catch (Throwable ignored) {}
+        }
+        Process capture = activeStillCapture;
+        if (capture != null && capture.isAlive()) {
+            try { capture.destroyForcibly(); } catch (Throwable ignored) {}
+        }
     }
 
     /** Snapshot of the current state for the UI status endpoint. Volatile-free read of
@@ -357,8 +412,59 @@ public final class ClusterMirrorController {
         // Resolve ONCE and size from the SAME descriptor: a second resolveFissionDisplay()
         // (what the 1-arg clusterDisplaySize does internally) could straddle a layerStack/id
         // change across a projection re-open and pair one display's size with another's stack.
-        BsNativeLayer.FissionDisplay fd = BsNativeLayer.resolveFissionDisplay();
-        Point panel = BsNativeLayer.clusterDisplaySize(ctx, fd);
+        boolean diLink5 =
+                com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
+        if (!diLink5 && ClusterProjectionController
+                .isLegacyProjectionAdmissionBlocked()) {
+            logger.info("start: legacy projection blocked by DI5 recovery");
+            mode = MODE_NO_PROJECTION;
+            return;
+        }
+        if (diLink5 && !com.overdrive.app.launcher.DiLink5ClusterCast
+                .isProjectionSourceActive()) {
+            logger.info("start: no active DI5 projection source");
+            mode = MODE_NO_PROJECTION;
+            return;
+        }
+        if (!diLink5) {
+            ClusterProjectionController projection =
+                    ClusterProjectionController.getInstance();
+            if (!projection.isOpen()) {
+                logger.info("start: no already-open legacy projection source");
+                mode = MODE_NO_PROJECTION;
+                return;
+            }
+            try {
+                if (!projection.acquireSustained("mirror")) {
+                    logger.info("start: mirror projection hold was not admitted");
+                    mode = MODE_NO_PROJECTION;
+                    return;
+                }
+                holdsProjection = true;
+            } catch (Throwable t) {
+                logger.warn("start: acquireSustained failed: " + t.getMessage());
+                mode = MODE_NO_PROJECTION;
+                return;
+            }
+        }
+        int diLink5TargetId = diLink5
+                ? com.overdrive.app.launcher.DiLink5ClusterCast
+                        .currentTargetDisplayId()
+                : -1;
+        BsNativeLayer.FissionDisplay fd = diLink5
+                ? BsNativeLayer.resolveDiLink5MirrorDisplay(diLink5TargetId)
+                : BsNativeLayer.resolveFissionDisplay();
+        int diLink5Width = diLink5
+                ? com.overdrive.app.launcher.DiLink5ClusterCast
+                        .currentTargetDisplayWidth()
+                : 0;
+        int diLink5Height = diLink5
+                ? com.overdrive.app.launcher.DiLink5ClusterCast
+                        .currentTargetDisplayHeight()
+                : 0;
+        Point panel = diLink5Width > 1 && diLink5Height > 1
+                ? new Point(diLink5Width, diLink5Height)
+                : BsNativeLayer.clusterDisplaySize(ctx, fd);
         this.panelW = Math.max(1, panel.x);
         this.panelH = Math.max(1, panel.y);
         this.fissionStack = fd.layerStack;
@@ -370,18 +476,12 @@ public final class ClusterMirrorController {
         // meaningless or paint over the infotainment.
         if (this.fissionStack == BsNativeLayer.STACK_UNRESOLVED || this.fissionStack == 0) {
             logger.info("start: no live cluster projection (stack=" + this.fissionStack + ")");
+            if (holdsProjection) {
+                teardownResources();
+            }
             mode = MODE_NO_PROJECTION;
             return;
         }
-
-        // Pin the projection open for the duration of the mirror so a linger/max-cap
-        // auto-close can't blank the source mid-view. Acquire ONLY now that we've
-        // confirmed it is already open (requestOpen inside acquireSustained is a no-op
-        // when open), so the mirror never itself forces a gauge-takeover. Released in
-        // teardownResources(). The gauge-restore safety net (ACC-off/shutdown) is
-        // unaffected — those clear ALL holders regardless.
-        try { ClusterProjectionController.getInstance().acquireSustained("mirror"); }
-        catch (Throwable t) { logger.warn("start: acquireSustained failed: " + t.getMessage()); }
 
         // Create the head-unit host layer (layerStack 0 = default, so no setLayerStack op
         // — the layer composites on the head unit exactly like the proven BS head-unit
@@ -704,6 +804,7 @@ public final class ClusterMirrorController {
         Process p = null;
         try {
             p = new ProcessBuilder("sh", "-c", cmd).redirectErrorStream(true).start();
+            activeStillCapture = p;
             if (!p.waitFor(3, TimeUnit.SECONDS)) { p.destroyForcibly(); return null; }
             if (p.exitValue() != 0) return null;
             if (!f.exists() || f.length() == 0) return null;
@@ -712,6 +813,7 @@ public final class ClusterMirrorController {
             logger.debug("captureStill failed: " + t.getMessage());
             return null;
         } finally {
+            if (activeStillCapture == p) activeStillCapture = null;
             if (p != null) try { p.destroy(); } catch (Throwable ignored) {}
         }
     }
@@ -738,7 +840,7 @@ public final class ClusterMirrorController {
     // ── Teardown (deterministic — never leaves a display/layer/reader/thread) ───────
 
     private void teardownResources() {
-        if (stillFuture != null) { try { stillFuture.cancel(false); } catch (Throwable ignored) {} stillFuture = null; }
+        if (stillFuture != null) { try { stillFuture.cancel(true); } catch (Throwable ignored) {} stillFuture = null; }
         if (mirrorDisplayToken != null) {
             // CRITICAL (ACC-off crash fix): UNBIND the virtual display's OUTPUT surface and
             // its SOURCE layerStack BEFORE destroying it. Our VD (createDisplay) reads the
@@ -758,8 +860,11 @@ public final class ClusterMirrorController {
         stillPaint = null;
         // Release our projection hold LAST so the controller can restore the gauges when
         // no other consumer (cast app / map / blind-spot) still wants the projection.
-        try { ClusterProjectionController.getInstance().releaseSustained("mirror"); }
-        catch (Throwable ignored) {}
+        if (holdsProjection) {
+            holdsProjection = false;
+            try { ClusterProjectionController.getInstance().releaseSustained("mirror"); }
+            catch (Throwable ignored) {}
+        }
     }
 
     // ── SurfaceControl virtual-display reflection ───────────────────────────────────

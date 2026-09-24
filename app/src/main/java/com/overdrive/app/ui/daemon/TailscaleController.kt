@@ -109,12 +109,12 @@ class TailscaleController(
         tailscaleLauncher.isAdbEnabled(callback)
     }
 
-    /** Publish the web UI over tailnet HTTPS — opt-in, gives it a secure context. */
+    /** Publish the dashboard over verified tailnet HTTPS. */
     fun saveHttpsSettings(enabled: Boolean, callback: ((Boolean) -> Unit)? = null) {
         tailscaleLauncher.saveHttpsSettings(enabled, callback)
     }
 
-    fun isHttpsEnabled(callback: ((Boolean) -> Unit)) {
+    fun isHttpsEnabled(callback: (Boolean) -> Unit) {
         tailscaleLauncher.isHttpsEnabled(callback)
     }
 
@@ -124,6 +124,7 @@ class TailscaleController(
     }
 
     override fun cleanup() {
+        TailscaleLauncher.invalidateDashboardLifecycle()
         // ps+awk+kill instead of pkill -f. executeShellCommand wraps in
         // `sh -c "<cmd>"`; the wrapper's argv contains the literal
         // "tailscaled" → toybox pkill -f would SIGKILL the calling shell

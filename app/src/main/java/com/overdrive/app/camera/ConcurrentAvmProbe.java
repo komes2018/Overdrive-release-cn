@@ -13,7 +13,9 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * One-time probe that opens both the pano AVMCamera id and the OEM Dashcam id
@@ -50,6 +52,9 @@ public final class ConcurrentAvmProbe {
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
     private static final long FIRST_FRAME_TIMEOUT_MS = 5_000;
+    private static final long CAMERA_OPEN_HARD_TIMEOUT_MS = 10_000L;
+    private static final AtomicBoolean terminalCameraOpenRestart =
+        new AtomicBoolean(false);
 
     private ConcurrentAvmProbe() {}
 
@@ -59,6 +64,12 @@ public final class ConcurrentAvmProbe {
      */
     public static int runIfNeeded() {
         try {
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                    || terminalCameraOpenRestart.get()
+                    || com.overdrive.app.daemon.CameraDaemon
+                        .isProcessRestartPending()) {
+                return -1;
+            }
             JSONObject camera = UnifiedConfigManager.loadConfig().optJSONObject("camera");
             if (camera == null) return -1;
 
@@ -127,6 +138,7 @@ public final class ConcurrentAvmProbe {
                         + "(no destructive open performed)");
                     JSONObject patch = new JSONObject();
                     patch.put("concurrentAvmSupported", 1);
+                    patch.put("concurrentAvmProbeEnabled", false);
                     UnifiedConfigManager.updateSection("camera", patch);
                     return 1;
                 }
@@ -164,7 +176,35 @@ public final class ConcurrentAvmProbe {
                 return -1;
             }
 
+            // The UI promises this destructive one-shot runs only while
+            // parked. AccMonitor's cold default is ACC-off, so require a clean
+            // hardware read instead of trusting the cache.
+            if (!com.overdrive.app.daemon.CameraDaemon
+                    .isAccConfirmedOffForCameraProbe()) {
+                logger.info("Probe deferred: ACC is not confirmed OFF by a "
+                    + "trustworthy hardware read");
+                return -1;
+            }
+
+            // Consume the one-shot BEFORE opening either camera. If the HAL
+            // wedges and the urgent restart kills this process, the next daemon
+            // boot must not repeat the same destructive probe forever.
+            JSONObject consume = new JSONObject();
+            consume.put("concurrentAvmProbeEnabled", false);
+            try {
+                UnifiedConfigManager.updateSection("camera", consume);
+            } catch (Throwable writeFailure) {
+                logger.warn("Probe deferred: could not consume one-shot opt-in: "
+                    + writeFailure.getMessage());
+                return -1;
+            }
+
             int result = probe(panoId, oemId);
+            if (result < 0) {
+                logger.info("Probe retired before completion; leaving "
+                    + "concurrentAvmSupported unprobed");
+                return -1;
+            }
             JSONObject patch = new JSONObject();
             patch.put("concurrentAvmSupported", result);
             UnifiedConfigManager.updateSection("camera", patch);
@@ -206,6 +246,10 @@ public final class ConcurrentAvmProbe {
         HandlerThread panoThread = null;
         HandlerThread oemThread = null;
         try {
+            if (!com.overdrive.app.daemon.CameraDaemon
+                    .isAccConfirmedOffForCameraProbe()) {
+                return -1;
+            }
             Class<?> avm = Class.forName("android.hardware.AVMCamera");
 
             panoCam = openAvmCamera(avm, panoId);
@@ -214,12 +258,25 @@ public final class ConcurrentAvmProbe {
                 return 0;
             }
 
+            if (!com.overdrive.app.daemon.CameraDaemon
+                    .isAccConfirmedOffForCameraProbe()) {
+                logger.info("Probe retired after pano open: ACC no longer "
+                    + "confirmed OFF");
+                return -1;
+            }
             oemCam = openAvmCamera(avm, oemId);
             if (oemCam == null) {
                 // Single-client HAL: pano grabbed it, OEM open failed. That
                 // alone is the answer — concurrentAvmSupported=0.
                 logger.info("Probe: OEM open failed while pano was open — single-client HAL");
                 return 0;
+            }
+
+            if (!com.overdrive.app.daemon.CameraDaemon
+                    .isAccConfirmedOffForCameraProbe()) {
+                logger.info("Probe retired after OEM open: ACC no longer "
+                    + "confirmed OFF");
+                return -1;
             }
 
             // Attach SurfaceTexture-only consumers and watch for first frame
@@ -252,6 +309,12 @@ public final class ConcurrentAvmProbe {
                 logger.warn("Probe: pano attach failed");
                 return 0;
             }
+            if (!com.overdrive.app.daemon.CameraDaemon
+                    .isAccConfirmedOffForCameraProbe()) {
+                logger.info("Probe retired before OEM preview start: ACC no "
+                    + "longer confirmed OFF");
+                return -1;
+            }
             if (!attachAndStart(avm, oemCam, oemSurf, oemSt)) {
                 // OEM attach failed while pano is live — could be either HAL
                 // refused second client OR HAL doesn't expose addPreviewSurface.
@@ -263,10 +326,13 @@ public final class ConcurrentAvmProbe {
             // Race both first-frame latches. We need BOTH to fire within
             // the timeout for a positive result.
             AtomicInteger okCount = new AtomicInteger(0);
-            long deadline = System.currentTimeMillis() + FIRST_FRAME_TIMEOUT_MS;
-            if (panoLatch.await(deadline - System.currentTimeMillis(),
+            long deadline = android.os.SystemClock.elapsedRealtime()
+                + FIRST_FRAME_TIMEOUT_MS;
+            if (panoLatch.await(Math.max(0L,
+                    deadline - android.os.SystemClock.elapsedRealtime()),
                 TimeUnit.MILLISECONDS)) okCount.incrementAndGet();
-            if (oemLatch.await(Math.max(0L, deadline - System.currentTimeMillis()),
+            if (oemLatch.await(Math.max(0L,
+                    deadline - android.os.SystemClock.elapsedRealtime()),
                 TimeUnit.MILLISECONDS)) okCount.incrementAndGet();
 
             int result = okCount.get() == 2 ? 1 : 0;
@@ -275,22 +341,76 @@ public final class ConcurrentAvmProbe {
             return result;
         } catch (Throwable t) {
             logger.warn("Probe threw: " + t.getMessage());
-            return 0;
+            return terminalCameraOpenRestart.get() ? -1 : 0;
         } finally {
-            // Always close in reverse order. AVMCamera close paths must run
-            // even on exception so we don't leak HAL handles.
-            tryStopClose(panoCam);
-            tryStopClose(oemCam);
-            if (panoSurf != null) try { panoSurf.release(); } catch (Throwable ignored) {}
-            if (oemSurf != null) try { oemSurf.release(); } catch (Throwable ignored) {}
-            if (panoSt != null) try { panoSt.release(); } catch (Throwable ignored) {}
-            if (oemSt != null) try { oemSt.release(); } catch (Throwable ignored) {}
-            if (panoThread != null) panoThread.quitSafely();
-            if (oemThread != null) oemThread.quitSafely();
+            if (terminalCameraOpenRestart.get()) {
+                // A raw vendor open is still in flight and may publish its
+                // camera handle late. Java cleanup could overlap it; process
+                // retirement is the only safe owner now.
+                logger.warn("Probe cleanup skipped: terminal camera-open "
+                    + "restart owns all HAL resources");
+            } else {
+                // Always close in reverse order. AVMCamera close paths must run
+                // even on exception so we don't leak HAL handles.
+                tryStopClose(oemCam);
+                tryStopClose(panoCam);
+                if (panoSurf != null) try { panoSurf.release(); } catch (Throwable ignored) {}
+                if (oemSurf != null) try { oemSurf.release(); } catch (Throwable ignored) {}
+                if (panoSt != null) try { panoSt.release(); } catch (Throwable ignored) {}
+                if (oemSt != null) try { oemSt.release(); } catch (Throwable ignored) {}
+                if (panoThread != null) panoThread.quitSafely();
+                if (oemThread != null) oemThread.quitSafely();
+            }
         }
     }
 
-    private static Object openAvmCamera(Class<?> avm, int id) {
+    private static Object openAvmCamera(Class<?> avm, int id)
+            throws InterruptedException {
+        final AtomicReference<Object> result = new AtomicReference<>();
+        Thread worker = new Thread(
+            () -> result.set(openAvmCameraBlocking(avm, id)),
+            "ConcurrentAvmOpen-" + id);
+        worker.setDaemon(true);
+        worker.start();
+
+        final long deadline = android.os.SystemClock.elapsedRealtime()
+            + CAMERA_OPEN_HARD_TIMEOUT_MS;
+        while (worker.isAlive()) {
+            long remaining =
+                deadline - android.os.SystemClock.elapsedRealtime();
+            if (remaining <= 0L) break;
+            try {
+                worker.join(Math.min(remaining, 200L));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                if (worker.isAlive()) {
+                    armTerminalOpenRestart(
+                        "Concurrent AVMCamera probe open interrupted for id="
+                            + id);
+                    throw interrupted;
+                }
+                Object completed = result.getAndSet(null);
+                tryStopClose(completed);
+                throw interrupted;
+            }
+        }
+        if (worker.isAlive()) {
+            armTerminalOpenRestart(
+                "Concurrent AVMCamera probe open blocked for "
+                    + CAMERA_OPEN_HARD_TIMEOUT_MS + "ms (id=" + id + ")");
+            return null;
+        }
+        return result.get();
+    }
+
+    private static void armTerminalOpenRestart(String reason) {
+        terminalCameraOpenRestart.set(true);
+        com.overdrive.app.daemon.CameraDaemon
+            .requestUrgentCameraReleaseRestart(reason);
+        logger.error(reason + " — terminal restart armed; probe cleanup fenced");
+    }
+
+    private static Object openAvmCameraBlocking(Class<?> avm, int id) {
         try {
             Constructor<?> c = avm.getDeclaredConstructor(int.class);
             c.setAccessible(true);

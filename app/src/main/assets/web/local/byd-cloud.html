@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=6"></script>
-    <script src="../shared/app-shell.js?v=5"></script>
+    <script src="../shared/theme.js?v=8"></script>
+    <script src="../shared/app-shell.js?v=7"></script>
     <!--
       Bottom-tab manifest. Three task-based tabs:
         Account  — credential form (region, email, password, PIN, Save / Test)
@@ -26,12 +26,12 @@
         ];
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=24">
+    <link rel="stylesheet" href="../shared/styles.css?v=34">
 </head>
 <body>
     <div class="app-layout">
         <div id="app-shell-mount"></div>
-        <main class="main-content">
+        <main class="main-content" aria-busy="true" inert style="pointer-events:none">
             <div class="mobile-header">
                 <button class="menu-toggle" onclick="toggleSidebar()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -243,7 +243,7 @@
                                 </div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="bydCloudMergeToggle" onchange="BydCloud.toggleCloudDataMerge(this.checked)">
+                                        <input type="checkbox" id="bydCloudMergeToggle" disabled onchange="BydCloud.toggleCloudDataMerge(this.checked)">
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
@@ -287,9 +287,10 @@
     <script src="../shared/auth.js"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js?v=20"></script>
+    <script src="../shared/settings-hydration.js?v=1"></script>
     <script src="../shared/update-flow.js"></script>
     <!-- BydCloud module + SurvSettings stubs live in surveillance.js. -->
-    <script src="../shared/surveillance.js?v=survtoggle1"></script>
+    <script src="../shared/surveillance.js?v=survtoggle9"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
@@ -343,10 +344,17 @@
         }());
 
         document.addEventListener('DOMContentLoaded', function () {
+            var unlockSettings = function () {
+                if (BYD.utils && BYD.utils.unlockSettingsHydration) {
+                    BYD.utils.unlockSettingsHydration();
+                }
+            };
             BYD.i18n.init().then(function () {
                 BYD.core.init();
-                if (window.BydCloud && BydCloud.loadStatus) BydCloud.loadStatus();
-            });
+                if (window.BydCloud && BydCloud.loadStatus) {
+                    return BydCloud.loadStatus();
+                }
+            }).then(unlockSettings, unlockSettings);
         });
     </script>
 </body>

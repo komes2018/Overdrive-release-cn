@@ -7,9 +7,10 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Toggle the device radios (WiFi / Bluetooth / mobile-data) from an automation action
- * or a key-mapping. Runs the Android {@code svc <radio> enable|disable} shell command in
- * the daemon (UID 2000), which holds the shell privilege the SDK path never grants for
- * these system radios.
+ * or a key-mapping. WiFi and mobile data use Android's {@code svc} command in the daemon.
+ * Bluetooth is dispatched to the existing app-process actuator, where the framework
+ * {@code BluetoothAdapter} API is available; {@code svc bluetooth} can exit successfully
+ * on this firmware without changing the adapter.
  *
  * <p><b>WiFi keep-alive interaction (the reason this is a shared helper, not a raw
  * shell binding).</b> The app runs a WiFi keep-alive watchdog that re-asserts
@@ -41,8 +42,8 @@ public final class RadioControl {
 
     /**
      * Turn a radio on or off. For WiFi, keeps the keep-alive suppression flag in sync so
-     * an explicit off is not auto-re-enabled. Returns true when the shell command was
-     * dispatched successfully (exit 0), false otherwise.
+     * an explicit off is not auto-re-enabled. Returns true when the direct command or
+     * app-process Bluetooth dispatch was accepted, false otherwise.
      *
      * @param radio  which radio to toggle
      * @param enable true = enable, false = disable
@@ -70,7 +71,11 @@ public final class RadioControl {
             }
         }
         String svc = svcName(radio);
-        String cmd = "svc " + svc + " " + (enable ? "enable" : "disable");
+        String cmd = radio == Radio.BLUETOOTH
+                ? "am start-foreground-service -n "
+                    + "com.overdrive.app/.services.VehicleActuatorService"
+                    + " --es action bluetooth --ez enabled " + enable
+                : "svc " + svc + " " + (enable ? "enable" : "disable");
         boolean ok = runShell(cmd);
         logger.info("RadioControl " + svc + " " + (enable ? "enable" : "disable")
                 + " -> " + (ok ? "ok" : "failed"));
@@ -103,7 +108,7 @@ public final class RadioControl {
         }
     }
 
-    /** Run one shell command in the daemon, bounded so a wedged svc can't hang a worker. */
+    /** Run one shell command in the daemon, bounded so a wedged command can't hang a worker. */
     private static boolean runShell(String cmd) {
         Process p = null;
         try {

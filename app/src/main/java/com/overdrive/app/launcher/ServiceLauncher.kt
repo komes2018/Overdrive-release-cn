@@ -124,6 +124,12 @@ class ServiceLauncher(
      * Apply power settings to keep WiFi and system active.
      */
     fun applyPowerSettings(callback: LaunchCallback) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            logManager.info(TAG, "Using scoped wake and WiFi locks for DiLink 5")
+            callback.onLog("Using scoped wake and WiFi locks")
+            callback.onLaunched()
+            return
+        }
         logManager.info(TAG, "Applying power settings...")
         callback.onLog("Applying power settings...")
         
@@ -247,15 +253,19 @@ class ServiceLauncher(
         logManager.info(TAG, "Ensuring WiFi stays enabled...")
         callback.onLog("Ensuring WiFi stays enabled...")
 
-        val commands = listOf(
-            "svc wifi enable",
-            "settings put global wifi_sleep_policy 2",
-            "settings put global wifi_scan_throttle_enabled 0",
-            "settings put global wifi_on 1",
-            "settings put global byd_wifi_always_on 1 2>/dev/null",
-            "settings put system byd_wifi_keep_alive 1 2>/dev/null",
-            "dumpsys deviceidle whitelist +com.android.wifi"
-        )
+        val commands = if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            listOf("svc wifi enable")
+        } else {
+            listOf(
+                "svc wifi enable",
+                "settings put global wifi_sleep_policy 2",
+                "settings put global wifi_scan_throttle_enabled 0",
+                "settings put global wifi_on 1",
+                "settings put global byd_wifi_always_on 1 2>/dev/null",
+                "settings put system byd_wifi_keep_alive 1 2>/dev/null",
+                "dumpsys deviceidle whitelist +com.android.wifi"
+            )
+        }
 
         executeCommandSequence(commands, 0, callback) {
             logManager.info(TAG, "WiFi keep-alive settings applied")

@@ -180,6 +180,15 @@ var CHARGING = {
         this._showSkeleton();
         setTimeout(function () { self._syncTabPresentation(); }, 0);
         this._restartVisibleRefresh(true);
+        try {
+            var deepLinkId =
+                new URLSearchParams(window.location.search).get('id');
+            if (deepLinkId && /^\d+$/.test(deepLinkId)) {
+                setTimeout(function () {
+                    self.showDetail(Number(deepLinkId));
+                }, 0);
+            }
+        } catch (e) {}
     },
 
     _syncTabPresentation: function (activeId) {

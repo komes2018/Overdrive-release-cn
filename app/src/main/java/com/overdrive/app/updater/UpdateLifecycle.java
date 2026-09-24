@@ -36,6 +36,23 @@ public final class UpdateLifecycle {
             + "if [ \"$pid\" != \"$MY_PID\" ]; then kill -9 $pid 2>/dev/null; fi; done\n";
     }
 
+    private static String diLink5CaptureKillScript() {
+        try {
+            com.overdrive.app.camera.dilink5.DiLink5Platform
+                    .refreshActiveMode();
+            if (!com.overdrive.app.camera.dilink5.DiLink5Platform
+                    .isSelected()) {
+                return "";
+            }
+        } catch (Throwable ignored) {
+            return "";
+        }
+        return psAwkKillLine("fast_cam_capture")
+                + psAwkKillLine("qcarcam_test")
+                + "killall -9 fast_cam_capture 2>/dev/null\n"
+                + "killall -9 qcarcam_test 2>/dev/null\n";
+    }
+
     public static final String UPDATE_IN_PROGRESS_FILE = "/data/local/tmp/overdrive_update_in_progress";
     public static final String POST_UPDATE_FILE = "/data/local/tmp/overdrive_post_update";
     /**
@@ -87,6 +104,7 @@ public final class UpdateLifecycle {
     public static void hardResetDaemons(Context ctx, Runnable onComplete) {
         Log.i(TAG, "post-update detected — hard-resetting daemons");
         long start = System.currentTimeMillis();
+        String diLink5CaptureCleanup = diLink5CaptureKillScript();
         // We allocate a fresh AdbDaemonLauncher here because hardResetDaemons
         // is static and runs early in MainActivity.runDaemonStartup, before
         // the per-Activity DaemonStartupManager's launcher is necessarily
@@ -151,6 +169,7 @@ public final class UpdateLifecycle {
                 psAwkKillLine("start_acc_sentry") +
                 psAwkKillLine("start_telegram") +
                 psAwkKillLine("byd_cam_daemon") +
+                diLink5CaptureCleanup +
                 psAwkKillLine("cam_daemon") +
                 psAwkKillLine("sentry_daemon") +
                 psAwkKillLine("acc_sentry_daemon") +
@@ -169,6 +188,11 @@ public final class UpdateLifecycle {
                 // mid-shutdown could still rewrite the lock between our
                 // pkill and our rm.
                 "sleep 1\n" +
+                // Watchdog ownership locks intentionally do not match
+                // *_daemon.lock. SIGKILL bypasses the watchdog EXIT trap, so
+                // these must be removed explicitly after the old wrappers are
+                // dead or the replacement watchdog will fail closed.
+                "rm -rf /data/local/tmp/cam_watchdog.lock /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null\n" +
                 "rm -f /data/local/tmp/*_daemon.lock 2>/dev/null\n" +
                 // The detached install script has finished executing by the
                 // time the new MainActivity runs this reset — remove it so it

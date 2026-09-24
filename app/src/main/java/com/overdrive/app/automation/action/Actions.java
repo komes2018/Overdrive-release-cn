@@ -332,8 +332,9 @@ public class Actions {
                         new Label("1", "automation.open"),
                         new Label("2", "automation.close"),
                         new Label("3", "automation.stop"))));
-        // OPENWINDOW is a cloud ventilation crack, not the local full-open operation above.
-        // Keep it distinct so an off-car rule never claims it fully opened the windows.
+        // Vent is a local 15% target while awake and OPENWINDOW remotely, not the
+        // full-open operation above. Keep it distinct so a rule never claims it
+        // fully opened the windows.
         addAction(new ApiAction(
                 new Label("windowsVent", "automation.vent_windows"),
                 "automation.vent_windows_description",
@@ -1003,6 +1004,27 @@ public class Actions {
                 "/api/apps/launch",
                 "{\"package\":\"${package}\",\"split\":true}",
                 new AppType(new Label("package", "automation.app"))));
+        // Deterministic split pair. Kept separate from openAppSplit so existing
+        // saved rules retain their original "current foreground app + selected app"
+        // behaviour and do not gain a newly-required variable.
+        addAction(new ApiAction(
+                new Label("openAppsSplit", "automation.open_apps_split"),
+                "automation.open_apps_split_description",
+                "POST",
+                "/api/apps/launch",
+                "{\"package\":\"${primaryPackage}\",\"secondaryPackage\":\"${secondaryPackage}\",\"split\":true}",
+                new AppType(new Label("primaryPackage", "automation.primary_app")),
+                new AppType(new Label("secondaryPackage", "automation.secondary_app"))) {
+            @Override
+            public com.overdrive.app.automation.AutomationAction fromJson(JSONObject input) {
+                com.overdrive.app.automation.AutomationAction parsed = super.fromJson(input);
+                if (parsed == null) return null;
+                java.util.Map<String, Object> values = parsed.getVariables();
+                return java.util.Objects.equals(
+                        values.get("primaryPackage"), values.get("secondaryPackage"))
+                        ? null : parsed;
+            }
+        });
         // ── System UI navigation + screenshot (daemon shell as UID 2000) ─────────
         // Home / Back / Recents use input keyevents. Screenshots route through the daemon's
         // SurfaceControl capture so the virtual driver-cluster layer stack is included.
@@ -1027,6 +1049,14 @@ public class Actions {
                         new Label("display", "automation.display"),
                         new Label("0", "automation.display_head_unit"),
                         new Label("1", "automation.display_cluster"))));
+        // Dedicated destructive action: the exact endpoint is allowlisted, but the handler
+        // still requires live Park and persists a five-minute boot-loop/cooldown guard.
+        addAction(new ApiAction(
+                new Label("iviReboot", "automation.ivi_reboot"),
+                "automation.ivi_reboot_description",
+                "POST",
+                "/api/system/ivi-reboot",
+                "{\"confirm\":\"REBOOT\"}"));
         // Centre-screen orientation through the same catalog entity used by key mapping.
         // Toggle alternates horizontal/vertical using the catalog's readback-less select cache.
         addAction(new VehicleControlAction(

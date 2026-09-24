@@ -254,11 +254,11 @@
         </com.google.android.material.card.MaterialCardView>
 
         <!-- Camera ingestion mode selector. Top-of-dialog control because it
-             determines which path the daemon takes (legacy ImageReader +
-             4-strip→2x2 rearrangement, or the DiLink 4 SurfaceTexture +
-             passthrough path). Defaults to "Default" when no config value
+             determines which path the daemon takes (legacy ImageReader,
+             DiLink 4 SurfaceTexture, or DiLink 5 native QCarCam). Defaults to
+             "Default" when no config value
              is present, which preserves the previously-shipping behaviour.
-             Persists via /api/surveillance/config {cameraMode: "default"|"dilink4"}.
+             Persists via /api/surveillance/config.
              Save → daemon restart so the new mode takes effect. -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
@@ -332,6 +332,19 @@
                         android:text="@string/camera_mode_option_dilink4"
                         android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
                         android:textColor="?attr/colorOnSurface" />
+
+                    <RadioButton
+                        android:id="@+id/rbCameraModeDilink5"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:buttonTint="?attr/colorPrimary"
+                        android:paddingStart="8dp"
+                        android:paddingTop="8dp"
+                        android:paddingEnd="8dp"
+                        android:paddingBottom="8dp"
+                        android:text="@string/camera_mode_option_dilink5"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="?attr/colorOnSurface" />
                 </RadioGroup>
 
                 <com.google.android.material.button.MaterialButton
@@ -347,6 +360,117 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:text="@string/camera_mode_hint"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Native camera-ID order. Hidden outside DiLink 5 so the legacy
+             role/slice controls and their persistence remain unchanged. -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardDiLink5CameraMapping"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/card_gap_vertical"
+            android:visibility="gone"
+            app:cardBackgroundColor="?attr/colorSurfaceContainer"
+            app:cardCornerRadius="@dimen/card_radius_standard"
+            app:cardElevation="0dp"
+            app:strokeColor="?attr/colorOutlineVariant"
+            app:strokeWidth="1dp"
+            tools:visibility="visible">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/camera_dilink5_mapping_title"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+                    android:textColor="?attr/colorOnSurface" />
+
+                <TextView
+                    android:id="@+id/tvCurrentDiLink5CameraMapping"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/camera_dilink5_mapping_current_auto"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/camera_dilink5_mapping_subtitle"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                <RadioGroup
+                    android:id="@+id/rgDiLink5CameraMapping"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical">
+
+                    <RadioButton
+                        android:id="@+id/rbDiLink5MappingAuto"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:buttonTint="?attr/colorPrimary"
+                        android:padding="8dp"
+                        android:text="@string/camera_dilink5_mapping_auto"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="?attr/colorOnSurface" />
+
+                    <RadioButton
+                        android:id="@+id/rbDiLink5MappingStandard"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:buttonTint="?attr/colorPrimary"
+                        android:padding="8dp"
+                        android:text="@string/camera_dilink5_mapping_standard"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="?attr/colorOnSurface" />
+
+                    <RadioButton
+                        android:id="@+id/rbDiLink5MappingOpposite"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:buttonTint="?attr/colorPrimary"
+                        android:padding="8dp"
+                        android:text="@string/camera_dilink5_mapping_opposite"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="?attr/colorOnSurface" />
+
+                    <RadioButton
+                        android:id="@+id/rbDiLink5MappingShark"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:buttonTint="?attr/colorPrimary"
+                        android:padding="8dp"
+                        android:text="@string/camera_dilink5_mapping_shark"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="?attr/colorOnSurface" />
+                </RadioGroup>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSaveDiLink5CameraMapping"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="end"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/camera_mode_save" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/camera_dilink5_mapping_hint"
                     android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                     android:textColor="?attr/colorOnSurfaceVariant" />
             </LinearLayout>
@@ -813,6 +937,29 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:text="@string/camera_concurrent_probe_subtitle"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                <!-- Decoupled encoder lane (camera.decoupledEncoderLane).
+                     Saves immediately on toggle; the pipeline reads it at
+                     construction, so it goes live on the next camera restart.
+                     Legacy ImageReader path only — PanoramicCameraGpu
+                     hard-gates the flag off on DiLink 4/5, and the switch is
+                     disabled there to match. -->
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/swDecoupledEncoderLane"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/camera_decoupled_lane_label"
+                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                    android:textColor="?attr/colorOnSurface" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/camera_decoupled_lane_subtitle"
                     android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                     android:textColor="?attr/colorOnSurfaceVariant" />
 

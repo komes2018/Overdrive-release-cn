@@ -1088,12 +1088,7 @@
     "mqtt_channel": "Chaîne",
     "mqtt_value": "Valeur",
     "wait_until_description": "Mettre en pause les actions restantes jusqu'à ce qu'un signal choisi rencontre une comparaison, ou le délai d'attente s'écoule. Exemple: attendre jusqu'à Vitesse = 0 avant de fermer les fenêtres.",
-    "wait_until_state_description": "Mettre en pause les actions restantes jusqu'à ce qu'un signal on/off choisi atteigne un état, ou que le délai d'attente s'écoule. Exemple: attendre jusqu'à ce que les indicateurs = Off avant de continuer.",
-      "wait_timeout": "Délai d'attente (secondes)",
-      "save_seat_position": "Enregistrer la position du siège",
-      "save_seat_position_description": "Stocker la position actuelle du siège conducteur dans un emplacement de mémoire.",
-      "set_seat_position": "Position du siège de contrôle",
-      "set_seat_position_description": "Charger une position de mémoire de siège. Assurez-vous que la mémoire a été sauvée en premier par le véhicule. Ce contrôle ne fonctionne pas lorsque le véhicule est éteint."
+    "wait_until_state_description": "Mettre en pause les actions restantes jusqu'à ce qu'un signal on/off choisi atteigne un état, ou que le délai d'attente s'écoule. Exemple: attendre jusqu'à ce que les indicateurs = Off avant de continuer."
   },
   "messages": {
     "logged_out": "Déconnecté",

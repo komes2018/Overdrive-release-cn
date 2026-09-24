@@ -90,9 +90,12 @@ public class AutomationColdStartIntegrationTest {
                 "brake reference not loaded");
         require(Automations.isEventReferenced(BydEvent.STEERING_ANGLE),
                 "steering reference not loaded");
+        require(Automations.isEventReferenced(BydEvent.STEERING_HEAT),
+                "steering heat reference not loaded");
         require(TurnSignalEvent.isScheduledForTest(), "turn poller not scheduled");
         require(GearEvent.isScheduledForTest(), "gear poller not scheduled");
         require(DynamicsEvent.isScheduledForTest(), "dynamics poller not scheduled");
+        require(ClimateEvent.isScheduledForTest(), "climate poller not scheduled");
         System.out.println("COLD_START_POLLERS_OK");
     }
 
@@ -112,7 +115,8 @@ public class AutomationColdStartIntegrationTest {
                                 new JSONObject().put("units", "kmph")))
                         .put(event("accelerator"))
                         .put(event("brake"))
-                        .put(event("steeringAngle")))
+                        .put(event("steeringAngle"))
+                        .put(event("steeringHeat")))
                 .put("conditions", new JSONArray()
                         .put(event("turnSignal")
                                 .put("variables", new JSONObject().put("side", side))

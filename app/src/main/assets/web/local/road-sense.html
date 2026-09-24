@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title data-i18n="app.road_sense_title">RoadSense - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
-    <script src="../shared/theme.js?v=6"></script>
-    <script src="../shared/app-shell.js?v=5"></script>
+    <script src="../shared/theme.js?v=8"></script>
+    <script src="../shared/app-shell.js?v=7"></script>
     <!--
       Bottom-tab manifest. Tabs grouping the RoadSense settings cards:
         General      — master enable + calibration mode
@@ -27,7 +27,7 @@
         ];
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=25">
+    <link rel="stylesheet" href="../shared/styles.css?v=34">
     <style>
         /* Blind-spot speed window: two narrow km/h fields on one row. .text-input is
            built for full-width fields (width:100% + min-width:200px), so a narrow
@@ -77,7 +77,7 @@
         <!-- App shell sidebar (rendered by ../shared/app-shell.js) -->
         <div id="app-shell-mount"></div>
         <!-- Main Content -->
-        <main class="main-content">
+        <main class="main-content" aria-busy="true" inert style="pointer-events:none">
             <div class="mobile-header">
                 <button class="menu-toggle" onclick="toggleSidebar()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -938,8 +938,9 @@
 
     <script src="../shared/auth.js"></script>
     <script src="../shared/core.js?v=20"></script>
+    <script src="../shared/settings-hydration.js?v=1"></script>
     <script src="../shared/update-flow.js"></script>
-    <script src="../shared/road-sense.js?v=chimevolume6"></script>
+    <script src="../shared/road-sense.js?v=chimevolume7"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

@@ -17,6 +17,10 @@ window.SafeLocations = {
     featureEnabled: false,
     currentGps: null,
     gpsMarker: null,
+    ready: false,
+    togglePending: false,
+    zoneTogglePending: {},
+    _writeQueue: Promise.resolve(),
 
     // Live editing circle
     editCircle: null,
@@ -30,9 +34,16 @@ window.SafeLocations = {
     },
 
     async init() {
-        await this.loadData();
+        this.ready = await this.loadData();
         this.updateUI();
         this.refreshTimer = setInterval(() => this.refreshStatus(), 5000);
+    },
+
+    _enqueueWrite(task) {
+        const run = () => task();
+        const next = this._writeQueue.then(run, run);
+        this._writeQueue = next.catch(() => {});
+        return next;
     },
 
     text(key, vars, fallback) {
@@ -61,14 +72,15 @@ window.SafeLocations = {
 
     async loadData() {
         try {
-            const resp = await fetch('/api/surveillance/safe-locations');
-            const data = await resp.json();
+            const data = await this.requestJson('/api/surveillance/safe-locations');
             this.featureEnabled = data.featureEnabled || false;
             this.zones = data.zones || [];
             this.currentGps = data.hasGps ? { lat: data.lat, lng: data.lng, accuracy: data.accuracy } : null;
             this.updateStatusText(data);
+            return true;
         } catch (e) {
             console.warn('Failed to load safe locations:', e);
+            return false;
         }
     },
 
@@ -104,7 +116,10 @@ window.SafeLocations = {
 
     updateUI() {
         const toggle = document.getElementById('safeLocEnabled');
-        if (toggle) toggle.checked = this.featureEnabled;
+        if (toggle) {
+            toggle.checked = this.featureEnabled;
+            toggle.disabled = !this.ready || this.togglePending;
+        }
 
         const badge = document.getElementById('safeLocBadge');
         if (badge) {
@@ -292,6 +307,7 @@ window.SafeLocations = {
             const toggleInput = document.createElement('input');
             toggleInput.type = 'checkbox';
             toggleInput.checked = z.enabled;
+            toggleInput.disabled = !!this.zoneTogglePending[z.id];
             toggleInput.setAttribute('aria-label', this.text(
                 'safe_loc.toggle_zone',
                 {name: z.name},
@@ -490,16 +506,18 @@ window.SafeLocations = {
 
     async toggleFeature() {
         const toggle = document.getElementById('safeLocEnabled');
+        if (!toggle || !this.ready || this.togglePending) return;
         const enabled = toggle.checked;
         const previous = this.featureEnabled;
+        this.togglePending = true;
+        this.updateUI();
         try {
-            const data = await this.requestJson('/api/surveillance/safe-locations/toggle', {
+            const data = await this._enqueueWrite(() => this.requestJson('/api/surveillance/safe-locations/toggle', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ enabled })
-            });
+            }));
             this.featureEnabled = data.enabled == null ? enabled : data.enabled;
-            this.updateUI();
             this.toast(
                 this.featureEnabled
                     ? this.text('safe_loc.enabled', null, 'Safe locations enabled')
@@ -509,8 +527,10 @@ window.SafeLocations = {
         } catch (e) {
             this.featureEnabled = previous;
             toggle.checked = previous;
-            this.updateUI();
             this.toast(this.text('safe_loc.toggle_failed', null, 'Failed to toggle'), 'error');
+        } finally {
+            this.togglePending = false;
+            this.updateUI();
         }
     },
 
@@ -524,7 +544,7 @@ window.SafeLocations = {
         if (!values) return;
 
         try {
-            const data = await this.requestJson('/api/surveillance/safe-locations', {
+            const data = await this._enqueueWrite(() => this.requestJson('/api/surveillance/safe-locations', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -533,7 +553,7 @@ window.SafeLocations = {
                     lng: this.currentGps.lng,
                     radiusM: values.radiusM
                 })
-            });
+            }));
             if (!data.zone) throw new Error(this.text('safe_loc.add_zone_failed', null, 'Failed to add zone'));
 
             this.zones.push(data.zone);
@@ -559,7 +579,7 @@ window.SafeLocations = {
         if (!values) return;
 
         try {
-            await this.requestJson('/api/surveillance/safe-locations', {
+            await this._enqueueWrite(() => this.requestJson('/api/surveillance/safe-locations', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -567,7 +587,7 @@ window.SafeLocations = {
                     name: values.name,
                     radiusM: values.radiusM
                 })
-            });
+            }));
 
             zone.name = values.name;
             zone.radiusM = values.radiusM;
@@ -587,24 +607,29 @@ window.SafeLocations = {
 
     async toggleZone(id, enabled) {
         const zone = this.zones.find(z => z.id === id);
-        if (!zone) return;
+        if (!zone || this.zoneTogglePending[id]) return;
+        const previous = zone.enabled;
+        this.zoneTogglePending[id] = true;
+        zone.enabled = enabled;
+        this.renderZoneList();
         try {
-            await this.requestJson('/api/surveillance/safe-locations', {
+            await this._enqueueWrite(() => this.requestJson('/api/surveillance/safe-locations', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id, enabled })
-            });
-            zone.enabled = enabled;
+            }));
 
             // Update map circle color
             if (this.zoneCircles[id]) {
                 const color = enabled ? '#10b981' : '#6b7280';
                 this.zoneCircles[id].setStyle({ color, fillColor: color, dashArray: enabled ? null : '5,5' });
             }
-            this.renderZoneList();
         } catch (e) {
-            this.renderZoneList();
+            zone.enabled = previous;
             this.toast(e.message || this.text('safe_loc.toggle_failed', null, 'Failed to toggle'), 'error');
+        } finally {
+            delete this.zoneTogglePending[id];
+            this.renderZoneList();
         }
     },
 
@@ -630,11 +655,11 @@ window.SafeLocations = {
         if (!confirmed) return;
 
         try {
-            await this.requestJson('/api/surveillance/safe-locations', {
+            await this._enqueueWrite(() => this.requestJson('/api/surveillance/safe-locations', {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id })
-            });
+            }));
             this.zones = this.zones.filter(z => z.id !== id);
             this.removeSavedZoneFromMap(id);
             this.renderZoneList();
@@ -645,6 +670,11 @@ window.SafeLocations = {
     },
 
     async refreshStatus() {
+        if (!this.ready) {
+            this.ready = await this.loadData();
+            this.updateUI();
+            return;
+        }
         try {
             const resp = await fetch('/api/surveillance/safe-locations');
             const data = await resp.json();

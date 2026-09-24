@@ -128,12 +128,6 @@ class RecordingViewModel(app: Application) : AndroidViewModel(app) {
             
             override fun onError(error: String) {
                 log.error(TAG, "Recording stop error: $error")
-                // Still update UI
-                handler.post {
-                    _isRecording.value = false
-                    handler.removeCallbacks(durationUpdater)
-                    _duration.value = 0  // Reset timer to 0
-                }
             }
         })
         

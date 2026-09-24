@@ -211,7 +211,7 @@ body.dashboard-page .sidebar .brand-link:hover {
 .app-bar-title {
     font-size: 22px;
     font-weight: 600;
-    letter-spacing: var(--tracking-headline, 0em);
+    letter-spacing: var(--tracking-headline, -0.015em);
     color: var(--on-surface);
     margin: 0;
 }
@@ -352,58 +352,10 @@ html.shell-ready { visibility: visible; }
    competes for space and reads as visual noise. */
 .nav-group-header-collapsible .nav-group-line { display: none; }
 
-/* === ANIMATED COLLAPSE for nav-link members ====================
- * Members of a collapsible group don't snap with `display:none` when the
- * group closes — they slide + fade to zero height. The `[hidden]` attribute
- * is still set (for screen readers and tab-order semantics) but its UA
- * `display:none` is overridden by `!important` flex below so the transition
- * has something to animate.
- *
- * `max-height: 64px` is the resting cap — generous enough that long
- * wrapped labels (Vehicle Control / Recording Settings) don't truncate at
- * either theme's font size. Padding + margin shrink with the height so
- * the layout collapses cleanly to a hairline.
- */
-.sidebar-nav .nav-link {
-    /* Resting state — let the link size to content but cap so the
-       transition out has a concrete numeric start. */
-    max-height: 64px;
-    overflow: hidden;
-    transition: max-height var(--duration-med, 240ms) var(--easing-emphasized, cubic-bezier(0.2, 0.0, 0.0, 1.0)),
-                padding-top var(--duration-med, 240ms) var(--easing-emphasized, cubic-bezier(0.2, 0.0, 0.0, 1.0)),
-                padding-bottom var(--duration-med, 240ms) var(--easing-emphasized, cubic-bezier(0.2, 0.0, 0.0, 1.0)),
-                margin-top var(--duration-med, 240ms) var(--easing-emphasized, cubic-bezier(0.2, 0.0, 0.0, 1.0)),
-                margin-bottom var(--duration-med, 240ms) var(--easing-emphasized, cubic-bezier(0.2, 0.0, 0.0, 1.0)),
-                opacity var(--duration-short, 180ms) ease-out,
-                background-color 0.2s ease,
-                color 0.2s ease;
-}
-
+/* Hidden members must leave the flex layout entirely. Keeping them as
+   zero-height flex items still reserves their min-height and column gaps. */
 .sidebar-nav [hidden] {
-    /* Override the UA `display:none` so the transition has a flex layout
-       to drive. Then drop every dimensional axis to 0 — the cascade lands
-       on a fully-flat link that reads as collapsed. */
-    display: flex !important;
-    max-height: 0 !important;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-    opacity: 0;
-    pointer-events: none;
-    /* Take the link out of the keyboard tab order while collapsed so a
-       focus trap can't land on a visually-hidden destination. */
-    visibility: hidden;
-}
-
-/* Animate group-header bottom padding so the gap between header and the
-   first member also collapses, not just the member itself. Without this
-   the collapsed state leaves a stray ~6dp gap below the header. */
-.sidebar .nav-group-header {
-    transition: padding-bottom var(--duration-med, 240ms) var(--easing-emphasized, cubic-bezier(0.2, 0.0, 0.0, 1.0));
-}
-.nav-group-header-collapsible[data-collapsed="true"] {
-    padding-bottom: 0;
+    display: none !important;
 }
 
 /* === EV CARD: GLB-rendered three.js scene ======================= */

@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=7"></script>
-    <script src="../shared/app-shell.js?v=5"></script>
+    <script src="../shared/theme.js?v=8"></script>
+    <script src="../shared/app-shell.js?v=7"></script>
     <!--
       Per-page bottom-tab manifest. Five tabs grouped by user task:
         General   — mode toggle + schedule + deterrent (when/how surveillance runs)
@@ -33,7 +33,7 @@
         ];
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=26">
+    <link rel="stylesheet" href="../shared/styles.css?v=34">
     <style>
         /* Per-camera detection toggles — 2-column on tablets, single column on
            narrow phones so the toggle never runs out of room next to the label. */
@@ -68,7 +68,7 @@
         <!-- App shell sidebar (rendered by ../shared/app-shell.js) -->
         <div id="app-shell-mount"></div>
         <!-- Main Content -->
-        <main class="main-content">
+        <main class="main-content" aria-busy="true" inert style="pointer-events:none">
             <div class="mobile-header">
                 <button class="menu-toggle" onclick="toggleSidebar()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -131,7 +131,7 @@
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
-                                    <input type="checkbox" id="survEnabled" onchange="SurvSettings.toggleSurveillance()">
+                                    <input type="checkbox" id="survEnabled" disabled onchange="SurvSettings.toggleSurveillance()">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -175,8 +175,8 @@
                              to Internal storage. The toggle/confirm flow enforces this. -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.keep_usb_power">Keep USB powered while parked</div>
-                                <div class="setting-desc" data-i18n="surveillance.keep_usb_power_desc">Keeps the USB ports powered after the car is switched off (for example to charge a phone or power an accessory). Turn off to let the head unit sleep and save the 12V battery. Note: the SD-card slot shares the USB power rail, so turning this off also powers down the SD card while parked — surveillance will record to Internal storage instead. Takes effect the next time the car is switched off.</div>
+                                <div class="setting-name" id="survKeepUsbPowerName" data-i18n="surveillance.keep_usb_power">Keep USB powered while parked</div>
+                                <div class="setting-desc" id="survKeepUsbPowerDesc" data-i18n="surveillance.keep_usb_power_desc">Keeps the USB ports powered after the car is switched off (for example to charge a phone or power an accessory). Turn off to let the head unit sleep and save the 12V battery. Note: the SD-card slot shares the USB power rail, so turning this off also powers down the SD card while parked — surveillance will record to Internal storage instead. Takes effect the next time the car is switched off.</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -185,6 +185,7 @@
                                 </label>
                             </div>
                         </div>
+                        <div class="setting-hint" id="survKeepUsbPowerCapabilityNote" style="display:none;">This mode can keep Android awake, but parked USB and SD-card power remains best-effort because the vehicle firmware controls the physical rail.</div>
 
                         <!-- Parked cellular keep-alive. Default OFF (opt-in): on some
                              models the data module sleeps a while after the car is
@@ -200,6 +201,47 @@
                             <div class="setting-control">
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="survMobileDataKeepAlive" onchange="SurvSettings.toggleMobileDataKeepAlive()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- DiLink 5 only: opt-in BYD-cloud realtime heartbeat. Hidden
+                             on other camera modes; disabled until BYD Cloud is verified.
+                             The daemon owns the runtime lifecycle and cancels the
+                             schedule + active HTTP request on ACC ON or shutdown. -->
+                        <div class="setting-row" id="survDi5CloudKeepAliveRow" style="display:none;">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="surveillance.di5_cloud_keepalive">Experimental: Keep DI5 awake using BYD Cloud</div>
+                                <div class="setting-desc" data-i18n="surveillance.di5_cloud_keepalive_desc">While ACC is off, requests vehicle status through BYD Cloud every 15 seconds. Requires a connected BYD account and internet access. It may use vehicle SIM data, prevent deep sleep, and increase parked battery use. It stops on ACC-on or when the daemon stops.</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="survDi5CloudKeepAlive" disabled onchange="SurvSettings.toggleDi5CloudKeepAlive()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-hint" id="survDi5CloudKeepAliveCloudNote" style="display:none;" data-i18n="surveillance.di5_cloud_keepalive_requires_cloud">Connect and verify your BYD Cloud account before enabling this option.</div>
+
+                        <!-- Opt-in DiLink 5 parked keep-alive (Experimental). ONE master
+                             switch; the individual levers (MCU/sentry hold, panorama
+                             heartbeat, AP hold) are config-only diagnostics and never
+                             appear here. Always visible: DiLink 5 head units exist
+                             with and without the QCarCam camera stack, so this row is
+                             deliberately NOT tied to the camera-mode selection or to
+                             the DI5 cloud keep-alive row above. The input starts
+                             disabled (hydration lock) and is enabled by
+                             applyDi5ParkedKeepAliveUI(). Turning ON asks for
+                             confirmation (12 V battery cost). -->
+                        <div class="setting-row" id="survDi5ParkedKeepAliveRow">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="surveillance.di5_parked_keepalive">Experimental: DiLink 5 parked keep-alive</div>
+                                <div class="setting-desc" data-i18n="surveillance.di5_parked_keepalive_desc">For DiLink 5 head units, with any camera mode. Keeps the vehicle in sentry mode after the car is switched off so the MCU does not cut the camera and USB rails, and re-wakes the MCU if it drifts to sleep. Uses more 12V battery; it stops by itself below the configured voltage cutoff and stays off until the car is switched on or charging is detected. Takes effect on the next parked tick.</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="survDi5ParkedKeepAlive" disabled onchange="SurvSettings.toggleDi5ParkedKeepAlive()">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -284,7 +326,7 @@
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
-                                    <input type="checkbox" id="safeLocEnabled" onchange="SafeLocations.toggleFeature()">
+                                    <input type="checkbox" id="safeLocEnabled" disabled onchange="SafeLocations.toggleFeature()">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -727,6 +769,118 @@
                     </div>
                 </div>
 
+                <!-- Parking Intelligence — master switch + sub-features. Writes
+                     the `parking` config section via /api/parking/config; the
+                     daemon's ParkingController starts/stops live on the flip.
+                     Deliberately separate from the sentry toggles above: it
+                     never changes detection, triggers or recording. -->
+                <div class="card" data-tab="general" id="parking">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/></svg>
+                            <span data-i18n="parking.settings_title">Parking Intelligence</span>
+                            <span class="status-badge inactive" id="parkingBadge" data-i18n="status.off">OFF</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="setting-hint" style="margin-bottom:12px;" data-i18n="parking.settings_desc">Opens a session at every switch-off: location and GPS freshness, four-camera stills when you walk away and when you return, the vehicles that arrived or left next to you while sentry watched, and two notifications ("Parked", "Back at car"). Off = no threads, no store, no compute.</div>
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="parking.settings_enabled">Enable Parking Intelligence</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="parkingEnabled" onchange="ParkingSettings.save('enabled', this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div id="parkingSubSettings">
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="parking.settings_snapshots">Arrived / returned stills</div>
+                                    <div class="setting-desc" data-i18n="parking.settings_snapshots_desc">Four-camera stills ~90 s after switch-off and at the first door open or unlock. Also the image on the notifications.</div>
+                                </div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="parkingSnapshots" onchange="ParkingSettings.save('snapshots', this.checked)">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="parking.settings_neighbours">Neighbour timeline</div>
+                                    <div class="setting-desc" data-i18n="parking.settings_neighbours_desc">Track vehicles that arrive or leave next to you from the sentry baseline and finalized events, and keep the sharpest frames of each. Needs sentry armed.</div>
+                                </div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="parkingNeighbours" onchange="ParkingSettings.save('neighbours', this.checked)">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="parking.settings_signage">Read garage signage (v2)</div>
+                                    <div class="setting-desc" data-i18n="parking.settings_signage_desc">Read level / zone / bay text from the stills and the last minute of the approach clip with the bundled on-device OCR (PP-OCRv3, ~5.5 MB). Runs once right after the arrival stills so the Parked message carries the level; a read deferred by a recording sentry clip is retried later. Language-specific models can be side-loaded to Overdrive/models/.</div>
+                                </div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="parkingSignage" onchange="ParkingSettings.save('signage', this.checked)">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="setting-hint" id="parkingModelsNote" style="display:none;"></div>
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="parking.settings_geocoding">Address lookup</div>
+                                    <div class="setting-desc" data-i18n="parking.settings_geocoding_desc">Turn the parking GPS fix into a district / street label for the Parked message and the session list. Until you set it here, parking follows your sentry or dashcam place-tagging choice.</div>
+                                </div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="parkingGeocodingEnabled" onchange="ParkingSettings.saveGeocoding('enabled', this.checked)">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="setting-hint" id="parkingGeocodingNote" style="display:none;"></div>
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="parking.settings_geocoding_online">Use online resolver</div>
+                                    <div class="setting-desc" data-i18n="parking.settings_geocoding_online_desc">Falls back to OpenStreetMap Nominatim when on-device geocoding cannot name the place. Sends only the parking coordinates and your device language.</div>
+                                </div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="parkingGeocodingOnline" onchange="ParkingSettings.saveGeocoding('allowOnline', this.checked)">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="parking.settings_retention">Keep sessions (days)</div>
+                                </div>
+                                <div class="setting-control">
+                                    <input type="number" class="input" id="parkingRetentionDays" min="7" max="730" step="1" style="width:90px;" onchange="ParkingSettings.save('retentionDays', parseInt(this.value, 10))">
+                                </div>
+                            </div>
+                            <div class="setting-row" style="border-bottom:none;">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="parking.settings_cap">Stills &amp; frames cap (MB)</div>
+                                </div>
+                                <div class="setting-control">
+                                    <input type="number" class="input" id="parkingStorageCapMb" min="50" max="4096" step="50" style="width:90px;" onchange="ParkingSettings.save('storageCapMb', parseInt(this.value, 10))">
+                                </div>
+                            </div>
+                        </div>
+                        <div style="margin-top:12px;">
+                            <a class="btn" href="parking.html" style="width:100%; display:block; text-align:center;" data-i18n="parking.settings_open_page">Open Parking</a>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Screen Deterrent — placed BEFORE cloud deterrent because
                      it works out-of-the-box without any external service. -->
                 <div class="card" data-tab="general">
@@ -917,7 +1071,7 @@
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
-                                    <input type="checkbox" id="survGeocodingOnline" onchange="SurvSettings.toggleGeocodingOnline()">
+                                    <input type="checkbox" id="survGeocodingOnline" disabled onchange="SurvSettings.toggleGeocodingOnline()">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -928,7 +1082,7 @@
                                 <div class="setting-desc" data-i18n="surveillance.geocoding_custom_url_desc">Optional. Point to a self-hosted instance to skip the public OSM endpoint entirely. Shared with dashcam settings.</div>
                             </div>
                             <div class="setting-control">
-                                <input type="url" id="survGeocodingCustomUrl" class="text-input" inputmode="url" placeholder="https://nominatim.example.com" onchange="SurvSettings.saveGeocodingCustomUrl()" />
+                                <input type="url" id="survGeocodingCustomUrl" class="text-input" inputmode="url" placeholder="https://nominatim.example.com" disabled onchange="SurvSettings.saveGeocodingCustomUrl()" />
                             </div>
                         </div>
                     </div>
@@ -1423,7 +1577,7 @@
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
-                                    <input type="checkbox" id="cdrCleanupEnabled" onchange="SurvSettings.toggleCdrCleanup()">
+                                    <input type="checkbox" id="cdrCleanupEnabled" disabled onchange="SurvSettings.toggleCdrCleanup()">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -1454,7 +1608,7 @@
                             <div class="setting-control">
                                 <div class="slider-control">
                                     <span class="slider-value" id="cdrReservedValue">2 GB</span>
-                                    <input type="range" class="slider" id="cdrReservedSlider" min="100" max="20000" step="100" value="2000" oninput="SurvSettings.updateCdrReserved(this.value)">
+                                    <input type="range" class="slider" id="cdrReservedSlider" min="100" max="20000" step="100" value="2000" disabled oninput="SurvSettings.updateCdrReserved(this.value)">
                                 </div>
                             </div>
                         </div>
@@ -1466,7 +1620,7 @@
                             <div class="setting-control">
                                 <div class="slider-control">
                                     <span class="slider-value" id="cdrProtectedValue">24h</span>
-                                    <input type="range" class="slider" id="cdrProtectedSlider" min="0" max="168" step="12" value="24" oninput="SurvSettings.updateCdrProtected(this.value)">
+                                    <input type="range" class="slider" id="cdrProtectedSlider" min="0" max="168" step="12" value="24" disabled oninput="SurvSettings.updateCdrProtected(this.value)">
                                 </div>
                             </div>
                         </div>
@@ -1478,12 +1632,12 @@
                             <div class="setting-control">
                                 <div class="slider-control">
                                     <span class="slider-value" id="cdrMinKeepValue">10</span>
-                                    <input type="range" class="slider" id="cdrMinKeepSlider" min="0" max="50" step="5" value="10" oninput="SurvSettings.updateCdrMinKeep(this.value)">
+                                    <input type="range" class="slider" id="cdrMinKeepSlider" min="0" max="100" step="5" value="10" disabled oninput="SurvSettings.updateCdrMinKeep(this.value)">
                                 </div>
                             </div>
                         </div>
                         <!-- Manual Cleanup Button -->
-                        <button class="btn btn-danger" style="width:100%;margin-top:12px;" onclick="SurvSettings.triggerCdrCleanup()">
+                        <button class="btn btn-danger" id="cdrCleanupNow" disabled style="width:100%;margin-top:12px;" onclick="SurvSettings.triggerCdrCleanup()">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                             <span data-i18n="recording.cdr_cleanup_now_v2">Clean up now</span>
                         </button>
@@ -1514,21 +1668,37 @@
     <script src="../shared/core.js?v=20"></script>
     <script src="../shared/update-flow.js"></script>
     <script src="../shared/storage-budget.js?v=8"></script>
-    <script src="../shared/surveillance.js?v=survvideo1"></script>
-    <script src="../shared/safe-locations.js?v=2"></script>
-    <script src="../shared/roi-schedule.js"></script>
+    <script src="../shared/settings-hydration.js?v=1"></script>
+    <script src="../shared/surveillance.js?v=survtoggle9"></script>
+    <script src="../shared/safe-locations.js?v=4"></script>
+    <script src="../shared/roi-schedule.js?v=3"></script>
+    <script src="../shared/parking-settings.js?v=3"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
             document.getElementById('sidebarOverlay').classList.toggle('show');
         }
+        var unlockSettings = function () {
+            if (BYD.utils && BYD.utils.unlockSettingsHydration) {
+                BYD.utils.unlockSettingsHydration();
+            }
+        };
+        var failSettings = function (error) {
+            console.error('Failed to initialize surveillance settings:', error);
+            if (BYD.utils && BYD.utils.toast) {
+                BYD.utils.toast(BYD.i18n.t('errors.load_failed'), 'error');
+            }
+        };
         BYD.i18n.init().then(function () {
             BYD.core.init();
-            SurvSettings.init();
-            SafeLocations.init();
-            RoiEditor.init();
-            ScheduleEditor.init();
-        });
+            return Promise.all([
+                SurvSettings.init(),
+                SafeLocations.init(),
+                RoiEditor.init(),
+                ScheduleEditor.init(),
+                ParkingSettings.init()
+            ]);
+        }).then(unlockSettings, failSettings);
     </script>
 </body>
 </html>

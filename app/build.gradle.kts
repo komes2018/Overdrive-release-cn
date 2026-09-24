@@ -519,6 +519,12 @@ android {
             // CRITICAL: Compresses .so files in the APK (saves ~20MB+)
             useLegacyPackaging = true
 
+            // libtailscale.so is a UPX-packed Android executable intentionally
+            // disguised as a JNI library so PackageManager extracts it. Running
+            // llvm-strip after UPX rewrites the tested payload and removes UPX's
+            // integrity metadata, so package this one file byte-for-byte.
+            keepDebugSymbols += "**/libtailscale.so"
+
             // Keep only arm64-v8a (You already have this, but good to keep)
             excludes += listOf(
                 "lib/armeabi-v7a/**",

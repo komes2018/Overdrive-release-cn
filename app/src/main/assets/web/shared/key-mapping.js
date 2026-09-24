@@ -367,6 +367,9 @@ window.KM = (function () {
         { id: 'screenshot', i18n: 'keymap.act_screenshot', kind: 'api',
           method: 'POST', path: '/api/vehicle/system', body: '{"target":"screenshot","display":${v}}',
           payloads: [ { v: '0', i18n: 'keymap.display_head_unit' }, { v: '1', i18n: 'keymap.display_cluster' } ] },
+        // Parked-only and guarded against startup/reboot loops by the daemon.
+        { id: 'ivi_reboot', i18n: 'keymap.act_ivi_reboot', kind: 'api',
+          method: 'POST', path: '/api/system/ivi-reboot', body: '{"confirm":"REBOOT"}' },
         // Cast an installed app onto the DRIVER CLUSTER. The daemon opens the OEM
         // projection first (the fission display doesn't exist until then), resolves the
         // live display id, and holds the projection open. App picked from the live list
@@ -553,7 +556,7 @@ window.KM = (function () {
         bs_rotation: 'surveillance', bs_enable: 'surveillance', bs_dismiss: 'surveillance',
         native_camera_view: 'surveillance',
         seat_recall: 'system', seat_save: 'system',
-        ui_nav: 'system', screenshot: 'system', show_toast: 'system',
+        ui_nav: 'system', screenshot: 'system', ivi_reboot: 'system', show_toast: 'system',
         cast_app_cluster: 'system', cluster_cast_stop: 'system',
         radio_wifi: 'system', radio_bluetooth: 'system', radio_data: 'system',
         run_automation: 'flow'

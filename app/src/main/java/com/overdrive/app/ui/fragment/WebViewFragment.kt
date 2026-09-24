@@ -48,7 +48,64 @@ class WebViewFragment : Fragment() {
         // tags the standalone HTML dashboard with that attribute, and it must
         // keep its nav.
         private const val EMBED_ATTR = "data-android-embed"
-        private const val EMBED_CHROME = """<script>document.documentElement.setAttribute('data-android-embed','1');</script><style>[data-android-embed="1"] .sidebar,[data-android-embed="1"] .sidebar-overlay,[data-android-embed="1"] .mobile-header,[data-android-embed="1"] .page-header{display:none !important;}[data-android-embed="1"]{--sidebar-width:0px !important;}[data-android-embed="1"] .main-content{margin-left:0 !important;padding-top:0 !important;}[data-android-embed="1"] .bottom-tabs{left:0 !important;right:0 !important;}</style>"""
+        private const val FETCH_BRIDGE_JS = """
+(function() {
+    if (!window.AndroidBridge || window._fetchPatched) return;
+    window._fetchPatched = true;
+    var _orig = window.fetch;
+    window.fetch = function(input, init) {
+        init = init || {};
+        var url = (typeof input === 'string') ? input : (input.url || '');
+        var isLocal = url.startsWith('/') || url.indexOf('127.0.0.1') !== -1 || url.indexOf('localhost') !== -1;
+
+        // Only intercept API calls — let media (video/thumb/snapshot/h264) go through normally
+        // Also let /status go through normal async path — it polls every 3s and would block the JS thread
+        var isApi = url.indexOf('/api/') !== -1 || url.indexOf('/auth/') !== -1;
+        if (!isLocal || !isApi) return _orig.call(window, input, init);
+
+        var method = (init.method || 'GET').toUpperCase();
+
+        // Only use synchronous AndroidBridge for POST/PUT/DELETE (writes).
+        // GET requests go through normal async WebView path (shouldInterceptRequest handles proxy bypass).
+        // This prevents the synchronous bridge from blocking the JS thread during polling/config loads.
+        if (method === 'GET') return _orig.call(window, input, init);
+        var body = init.body || '';
+        var headers = {};
+        if (init.headers) {
+            if (init.headers instanceof Headers) {
+                init.headers.forEach(function(v, k) { headers[k] = v; });
+            } else if (typeof init.headers === 'object') {
+                headers = init.headers;
+            }
+        }
+        if (!headers['Content-Type'] && !headers['content-type'] && body) {
+            headers['Content-Type'] = 'application/json';
+        }
+
+        var fullUrl = url.startsWith('/') ? 'http://127.0.0.1:8080' + url : url;
+
+        return new Promise(function(resolve) {
+            try {
+                var raw = AndroidBridge.httpRequest(fullUrl, method, body, JSON.stringify(headers));
+                var status = 200;
+                try {
+                    var parsed = JSON.parse(raw);
+                    if (parsed._status) { status = parsed._status; delete parsed._status; raw = JSON.stringify(parsed); }
+                } catch(e) {}
+                resolve(new Response(raw, { status: status, headers: { 'Content-Type': 'application/json' } }));
+            } catch(e) {
+                console.error('AndroidBridge error:', e);
+                resolve(new Response('{"error":"bridge_error"}', { status: 500 }));
+            }
+        });
+    };
+    console.log('[OverDrive] fetch() patched to bypass proxy');
+})();
+"""
+        private const val EMBED_CHROME =
+            """<script>document.documentElement.setAttribute('data-android-embed','1');""" +
+                FETCH_BRIDGE_JS +
+                """</script><style>[data-android-embed="1"] .sidebar,[data-android-embed="1"] .sidebar-overlay,[data-android-embed="1"] .mobile-header,[data-android-embed="1"] .page-header{display:none !important;}[data-android-embed="1"]{--sidebar-width:0px !important;}[data-android-embed="1"] .main-content{margin-left:0 !important;padding-top:0 !important;}[data-android-embed="1"] .bottom-tabs{left:0 !important;right:0 !important;}</style>"""
 
         /** Splice [EMBED_CHROME] into a page's `<head>`, falling back to
          *  `<html>` and then the document start. */
@@ -153,7 +210,7 @@ class WebViewFragment : Fragment() {
         //     provides the nav rail + top app bar, so the in-page sidebar,
         //     mobile header, page-header title, and floating mini-preview tab
         //     switcher are all redundant and visually noisy. ===
-        '.sidebar, .sidebar-overlay, .mobile-header { display: none !important; }',
+        '.sidebar, .sidebar-overlay, .mobile-header, .vc-nav-btn { display: none !important; }',
         // The activity's MaterialToolbar already shows the page title; hiding
         // the in-page <header class="page-header"> kills the duplicate title.
         '.page-header { display: none !important; }',
@@ -162,12 +219,14 @@ class WebViewFragment : Fragment() {
         // .footer-bar) to the right of where the sidebar used to live.
         // Without this the bottom-tab bar leaves a 260px gap on the left
         // and only fills half the viewport in landscape.
-        ':root { --sidebar-width: 0px !important; }',
+        ':root { --sidebar-width: 0px !important; --safe-bottom: 0px !important; }',
         '.main-content { margin-left: 0 !important; padding-top: 0 !important; }',
         '.bottom-tabs { left: 0 !important; right: 0 !important; }',
         '.pip-container, .pip-toggle-btn, #pipToggleBtn, #pipContainer { display: none !important; }',
-        '.toast-container { z-index: 20000 !important; bottom: 70px !important; }',
-        '.page-body { padding-bottom: 80px !important; }',
+        '.toast-container { z-index: 20000 !important; bottom: 24px !important; }',
+        'body.ot-tabs-on .toast-container { bottom: calc(96px + var(--safe-bottom, 0px)) !important; }',
+        '.page-body { padding-bottom: 24px !important; }',
+        'body.ot-tabs-on .page-body { padding-bottom: calc(96px + var(--safe-bottom, 0px)) !important; }',
         '.footer-bar { bottom: 0 !important; left: 0 !important; right: 0 !important;',
         '              padding: 12px 16px !important; padding-bottom: 12px !important;',
         '              z-index: 10000 !important; }',
@@ -183,7 +242,6 @@ class WebViewFragment : Fragment() {
         '.bottom-tab, .bottom-tab:focus, .bottom-tab:focus-visible,',
         '.bottom-tab:active { outline: none !important; box-shadow: none !important;',
         '                     background-image: none !important; }',
-        'button:focus, button:focus-visible { outline: none !important; }',
         '* { -webkit-tap-highlight-color: transparent !important; }',
 
         // === Generic icon-then-text spacing inside the WebView shell.
@@ -314,58 +372,6 @@ class WebViewFragment : Fragment() {
         tabsObserver.observe(document.body, { childList: true, subtree: true });
     }
 
-    // Replace fetch() to bypass sing-box proxy for localhost
-    if (window.AndroidBridge && !window._fetchPatched) {
-        window._fetchPatched = true;
-        var _orig = window.fetch;
-        window.fetch = function(input, init) {
-            init = init || {};
-            var url = (typeof input === 'string') ? input : (input.url || '');
-            var isLocal = url.startsWith('/') || url.indexOf('127.0.0.1') !== -1 || url.indexOf('localhost') !== -1;
-            
-            // Only intercept API calls — let media (video/thumb/snapshot/h264) go through normally
-            // Also let /status go through normal async path — it polls every 3s and would block the JS thread
-            var isApi = url.indexOf('/api/') !== -1 || url.indexOf('/auth/') !== -1;
-            if (!isLocal || !isApi) return _orig.call(window, input, init);
-            
-            var method = (init.method || 'GET').toUpperCase();
-            
-            // Only use synchronous AndroidBridge for POST/PUT/DELETE (writes).
-            // GET requests go through normal async WebView path (shouldInterceptRequest handles proxy bypass).
-            // This prevents the synchronous bridge from blocking the JS thread during polling/config loads.
-            if (method === 'GET') return _orig.call(window, input, init);
-            var body = init.body || '';
-            var headers = {};
-            if (init.headers) {
-                if (init.headers instanceof Headers) {
-                    init.headers.forEach(function(v, k) { headers[k] = v; });
-                } else if (typeof init.headers === 'object') {
-                    headers = init.headers;
-                }
-            }
-            if (!headers['Content-Type'] && !headers['content-type'] && body) {
-                headers['Content-Type'] = 'application/json';
-            }
-            
-            var fullUrl = url.startsWith('/') ? 'http://127.0.0.1:8080' + url : url;
-            
-            return new Promise(function(resolve) {
-                try {
-                    var raw = AndroidBridge.httpRequest(fullUrl, method, body, JSON.stringify(headers));
-                    var status = 200;
-                    try {
-                        var parsed = JSON.parse(raw);
-                        if (parsed._status) { status = parsed._status; delete parsed._status; raw = JSON.stringify(parsed); }
-                    } catch(e) {}
-                    resolve(new Response(raw, { status: status, headers: { 'Content-Type': 'application/json' } }));
-                } catch(e) {
-                    console.error('AndroidBridge error:', e);
-                    resolve(new Response('{"error":"bridge_error"}', { status: 500 }));
-                }
-            });
-        };
-        console.log('[OverDrive] fetch() patched to bypass proxy');
-    }
 })();
 """
     }
@@ -957,8 +963,10 @@ class WebViewFragment : Fragment() {
                         // CSS that depends on the variable values uses the right
                         // values on first paint.
                         view?.evaluateJavascript(buildThemeInjectJs(), null)
-                        // Hide sidebar (app drawer handles navigation) and
-                        // patch fetch() to bypass proxy for ALL localhost calls
+                        // Fallback for any page whose HTML could not be spliced.
+                        // Idempotent: normal pages installed it in <head>.
+                        view?.evaluateJavascript(FETCH_BRIDGE_JS, null)
+                        // Hide sidebar (app drawer handles navigation).
                         view?.evaluateJavascript(INJECT_JS, null)
                     }
                 }
@@ -987,6 +995,10 @@ class WebViewFragment : Fragment() {
                             val uri = android.net.Uri.parse(url)
                             val filter = uri.getQueryParameter("filter")
                             val file = uri.getQueryParameter("file")
+                            // Parking page → "Open events": the native list narrows
+                            // to that park's clips (RecordingsFragment shows a
+                            // dismissible chip for it).
+                            val parkingSessionId = uri.getQueryParameter("parkingSessionId")
                             // A `file=` deep link (from a notification or the Log tab)
                             // means "open THIS clip", not "show the list". The native
                             // recordings fragment ignores the file arg, so resolve the
@@ -998,6 +1010,7 @@ class WebViewFragment : Fragment() {
                             } else {
                                 val bundle = android.os.Bundle().apply {
                                     if (filter != null) putString("filter", filter)
+                                    if (!parkingSessionId.isNullOrBlank()) putString("parkingSessionId", parkingSessionId)
                                 }
                                 androidx.navigation.fragment.NavHostFragment.findNavController(this@WebViewFragment)
                                     .navigate(R.id.recordingsFragment, bundle)
@@ -1260,11 +1273,8 @@ class WebViewFragment : Fragment() {
         }
 
         /**
-         * Return the APK's web i18n catalog JSON for `lang`. The in-app
-         * WebView uses this when `/i18n/<lang>.json` can't be fetched from
-         * the daemon (phone without UID 2000, or stale extract under
-         * `/data/local/tmp/web/i18n`). Empty string on miss so JS falls
-         * through to HTTP.
+         * Return the APK-bundled web catalog. The JS runtime uses this before
+         * HTTP so app updates cannot be masked by a stale daemon extraction.
          */
         @android.webkit.JavascriptInterface
         fun getI18nCatalog(lang: String?): String {
@@ -1782,44 +1792,47 @@ class WebViewFragment : Fragment() {
     }
 
     /**
-     * APK-bundled web catalog (`assets/web/i18n/<lang>.json`). Used by the
-     * JS bridge and by {@link #interceptI18nCatalog} so Hebrew (and every
-     * other locale) does not depend on the daemon having extracted files
-     * into `/data/local/tmp/web/i18n`.
+     * Read an APK-bundled web catalog without accepting an unknown tag as
+     * English. Unknown / traversal-shaped names must fall through to a 404.
      */
     private fun loadI18nCatalogJson(lang: String?): String {
-        val raw = lang?.trim().orEmpty()
-        if (raw.isEmpty()) return ""
-        val tag = com.overdrive.app.server.LocaleManager.resolve(raw)
-        if (!com.overdrive.app.server.LocaleManager.isSupported(tag)) return ""
+        val tag = com.overdrive.app.server.LocaleManager.resolveOrNull(
+            lang?.trim().orEmpty()
+        ) ?: return ""
         val ctx = context ?: return ""
         return try {
-            ctx.assets.open("web/i18n/$tag.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
+            ctx.assets.open("web/i18n/$tag.json")
+                .bufferedReader(Charsets.UTF_8)
+                .use { it.readText() }
         } catch (_: Exception) {
             ""
         }
     }
 
+    /**
+     * Serve catalog requests straight from the installed APK in the embedded
+     * WebView. External clients still use the daemon HTTP path.
+     */
     private fun interceptI18nCatalog(url: String): WebResourceResponse? {
-        val path = android.net.Uri.parse(url).path ?: return null
+        val path = Uri.parse(url).path ?: return null
         if (!path.startsWith("/i18n/") || !path.endsWith(".json")) return null
         val file = path.substringAfter("/i18n/")
         if (file.contains('/') || file.contains("..")) return null
         val json = loadI18nCatalogJson(file.removeSuffix(".json"))
         if (json.isEmpty()) return null
         val bytes = json.toByteArray(Charsets.UTF_8)
-        val resp = WebResourceResponse(
+        return WebResourceResponse(
             "application/json",
             "utf-8",
             java.io.ByteArrayInputStream(bytes)
-        )
-        resp.setStatusCodeAndReasonPhrase(200, "OK")
-        resp.responseHeaders = mapOf(
-            "Cache-Control" to "no-store",
-            "Access-Control-Allow-Origin" to "*",
-            "Content-Length" to bytes.size.toString()
-        )
-        return resp
+        ).apply {
+            setStatusCodeAndReasonPhrase(200, "OK")
+            responseHeaders = mapOf(
+                "Cache-Control" to "no-store",
+                "Access-Control-Allow-Origin" to "*",
+                "Content-Length" to bytes.size.toString()
+            )
+        }
     }
 
     /**
@@ -1832,9 +1845,10 @@ class WebViewFragment : Fragment() {
      * previous language until the user manually navigates away and back).
      *
      * Calls BYD.i18n.setLang() in the loaded page, which refetches the
-     * catalog and re-hydrates every [data-i18n] node. Safe to call before
-     * the page has finished loading — the call is no-op'd until BYD is
-     * present.
+     * catalog and re-hydrates every [data-i18n] node. Persistence is skipped
+     * because LanguagePickerDialog already committed the native selection.
+     * Safe to call before the page has finished loading — the call is no-op'd
+     * until BYD is present.
      */
     fun applyLocale(lang: String) {
         if (lang.isBlank()) return
@@ -1843,7 +1857,8 @@ class WebViewFragment : Fragment() {
         val safe = lang.replace(Regex("[^a-zA-Z0-9-]"), "")
         if (safe.isEmpty()) return
         webView?.evaluateJavascript(
-            "if (window.BYD && BYD.i18n && BYD.i18n.setLang) { BYD.i18n.setLang('$safe'); }",
+            "if (window.BYD && BYD.i18n && BYD.i18n.setLang) { " +
+                "BYD.i18n.setLang('$safe', { persist: false }); }",
             null
         )
     }

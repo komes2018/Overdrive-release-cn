@@ -1,7 +1,6 @@
 package com.overdrive.app.camera;
 
 import android.hardware.IBYDCameraService;
-import android.hardware.IBYDCameraUser;
 import com.overdrive.app.logging.DaemonLogger;
 
 import java.lang.reflect.Method;
@@ -10,11 +9,10 @@ import java.lang.reflect.Proxy;
 /**
  * Cooperative camera coordinator for BYD platform.
  *
- * NOTE: registerCameraUser() / IBYDCameraUser callback registration is permanently
- * DISABLED — the daemon does not participate in IBYDCameraService arbitration.
- * The only live path is polling-based: getCurrentCameraUser() + frame-stall detection.
- * All registerUser-gated branches in this file are dead and kept commented for
- * reference only; do not re-enable without re-validating the yield/reacquire flow.
+ * NOTE: IBYDCameraUser callback registration is disabled. The DI4 panoramic
+ * recorder follows DIPlus's uninterrupted model:
+ * one AVMCamera producer stays open while the native camera UI co-consumes it.
+ * Legacy contention detection remains polling-based.
  *
  * Cleanup order (always): disablePreviewCallback → stopPreview → close
  */
@@ -29,13 +27,6 @@ public class BydCameraCoordinator {
     private Method getCurrentCameraUserMethod;  // For polling fallback
     private boolean serviceAvailable = false;
 
-    // Camera user registration — DISABLED. registerCameraUser() is no longer
-    // invoked, so these fields stay at their initial values for the lifetime
-    // of the process: cameraUser == null, registeredAsUser == false.
-    // Kept (non-final) so the commented-out registration code still compiles.
-    private BydCameraUser cameraUser;
-    private boolean registeredAsUser = false;
-
     // Event callback state (AVMCamera.IEventCallback — separate from IBYDCameraUser)
     private boolean eventCallbackSet = false;
 
@@ -49,7 +40,12 @@ public class BydCameraCoordinator {
 
     // Callback to PanoramicCameraGpu
     public interface CameraYieldCallback {
-        void onYieldCamera();
+        /**
+         * Release the active AVMCamera ownership.
+         *
+         * @return true once this process no longer owns the camera handle.
+         */
+        boolean onYieldCamera();
         void onReacquireCamera();
         void onCameraError(int eventType);
     }
@@ -71,10 +67,10 @@ public class BydCameraCoordinator {
     // ==================== IBYDCameraService Connection ====================
 
     /**
-     * Connects to IBYDCameraService and registers as a camera user.
+     * Connects to IBYDCameraService for legacy polling only.
      *
-     * Tries typed AIDL stubs first (for registerUser). If that fails,
-     * falls back to reflection-based polling (getCurrentCameraUser).
+     * Resolves the typed service first, then prepares reflection-based
+     * getCurrentCameraUser polling where supported.
      */
     public void register() {
         try {
@@ -139,178 +135,14 @@ public class BydCameraCoordinator {
                 logger.warn("Reflection proxy setup failed: " + e.getMessage());
             }
 
-            // API discovery and camera user registration DISABLED.
-            // We don't participate in IBYDCameraService arbitration.
-            // discoverCameraServiceApi();
-            // registerCameraUser();
+            // Do not register IBYDCameraUser. In particular, the DI4 pano
+            // recorder must not enter the ordinary-DVR release protocol.
 
         } catch (ClassNotFoundException e) {
             logger.info("IBYDCameraService not found — camera arbitration unavailable");
         } catch (Exception e) {
             logger.warn("IBYDCameraService setup failed: " + e.getMessage());
         }
-    }
-
-    // ==================== Camera User Registration ====================
-
-    /**
-     * Registers with IBYDCameraService as a camera user.
-     *
-     * DEAD CODE — DISABLED. Not invoked from {@link #register()} (call sites are
-     * commented out). Kept for reference in case event-driven yield is revived.
-     * If you uncomment the call site, also remove the `false` return in
-     * {@link #isRegisteredAsUser()} and revert the polling-only short-circuits.
-     */
-    @SuppressWarnings("unused")
-    private void registerCameraUser() {
-        if (registeredAsUser) {
-            logger.info("Already registered as camera user");
-            return;
-        }
-
-        // Create our camera user implementation
-        cameraUser = new BydCameraUser(activeCameraId, "com.overdrive.app");
-        cameraUser.setListener(new BydCameraUser.CameraYieldListener() {
-            @Override
-            public void onYieldRequired() {
-                // Only called from yieldDueToContention() — frame stall + native app active
-                logger.info("IBYDCameraUser: yield required (frame stall contention) — notifying pipeline");
-                yielded = true;
-                nativeAppActive = true;
-                yieldTimestamp = System.currentTimeMillis();
-                if (yieldCallback != null) {
-                    yieldCallback.onYieldCamera();
-                }
-            }
-
-            @Override
-            public void onCameraAvailable() {
-                // Native app closed camera — reacquire if we had yielded
-                logger.info("IBYDCameraUser: camera available — notifying pipeline");
-                yielded = false;
-                nativeAppActive = false;
-                long yieldDuration = System.currentTimeMillis() - yieldTimestamp;
-                logger.info("Camera was yielded for " + yieldDuration + "ms");
-
-                if (yieldCallback != null) {
-                    new Thread(() -> {
-                        try {
-                            Thread.sleep(REACQUIRE_DELAY_MS);
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            return;
-                        }
-
-                        if (!yielded && !nativeAppActive) {
-                            yieldCallback.onReacquireCamera();
-                        }
-                    }, "CameraReacquire").start();
-                }
-            }
-
-            @Override
-            public void onNativeAppOpened(String packageName) {
-                // Informational — native app opened camera but we're NOT yielding.
-                // If sharing works (both get frames), recording continues uninterrupted.
-                // If sharing fails, frame stall watchdog will detect it and call
-                // onFrameStallDetected() → yieldDueToContention().
-                logger.info("Native app opened camera: " + packageName +
-                    " — monitoring for frame stalls (recording continues)");
-                nativeAppActive = true;
-            }
-        });
-
-        // Try registerUser via typed proxy
-        if (typedServiceProxy != null) {
-            try {
-                boolean result = typedServiceProxy.registerUser(cameraUser);
-                registeredAsUser = true;
-                logger.info("Registered as camera user via typed AIDL (camera " +
-                    activeCameraId + ", result=" + result + ") — event-driven yield active");
-                return;
-            } catch (Throwable e) {
-                // Catches both Exception and Error (NoSuchMethodError when runtime
-                // IBYDCameraService doesn't match our compile-time stub)
-                logger.warn("registerUser via typed proxy failed: " + e.getMessage());
-                typedServiceProxy = null;  // Don't try typed proxy again
-            }
-        }
-
-        // Try registerUser via reflection
-        if (reflectionServiceProxy != null) {
-            try {
-                Method registerMethod = reflectionServiceProxy.getClass()
-                    .getDeclaredMethod("registerUser", IBYDCameraUser.class);
-                registerMethod.setAccessible(true);
-                registerMethod.invoke(reflectionServiceProxy, cameraUser);
-                registeredAsUser = true;
-                logger.info("Registered as camera user via reflection (camera " +
-                    activeCameraId + ") — event-driven yield active");
-                return;
-            } catch (NoSuchMethodException e) {
-                logger.warn("registerUser(IBYDCameraUser) not found on service");
-            } catch (Throwable e) {
-                logger.warn("registerUser via reflection failed: " + e.getMessage());
-            }
-        }
-
-        // Try with android.os.IBinder parameter type (some firmware versions)
-        if (reflectionServiceProxy != null) {
-            try {
-                Method registerMethod = reflectionServiceProxy.getClass()
-                    .getDeclaredMethod("registerUser", android.os.IBinder.class);
-                registerMethod.setAccessible(true);
-                registerMethod.invoke(reflectionServiceProxy, cameraUser.asBinder());
-                registeredAsUser = true;
-                logger.info("Registered as camera user via IBinder overload (camera " +
-                    activeCameraId + ") — event-driven yield active");
-                return;
-            } catch (NoSuchMethodException e) {
-                // Expected if this overload doesn't exist
-            } catch (Throwable e) {
-                logger.warn("registerUser IBinder overload failed: " + e.getMessage());
-            }
-        }
-
-        logger.warn("Camera user registration failed — using polling fallback");
-    }
-
-    /**
-     * Unregisters from IBYDCameraService.
-     *
-     * DEAD CODE — DISABLED, paired with {@link #registerCameraUser()}.
-     */
-    @SuppressWarnings("unused")
-    private void unregisterCameraUser() {
-        if (!registeredAsUser || cameraUser == null) return;
-
-        boolean unregistered = false;
-        if (typedServiceProxy != null) {
-            try {
-                typedServiceProxy.unregisterUser(cameraUser);
-                unregistered = true;
-                logger.info("Unregistered camera user via typed AIDL");
-            } catch (Exception e) {
-                logger.warn("unregisterUser failed (service may still hold reference): " + e.getMessage());
-            }
-        } else if (reflectionServiceProxy != null) {
-            try {
-                Method unregisterMethod = reflectionServiceProxy.getClass()
-                    .getDeclaredMethod("unregisterUser", IBYDCameraUser.class);
-                unregisterMethod.setAccessible(true);
-                unregisterMethod.invoke(reflectionServiceProxy, cameraUser);
-                unregistered = true;
-                logger.info("Unregistered camera user via reflection");
-            } catch (Exception e) {
-                logger.warn("unregisterUser via reflection failed: " + e.getMessage());
-            }
-        }
-
-        if (!unregistered) {
-            logger.warn("Could not confirm unregister — clearing local state to allow re-registration");
-        }
-        registeredAsUser = false;
-        cameraUser.clearYielded();
     }
 
     // ==================== Yield State Query ====================
@@ -320,17 +152,10 @@ public class BydCameraCoordinator {
      * Returns false if native app opened but sharing is working (no frame stall).
      */
     public boolean isCameraYielded() {
-        // registerCameraUser is DISABLED — only the polling path is live.
-        // if (registeredAsUser && cameraUser != null) {
-        //     return cameraUser.isYielded();
-        // }
         return yielded;
     }
 
-    /**
-     * Whether we're using event-driven registration (true) or polling fallback (false).
-     * Permanently false — registerCameraUser is DISABLED.
-     */
+    /** Event-driven camera-user registration is intentionally disabled. */
     public boolean isRegisteredAsUser() {
         return false;
     }
@@ -345,10 +170,6 @@ public class BydCameraCoordinator {
      * Used at camera open time to decide PRIMARY vs SECONDARY mode.
      */
     public String queryCurrentCameraUser() {
-        // registerCameraUser DISABLED — polling path only.
-        // if (registeredAsUser && cameraUser != null) {
-        //     return cameraUser.isNativeAppHoldingCamera() ? "native" : null;
-        // }
         if (getCurrentCameraUserMethod != null && reflectionServiceProxy != null) {
             try {
                 Object currentUser = getCurrentCameraUserMethod.invoke(reflectionServiceProxy);
@@ -363,8 +184,8 @@ public class BydCameraCoordinator {
     }
 
     /**
-     * Checks if another app currently holds the camera via getCurrentCameraUser() polling.
-     * Only used when registerUser is not available.
+     * Checks if another app currently holds the camera via
+     * getCurrentCameraUser() polling.
      *
      * @return true if another camera user is active (native AVM app)
      */
@@ -372,11 +193,6 @@ public class BydCameraCoordinator {
         if (!serviceAvailable || getCurrentCameraUserMethod == null) {
             return false;
         }
-
-        // registerCameraUser DISABLED — callbacks never fire, so always poll.
-        // if (registeredAsUser) {
-        //     return nativeAppActive;
-        // }
 
         try {
             Object currentUser = getCurrentCameraUserMethod.invoke(reflectionServiceProxy);
@@ -440,23 +256,9 @@ public class BydCameraCoordinator {
     /**
      * Called by the frame stall detector when no frames arrive for 2+ seconds.
      *
-     * registerCameraUser is DISABLED, so only the polling path runs.
-     * If the native app currently holds the camera → yield. Otherwise HAL issue.
+     * Registration is disabled, so only the legacy polling path runs.
      */
     public boolean onFrameStallDetected() {
-        // Event-driven path (registerCameraUser) DISABLED:
-        // if (registeredAsUser && cameraUser != null) {
-        //     if (cameraUser.isNativeAppHoldingCamera()) {
-        //         logger.warn("CONTENTION: Frame stall + native app holds camera — yielding now");
-        //         cameraUser.yieldDueToContention();
-        //         return true;
-        //     } else {
-        //         logger.warn("Frame stall but native app NOT holding camera — HAL issue");
-        //         return false;
-        //     }
-        // }
-
-        // Polling path (the only live path)
         checkNativeAppActive();
 
         if (nativeAppActive) {
@@ -478,6 +280,7 @@ public class BydCameraCoordinator {
 
     public void setupEventCallback(Object cameraObj) {
         if (cameraObj == null) return;
+        if (cameraObj instanceof com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) return;
         if (eventCallbackSet) return;  // already wired; resetEventCallbackState clears
 
         try {
@@ -555,28 +358,32 @@ public class BydCameraCoordinator {
 
     /**
      * Notify IBYDCameraService before opening camera.
-     * 
-     * DISABLED — we don't register with the service, so preOpenCamera notifications
-     * would trigger the yield protocol on the native DVR. We open silently.
+     *
+     * <p>Intentionally a no-op. DIPlus panoramic recording opens AVMCamera
+     * directly and does not join IBYDCameraUser arbitration.
      */
     public void notifyPreOpenCamera() {
-        // Disabled — not participating in IBYDCameraService arbitration.
-        // Opening camera directly without notifying the service.
+        // Open directly without announcing an ownership transition.
     }
 
     /**
      * Notify IBYDCameraService after closing camera.
-     * 
-     * DISABLED — we don't register with the service, so posCloseCamera notifications
-     * are not needed. We close silently.
+     *
+     * <p>Intentionally a no-op for the same direct-open model as
+     * {@link #notifyPreOpenCamera()}.
      */
     public void notifyPosCloseCamera() {
-        // Disabled — not participating in IBYDCameraService arbitration.
-        // Closing camera directly without notifying the service.
+        // No camera-user registration exists to notify.
     }
 
-    public static void closeCamera(Object cameraObj, int channelId) {
-        if (cameraObj == null) return;
+    /**
+     * Close an AVMCamera and report whether the vendor close call completed.
+     *
+     * <p>disablePreviewCallback/stopPreview are best-effort cleanup. Native
+     * ownership is considered released only after close() returns normally.
+     */
+    public static boolean closeCamera(Object cameraObj, int channelId) {
+        if (cameraObj == null) return true;
 
         try {
             Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
@@ -586,7 +393,7 @@ public class BydCameraCoordinator {
                 m.setAccessible(true);
                 m.invoke(cameraObj, channelId);
             } catch (NoSuchMethodException ignored) {
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 logger.warn("disablePreviewCallback failed: " + e.getMessage());
             }
 
@@ -594,7 +401,7 @@ public class BydCameraCoordinator {
                 Method m = avmClass.getDeclaredMethod("stopPreview");
                 m.setAccessible(true);
                 m.invoke(cameraObj);
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 logger.warn("stopPreview failed: " + e.getMessage());
             }
 
@@ -602,31 +409,33 @@ public class BydCameraCoordinator {
                 Method m = avmClass.getDeclaredMethod("close");
                 m.setAccessible(true);
                 m.invoke(cameraObj);
-            } catch (Exception e) {
+                return true;
+            } catch (Throwable e) {
                 logger.warn("close failed: " + e.getMessage());
+                return false;
             }
 
-        } catch (ClassNotFoundException e) {
-            logger.error("AVMCamera class not found");
+        } catch (Throwable e) {
+            logger.error("AVMCamera class unavailable: " + e.getMessage());
+            return false;
         }
     }
 
     // ==================== Lifecycle ====================
 
     public void unregister() {
-        // Camera user unregistration DISABLED — we never register, so nothing to unregister.
-        // unregisterCameraUser();
         serviceAvailable = false;
         typedServiceProxy = null;
         reflectionServiceProxy = null;
         getCurrentCameraUserMethod = null;
+        yielded = false;
+        nativeAppActive = false;
     }
 
     // ==================== State Queries ====================
 
     public boolean isNativeAppActive() { return nativeAppActive; }
-    // cameraUser is permanently null (registerCameraUser DISABLED), so polling 'yielded' is canonical.
-    public boolean isYielded() { return yielded; }
+    public boolean isYielded() { return isCameraYielded(); }
     public boolean isRegistered() { return serviceAvailable; }
     public boolean isEventCallbackActive() { return eventCallbackSet; }
     public void resetEventCallbackState() { eventCallbackSet = false; }
@@ -739,6 +548,6 @@ public class BydCameraCoordinator {
             }
         }
 
-        logger.info("=== Discovery complete (registeredAsUser=" + registeredAsUser + ") ===");
+        logger.info("=== Discovery complete (camera-user registration disabled) ===");
     }
 }

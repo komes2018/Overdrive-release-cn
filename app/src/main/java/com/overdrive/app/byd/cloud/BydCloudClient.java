@@ -401,9 +401,10 @@ public final class BydCloudClient {
                 }
             }
         } catch (IOException e) {
-            // getLatestConfig still gives useful coarse gates. The learn-info
-            // refinement leaves OPENWINDOW unavailable until a later refresh
-            // positively proves this VIN can vent remotely.
+            // getLatestConfig still gives the coarse function gate. For
+            // OPENWINDOW, pyBYD intentionally falls back to function 1026 when
+            // vehicleFunLearnInfo is unavailable; an explicit returned 0/0 is
+            // still honored by CloudCapabilities.
             logger.info("Capability vehicle metadata unavailable: " + e.getMessage());
         }
 
@@ -435,6 +436,7 @@ public final class BydCloudClient {
         CloudCapabilities parsed = CloudCapabilities.fromResponses(
                 vin, perVin, vehicle, System.currentTimeMillis());
         cloudCapabilities = parsed;
+        logger.info("Cloud window-vent gate: " + parsed.windowVentGateSummary());
         return parsed;
     }
 
@@ -1479,6 +1481,26 @@ public final class BydCloudClient {
      * Wakes the T-Box and polls until data is ready (up to 10 attempts, 1.5s apart).
      */
     public JSONObject fetchVehicleRealtime(String vin) throws IOException {
+        return fetchVehicleRealtime(vin, 10, 0L);
+    }
+
+    /**
+     * Bounded realtime request used only by the parked DiLink 5 heartbeat.
+     *
+     * <p>One result poll is sufficient for the normal ~2s ready path seen in
+     * the field. Capping each HTTP leg at six seconds keeps the trigger plus
+     * one poll inside the 15-second heartbeat budget even on a degraded route.
+     * The regular UI/poller method above retains its full ten-poll behaviour.
+     */
+    public JSONObject fetchVehicleRealtimeForParkedKeepAlive(String vin)
+            throws IOException {
+        return fetchVehicleRealtime(vin, 1, 6_000L);
+    }
+
+    private JSONObject fetchVehicleRealtime(
+            String vin,
+            int maxPollAttempts,
+            long callTimeoutMs) throws IOException {
         BydCloudSession s = ensureSession();
         long nowMs = System.currentTimeMillis();
 
@@ -1492,8 +1514,10 @@ public final class BydCloudClient {
         }
 
         TokenEnvelope env = buildTokenOuterEnvelope(nowMs, s, inner);
-        JSONObject response = transport.postSecure(
-                "/vehicleInfo/vehicle/vehicleRealTimeRequest", env.outer);
+        JSONObject response = postRealtimeSecure(
+                "/vehicleInfo/vehicle/vehicleRealTimeRequest",
+                env.outer,
+                callTimeoutMs);
 
         String code = response.optString("code", "");
         if (!"0".equals(code)) {
@@ -1513,7 +1537,7 @@ public final class BydCloudClient {
 
         if (requestSerial == null || requestSerial.isEmpty()) return vehicleInfo;
 
-        for (int attempt = 1; attempt <= 10; attempt++) {
+        for (int attempt = 1; attempt <= maxPollAttempts; attempt++) {
             try { Thread.sleep(1500); } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return vehicleInfo;
@@ -1530,8 +1554,10 @@ public final class BydCloudClient {
 
             TokenEnvelope pollEnv = buildTokenOuterEnvelope(nowMs, s, pollInner);
             try {
-                JSONObject pollResp = transport.postSecure(
-                        "/vehicleInfo/vehicle/vehicleRealTimeResult", pollEnv.outer);
+                JSONObject pollResp = postRealtimeSecure(
+                        "/vehicleInfo/vehicle/vehicleRealTimeResult",
+                        pollEnv.outer,
+                        callTimeoutMs);
                 if (!"0".equals(pollResp.optString("code", ""))) continue;
 
                 String pollData = pollResp.optString("respondData", "");
@@ -1552,6 +1578,15 @@ public final class BydCloudClient {
         }
 
         return vehicleInfo;
+    }
+
+    private JSONObject postRealtimeSecure(
+            String endpoint,
+            JSONObject outer,
+            long callTimeoutMs) throws IOException {
+        return callTimeoutMs > 0L
+                ? transport.postSecure(endpoint, outer, callTimeoutMs)
+                : transport.postSecure(endpoint, outer);
     }
 
     private boolean isRealtimeReady(JSONObject vi) {

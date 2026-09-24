@@ -1,6 +1,7 @@
 package com.overdrive.app.ui;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
@@ -24,12 +25,13 @@ public class WebViewEmbedChromeAssetTest {
         assertTrue(fragment.contains("fun spliceEmbedChrome(html: String): String"));
         assertTrue(fragment.contains("spliceEmbedChrome("));
 
-        int chrome = fragment.indexOf("EMBED_CHROME = ");
+        int chrome = fragment.indexOf("EMBED_CHROME =");
         assertTrue(chrome >= 0);
         String block = fragment.substring(chrome, fragment.indexOf("</style>", chrome));
         assertTrue(block.contains("[data-android-embed=\"1\"] .sidebar"));
         assertTrue(block.contains("[data-android-embed=\"1\"] .mobile-header"));
         assertTrue(block.contains("--sidebar-width:0px"));
+        assertTrue(block.contains("[data-android-embed=\"1\"] .bottom-tabs"));
         // The standalone HTML dashboard tags itself data-app-shell and must
         // keep its nav, so the pre-paint hide must never key on it.
         assertFalse(block.contains("data-app-shell"));
@@ -41,6 +43,25 @@ public class WebViewEmbedChromeAssetTest {
 
         assertTrue(fragment.contains("mime == \"text/html\" && connection.responseCode == 200"));
         assertTrue(fragment.contains("if (length > 0 && !splicedHtml)"));
+    }
+
+    @Test
+    public void writeFetchBridgeIsInstalledBeforePageScripts() throws IOException {
+        String fragment = readRepositoryFile(FRAGMENT);
+
+        int bridge = fragment.indexOf("private const val FETCH_BRIDGE_JS");
+        int chrome = fragment.indexOf("private const val EMBED_CHROME");
+        assertTrue(bridge >= 0);
+        assertTrue(chrome > bridge);
+
+        String bridgeBlock = fragment.substring(bridge, chrome);
+        assertTrue(bridgeBlock.contains("window.fetch = function(input, init)"));
+        assertTrue(bridgeBlock.contains(
+                "AndroidBridge.httpRequest(fullUrl, method, body, JSON.stringify(headers))"));
+        assertTrue(fragment.substring(chrome).contains("FETCH_BRIDGE_JS +"));
+        assertTrue(fragment.contains("view?.evaluateJavascript(FETCH_BRIDGE_JS, null)"));
+        assertEquals(1, countOccurrences(
+                fragment, "window.fetch = function(input, init)"));
     }
 
     @Test
@@ -78,5 +99,13 @@ public class WebViewEmbedChromeAssetTest {
             current = current.getParent();
         }
         throw new AssertionError("Could not locate repository file: " + relativePath);
+    }
+
+    private static int countOccurrences(String text, String needle) {
+        int count = 0;
+        for (int at = 0; (at = text.indexOf(needle, at)) >= 0; at += needle.length()) {
+            count++;
+        }
+        return count;
     }
 }

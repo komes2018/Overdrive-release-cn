@@ -408,10 +408,15 @@ public class EventTimelineCollector {
         final com.overdrive.app.geo.GeoSnapshot endG   = (endGeo != null)
                 ? endGeo
                 : com.overdrive.app.geo.GeoSnapshot.capture(durationMs);
+        // Parking Intelligence: capture the OPEN session id HERE on the
+        // dispatch thread (null when the feature is off / nothing open). The
+        // writer runs asynchronously and could otherwise observe a session
+        // that opened after this clip finalized.
+        final String parkingSessionId = com.overdrive.app.parking.ParkingHooks.currentSessionId();
 
         writeExecutor.execute(() -> {
             writeJsonSidecar(mp4File, starts, ends, types, confs, counts, cams, count,
-                    durationMs, actorsCopy, heroThumb, startG, peakG, endG);
+                    durationMs, actorsCopy, heroThumb, startG, peakG, endG, parkingSessionId);
             // SRT subtitle sidecar — localized prose so VLC / video.js / ExoPlayer
             // can show "Person detected close range" / "Charging started · 4.3 kW"
             // without re-encoding the burned-in English overlay. Wrapped so an
@@ -936,6 +941,18 @@ public class EventTimelineCollector {
                                    com.overdrive.app.geo.GeoSnapshot startGeo,
                                    com.overdrive.app.geo.GeoSnapshot peakGeo,
                                    com.overdrive.app.geo.GeoSnapshot endGeo) {
+        writeJsonSidecar(mp4File, starts, ends, types, confs, counts, cameras, count,
+                durationMs, actors, heroThumbnail, startGeo, peakGeo, endGeo, null);
+    }
+
+    private void writeJsonSidecar(File mp4File, long[] starts, long[] ends,
+                                   byte[] types, float[] confs, byte[] counts,
+                                   byte[] cameras, int count, long durationMs,
+                                   java.util.List<Actor> actors, String heroThumbnail,
+                                   com.overdrive.app.geo.GeoSnapshot startGeo,
+                                   com.overdrive.app.geo.GeoSnapshot peakGeo,
+                                   com.overdrive.app.geo.GeoSnapshot endGeo,
+                                   String parkingSessionId) {
         final String[] CAMERA_NAMES = {"front", "right", "rear", "left"};
 
         try {
@@ -1166,6 +1183,13 @@ public class EventTimelineCollector {
 
             if (heroThumbnail != null && !heroThumbnail.isEmpty()) {
                 root.put("heroThumbnail", heroThumbnail);
+            }
+            // Parking Intelligence (additive, omitted when the feature is off):
+            // the parked session this event happened in. The recordings index
+            // ingests it into parking_session_id so a session page can list
+            // its clips without scanning sidecars.
+            if (parkingSessionId != null && !parkingSessionId.isEmpty()) {
+                root.put("parkingSessionId", parkingSessionId);
             }
 
             // ---- Geo block (v3 addition) ----

@@ -2,6 +2,7 @@ package com.overdrive.app.communication;
 
 import com.overdrive.app.byd.BydDataCollector;
 import com.overdrive.app.byd.BydVehicleData;
+import com.overdrive.app.camera.dilink5.DiLink5Platform;
 import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.monitor.AccMonitor;
@@ -47,6 +48,7 @@ public final class VehicleCommunicationSafety {
      */
     public static boolean isRemoteVoiceOverlaySafe() {
         Integer gear = readGear();
+        if (DiLink5Platform.isSelected() && gear == null) return false;
         if (gear != null && gear == GearMonitor.GEAR_R) return false;
 
         try {
@@ -71,6 +73,15 @@ public final class VehicleCommunicationSafety {
     }
 
     private static Integer readGear() {
+        if (DiLink5Platform.isSelected()) {
+            try {
+                int gear = BydDataCollector.getInstance().readGearNow();
+                return gear >= GearMonitor.GEAR_P && gear <= GearMonitor.GEAR_S
+                        ? gear : null;
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
         try {
             GearMonitor monitor = GearMonitor.getInstance();
             if (monitor != null && monitor.isRunning()) {

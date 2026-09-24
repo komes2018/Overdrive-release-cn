@@ -620,9 +620,7 @@ class DashboardFragment : Fragment() {
                 skeleton?.markLoaded(R.id.vehicleRangeSkeleton)
                 renderVehicleState()
                 if (dashboardResumed) {
-                    val isAccOn = (dashboardState.vehicle as? DashboardUiState.VehicleState.Ready)?.snapshot?.isAccOn == true
-                    val refreshMs = if (isAccOn) STATUS_REFRESH_ACTIVE_MS else STATUS_REFRESH_IDLE_MS
-                    mainHandler.postDelayed(statusRefreshRunnable, refreshMs)
+                    mainHandler.postDelayed(statusRefreshRunnable, STATUS_REFRESH_MS)
                 }
             }
         }
@@ -735,29 +733,10 @@ class DashboardFragment : Fragment() {
                 heroSubtitle.text = when {
                     snapshot.charging?.fault == true ->
                         getString(R.string.dashboard_modern_charge_fault)
-                    snapshot.charging?.charging == true -> {
-                        val kw = snapshot.charging.powerKw
-                        if (kw != null && kw > 0.0) {
-                            "In Ricarica (${String.format(java.util.Locale.US, "%.1f", kw)} kW)"
-                        } else {
-                            getString(R.string.dashboard_modern_charging)
-                        }
-                    }
                     snapshot.charging?.full == true ->
                         getString(R.string.dashboard_modern_charge_complete)
-                    isPowerOn && (gear == "D" || gear == "M" || gear == "S" || (speed != null && speed >= 3.0)) -> {
-                        val spdText = if (speed != null && speed >= 1.0) " · ${Math.round(speed)} km/h" else ""
-                        val recText = if (isRecording) " (REC)" else ""
-                        "In Guida (${gear ?: "D"})$spdText$recText"
-                    }
-                    isPowerOn && gear == "R" -> {
-                        val recText = if (isRecording) " (REC)" else ""
-                        "In Retromarcia (R)$recText"
-                    }
-                    isPowerOn && gear == "N" -> "In Folle (N)"
-                    isPowerOn && (gear == "P" || gear == null) -> "Pronta / Parcheggiata (P)"
-                    !isPowerOn && isSentry -> "Sentinella Attiva"
-                    snapshot.charging?.plugged == true -> "Collegata alla colonnina"
+                    snapshot.charging?.charging == true ->
+                        getString(R.string.dashboard_modern_charging)
                     else -> getString(R.string.dashboard_modern_vehicle_connected)
                 }
                 vehicleSocValue.text = snapshot.socPercent?.let {
@@ -1520,7 +1499,14 @@ class DashboardFragment : Fragment() {
         val resetButton = dialogView.findViewById<
             com.google.android.material.button.MaterialButton>(R.id.vehicleResetAuto)
 
-        // Nothing is known to reset until the fetch lands.
+        // Nothing is known to reset until the fetch lands, and only a manually
+        // set capacity is resettable. Held so re-enabling after a failed save
+        // cannot offer a reset that was never available.
+        var resetEligible = false
+        // The summary fetch answers on a background thread and posts back. If it
+        // lands after the user has already hit Save, it must not re-enable the
+        // controls mid-write.
+        var saveInFlight = false
         resetButton.isEnabled = false
 
         capInput.doAfterTextChanged { capLayout.error = null }
@@ -1541,10 +1527,12 @@ class DashboardFragment : Fragment() {
         data class ModelEntry(val id: String, val title: String, val nominalKwh: Double)
         val modelEntries = mutableListOf<ModelEntry>()
         var selectedModelId: String? = null
+        var modelSelectionChanged = false
         modelDropdown.setOnItemClickListener { _, _, position, _ ->
             if (position in modelEntries.indices) {
                 val entry = modelEntries[position]
                 selectedModelId = entry.id
+                modelSelectionChanged = true
                 // Auto-fill the capacity field with the manifest's
                 // canonical nominalKwh for this model. The user can still
                 // edit it before saving — this is just a sensible starting
@@ -1568,6 +1556,7 @@ class DashboardFragment : Fragment() {
             var nominalKwh = 0.0
             var nominalSource = "unset"
             var displaySoh = -1.0
+            var displaySource = "unavailable"
             var estimatedKwh = 0.0
             var statusModelId: String? = null
             var calSoh = 0.0
@@ -1592,6 +1581,7 @@ class DashboardFragment : Fragment() {
                     nominalKwh = json.optDouble("nominalCapacityKwh", 0.0)
                     nominalSource = json.optString("nominalSource", "unset")
                     displaySoh = json.optDouble("displaySoh", -1.0)
+                    displaySource = json.optString("displaySource", "unavailable")
                     val est = json.optDouble("estimatedCapacityKwh", -1.0)
                     if (est > 0) estimatedKwh = est
                     if (!json.isNull("modelId")) {
@@ -1663,6 +1653,7 @@ class DashboardFragment : Fragment() {
             val finalNominalKwh = nominalKwh
             val finalNominalSource = nominalSource
             val finalDisplaySoh = displaySoh
+            val finalDisplaySource = displaySource
             val finalEstimatedKwh = estimatedKwh
             val finalStatusModelId = statusModelId ?: initialModelId
             val finalCalSoh = calSoh
@@ -1708,7 +1699,8 @@ class DashboardFragment : Fragment() {
                         }
                     )
                 )
-                resetButton.isEnabled = manual
+                resetEligible = manual
+                resetButton.isEnabled = manual && !saveInFlight
 
                 summaryCapacity.text = if (finalNominalKwh > 0) {
                     String.format("%.1f kWh", finalNominalKwh)
@@ -1716,10 +1708,15 @@ class DashboardFragment : Fragment() {
                     getString(R.string.soh_dialog_capacity_not_detected)
                 }
 
-                summarySoh.text = if (finalDisplaySoh > 0) {
-                    String.format("%.1f%%", finalDisplaySoh)
-                } else {
-                    getString(R.string.vehicle_dialog_soh_unavailable)
+                summarySoh.text = when {
+                    finalDisplaySoh > 0 && finalDisplaySource == "oem" ->
+                        String.format("%.1f%% (vehicle)", finalDisplaySoh)
+                    finalDisplaySoh > 0 && finalDisplaySource == "live" ->
+                        String.format("%.1f%% (live)", finalDisplaySoh)
+                    finalDisplaySoh > 0 && finalDisplaySource == "calibration" ->
+                        String.format("%.1f%% (from last charge)", finalDisplaySoh)
+                    finalDisplaySoh > 0 -> String.format("%.1f%%", finalDisplaySoh)
+                    else -> getString(R.string.vehicle_dialog_soh_unavailable)
                         .replaceFirstChar { it.uppercase() }
                 }
 
@@ -1773,18 +1770,45 @@ class DashboardFragment : Fragment() {
             dialog.dismiss()
         }
         dialog.setOnShowListener {
-            dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
+            val saveButton =
+                dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE)
+            val cancelButton =
+                dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE)
+            fun setSaving(saving: Boolean) {
+                saveInFlight = saving
+                saveButton.isEnabled = !saving
+                resetButton.isEnabled = !saving && resetEligible
+                cancelButton.isEnabled = !saving
+                dialog.setCancelable(!saving)
+                dialog.setCanceledOnTouchOutside(!saving)
+            }
+            saveButton.setOnClickListener {
                 val raw = capInput.text?.toString()?.trim().orEmpty()
                 val kwh = raw.toDoubleOrNull()
-                if (kwh == null || kwh < 15.0 || kwh > 120.0) {
+                if (kwh == null || !kwh.isFinite() || kwh < 5.0 || kwh > 120.0) {
                     capLayout.error = getString(R.string.vehicle_dialog_invalid_capacity)
                     return@setOnClickListener
                 }
                 completionDeferred = true
-                postNominalAndModel(kwh, selectedModelId) { finishOnce() }
-                dialog.dismiss()
+                setSaving(true)
+                postNominalAndModel(
+                    kwh,
+                    selectedModelId.takeIf { modelSelectionChanged },
+                ) { error ->
+                    if (error == null) {
+                        finishOnce()
+                        dialog.dismiss()
+                    } else {
+                        completionDeferred = false
+                        setSaving(false)
+                        appToast?.show(
+                            getString(R.string.toast_failed_with_message, error),
+                            AppToast.Kind.ERROR,
+                        )
+                    }
+                }
             }
-            dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).setOnClickListener {
+            cancelButton.setOnClickListener {
                 dialog.dismiss()
             }
         }
@@ -1840,37 +1864,63 @@ class DashboardFragment : Fragment() {
     private fun postNominalAndModel(
         kwh: Double,
         modelId: String?,
-        onComplete: (() -> Unit)? = null,
+        onComplete: ((String?) -> Unit)? = null,
     ) {
         val executor = metricsExecutor ?: Executors.newSingleThreadExecutor()
             .also { metricsExecutor = it }
         executor.execute {
-            try {
-                val conn = com.overdrive.app.util.DaemonHttpClient.open(
-                    "/api/performance/soh/nominal", "POST", 3000, 5000)
-                conn.doOutput = true
-                conn.setRequestProperty("Content-Type", "application/json")
-                conn.outputStream.use { it.write("{\"nominalKwh\":$kwh}".toByteArray()) }
-                conn.responseCode
-                conn.disconnect()
-            } catch (_: Throwable) {}
-
-            if (!modelId.isNullOrEmpty()) {
-                try {
-                    val conn = com.overdrive.app.util.DaemonHttpClient.open(
-                        "/api/models/selected", "POST", 3000, 5000)
-                    conn.doOutput = true
-                    conn.setRequestProperty("Content-Type", "application/json")
-                    conn.outputStream.use { it.write("{\"modelId\":\"$modelId\"}".toByteArray()) }
-                    conn.responseCode
-                    conn.disconnect()
-                } catch (_: Throwable) {}
+            val error = if (!modelId.isNullOrEmpty()) {
+                postJsonResult(
+                    "/api/models/selected",
+                    org.json.JSONObject()
+                        .put("modelId", modelId)
+                        .put("nominalKwh", kwh),
+                    "ok",
+                )
+            } else {
+                postJsonResult(
+                    "/api/performance/soh/nominal",
+                    org.json.JSONObject().put("nominalKwh", kwh),
+                    "success",
+                )
             }
 
             mainHandler.post {
-                refreshVehicleTile()
-                onComplete?.invoke()
+                if (error == null) refreshVehicleTile()
+                onComplete?.invoke(error)
             }
+        }
+    }
+
+    private fun postJsonResult(
+        path: String,
+        body: org.json.JSONObject,
+        successKey: String,
+    ): String? {
+        var conn: java.net.HttpURLConnection? = null
+        return try {
+            conn = com.overdrive.app.util.DaemonHttpClient.open(
+                path, "POST", 3000, 5000)
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.outputStream.use {
+                it.write(body.toString().toByteArray(Charsets.UTF_8))
+            }
+            val status = conn.responseCode
+            val stream = if (status in 200..299) conn.inputStream else conn.errorStream
+            val responseBody = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val response = responseBody.takeIf { it.isNotBlank() }
+                ?.let { org.json.JSONObject(it) }
+            if (status in 200..299 && response?.optBoolean(successKey, false) == true) {
+                null
+            } else {
+                response?.optString("error", "")?.takeIf { it.isNotBlank() }
+                    ?: "HTTP $status"
+            }
+        } catch (t: Throwable) {
+            t.message?.takeIf { it.isNotBlank() } ?: "Network error"
+        } finally {
+            conn?.disconnect()
         }
     }
 
@@ -1890,6 +1940,7 @@ class DashboardFragment : Fragment() {
             "seagull" -> getString(R.string.vehicle_model_seagull)
             "sealion6" -> "BYD Sealion 6"
             "sealion7" -> "BYD Sealion 7"
+            "shark" -> "BYD Shark"
             "sealu", "seal-u" -> "BYD Seal U"
             else -> modelId.replaceFirstChar { it.uppercase() }
         }
@@ -1900,8 +1951,7 @@ class DashboardFragment : Fragment() {
         private const val STATE_AI_INSIGHT_EXPANDED =
             "dashboard.ai_insight_expanded"
         private const val STATE_SELECTED_TUNNEL = "dashboard.selected_tunnel"
-        private const val STATUS_REFRESH_ACTIVE_MS = 2_000L
-        private const val STATUS_REFRESH_IDLE_MS = 15_000L
+        private const val STATUS_REFRESH_MS = 15_000L
         private const val RECORDING_STATS_RETRY_MS = 1_500L
         private const val MAX_RECORDING_STATS_RETRIES = 3
         private const val STATUS_CONNECT_TIMEOUT_MS = 2_000

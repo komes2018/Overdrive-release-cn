@@ -6,7 +6,7 @@ import com.overdrive.app.R
 
 /**
  * Vehicle-profile chapter: introduces the battery capacity + model setting, then opens
- * the REAL showVehicleCapacityDialog (model preset vs custom kWh, visible 15–120 toast
+ * the REAL showVehicleCapacityDialog (model preset vs custom kWh, visible 5–120 toast
  * validation). Skippable — the profile is not safety-critical and is reachable later via
  * the Dashboard Vehicle tile.
  */

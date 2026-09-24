@@ -1,18 +1,20 @@
 package com.overdrive.app.byd;
 
 /**
- * Resolves the front-passenger belt getter's ambiguous empty-seat value.
+ * Resolves the front-passenger belt getter's ambiguous value.
  *
- * <p>On affected BYD firmware, getter value {@code 1} means both "buckled" and the idle value of
- * an empty seat. A getter value {@code 1} is therefore trusted only inside a closed-door session
- * that has already produced a getter value {@code 0}. Opening the passenger door ends that
- * session. Typed SDK callbacks remain authoritative and temporarily override a lagging getter.
+ * <p>On affected BYD firmware, getter value {@code 1} is ambiguous: it can be a real buckle or
+ * the idle value of an empty seat. It is trusted only inside a door-bounded session that has
+ * already produced a getter value {@code 0}. Independent occupancy refines that rule when
+ * available: a confirmed empty seat blocks/revokes trust, while an unavailable occupancy source
+ * fails open so trims without that sensor can still detect a real {@code 0 -> 1} buckle.
+ * Typed SDK callbacks remain authoritative and temporarily override a lagging getter.
  */
 final class PassengerSeatbeltTracker {
     static final long CALLBACK_OVERRIDE_MS = 2_000L;
 
     private enum Phase {
-        AWAITING_CLOSED_DOOR_UNBUCKLED,
+        AWAITING_CONFIRMED_UNBUCKLED,
         DOOR_OPEN,
         TRACKING
     }
@@ -32,16 +34,17 @@ final class PassengerSeatbeltTracker {
         }
     }
 
-    private Phase phase = Phase.AWAITING_CLOSED_DOOR_UNBUCKLED;
+    private Phase phase = Phase.AWAITING_CONFIRMED_UNBUCKLED;
     private int pendingCallbackState = BydVehicleData.UNAVAILABLE;
     private long pendingCallbackAtMs;
     private int lastCallbackState = BydVehicleData.UNAVAILABLE;
 
-    synchronized Reading resolveGetter(int getterState) {
-        return resolveGetter(getterState, monotonicMs());
+    synchronized Reading resolveGetter(int getterState, int independentOccupancy) {
+        return resolveGetter(getterState, independentOccupancy, monotonicMs());
     }
 
-    synchronized Reading resolveGetter(int getterState, long nowMs) {
+    synchronized Reading resolveGetter(
+            int getterState, int independentOccupancy, long nowMs) {
         if (isBeltState(pendingCallbackState)) {
             int callbackState = pendingCallbackState;
             if (getterState == callbackState) {
@@ -57,10 +60,20 @@ final class PassengerSeatbeltTracker {
             clearPendingCallback();
         }
 
+        if (independentOccupancy == 0 && phase != Phase.DOOR_OPEN) {
+            phase = Phase.AWAITING_CONFIRMED_UNBUCKLED;
+        }
+
         if (getterState == 0) {
-            // A 0 while the door is open is still a real unbuckle value to publish, but it cannot
-            // establish the next passenger session: the empty-seat getter may rebound to 1.
-            if (phase != Phase.DOOR_OPEN) {
+            // A 0 while the door is open may still be published, but it cannot establish the next
+            // passenger session. Once the door is closed, arm unless a working occupancy sensor
+            // explicitly says the seat is empty. UNAVAILABLE must fail open: field trims exist
+            // where getPassengerStatus never supplies a valid value, and otherwise a real 0 -> 1
+            // buckle can never be detected.
+            boolean occupancyAllowsSession =
+                    independentOccupancy == 1
+                            || independentOccupancy == BydVehicleData.UNAVAILABLE;
+            if (phase != Phase.DOOR_OPEN && occupancyAllowsSession) {
                 phase = Phase.TRACKING;
             }
             return new Reading(0, 0, phase == Phase.TRACKING, false);
@@ -118,13 +131,13 @@ final class PassengerSeatbeltTracker {
         }
 
         if (phase != Phase.DOOR_OPEN) return false;
-        phase = Phase.AWAITING_CLOSED_DOOR_UNBUCKLED;
+        phase = Phase.AWAITING_CONFIRMED_UNBUCKLED;
         clearPendingCallback();
         return true;
     }
 
     synchronized void reset() {
-        phase = Phase.AWAITING_CLOSED_DOOR_UNBUCKLED;
+        phase = Phase.AWAITING_CONFIRMED_UNBUCKLED;
         clearPendingCallback();
         lastCallbackState = BydVehicleData.UNAVAILABLE;
     }

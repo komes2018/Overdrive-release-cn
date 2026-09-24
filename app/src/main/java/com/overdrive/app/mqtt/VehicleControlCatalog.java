@@ -231,8 +231,13 @@ public final class VehicleControlCatalog {
                     if (state != null) {
                         Boolean on = null;
                         try { on = state.isOn(snap); } catch (Exception ignored) {}
-                        // Unknown current state (never reported) → default to turning ON,
-                        // the more useful "make it happen" outcome for a single press.
+                        if (on == null
+                                && ("drl".equals(key) || "hazard".equals(key))) {
+                            return null;
+                        }
+                        // Other unknown state readers retain the historical first-press ON
+                        // behavior; light toggles above fail closed because stale telemetry
+                        // can otherwise invert a safety-visible command.
                         boolean next = (on == null) ? true : !on;
                         payload = next ? "on" : "off";
                     } else if (options != null && !options.isEmpty()) {
@@ -957,8 +962,9 @@ public final class VehicleControlCatalog {
             }
             return ControlAction.of(new VehicleCommandRouter.WindowMoveCommand(0, 3, null));
         }));
-        // OPENWINDOW is ventilation only, never a full-drop. Keep it separate from the cover
-        // so Home Assistant cannot mark a successful 10% vent as a full-open command.
+        // Vent is never a full-drop: it uses local 15% positioning while awake
+        // and OPENWINDOW remotely. Keep it separate from the cover so Home
+        // Assistant cannot mark a successful vent as a full-open command.
         register(new ControlEntity("windows_vent", "button", "车窗通风", "mdi:car-door",
                 null, true, null, 0, 0, 0, null, null, null, null, null,
                 (sub, payload, snap) -> "PRESS".equalsIgnoreCase(payload)
@@ -1043,7 +1049,9 @@ public final class VehicleControlCatalog {
         // ── Daytime running lights — switch (real state, toggle-capable) ─
         register(sw("drl", "日间行车灯", "mdi:car-light-dimmed", null, "light_drl", "1", "0",
                 (sub, payload, snap) -> ControlAction.of(new VehicleCommandRouter.LightsCommand(truthy(payload))),
-                snap -> snap == null ? null : snap.dayTimeLight));
+                snap -> snap == null
+                        || !snap.isLightKnown(BydVehicleData.LIGHT_KNOWN_DRL)
+                        ? null : snap.dayTimeLight));
 
         // ── OEM exterior-light selector — four-state Instrument HAL control ──
         // This is not the DRL switch or beam-height adjustment. It mirrors CarSetting's
@@ -1078,7 +1086,10 @@ public final class VehicleControlCatalog {
         // GET /api/debug/light/fire?candidate=A before relying on it.
         register(sw("hazard", "双闪", "mdi:car-light-alert", null, "light_hazard", "1", "0",
                 (sub, payload, snap) -> ControlAction.of(new VehicleCommandRouter.HazardCommand(truthy(payload))),
-                snap -> snap == null ? null : snap.hazard));
+                snap -> snap == null
+                        || !snap.isLightKnown(
+                                BydVehicleData.LIGHT_KNOWN_TURN_HAZARD)
+                        ? null : snap.hazard));
 
         // ── Ambient lights colour — number (real state, 1-based palette index) ──
         register(number("ambient_colour", "氛围灯颜色", "mdi:format-color-fill", "config",
@@ -1117,7 +1128,10 @@ public final class VehicleControlCatalog {
         register(sw("adas_slw", "限速提醒", "mdi:speedometer-slow", "config", "speed_limit_warning",
                 "1", "0", (sub, payload, snap) ->
                         ControlAction.of(new VehicleCommandRouter.AdasSpeedLimitWarningCommand(truthy(payload))),
-                snap -> snap == null ? null : snap.speedLimitWarning));
+                snap -> snap == null
+                        || (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                            && !snap.speedLimitWarningKnown)
+                        ? null : snap.speedLimitWarning));
 
         // ── Electronic Stability Program (ESP/ESC) — switch ──────────────
         // SAFETY control. State published to esp_state (1=on/0=off); the ESP feature
@@ -1156,7 +1170,10 @@ public final class VehicleControlCatalog {
                 "1", "0", (sub, payload, snap) ->
                         ControlAction.of(new VehicleCommandRouter.SettingChildPresenceDetectionCommand(truthy(payload) ? 1 : 2)),
                 // Raw childPresenceDetection: 1=on, 2=off, 3=delay. "on" iff == 1.
-                snap -> snap == null ? null : (snap.childPresenceDetection == 1)));
+                snap -> snap == null
+                        || snap.childPresenceDetection < 1
+                        || snap.childPresenceDetection > 3
+                        ? null : (snap.childPresenceDetection == 1)));
 
         // ── Expanded ADAS matrix ─────────────────────────────────────────────
         // All route to adasDevice via BydDataCollector (feature-id or reflection). No

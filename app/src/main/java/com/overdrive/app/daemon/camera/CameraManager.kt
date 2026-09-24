@@ -1,6 +1,7 @@
 package com.overdrive.app.daemon.camera
 
 import android.os.Handler
+import com.overdrive.app.daemon.CameraDaemon
 import com.overdrive.app.surveillance.GpuSurveillancePipeline
 import com.overdrive.app.logging.DaemonLogger
 import java.io.File
@@ -92,7 +93,8 @@ class CameraManager(
         }
         
         try {
-            gpuPipeline?.start()
+            val cameraStartEpoch = CameraDaemon.captureCameraStartEpoch()
+            gpuPipeline?.start(false, cameraStartEpoch)
             pipelineRunning = true
             logger.info("GPU mosaic recording started")
         } catch (e: Exception) {

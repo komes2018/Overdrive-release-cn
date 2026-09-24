@@ -295,8 +295,10 @@ public class GpuStreamScaler {
      *  per-quadrant offsets so streaming a single direction picks the slice
      *  that the user mapped to that role. */
 
+    private final boolean isTexture2D;
+
     public GpuStreamScaler(int outputWidth, int outputHeight) {
-        this(outputWidth, outputHeight, null);
+        this(outputWidth, outputHeight, null, false);
     }
 
     /**
@@ -305,10 +307,18 @@ public class GpuStreamScaler {
      */
     public GpuStreamScaler(int outputWidth, int outputHeight,
                            float[] quadrantStripOffsetX) {
+        this(outputWidth, outputHeight, quadrantStripOffsetX, false);
+    }
+
+    public GpuStreamScaler(int outputWidth, int outputHeight,
+                           float[] quadrantStripOffsetX,
+                           boolean isTexture2D) {
         this.outputWidth = outputWidth;
         this.outputHeight = outputHeight;
+        this.isTexture2D = isTexture2D;
         this.quadrantStripOffsetX = normalizeOffsets(quadrantStripOffsetX);
-        this.fragmentShader = buildFragmentShader(this.quadrantStripOffsetX);
+        this.fragmentShader = buildFragmentShader(
+            this.quadrantStripOffsetX, isTexture2D);
     }
     
     public int getWidth() { return outputWidth; }
@@ -351,6 +361,16 @@ public class GpuStreamScaler {
 
         // Create EGL surface from the target surface (encoder input OR SC layer)
         encoderSurface = eglCore.createWindowSurface(encoderInputSurface);
+
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            // DI5's native CPU upload shares this context with the recorder.
+            // Bind our real target explicitly, then drain any error left by the
+            // preceding frame-state restore. Otherwise GlUtil's first error
+            // check can blame a stale GL_INVALID_OPERATION (0x502) on
+            // glCreateShader and tear down both blind-spot and live-view.
+            eglCore.makeCurrent(encoderSurface);
+            clearPendingGlErrorsForDiLink5Init();
+        }
 
         // Compile shaders (profile-baked)
         programId = GlUtil.createProgram(VERTEX_SHADER, fragmentShader);
@@ -433,6 +453,19 @@ public class GpuStreamScaler {
         resolveCoef();
 
         logger.info("GpuStreamScaler initialized: " + outputWidth + "×" + outputHeight);
+    }
+
+    private void clearPendingGlErrorsForDiLink5Init() {
+        int cleared = 0;
+        int error;
+        while (cleared < 8
+                && (error = GLES20.glGetError()) != GLES20.GL_NO_ERROR) {
+            cleared++;
+            logger.warn(String.format(
+                    Locale.US,
+                    "DI5 scaler init cleared stale GL error 0x%x before shader creation",
+                    error));
+        }
     }
 
     /**
@@ -521,7 +554,10 @@ public class GpuStreamScaler {
         
         // Bind texture
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+        GLES20.glBindTexture(
+            isTexture2D ? GLES20.GL_TEXTURE_2D
+                        : GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
+            cameraTextureId);
         GLES20.glUniform1i(uCameraTexLocation, 0);
         
         // Quasi-static uniforms — only re-upload when a setter flagged
@@ -602,7 +638,7 @@ public class GpuStreamScaler {
                 }
             }
             if (uApplyManualYFlipLocation >= 0) {
-                // SurfaceTexture layouts 1/3 use the matrix's Y-flip. Layout 0 / DiLink 5 needs manual Y-flip.
+                // SurfaceTexture layouts 1/3 use the matrix's Y-flip.
                 GLES20.glUniform1f(uApplyManualYFlipLocation,
                     (cameraLayout == 1 || cameraLayout == 3) ? 0.0f : 1.0f);
             }
@@ -974,6 +1010,10 @@ public class GpuStreamScaler {
             bsContentOff[0] = offX; bsContentOff[1] = offY;
             bsContentActive = true;
         }
+        // The five content/card uniforms are uploaded inside drawFrame's uniformsDirty
+        // block, so without this the new matrix never reaches the shader and the card
+        // renders untransformed until some unrelated setter happens to dirty it.
+        this.uniformsDirty.set(true);
         logger.info(String.format(Locale.US,
                 "BS content transform set: rot=%.1f crop=(%.3f,%.3f,%.3f,%.3f) "
                         + "flip=(%s,%s) zoom=%.3f translate=(%.4f,%.4f) aspect=%.4f",
@@ -1000,6 +1040,9 @@ public class GpuStreamScaler {
             bsContentOff[0] = 0f; bsContentOff[1] = 0f;
             bsContentActive = false;
         }
+        // Same reason as setBsContentTransform: without the dirty flag a stale ACTIVE
+        // uniform keeps the shader applying the transform we just cleared.
+        this.uniformsDirty.set(true);
     }
 
     /** True while a free-angle content transform is in effect.
@@ -1480,7 +1523,7 @@ public class GpuStreamScaler {
     }
 
     public void setRedMaskEnabled(boolean enabled) {
-        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {
             enabled = false;
         }
         if (enabled == this.redMaskEnabled) return;   // idempotent
@@ -1568,6 +1611,12 @@ public class GpuStreamScaler {
      * uViewMode 0 = mosaic; 5 = raw.
      */
     private static String buildFragmentShader(float[] offsets) {
+        return buildFragmentShader(offsets, false);
+    }
+
+    private static String buildFragmentShader(
+            float[] offsets,
+            boolean isTexture2D) {
         // uApaMode > 2.5 = DiLink 4 / 2x2-native HAL.
         //   uViewMode == 0 → rearrange the 2x2 into canonical Front=TL,
         //                    Right=TR, Rear=BL, Left=BR with per-role flips,
@@ -1576,12 +1625,28 @@ public class GpuStreamScaler {
         //                    applied within the local 0.5×0.5 region.
         //   uViewMode == 5 → raw passthrough (debug).
         // The legacy 4-strip math stays for uApaMode <= 2.5 paths.
+        String fullFrameSampling =
+            isTexture2D
+                ? "        if (uViewMode >= 1 && uViewMode <= 4) {\n"
+                    + "            vec2 corner = vec2(0.0, 0.0);\n"
+                    + "            if (uViewMode == 2) corner = vec2(0.5, 0.0);\n"
+                    + "            else if (uViewMode == 3) corner = vec2(0.0, 0.5);\n"
+                    + "            else if (uViewMode == 4) corner = vec2(0.5, 0.5);\n"
+                    + "            samplePos = corner + vTexCoord * 0.5;\n"
+                    + "        } else {\n"
+                    + "            samplePos = vTexCoord;\n"
+                    + "        }\n"
+                : "        samplePos = vTexCoord;\n";
+        String cameraSampler = isTexture2D
+            ? "uniform sampler2D uCameraTex;\n"
+            : "uniform samplerExternalOES uCameraTex;\n";
         return String.format(Locale.US,
-            "#extension GL_OES_EGL_image_external : require\n" +
+            "#extension GL_OES_EGL_image_external : "
+                + (isTexture2D ? "enable\n" : "require\n") +
             // highp: the view 7/8 sampler needs the extra precision (mediump, the
             // Adreno 610 fragment default, shimmers the seam). Other paths insensitive.
             "precision highp float;\n" +
-            "uniform samplerExternalOES uCameraTex;\n" +
+            cameraSampler +
             "uniform samplerExternalOES uOemTex;\n" +
             "uniform mat4 uOemTexMatrix;\n" +
             "uniform int uOemActive;\n" +
@@ -1925,7 +1990,7 @@ public class GpuStreamScaler {
             // ground-truth-correct single-view modes (mode 2 = RIGHT reads
             // uProducerForRight, mode 4 = LEFT reads uProducerForLeft, mode 3 = REAR
             // reads uProducerForRear): corner + cardUv*0.5, with the SAME per-camera
-            // flip flags those modes apply, so the feed is never mirrored/upside-down.
+            // flip flags those modes apply. Rear-only then mirrors X for the card.
             // The stitch tuning sliders only shape the merged 'both' view; single-cam
             // is a plain camera passthrough by design. Coverage is a constant 1.0 (the
             // camera always fills the card body); the rounded-corner transparency still
@@ -1939,6 +2004,7 @@ public class GpuStreamScaler {
             "                vec2 sl = bsRectifyTile(cardUv) * 0.5;\n" +
             "                if (uFlipForRear.x > 0.5) sl.x = 0.5 - sl.x;\n" +
             "                if (uFlipForRear.y > 0.5) sl.y = 0.5 - sl.y;\n" +
+            "                sl.x = 0.5 - sl.x;\n" +
             "                bsCol = vec4(texture2D(uCameraTex, uProducerForRear + sl).rgb, 1.0);\n" +
             "            } else {\n" +
             "                bsCol = odBlend(uProducerForRear, uFlipForRear,\n" +
@@ -1974,7 +2040,7 @@ public class GpuStreamScaler {
             "            }\n" +
             "        }\n" +
             "    } else if (uApaMode > 0.5) {\n" +
-            "        samplePos = vTexCoord;\n" +
+            fullFrameSampling +
             "    } else if (uViewMode == 0) {\n" +
             "        vec2 gridPos = step(0.5, vTexCoord);\n" +
             "        float stripOffsetX;\n" +
@@ -2034,13 +2100,14 @@ public class GpuStreamScaler {
             // like the ground-truth-correct legacy single-view modes (mode 2 = RIGHT
             // reads rightOffset, mode 4 = LEFT reads leftOffset, mode 3 = REAR reads
             // rearOffset): startX + cardUv.x*0.25 across the 0.25-wide strip, full
-            // height, no flip (those modes apply none). The stitch tuning sliders only
+            // height. Rear-only mirrors X for the card. The stitch tuning sliders only
             // shape the merged 'both' view. Mode 0 keeps the merged rear+side blend.
             "            if (uBsMergeMode == 1) {\n" +
             "                vec2 rc = bsRectifyTile(cardUv);\n" +   // fisheye dewarp (identity at 0)
             "                bsCol = vec4(texture2D(uCameraTex, vec2(sideX + rc.x * 0.25, rc.y)).rgb, 1.0);\n" +
             "            } else if (uBsMergeMode == 2) {\n" +
             "                vec2 rc = bsRectifyTile(cardUv);\n" +
+            "                rc.x = 1.0 - rc.x;\n" +
             "                bsCol = vec4(texture2D(uCameraTex, vec2(rearOffset + rc.x * 0.25, rc.y)).rgb, 1.0);\n" +
             "            } else {\n" +
             "                bsCol = odBlend(vec2(rearOffset, 0.0), vec2(0.0),\n" +

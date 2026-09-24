@@ -208,6 +208,16 @@
                     tools:text="125 MB" />
 
                 <ImageButton
+                    android:id="@+id/btnMore"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/cd_recording_more_actions"
+                    android:padding="12dp"
+                    android:src="@drawable/ic_more_vert"
+                    app:tint="?attr/colorOnSurfaceVariant" />
+
+                <ImageButton
                     android:id="@+id/btnShare"
                     android:layout_width="48dp"
                     android:layout_height="48dp"

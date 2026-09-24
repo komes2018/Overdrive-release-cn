@@ -33,6 +33,21 @@ const TRIPS = {
     pendingStorageLimit: null,
     electricityRate: 0,
     currency: '$',
+    _hydrated: false,
+    _writeQueue: Promise.resolve(),
+    _cdrReady: false,
+    _cdrWritePending: false,
+    _cdrCleanupPending: false,
+    _cdrWritesPending: 0,
+    _cdrWriteVersion: 0,
+    _cdrSaveTimer: null,
+    _cdrDirty: {},
+    cdrCleanupEnabled: false,
+    cdrConfig: {
+        reservedSpaceMb: 2000,
+        protectedHours: 24,
+        minFilesKeep: 10
+    },
     // Pack capacity from SohEstimator (user override or auto-detected).
     // Used as the fallback nominal when a trip's kwhStart wasn't recorded.
     // 0 means the daemon hasn't surfaced one yet; falls through to the
@@ -172,6 +187,39 @@ const TRIPS = {
 
     // ==================== INIT ====================
 
+    _enqueueWrite(task) {
+        const run = () => task();
+        const next = this._writeQueue.then(run, run);
+        this._writeQueue = next.catch(() => {});
+        return next;
+    },
+
+    async _postJson(url, body) {
+        return this._enqueueWrite(async () => {
+            try {
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data || data.success !== true) {
+                    throw new Error(data && data.error ? data.error : 'Request rejected');
+                }
+                return data;
+            } catch (e) {
+                console.warn('[Trips] Save failed:', e);
+                return null;
+            }
+        });
+    },
+
+    _toastSaveFailed() {
+        if (BYD.utils && BYD.utils.toast) {
+            BYD.utils.toast(BYD.i18n.t('common.error'), 'error');
+        }
+    },
+
     async init() {
         console.log('[Trips] Initializing v2...');
         // Resolve canvas palette from CSS variables before first paint
@@ -246,10 +294,13 @@ const TRIPS = {
             this._finishSummaryRequest(bootstrapSummaryRequest);
         }
 
-        // CDR info is a separate /api/storage/external endpoint, not part
-        // of the trips bootstrap. Small enough that one extra RTT after
-        // first paint doesn't matter.
-        await this.loadCdrInfo();
+        this._hydrated = true;
+        if (BYD.utils && BYD.utils.unlockSettingsHydration) {
+            BYD.utils.unlockSettingsHydration();
+        }
+        // CDR status can recursively scan a slow or unhealthy SD card. Keep
+        // its controls gated by _cdrReady instead of holding the whole page.
+        this.loadCdrInfo();
         this._startStorageRefresh();
         // Repaint when the unit preference changes elsewhere (core.js's /status
         // poll, or another page). Idempotent guard: init() can run more than once.
@@ -261,6 +312,13 @@ const TRIPS = {
                     event && event.detail ? event.detail.mode : null);
             });
         }
+        try {
+            const deepLinkId =
+                new URLSearchParams(window.location.search).get('id');
+            if (deepLinkId && /^\d+$/.test(deepLinkId)) {
+                await this.showDetail(deepLinkId);
+            }
+        } catch (e) {}
         console.log('[Trips] Initialized (bootstrap=' + usedBootstrap + ')');
     },
 
@@ -425,16 +483,25 @@ const TRIPS = {
     },
 
     async toggleEnabled() {
-        const checked = document.getElementById('tripsEnabled').checked;
+        const el = document.getElementById('tripsEnabled');
+        if (!el || !this._hydrated) return false;
+        const checked = el.checked;
+        const previous = !!this.tripsEnabled;
         this.tripsEnabled = checked;
         this._applyEnabledHint();
+        el.disabled = true;
         try {
-            await fetch('/api/trips/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled: checked })
-            });
-        } catch (e) { console.warn('[Trips] Toggle failed:', e); }
+            if (await this._postJson('/api/trips/config', { enabled: checked })) {
+                return true;
+            }
+            this.tripsEnabled = previous;
+            el.checked = previous;
+            this._applyEnabledHint();
+            this._toastSaveFailed();
+            return false;
+        } finally {
+            el.disabled = false;
+        }
     },
 
     /** Show the "turn it on" affordance inside the Trips-tab empty state only
@@ -450,15 +517,7 @@ const TRIPS = {
     async enableFromEmptyState() {
         const el = document.getElementById('tripsEnabled');
         if (el) el.checked = true;
-        this.tripsEnabled = true;
-        this._applyEnabledHint();
-        try {
-            await fetch('/api/trips/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled: true })
-            });
-        } catch (e) { console.warn('[Trips] Enable failed:', e); }
+        if (!await this.toggleEnabled()) return;
         try {
             if (this.rangeFromMs != null) {
                 this.loadTripsBetween(
@@ -496,11 +555,7 @@ const TRIPS = {
             fuelUnit: this.fuelUnit
         };
         try {
-            await fetch('/api/trips/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
+            if (!await this._postJson('/api/trips/config', body)) return false;
             this.updateCurrencyIcons();
             this.updatePeriodSummary();
             this.updateCostHero();
@@ -509,7 +564,11 @@ const TRIPS = {
             if (this.trips && this.trips.length > 0) {
                 this.renderTripList(this.trips);
             }
-        } catch (e) { console.warn('[Trips] Save cost config failed:', e); }
+            return true;
+        } catch (e) {
+            console.warn('[Trips] Save cost config failed:', e);
+            return false;
+        }
     },
 
     /** Toggle visibility of PHEV-only setting rows. Idempotent. */
@@ -622,26 +681,28 @@ const TRIPS = {
     },
 
     async setDistanceUnit(unit) {
-        BYD.units.mode = unit;
+        if (!this._hydrated || (unit !== 'km' && unit !== 'mi')) return;
+        const previous = BYD.units.mode;
+        if (unit === previous) return;
+        const kmBtn = document.getElementById('unitKm');
+        const miBtn = document.getElementById('unitMi');
         this.updateDistanceUnitButtons(unit);
+        if (kmBtn) kmBtn.disabled = true;
+        if (miBtn) miBtn.disabled = true;
         try {
-            await fetch('/api/trips/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ distanceUnit: unit })
-            });
-            // Refresh all displays that show distance/speed values
-            this.updatePeriodSummary();
-            if (this.rangeFromMs == null && this._lastSummaryPayload) {
-                this._applySummaryPayload(this._lastSummaryPayload);
+            if (!await this._postJson('/api/trips/config', { distanceUnit: unit })) {
+                this.updateDistanceUnitButtons(previous);
+                this._toastSaveFailed();
+                return;
             }
-            this.updateCostHero();
-            if (this.trips && this.trips.length > 0) {
-                this.renderTripList(this.trips);
-            }
+            BYD.units.mode = unit;
+            this._repaintForUnitChange(unit);
             // Force a status refresh so the left nav range updates immediately
             if (BYD.core) BYD.core.refreshStatus();
-        } catch (e) { console.warn('[Trips] Set distance unit failed:', e); }
+        } finally {
+            if (kmBtn) kmBtn.disabled = false;
+            if (miBtn) miBtn.disabled = false;
+        }
     },
 
     /**
@@ -824,8 +885,14 @@ const TRIPS = {
 
         // CDR cleanup card is SD-only (BYD's built-in dashcam)
         const cdrCard = document.getElementById('tripCdrCleanupCard');
+        const cdrWasVisible = cdrCard && cdrCard.style.display !== 'none';
         if (cdrCard) cdrCard.style.display = s.storageType === 'SD_CARD' ? 'block' : 'none';
-        if (s.storageType === 'SD_CARD') this.loadCdrInfo();
+        if (s.storageType === 'SD_CARD') {
+            if (!cdrWasVisible) this._cdrReady = false;
+            this._setCdrEnabled(this.cdrCleanupEnabled);
+            this._applyCdrConfig(this.cdrConfig);
+            this.loadCdrInfo();
+        }
 
         this.pendingStorageType = null;
         this.pendingStorageLimit = null;
@@ -972,7 +1039,14 @@ const TRIPS = {
         }
 
         const cdrCard = document.getElementById('tripCdrCleanupCard');
+        const cdrWasVisible = cdrCard && cdrCard.style.display !== 'none';
         if (cdrCard) cdrCard.style.display = type === 'SD_CARD' ? 'block' : 'none';
+        if (type === 'SD_CARD') {
+            if (!cdrWasVisible) this._cdrReady = false;
+            this._setCdrEnabled(this.cdrCleanupEnabled);
+            this._applyCdrConfig(this.cdrConfig);
+            this.loadCdrInfo();
+        }
         // The destination volume changed, so re-evaluate against ITS capacity.
         this.updateBudgetBanner();
         this.showApplyNeeded();
@@ -1072,7 +1146,7 @@ const TRIPS = {
             }
 
             // Save cost config
-            await this.saveCostConfig();
+            if (!await this.saveCostConfig()) throw new Error('Trip cost config save failed');
 
             this.pendingStorageType = null;
             this.pendingStorageLimit = null;
@@ -1088,7 +1162,10 @@ const TRIPS = {
 
             if (rejected && BYD.utils && BYD.utils.toast) {
                 const fields = rejected.map(function (r) { return r.field; }).join(', ');
-                BYD.utils.toast('Some values rejected: ' + fields, 'warn');
+                BYD.utils.toast(
+                    BYD.i18n.t('trip.values_rejected', {fields: fields})
+                        || ('Some values rejected: ' + fields),
+                    'warn');
             }
         } catch (e) {
             console.warn('[Trips] Apply storage failed:', e);
@@ -1100,47 +1177,169 @@ const TRIPS = {
 
     async toggleCdrCleanup() {
         const el = document.getElementById('tripCdrEnabled');
+        if (!el || !this._hydrated || !this._cdrReady
+                || this._cdrWritePending || this._cdrCleanupPending
+                || this._cdrWritesPending > 0 || this._cdrSaveTimer
+                || Object.keys(this._cdrDirty).length > 0) return;
         const enabled = el ? el.checked : false;
+        const previous = this.cdrCleanupEnabled;
+        let saved = false;
+        this._cdrWriteVersion++;
+        this._cdrWritePending = true;
+        this._cdrWritesPending++;
+        this._setCdrEnabled(previous);
         try {
-            await fetch('/api/storage/external/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled: enabled })
-            });
-            const badge = document.getElementById('tripCdrBadge');
-            if (badge) {
-                badge.textContent = enabled ? BYD.i18n.t('status.on') : BYD.i18n.t('status.off');
-                badge.className = 'status-badge ' + (enabled ? 'active' : 'inactive');
+            const data = await this._postJson('/api/storage/external/config', { enabled: enabled });
+            if (data) {
+                saved = true;
+                this._setCdrEnabled(data.cleanupEnabled == null ? enabled : !!data.cleanupEnabled);
+                this._applyCdrConfig(data);
+            } else {
+                this._setCdrEnabled(previous);
+                this._toastSaveFailed();
             }
-        } catch (e) { console.warn('[Trips] CDR toggle failed:', e); }
+        } finally {
+            this._cdrWritesPending--;
+            this._cdrWritePending = false;
+            if (!saved) this._cdrReady = false;
+            this._setCdrEnabled(this.cdrCleanupEnabled);
+            if (!this._cdrReady && this._cdrWritesPending === 0 && !this._cdrSaveTimer) {
+                this.loadCdrInfo();
+            }
+        }
+    },
+
+    _setCdrEnabled(enabled) {
+        this.cdrCleanupEnabled = !!enabled;
+        const el = document.getElementById('tripCdrEnabled');
+        const badge = document.getElementById('tripCdrBadge');
+        const cleanupButton = document.getElementById('tripCdrCleanupNow');
+        if (el) {
+            if (!this._cdrWritePending) el.checked = this.cdrCleanupEnabled;
+            el.disabled = !this._cdrReady
+                || this._cdrWritePending || this._cdrCleanupPending
+                || this._cdrWritesPending > 0 || !!this._cdrSaveTimer
+                || Object.keys(this._cdrDirty).length > 0;
+        }
+        if (cleanupButton) {
+            cleanupButton.disabled = !this._cdrReady || !this.cdrCleanupEnabled
+                || this._cdrCleanupPending || this._cdrWritesPending > 0
+                || !!this._cdrSaveTimer || Object.keys(this._cdrDirty).length > 0;
+        }
+        if (badge) {
+            badge.textContent = this.cdrCleanupEnabled
+                ? BYD.i18n.t('status.on') : BYD.i18n.t('status.off');
+            badge.className = 'status-badge '
+                + (this.cdrCleanupEnabled ? 'active' : 'inactive');
+        }
     },
 
     updateCdrReserved(val) {
+        if (!this._hydrated || !this._cdrReady || this._cdrCleanupPending
+                || this._cdrWritePending || this._cdrWritesPending > 0) return;
+        this.cdrConfig.reservedSpaceMb = parseInt(val, 10);
+        this._cdrDirty.reservedSpaceMb = this.cdrConfig.reservedSpaceMb;
+        this._cdrWriteVersion++;
         const el = document.getElementById('tripCdrReservedValue');
         if (el) el.textContent = (val / 1000).toFixed(1) + ' GB';
+        this.saveCdrConfig();
     },
 
     updateCdrProtected(val) {
+        if (!this._hydrated || !this._cdrReady || this._cdrCleanupPending
+                || this._cdrWritePending || this._cdrWritesPending > 0) return;
+        this.cdrConfig.protectedHours = parseInt(val, 10);
+        this._cdrDirty.protectedHours = this.cdrConfig.protectedHours;
+        this._cdrWriteVersion++;
         const el = document.getElementById('tripCdrProtectedValue');
         if (el) el.textContent = val + 'h';
+        this.saveCdrConfig();
     },
 
     updateCdrMinKeep(val) {
+        if (!this._hydrated || !this._cdrReady || this._cdrCleanupPending
+                || this._cdrWritePending || this._cdrWritesPending > 0) return;
+        this.cdrConfig.minFilesKeep = parseInt(val, 10);
+        this._cdrDirty.minFilesKeep = this.cdrConfig.minFilesKeep;
+        this._cdrWriteVersion++;
         const el = document.getElementById('tripCdrMinKeepValue');
         if (el) el.textContent = val;
+        this.saveCdrConfig();
+    },
+
+    saveCdrConfig() {
+        if (this._cdrSaveTimer) clearTimeout(this._cdrSaveTimer);
+        this._cdrSaveTimer = setTimeout(() => {
+            this._cdrSaveTimer = null;
+            this._flushCdrConfig();
+        }, 200);
+        this._setCdrEnabled(this.cdrCleanupEnabled);
+    },
+
+    async _flushCdrConfig() {
+        if (!this._hydrated || !this._cdrReady) return;
+        const body = this._cdrDirty;
+        this._cdrDirty = {};
+        if (Object.keys(body).length === 0) return;
+        const writeVersion = this._cdrWriteVersion;
+        this._cdrWritesPending++;
+        this._setCdrEnabled(this.cdrCleanupEnabled);
+        this._applyCdrConfig(this.cdrConfig);
+        let saved = false;
+        try {
+            const data = await this._postJson('/api/storage/external/config', body);
+            if (!data) return;
+            saved = true;
+            if (writeVersion !== this._cdrWriteVersion) return;
+            if (data.cleanupEnabled != null) {
+                this._setCdrEnabled(!!data.cleanupEnabled);
+            }
+            this._applyCdrConfig(data);
+        } finally {
+            this._cdrWritesPending--;
+            if (!saved) this._cdrReady = false;
+            this._setCdrEnabled(this.cdrCleanupEnabled);
+            if (!this._cdrReady && this._cdrWritesPending === 0 && !this._cdrSaveTimer) {
+                this.loadCdrInfo();
+            }
+        }
     },
 
     async triggerCdrCleanup() {
+        const button = document.getElementById('tripCdrCleanupNow');
+        if (!this._hydrated || !this._cdrReady || !this.cdrCleanupEnabled
+                || this._cdrCleanupPending || this._cdrWritesPending > 0
+                || this._cdrSaveTimer || Object.keys(this._cdrDirty).length > 0
+                || (button && button.disabled)) return;
         if (!confirm(BYD.i18n.t('trip.cdr.delete_confirm'))) return;
+        this._cdrCleanupPending = true;
+        this._setCdrEnabled(this.cdrCleanupEnabled);
+        this._applyCdrConfig(this.cdrConfig);
         try {
             const resp = await fetch('/api/storage/external/cleanup', { method: 'POST' });
             const data = await resp.json();
             if (data.success) {
-                this.setEl('tripCdrTotalFreed', data.freedFormatted || '--');
-                this.setEl('tripCdrTotalDeleted', (data.deletedCount || 0) + ' files');
+                const msg = data.filesDeleted > 0
+                    ? BYD.i18n.t('recording.cdr_freed', {
+                        size: data.freedFormatted, files: data.filesDeleted
+                    })
+                    : BYD.i18n.t('recording.cdr_no_cleanup');
+                if (BYD.utils && BYD.utils.toast) BYD.utils.toast(msg, 'success');
                 this.loadCdrInfo();
+            } else if (BYD.utils && BYD.utils.toast) {
+                BYD.utils.toast(
+                    data.error || BYD.i18n.t('recording.cdr_cleanup_failed'), 'error');
             }
-        } catch (e) { console.warn('[Trips] CDR cleanup failed:', e); }
+        } catch (e) {
+            console.warn('[Trips] CDR cleanup failed:', e);
+            if (BYD.utils && BYD.utils.toast) {
+                BYD.utils.toast(BYD.i18n.t('recording.cdr_trigger_failed'), 'error');
+            }
+        } finally {
+            this._cdrCleanupPending = false;
+            this._setCdrEnabled(this.cdrCleanupEnabled);
+            this._applyCdrConfig(this.cdrConfig);
+        }
     },
 
     // Rebuild trip rows from telemetry files still on disk (history lost when
@@ -1223,10 +1422,15 @@ const TRIPS = {
     },
 
     async loadCdrInfo() {
+        if (this._cdrWritesPending > 0) return false;
+        const writeVersion = this._cdrWriteVersion;
         try {
             const resp = await fetch('/api/storage/external');
             const data = await resp.json();
-            if (!data.success) return;
+            if (!data.success
+                    || this._cdrWritesPending > 0
+                    || writeVersion !== this._cdrWriteVersion) return false;
+            this._cdrReady = true;
 
             // SD status row (tripSdCardStatus/tripSdStatusDot/tripSdStatusText/
             // tripSdSpaceInfo) is owned by _paintVolumeAvailability() — reached
@@ -1241,11 +1445,13 @@ const TRIPS = {
             // CDR info
             this.setEl('tripCdrPath', data.cdrPath || '--');
             this.setEl('tripCdrUsage', data.cdrUsageFormatted || '--');
-            this.setEl('tripCdrFileCount', data.cdrFileCount || '--');
+            this.setEl('tripCdrFileCount',
+                data.cdrFileCount == null ? '--' : data.cdrFileCount);
             this.setEl('tripCdrProtected', data.cdrProtectedFormatted || '--');
             this.setEl('tripCdrDeletable', data.cdrDeletableFormatted || '--');
             this.setEl('tripCdrTotalFreed', data.totalBytesFreedFormatted || '--');
-            this.setEl('tripCdrTotalDeleted', data.totalFilesDeleted || '--');
+            this.setEl('tripCdrTotalDeleted',
+                data.totalFilesDeleted == null ? '--' : data.totalFilesDeleted);
 
             // Background monitor + last cleanup + recommend banner
             const monEl = document.getElementById('tripCdrMonitoring');
@@ -1269,29 +1475,46 @@ const TRIPS = {
             if (banner) banner.style.display = data.recommendAutoCleanup ? 'block' : 'none';
 
             // Config
-            const cdrEnabled = document.getElementById('tripCdrEnabled');
-            const cdrBadge = document.getElementById('tripCdrBadge');
-            if (cdrEnabled) cdrEnabled.checked = data.cleanupEnabled || false;
-            if (cdrBadge) {
-                cdrBadge.textContent = data.cleanupEnabled ? BYD.i18n.t('status.on') : BYD.i18n.t('status.off');
-                cdrBadge.className = 'status-badge ' + (data.cleanupEnabled ? 'active' : 'inactive');
-            }
-            if (data.reservedSpaceMb) {
-                const rs = document.getElementById('tripCdrReservedSlider');
-                if (rs) rs.value = data.reservedSpaceMb;
-                this.setEl('tripCdrReservedValue', (data.reservedSpaceMb / 1000).toFixed(1) + ' GB');
-            }
-            if (data.protectedHours !== undefined) {
-                const ps = document.getElementById('tripCdrProtectedSlider');
-                if (ps) ps.value = data.protectedHours;
-                this.setEl('tripCdrProtectedValue', data.protectedHours + 'h');
-            }
-            if (data.minFilesKeep !== undefined) {
-                const ms = document.getElementById('tripCdrMinKeepSlider');
-                if (ms) ms.value = data.minFilesKeep;
-                this.setEl('tripCdrMinKeepValue', data.minFilesKeep);
-            }
+            this._setCdrEnabled(!!data.cleanupEnabled);
+            this._applyCdrConfig(data);
+            return true;
         } catch (e) { /* CDR info not critical */ }
+        return false;
+    },
+
+    _applyCdrConfig(data) {
+        const rs = document.getElementById('tripCdrReservedSlider');
+        if (typeof data.reservedSpaceMb === 'number') {
+            this.cdrConfig.reservedSpaceMb = data.reservedSpaceMb;
+            if (rs) rs.value = data.reservedSpaceMb;
+            this.setEl('tripCdrReservedValue', (data.reservedSpaceMb / 1000).toFixed(1) + ' GB');
+        }
+        if (rs) {
+            rs.disabled = !this._cdrReady || this._cdrCleanupPending
+                || this._cdrWritePending || this._cdrWritesPending > 0;
+        }
+
+        const ps = document.getElementById('tripCdrProtectedSlider');
+        if (typeof data.protectedHours === 'number') {
+            this.cdrConfig.protectedHours = data.protectedHours;
+            if (ps) ps.value = data.protectedHours;
+            this.setEl('tripCdrProtectedValue', data.protectedHours + 'h');
+        }
+        if (ps) {
+            ps.disabled = !this._cdrReady || this._cdrCleanupPending
+                || this._cdrWritePending || this._cdrWritesPending > 0;
+        }
+
+        const ms = document.getElementById('tripCdrMinKeepSlider');
+        if (typeof data.minFilesKeep === 'number') {
+            this.cdrConfig.minFilesKeep = data.minFilesKeep;
+            if (ms) ms.value = data.minFilesKeep;
+            this.setEl('tripCdrMinKeepValue', data.minFilesKeep);
+        }
+        if (ms) {
+            ms.disabled = !this._cdrReady || this._cdrCleanupPending
+                || this._cdrWritePending || this._cdrWritesPending > 0;
+        }
     },
 
     // Custom date-range state (epoch-ms). When rangeFromMs != null the trip
@@ -1787,12 +2010,73 @@ const TRIPS = {
             header.className = 'day-header';
             header.textContent = day;
             container.appendChild(header);
-            groups[day].forEach(trip => container.appendChild(this.createTripCard(trip)));
+            groups[day].forEach(trip => {
+                const card = this.createTripCard(trip);
+                // Parking Intelligence gap strips key off the trip's end time.
+                const end = trip.endTime || trip.end_time;
+                if (end) card.dataset.tripEnd = String(new Date(end).getTime());
+                container.appendChild(card);
+            });
         });
 
         // Update period summary and cost from loaded trips
         this.updatePeriodSummary();
         this.updateCostHero();
+        this.decorateParkingGaps(trips);
+    },
+
+    /**
+     * Parking Intelligence: under each trip, show where the car then sat and
+     * for how long ("🅿️ Parked 3 h 07 m · Mid Valley · B2"), linking to the
+     * session view. Purely additive and best-effort: one request per render,
+     * nothing rendered when the feature is off or has no sessions.
+     */
+    async decorateParkingGaps(trips) {
+        if (!trips || trips.length === 0) return;
+        const container = document.getElementById('tripList');
+        if (!container) return;
+        const token = (this._parkingGapToken = (this._parkingGapToken || 0) + 1);
+        let from = Infinity, to = 0;
+        trips.forEach(t => {
+            const s = new Date(t.startTime || t.start_time).getTime();
+            const e = new Date(t.endTime || t.end_time || t.startTime || t.start_time).getTime();
+            if (s < from) from = s;
+            if (e > to) to = e;
+        });
+        if (!isFinite(from) || to <= 0) return;
+        let sessions;
+        try {
+            const r = await fetch('/api/parking/sessions?from=' + (from - 3600000) + '&to=' + (to + 3600000) + '&limit=200', { cache: 'no-store' });
+            const d = await r.json();
+            sessions = (d && d.sessions) || [];
+        } catch (e) { return; }
+        if (token !== this._parkingGapToken || sessions.length === 0) return;
+        const fmtDur = ms => {
+            const mins = Math.max(0, Math.floor(ms / 60000)), h = Math.floor(mins / 60), m = mins % 60;
+            if (h >= 48) return Math.floor(h / 24) + ' d ' + (h % 24) + ' h';
+            return h > 0 ? h + ' h ' + (m < 10 ? '0' : '') + m + ' m' : m + ' m';
+        };
+        const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        container.querySelectorAll('.trip-card[data-trip-end]').forEach(card => {
+            const end = parseInt(card.dataset.tripEnd, 10);
+            if (!end) return;
+            // The session that opened when this trip ended: ACC-off within a
+            // few minutes after the trip's recorded end.
+            const s = sessions.find(x => x.startedMs >= end - 5 * 60000 && x.startedMs <= end + 20 * 60000);
+            if (!s) return;
+            const place = s.safeZone || (s.place && (s.place.short || s.place.displayName)) || '';
+            const level = s.signage && s.signage.found ? s.signage.label : '';
+            const dur = s.open ? BYD.i18n.t('parking.now_parked') : fmtDur((s.endedMs || Date.now()) - s.startedMs);
+            const a = document.createElement('a');
+            a.className = 'trip-park-gap';
+            a.href = 'parking.html#/session/' + encodeURIComponent(s.sessionId);
+            a.title = BYD.i18n.t('nav.parking');
+            a.innerHTML = '🅿️ <span>' + esc(dur) + (place ? ' · ' + esc(place) : '') + (level ? ' · <b>' + esc(level) + '</b>' : '') +
+                ((s.eventCount || 0) > 0 ? ' · ' + esc(BYD.i18n.t('parking.events_n', { n: s.eventCount })) : '') + '</span>';
+            // The card itself opens the trip detail; the strip must win.
+            a.addEventListener('click', ev => ev.stopPropagation());
+            card.appendChild(a);
+        });
     },
 
     // Resolve the per-trip nominal pack kWh used for SoC→energy fallbacks.
@@ -1867,6 +2151,13 @@ const TRIPS = {
         // of rendering them as if the trip genuinely scored zero.
         const recovered = this.isRecoveredTrip(trip);
         const tRC = (k, fb) => (window.BYD && BYD.i18n && BYD.i18n.t(k) && BYD.i18n.t(k) !== k) ? BYD.i18n.t(k) : fb;
+        // Broader than `recovered`: a row finalized by next-boot recovery
+        // keeps its live start-side snapshots (start SoC, start kWh), which
+        // defeat the all-zero isRecoveredTrip signature — but its scores are
+        // still unset. All five sub-scores at 0 always means "never scored"
+        // (the live engine floors at 50), so show the neutral glyph, not a
+        // genuine-looking red 0.
+        const noScore = recovered || !this.hasScoreData(trip);
         // efficiency is "% per km" stored — convert to per-mi when needed
         const effRaw = trip.efficiencySocPerKm || trip.efficiency_soc_per_km || 0;
         const eff = (BYD.units.mode === 'mi' ? effRaw / BYD.units.KM_TO_MI : effRaw).toFixed(2);
@@ -1884,10 +2175,12 @@ const TRIPS = {
         } else if (energyUsed > 0 && this.electricityRate > 0) {
             costStr = cur + (energyUsed * this.electricityRate).toFixed(2);
         } else if (this.electricityRate > 0) {
-            // Fallback: estimate from SoC delta for old trips without kWh data
+            // Fallback: estimate from SoC delta for old trips without kWh data.
+            // Requires BOTH bookends: a failed end read is stored as 0, and
+            // treating it as a real 0% would price the whole pack into one trip.
             const socStart = trip.socStart || trip.soc_start || 0;
             const socEnd = trip.socEnd || trip.soc_end || 0;
-            if (socStart > socEnd && socStart > 0) {
+            if (socEnd > 0 && socStart > socEnd) {
                 const socDelta = socStart - socEnd;
                 // Prefer per-trip kwhStart, then user/auto nominal, then 82.56 default
                 const nominal = this.estimateNominalKwh(trip);
@@ -1948,19 +2241,23 @@ const TRIPS = {
                 + fuelStart.toFixed(2) + '→' + fuelEnd.toFixed(2) + '%</span>';
         }
 
-        // Energy capsule: real kWh > SoC-per-km efficiency. On a recovered trip
-        // neither exists, so drop the capsule rather than print "0.00 %/km".
+        // Energy capsule: real kWh > SoC-per-km efficiency. Dropped when
+        // NEITHER exists (recovered rows, and recovery-finalized rows whose
+        // end-side reads never happened) rather than printing "0.00 %/km".
         // A regen-dominant trip shows its NEGATIVE net kWh (energyUsed is clamped
         // to 0 for costing) so the capsule agrees with the SoC capsule beside it.
         const signedEnergyVal = this.signedEnergy(trip);
         const capsuleEnergy = signedEnergyVal < 0 ? signedEnergyVal : energyUsed;
-        const energyCapsule = recovered
+        const energyCapsule = (recovered || (capsuleEnergy === 0 && !(effRaw > 0)))
             ? ''
             : '<span class="trip-capsule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> ' + (capsuleEnergy !== 0 ? capsuleEnergy.toFixed(2) + ' kWh' : eff + BYD.units.socPerDistLabel()) + '</span>';
-        // SoC capsule: omit on recovered (would read 0.00→0.00%).
-        const socCapsule = recovered
-            ? ''
-            : '<span class="trip-capsule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="7" width="12" height="10" rx="1"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/></svg> ' + socStart + '→' + socEnd + '%</span>';
+        // SoC capsule: only when BOTH bookends were actually read (>0). The
+        // daemon stores 0 for a failed read, and a recovery-finalized row never
+        // has an end SoC — "55.00→0.00%" would show a phantom full drain, and
+        // recovered rows would read "0.00→0.00%".
+        const socCapsule = this.hasSocPair(trip)
+            ? '<span class="trip-capsule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="7" width="12" height="10" rx="1"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/></svg> ' + socStart + '→' + socEnd + '%</span>'
+            : '';
         // Odometer capsule: absolute start→end readings (unit-aware). Gated on
         // both being present (>0) — recovered trips and HALs that don't report
         // the odometer leave these at 0, so the capsule is dropped rather than
@@ -1970,15 +2267,20 @@ const TRIPS = {
         const odoCapsule = (odoStart > 0 && odoEnd > 0)
             ? '<span class="trip-capsule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="14" r="7"/><path d="M12 14l3-3"/><path d="M12 3v2"/></svg> ' + BYD.units.dist(odoStart) + '→' + BYD.units.dist(odoEnd) + '</span>'
             : '';
-        // Score badge: a recovered trip has no driving score, so show a neutral
-        // "recovered" glyph instead of a misleading red 0.
-        const scoreBadge = recovered
-            ? '<div class="trip-score-badge recovered" title="' + tRC('trip.recovered.badge_title', 'Recovered from telemetry — no driving score available') + '">' +
+        // Score badge: a trip without score data (recovered, recovery-finalized,
+        // or scored from an empty dynamics stream) shows a neutral glyph instead
+        // of a misleading red 0.
+        const scoreBadge = noScore
+            ? '<div class="trip-score-badge recovered" title="' + (recovered
+                    ? tRC('trip.recovered.badge_title', 'Recovered from telemetry — no driving score available')
+                    : tRC('trip.no_score_badge_title', 'Driving score unavailable for this trip')) + '">' +
                 '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></div>'
             : '<div class="trip-score-badge ' + scoreClass + '">' + avgScore + '</div>';
         const recoveredTag = recovered
             ? '<span class="trip-recovered-tag">' + tRC('trip.recovered.tag', 'Recovered') + '</span>'
-            : '';
+            : (this.isPartialTrip(trip)
+                ? '<span class="trip-recovered-tag">' + tRC('trip.partial.tag', 'Partial data') + '</span>'
+                : '');
 
         card.innerHTML =
             '<div class="trip-card-top">' +
@@ -2175,7 +2477,7 @@ const TRIPS = {
         }
 
         let totalDist = 0, totalDur = 0, totalEnergy = 0, totalCost = 0;
-        let scoreSum = 0;
+        let scoreSum = 0, scoreCount = 0;
         let totalSocDelta = 0;
         // PHEV aggregates: total petrol burned across the window in litres,
         // and a flag tracking whether any trip in scope was PHEV (gates the
@@ -2187,21 +2489,29 @@ const TRIPS = {
             totalDist += t.distanceKm || t.distance_km || 0;
             totalDur += t.durationSeconds || t.duration_seconds || 0;
             let energy = t.energyUsedKwh || t.energy_used_kwh || 0;
-            // Fallback: estimate energy from SoC delta for trips without kWh data
+            // Fallback: estimate energy from SoC delta for trips without kWh
+            // data. Both bookends required — a failed end read is stored as 0
+            // and would book the whole pack as consumed by one trip.
             if (energy <= 0) {
                 const ss = t.socStart || t.soc_start || 0;
                 const se = t.socEnd || t.soc_end || 0;
-                if (ss > se && ss > 0) {
+                if (se > 0 && ss > se) {
                     const nom = this.estimateNominalKwh(t);
                     energy = ((ss - se) / 100) * nom;
                 }
             }
             totalEnergy += energy;
             totalCost += t.tripCost || t.trip_cost || 0;
-            scoreSum += this.getAvgScore(t);
+            // Rows without score data (all five sub-scores 0: recovery-
+            // finalized, or scored from an empty dynamics stream) are
+            // excluded from the average rather than dragging it toward 0.
+            if (this.hasScoreData(t)) {
+                scoreSum += this.getAvgScore(t);
+                scoreCount++;
+            }
             const socStart = t.socStart || t.soc_start || 0;
             const socEnd = t.socEnd || t.soc_end || 0;
-            if (socStart > socEnd) totalSocDelta += (socStart - socEnd);
+            if (socEnd > 0 && socStart > socEnd) totalSocDelta += (socStart - socEnd);
             // Per-trip PHEV roll-up. Trip records persist their own
             // litresUsed/fuelCost snapshots (computed at trip end), so
             // aggregation is a pure sum — no live config dependency.
@@ -2217,7 +2527,7 @@ const TRIPS = {
             this.setEl('summaryTrips', trips.length);
             this.setEl('summaryDistance', BYD.units.distVal(totalDist).toFixed(1));
             this.setEl('summaryTime', (totalDur / 3600).toFixed(1));
-            this.setEl('summaryEfficiency', trips.length > 0 ? Math.floor(scoreSum / trips.length) : '--');
+            this.setEl('summaryEfficiency', scoreCount > 0 ? Math.floor(scoreSum / scoreCount) : '--');
         }
         this.setEl('summaryEnergy', totalEnergy > 0 ? totalEnergy.toFixed(1) : '--');
 
@@ -2862,6 +3172,11 @@ const TRIPS = {
             const trip = tripData.trip;
 
             const recovered = this.isRecoveredTrip(trip);
+            // Partial-data axes (see createTripCard): a recovery-finalized row
+            // keeps real start-side values but has no scores and no end SoC, so
+            // score and SoC displays gate independently of `recovered`.
+            const noScore = recovered || !this.hasScoreData(trip);
+            const socPair = this.hasSocPair(trip);
             const start = new Date(trip.startTime || trip.start_time);
             const lang = BYD.i18n.getLang();
             this.setEl('detailTitle', (lang && lang.indexOf('zh') === 0)
@@ -2870,7 +3185,7 @@ const TRIPS = {
             this.setEl('detailSubtitle', start.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' }) +
                 ' – ' + new Date(trip.endTime || trip.end_time).toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' }));
             this.setEl('detailDuration', this.formatDuration(trip.durationSeconds || trip.duration_seconds || 0));
-            this.setEl('detailSocDelta', recovered ? '--' : ((trip.socStart || trip.soc_start || 0) - (trip.socEnd || trip.soc_end || 0)).toFixed(2) + '%');
+            this.setEl('detailSocDelta', socPair ? ((trip.socStart || trip.soc_start || 0) - (trip.socEnd || trip.soc_end || 0)).toFixed(2) + '%' : '--');
             // Show energy kWh or efficiency
             const detailEnergy = trip.energyUsedKwh || trip.energy_used_kwh || 0;
             // Signed net energy: negative when the pack ended FULLER than it
@@ -2886,9 +3201,12 @@ const TRIPS = {
             const energyMetered = !!(trip.energyMetered || trip.energy_metered);
             // Metered trips get 3 decimals: a sub-km hop draws ~0.1 kWh, which
             // 2 decimals would round toward a misleading "0.00".
+            // No-data rows (recovered, or recovery-finalized with no end-side
+            // reads) fall through every real branch — show '--', not "0.00".
+            const detailEffSoc = trip.efficiencySocPerKm || trip.efficiency_soc_per_km || 0;
             this.setEl('detailEfficiency', recovered ? '--'
                 : (displayEnergy !== 0 ? (energyMetered ? displayEnergy.toFixed(3) : displayEnergy.toFixed(2)) + ' kWh'
-                : (energyMetered ? '0.000 kWh' : (trip.efficiencySocPerKm || trip.efficiency_soc_per_km || 0).toFixed(2))));
+                : (energyMetered ? '0.000 kWh' : (detailEffSoc > 0 ? detailEffSoc.toFixed(2) : '--'))));
             // Average consumption: kWh/100km or %/100km — convert per-100 rate
             // when the user is on miles (kWh/100mi = kWh/100km / KM_TO_MI).
             const tripDist = trip.distanceKm || trip.distance_km || 0;
@@ -2903,8 +3221,10 @@ const TRIPS = {
                 // (e.g. a PHEV leg driven entirely on the engine).
                 this.setEl('detailConsumption', (0).toFixed(2));
             } else if (tripDist > 0.1) {
+                // SoC-based consumption needs BOTH bookends — a failed end
+                // read (stored 0) would fabricate a full-pack consumption.
                 const socDelta = (trip.socStart || trip.soc_start || 0) - (trip.socEnd || trip.soc_end || 0);
-                if (socDelta > 0) {
+                if (socPair && socDelta > 0) {
                     const socPer100km = (socDelta / tripDist) * 100;
                     this.setEl('detailConsumption', BYD.units.per100Val(socPer100km).toFixed(2) + '%');
                 } else {
@@ -2924,8 +3244,13 @@ const TRIPS = {
             this.setEl('detailDistance', BYD.units.distVal(trip.distanceKm || trip.distance_km || 0).toFixed(2));
             this.setEl('detailAvgSpeed', BYD.units.speedVal(trip.avgSpeedKmh || trip.avg_speed_kmh || 0).toFixed(2));
             this.setEl('detailMaxSpeed', BYD.units.speedVal(trip.maxSpeedKmh || trip.max_speed_kmh || 0).toFixed(2));
-            this.setEl('detailSocStart', recovered ? '--' : (trip.socStart || trip.soc_start || 0).toFixed(2) + '%');
-            this.setEl('detailSocEnd', recovered ? '--' : (trip.socEnd || trip.soc_end || 0).toFixed(2) + '%');
+            // Each SoC bookend shows only if IT was read (>0): a recovery-
+            // finalized row keeps a real start SoC but has no end read, and
+            // rendering that missing side as "0.00%" reads as a dead pack.
+            const detailSocStartVal = trip.socStart || trip.soc_start || 0;
+            const detailSocEndVal = trip.socEnd || trip.soc_end || 0;
+            this.setEl('detailSocStart', detailSocStartVal > 0 ? detailSocStartVal.toFixed(2) + '%' : '--');
+            this.setEl('detailSocEnd', detailSocEndVal > 0 ? detailSocEndVal.toFixed(2) + '%' : '--');
 
             // Odometer tiles — absolute start/end readings, unit-aware. Only
             // shown when both are present (>0); recovered trips and HALs that
@@ -3009,9 +3334,12 @@ const TRIPS = {
 
             // A recovered trip has no driving-DNA scores (not in telemetry), so
             // hide the whole breakdown card + recovered banner instead of drawing
-            // five empty 0/100 bars that read as a genuine zero-score trip.
-            this.applyRecoveredDetailState(recovered);
-            if (!recovered) {
+            // five empty 0/100 bars that read as a genuine zero-score trip. A
+            // PARTIAL row (recovery-finalized, real start data, no end reads)
+            // gets the explanatory banner and, if unscored, the rescore button.
+            this.applyRecoveredDetailState(recovered, noScore,
+                this.isPartialTrip(trip), this._hasTelemetryArtifact(trip));
+            if (!noScore) {
                 this.renderScoreBar('scoreAnticipation', 'scoreAnticipationVal', trip.anticipationScore || trip.anticipation_score || 0);
                 this.renderScoreBar('scoreSmoothness', 'scoreSmoothnessVal', trip.smoothnessScore || trip.smoothness_score || 0);
                 this.renderScoreBar('scoreSpeedDisc', 'scoreSpeedDiscVal', trip.speedDisciplineScore || trip.speed_discipline_score || 0);
@@ -3631,17 +3959,76 @@ const TRIPS = {
     },
 
     /**
-     * Toggle the detail view's recovered-trip presentation: show the
-     * explanatory banner and hide the Driving-DNA breakdown card (it would
-     * otherwise render five empty 0/100 bars that read as a genuine zero
-     * score). Idempotent and symmetric — passing false on the next (live)
-     * trip restores the normal layout.
+     * Toggle the detail view's degraded-data presentation. The recovered
+     * banner shows only for FULL reconstructions (isRecoveredTrip); the
+     * Driving-DNA breakdown card hides for ANY no-score row — recovery-
+     * finalized rows and empty-dynamics trips store all five sub-scores as
+     * 0, and five 0/100 bars read as a genuine zero-score trip. Idempotent
+     * and symmetric — passing false/false on the next (live) trip restores
+     * the normal layout.
      */
-    applyRecoveredDetailState(recovered) {
+    applyRecoveredDetailState(recovered, noScore, partial, canRescore) {
+        const tRC = (k, fb) => (window.BYD && BYD.i18n && BYD.i18n.t(k) && BYD.i18n.t(k) !== k) ? BYD.i18n.t(k) : fb;
         const banner = document.getElementById('detailRecoveredBanner');
-        if (banner) banner.style.display = recovered ? 'flex' : 'none';
+        // The banner explains EITHER a full telemetry reconstruction
+        // (recovered) OR a recovery-finalized row that kept its live start-side
+        // data but lost the end-of-trip reads (partial). Same element, two
+        // texts — a trip is never both.
+        if (banner) banner.style.display = (recovered || partial) ? 'flex' : 'none';
+        const note = document.getElementById('detailRecoveredNote');
+        if (note) {
+            note.textContent = recovered
+                ? tRC('trip.recovered.detail_note', 'Recovered from telemetry. Distance, speed and elevation are reconstructed from GPS; battery, energy, cost and driving scores were not recorded for this trip.')
+                : tRC('trip.partial.detail_note', 'This trip was closed by recovery after a restart. Distance, speed, route and driving scores are available; end-of-trip battery, energy and cost were not recorded.');
+        }
+        // "Compute driving scores" — only when the row has telemetry on disk
+        // but no scores (recovery closed it before recovery learned to score).
+        const rescoreBtn = document.getElementById('detailRescoreBtn');
+        if (rescoreBtn) {
+            rescoreBtn.style.display = ((recovered || partial) && noScore && canRescore) ? '' : 'none';
+            rescoreBtn.disabled = false;
+            rescoreBtn.textContent = tRC('trip.partial.rescore_button', 'Compute driving scores');
+        }
         const scoreCard = document.getElementById('scoreBreakdownCard');
-        if (scoreCard) scoreCard.style.display = recovered ? 'none' : '';
+        if (scoreCard) scoreCard.style.display = (recovered || noScore) ? 'none' : '';
+    },
+
+    /**
+     * POST /api/trips/{id}/rescore for the trip open in the detail view, then
+     * re-render the detail so the freshly computed Driving-DNA card appears.
+     */
+    async rescoreCurrentTrip() {
+        const tripId = this.currentTripId;
+        if (tripId == null) return;
+        const tRC = (k, fb) => (window.BYD && BYD.i18n && BYD.i18n.t(k) && BYD.i18n.t(k) !== k) ? BYD.i18n.t(k) : fb;
+        const btn = document.getElementById('detailRescoreBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = tRC('trip.partial.rescoring', 'Computing…');
+        }
+        let data = null;
+        try {
+            const resp = await fetch('/api/trips/' + tripId + '/rescore', { method: 'POST' });
+            data = await resp.json().catch(() => null);
+            if (!resp.ok || !data || data.success !== true) data = null;
+        } catch (e) {
+            console.warn('[Trips] Rescore failed:', e);
+            data = null;
+        }
+        if (window.BYD && BYD.utils && BYD.utils.toast) {
+            BYD.utils.toast(data
+                ? tRC('trip.partial.rescore_done', 'Driving scores computed for this trip.')
+                : tRC('trip.partial.rescore_failed', "Couldn't compute scores — not enough telemetry for this trip."),
+                data ? 'success' : 'error');
+        }
+        if (data) {
+            // Re-open the detail so the banner and score bars reflect the
+            // updated row (the list card refreshes on its next load).
+            this.showDetail(tripId);
+        } else if (btn) {
+            btn.disabled = false;
+            btn.textContent = tRC('trip.partial.rescore_button', 'Compute driving scores');
+        }
     },
 
     /**
@@ -4926,6 +5313,41 @@ const TRIPS = {
     },
 
     /**
+     * True when the row carries real driving-score data. The live score
+     * engine floors every sub-score at 50 when samples are sparse, so a row
+     * with ALL FIVE sub-scores at 0 can only mean the engine never ran for
+     * it: the row was finalized by next-boot recovery (scores are not in the
+     * telemetry file), or the dynamics channel produced no scoring samples
+     * for the whole trip. Score displays must treat those as "no data", not
+     * a genuine zero — and score AVERAGES must exclude them, or one such row
+     * drags a week of real 80s down for no reason.
+     */
+    hasScoreData(trip) {
+        if (!trip) return false;
+        const a = trip.anticipationScore || trip.anticipation_score || 0;
+        const s = trip.smoothnessScore || trip.smoothness_score || 0;
+        const sd = trip.speedDisciplineScore || trip.speed_discipline_score || 0;
+        const e = trip.efficiencyScore || trip.efficiency_score || 0;
+        const c = trip.consistencyScore || trip.consistency_score || 0;
+        return !!(a || s || sd || e || c);
+    },
+
+    /**
+     * True when BOTH SoC bookends were actually read (>0). The daemon stores
+     * 0 for a failed read (a real pack never trips at a true 0%), and a row
+     * finalized by next-boot recovery always has socEnd=0 — end SoC is not
+     * in the telemetry file. Any SoC arithmetic on a half-pair (delta, cost
+     * estimate, consumption %) silently treats the missing side as 0 and
+     * fabricates a full-pack-sized figure, so every consumer gates on this.
+     */
+    hasSocPair(trip) {
+        if (!trip) return false;
+        const ss = trip.socStart || trip.soc_start || 0;
+        const se = trip.socEnd || trip.soc_end || 0;
+        return ss > 0 && se > 0;
+    },
+
+    /**
      * True when a trip was rebuilt from on-disk GPS telemetry (the "Recover
      * Missing Trips" path) rather than recorded live. Such a row has real
      * distance/speed/duration/elevation but NO battery, energy, cost, or
@@ -4959,6 +5381,25 @@ const TRIPS = {
         const effSoc = trip.efficiencySocPerKm || trip.efficiency_soc_per_km || 0;
         if (energy || effSoc) return false;                    // any energy → live trip
         return true;
+    },
+
+    /**
+     * True for a row that recovery finalized IN PLACE after a process restart:
+     * the live start-side snapshot survived (start SoC > 0) but the end-side
+     * reads never happened (end SoC stored as 0 — a real pack never trips at a
+     * true 0%). Such a trip has real distance/speed/route (and, once scored,
+     * real DNA scores) but no end battery, energy or cost. Distinct from
+     * isRecoveredTrip (full reconstruction, no SoC at all); a trip is never
+     * both. Imported backups are excluded (they carry whatever the backup had).
+     */
+    isPartialTrip(trip) {
+        if (!trip) return false;
+        const path = trip.telemetryFilePath || trip.telemetry_file_path || '';
+        if (path.indexOf('imported://') === 0) return false;
+        if (this.isRecoveredTrip(trip)) return false;
+        const socStart = trip.socStart || trip.soc_start || 0;
+        const socEnd = trip.socEnd || trip.soc_end || 0;
+        return socStart > 0 && socEnd <= 0;
     },
 
     formatDuration(seconds) {

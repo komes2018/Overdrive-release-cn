@@ -3,23 +3,34 @@ package com.overdrive.app.services;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.bluetooth.BluetoothAdapter;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.IBinder;
+import android.os.ResultReceiver;
 import android.os.SystemClock;
 import android.util.Log;
 
 import com.overdrive.app.R;
+import com.overdrive.app.byd.AmbientProbe;
+import com.overdrive.app.byd.BodyworkSeatProbe;
 import com.overdrive.app.byd.BydConstants;
+import com.overdrive.app.byd.BydDataCollector;
 import com.overdrive.app.byd.BydDeviceHelper;
 import com.overdrive.app.byd.BydFeatureIds;
+import com.overdrive.app.byd.VehicleActuatorBridge;
 import com.overdrive.app.byd.routing.DrivingSafetyGuard;
+import com.overdrive.app.byd.routing.VehicleCommandRouter;
+import com.overdrive.app.camera.dilink5.DiLink5Platform;
 import com.overdrive.app.logging.DaemonLogger;
 
 import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -50,6 +61,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@code action=mirror_auto_follow_up} + {@code enabled}=true|false;
  * {@code action=hud} + {@code level}=0..100 (brightness);
  * {@code action=hud_power} + {@code on}=true|false (the dedicated HUD switch);
+ * {@code action=bluetooth} + {@code enabled}=true|false;
  * {@code action=ac_charge_current_limit} + {@code state}=1..5;
  * {@code action=energy_mode} + {@code mode}=1..5 (powertrain EV/HEV). Mirror/HUD/current-limit
  * writes are serialized off the main thread so their daemon-backed safety state can be rechecked
@@ -71,11 +83,14 @@ public class VehicleActuatorService extends Service {
     private static final long ENERGY_VERIFY_POLL_MS = 100L;
     private static final long ENERGY_READ_TIMEOUT_MS = 250L;
     private static final long ENERGY_HAL_WRITE_TIMEOUT_MS = 1000L;
+    private static final long BLUETOOTH_VERIFY_TIMEOUT_MS = 8_000L;
+    private static final long BLUETOOTH_VERIFY_POLL_MS = 100L;
     private static final int ENERGY_RECONCILE_MAX_ATTEMPTS = 6;
     private static final long ENERGY_RECONCILE_BASE_DELAY_MS = 250L;
     private static final long ENERGY_RECONCILE_MAX_DELAY_MS = 4000L;
     private static final SourceGenerationGate ENERGY_SOURCE_GENERATIONS =
             new SourceGenerationGate();
+    private static final Object DILINK5_BRIDGE_LOCK = new Object();
     /**
      * Process-lifetime lanes cap Binder damage across service recreation. A HAL call can ignore
      * interruption; if one wedges, its lane rejects later work instead of leaking a new thread for
@@ -91,6 +106,7 @@ public class VehicleActuatorService extends Service {
     private final EnergyModeQueue energyModeQueue = new EnergyModeQueue();
     private final AtomicInteger activeEnergyHalChains = new AtomicInteger();
     private ExecutorService guardedActuatorExecutor;
+    private ExecutorService diLink5BridgeExecutor;
     private ExecutorService energyExecutor;
     private ScheduledThreadPoolExecutor energyReconcileExecutor;
     private final Object energyReconcileLock = new Object();
@@ -111,6 +127,10 @@ public class VehicleActuatorService extends Service {
         super.onCreate();
         guardedActuatorExecutor = Executors.newSingleThreadExecutor(
                 r -> daemonThread(r, "ActuatorSafety"));
+        diLink5BridgeExecutor = new ThreadPoolExecutor(
+                1, 1, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1),
+                r -> daemonThread(r, "ActuatorDiLink5"),
+                new ThreadPoolExecutor.AbortPolicy());
         if (supportsEnergyMode()) {
             energyExecutor = new ThreadPoolExecutor(
                     1, 1, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1),
@@ -175,7 +195,13 @@ public class VehicleActuatorService extends Service {
                 return START_STICKY;
             }
             action = intent.getStringExtra("action");
-            if ("mirror".equals(action)) {
+            if (VehicleActuatorBridge.DILINK5_BRIDGE_ACTION.equals(action)) {
+                intent.setExtrasClassLoader(
+                        VehicleCommandRouter.VehicleCommand.class.getClassLoader());
+                ResultReceiver receiver =
+                        intent.getParcelableExtra(VehicleActuatorBridge.DILINK5_BRIDGE_RESULT);
+                finishesAsync = submitDiLink5Bridge(intent, receiver);
+            } else if ("mirror".equals(action)) {
                 boolean fold = intent.getBooleanExtra("fold", false);
                 finishesAsync = submitGuardedActuation(
                         fold ? DrivingSafetyGuard.GUARD_MIRROR_FOLD : null,
@@ -199,6 +225,13 @@ public class VehicleActuatorService extends Service {
                         "hud_power on=" + on,
                         () -> Log.i(TAG,
                                 "hud_power on=" + on + " -> ok=" + setHudPower(on)));
+            } else if ("bluetooth".equals(action)) {
+                boolean enabled = intent.getBooleanExtra("enabled", false);
+                finishesAsync = submitGuardedActuation(
+                        null,
+                        "bluetooth enabled=" + enabled,
+                        () -> logger.info("bluetooth enabled=" + enabled
+                                + " -> ok=" + setBluetoothEnabled(enabled)));
             } else if ("ac_charge_current_limit".equals(action)) {
                 int state = parseBoundedIntExtra(
                         intent.getStringExtra("state"),
@@ -239,6 +272,255 @@ public class VehicleActuatorService extends Service {
                 ? START_REDELIVER_INTENT : START_NOT_STICKY;
     }
 
+    private boolean submitDiLink5Bridge(Intent request, ResultReceiver receiver) {
+        ExecutorService executor = diLink5BridgeExecutor;
+        if (receiver == null || executor == null || executor.isShutdown()) {
+            sendDiLink5BridgeResult(receiver, bridgeFailure("vehicle worker unavailable"));
+            return false;
+        }
+        try {
+            executor.execute(() -> {
+                Bundle result;
+                try {
+                    result = runDiLink5Bridge(request);
+                } catch (Throwable failure) {
+                    result = bridgeFailure(failure.getMessage());
+                }
+                sendDiLink5BridgeResult(receiver, result);
+                finishStartCommand();
+            });
+            return true;
+        } catch (Throwable unavailable) {
+            sendDiLink5BridgeResult(receiver, bridgeFailure(unavailable.getMessage()));
+            return false;
+        }
+    }
+
+    private Bundle runDiLink5Bridge(Intent request) throws Exception {
+        synchronized (DILINK5_BRIDGE_LOCK) {
+            return runDiLink5BridgeLocked(request);
+        }
+    }
+
+    private Bundle runDiLink5BridgeLocked(Intent request) throws Exception {
+        if (!diLink5ModeCurrent(request)) {
+            return bridgeFailure("vehicle mode is not enabled");
+        }
+        if (diLink5BridgeExpired(request)) {
+            return bridgeFailure("vehicle request expired");
+        }
+        BydDataCollector.syncDiLink5Producer(getApplicationContext());
+        if (!diLink5ModeCurrent(request)) {
+            return bridgeFailure("vehicle mode changed during initialization");
+        }
+        if (diLink5BridgeExpired(request)) {
+            return bridgeFailure("vehicle request expired during initialization");
+        }
+        BydDataCollector collector = BydDataCollector.getInstance();
+        String operation =
+                request.getStringExtra(VehicleActuatorBridge.DILINK5_BRIDGE_OPERATION);
+        Bundle result = new Bundle();
+
+        if (VehicleActuatorBridge.DILINK5_VEHICLE_COMMAND.equals(operation)) {
+            request.setExtrasClassLoader(VehicleCommandRouter.VehicleCommand.class.getClassLoader());
+            Object value = request.getSerializableExtra(
+                    VehicleActuatorBridge.DILINK5_VEHICLE_COMMAND);
+            if (!(value instanceof VehicleCommandRouter.VehicleCommand)) {
+                return bridgeFailure("invalid vehicle command");
+            }
+            VehicleCommandRouter.VehicleCommand command =
+                    (VehicleCommandRouter.VehicleCommand) value;
+            String safetyGuard = null;
+            if (command.motionSafety()
+                    == VehicleCommandRouter.VehicleCommand.MotionSafety.BLOCK_WHILE_MOVING) {
+                safetyGuard = command.motionSafetyGuardKey();
+                if (safetyGuard == null) {
+                    return bridgeFailure("movement guard is unavailable");
+                }
+            }
+            if (diLink5BridgeExpired(request)) {
+                return bridgeFailure("vehicle request expired before actuation");
+            }
+            final String guard = safetyGuard;
+            result.putBoolean("success", VehicleActuatorBridge.runDiLink5Request(
+                    diLink5BridgeDeadline(request),
+                    diLink5BridgeModeGeneration(request),
+                    diLink5BridgeAccAuthoritative(request),
+                    diLink5BridgeAccOn(request),
+                    () -> (guard == null || !DrivingSafetyGuard.isActionBlocked(guard))
+                            && command.executeViaSdk(collector)));
+            if (command instanceof VehicleCommandRouter.ClimateStepTempCommand) {
+                result.putInt(
+                        VehicleActuatorBridge.DILINK5_RESULT_SETPOINT,
+                        ((VehicleCommandRouter.ClimateStepTempCommand) command).resultSetpoint);
+            }
+            return result;
+        }
+
+        if (VehicleActuatorBridge.DILINK5_POSITION_READ.equals(operation)) {
+            requireDiLink5ModeCurrent(request);
+            result.putBoolean("success", true);
+            result.putString("json",
+                    BodyworkSeatProbe.readFullBundle(getApplicationContext()).toString());
+            return result;
+        }
+
+        if (VehicleActuatorBridge.DILINK5_POSITION_APPLY.equals(operation)) {
+            Object value = request.getSerializableExtra(
+                    VehicleActuatorBridge.DILINK5_POSITION_OVERRIDES);
+            Map<String, Float> overrides = new HashMap<>();
+            if (value instanceof Map) {
+                for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                    if (entry.getKey() instanceof String
+                            && entry.getValue() instanceof Number) {
+                        overrides.put(
+                                (String) entry.getKey(),
+                                ((Number) entry.getValue()).floatValue());
+                    }
+                }
+            }
+            if (diLink5BridgeExpired(request)) {
+                return bridgeJsonFailure("vehicle request expired before actuation");
+            }
+            result.putBoolean("success", true);
+            result.putString("json", VehicleActuatorBridge.runDiLink5Request(
+                    diLink5BridgeDeadline(request),
+                    diLink5BridgeModeGeneration(request),
+                    diLink5BridgeAccAuthoritative(request),
+                    diLink5BridgeAccOn(request),
+                    () -> BodyworkSeatProbe.applyFull(
+                            getApplicationContext(), overrides).toString()));
+            return result;
+        }
+
+        if (VehicleActuatorBridge.DILINK5_POSITION_WRITE.equals(operation)) {
+            int[] ids = request.getIntArrayExtra(
+                    VehicleActuatorBridge.DILINK5_POSITION_IDS);
+            float[] values = request.getFloatArrayExtra(
+                    VehicleActuatorBridge.DILINK5_POSITION_VALUES);
+            if (ids == null || values == null || ids.length == 0
+                    || ids.length != values.length) {
+                return bridgeJsonFailure("invalid position arrays");
+            }
+            if (diLink5BridgeExpired(request)) {
+                return bridgeJsonFailure("vehicle request expired before actuation");
+            }
+            result.putBoolean("success", true);
+            result.putString("json", VehicleActuatorBridge.runDiLink5Request(
+                    diLink5BridgeDeadline(request),
+                    diLink5BridgeModeGeneration(request),
+                    diLink5BridgeAccAuthoritative(request),
+                    diLink5BridgeAccOn(request),
+                    () -> BodyworkSeatProbe.writeAxes(
+                            getApplicationContext(), ids, values).toString()));
+            return result;
+        }
+
+        if (VehicleActuatorBridge.DILINK5_AMBIENT_READ.equals(operation)) {
+            requireDiLink5ModeCurrent(request);
+            org.json.JSONObject ambient = AmbientProbe.read(getApplicationContext());
+            if (ambient == null) return bridgeFailure("ambient state unavailable");
+            result.putBoolean("success", true);
+            result.putString("json", ambient.toString());
+            return result;
+        }
+
+        if (VehicleActuatorBridge.DILINK5_AMBIENT_APPLY.equals(operation)) {
+            String raw = request.getStringExtra(
+                    VehicleActuatorBridge.DILINK5_AMBIENT_STATE);
+            if (raw == null) return bridgeFailure("invalid ambient state");
+            if (diLink5BridgeExpired(request)) {
+                return bridgeFailure("vehicle request expired before actuation");
+            }
+            org.json.JSONObject applied = VehicleActuatorBridge.runDiLink5Request(
+                    diLink5BridgeDeadline(request),
+                    diLink5BridgeModeGeneration(request),
+                    diLink5BridgeAccAuthoritative(request),
+                    diLink5BridgeAccOn(request),
+                    () -> AmbientProbe.apply(
+                            getApplicationContext(), new org.json.JSONObject(raw)));
+            result.putBoolean("success", applied.optBoolean("applied", false));
+            result.putString("json", applied.toString());
+            return result;
+        }
+
+        if (VehicleActuatorBridge.DILINK5_AMBIENT_COLOUR_MAX.equals(operation)) {
+            requireDiLink5ModeCurrent(request);
+            result.putBoolean("success", true);
+            result.putInt(
+                    VehicleActuatorBridge.DILINK5_AMBIENT_COLOUR_MAX,
+                    AmbientProbe.colourMax(getApplicationContext()));
+            return result;
+        }
+
+        return bridgeFailure("unknown vehicle operation");
+    }
+
+    private static boolean diLink5ModeCurrent(Intent request) {
+        DiLink5Platform.refreshActiveMode();
+        return DiLink5Platform.isSelected()
+                && DiLink5Platform.matchesActiveModeGeneration(
+                        diLink5BridgeModeGeneration(request));
+    }
+
+    private static void requireDiLink5ModeCurrent(Intent request) {
+        if (!diLink5ModeCurrent(request)) {
+            throw new IllegalStateException("vehicle mode changed");
+        }
+    }
+
+    private static String diLink5BridgeModeGeneration(Intent request) {
+        return request.getStringExtra(
+                VehicleActuatorBridge.DILINK5_MODE_GENERATION);
+    }
+
+    private static boolean diLink5BridgeExpired(Intent request) {
+        long deadline = diLink5BridgeDeadline(request);
+        return deadline <= 0L || SystemClock.elapsedRealtime() >= deadline;
+    }
+
+    private static long diLink5BridgeDeadline(Intent request) {
+        return request.getLongExtra(
+                VehicleActuatorBridge.DILINK5_BRIDGE_DEADLINE, 0L);
+    }
+
+    private static boolean diLink5BridgeAccAuthoritative(Intent request) {
+        return request.getBooleanExtra(
+                VehicleActuatorBridge.DILINK5_ACC_AUTHORITATIVE, false);
+    }
+
+    private static boolean diLink5BridgeAccOn(Intent request) {
+        return request.getBooleanExtra(
+                VehicleActuatorBridge.DILINK5_ACC_ON, false);
+    }
+
+    private static Bundle bridgeJsonFailure(String message) {
+        try {
+            Bundle result = bridgeFailure(message);
+            result.putString("json", new org.json.JSONObject()
+                    .put("accepted", false)
+                    .put("movementBlocked", true)
+                    .put("error", message)
+                    .toString());
+            return result;
+        } catch (org.json.JSONException impossible) {
+            return bridgeFailure(message);
+        }
+    }
+
+    private static Bundle bridgeFailure(String message) {
+        Bundle result = new Bundle();
+        result.putBoolean("success", false);
+        result.putString("error", message != null ? message : "vehicle request failed");
+        return result;
+    }
+
+    private static void sendDiLink5BridgeResult(
+            ResultReceiver receiver, Bundle result) {
+        if (receiver == null) return;
+        receiver.send(result != null && result.getBoolean("success") ? 1 : 0, result);
+    }
+
     private boolean submitGuardedActuation(
             String guardKey, String description, Runnable actuation) {
         ExecutorService executor = guardedActuatorExecutor;
@@ -272,6 +554,56 @@ public class VehicleActuatorService extends Service {
 
     private static boolean isAppProcessActionBlocked(String guardKey) {
         return DrivingSafetyGuard.isActionBlockedViaDaemon(guardKey);
+    }
+
+    private static boolean setBluetoothEnabled(boolean enabled) {
+        try {
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            if (adapter == null) {
+                logger.warn("Bluetooth adapter unavailable");
+                return false;
+            }
+
+            int state = adapter.getState();
+            if (bluetoothStateMatches(adapter, state, enabled)) return true;
+
+            boolean accepted = enabled ? adapter.enable() : adapter.disable();
+            state = adapter.getState();
+            boolean movingTowardTarget = enabled
+                    ? state == BluetoothAdapter.STATE_TURNING_ON
+                    : state == BluetoothAdapter.STATE_TURNING_OFF;
+            if (!accepted
+                    && !bluetoothStateMatches(adapter, state, enabled)
+                    && !movingTowardTarget) {
+                logger.warn("Bluetooth " + (enabled ? "enable" : "disable")
+                        + " request rejected at state=" + state);
+                return false;
+            }
+
+            long deadline = SystemClock.elapsedRealtime() + BLUETOOTH_VERIFY_TIMEOUT_MS;
+            while (SystemClock.elapsedRealtime() < deadline) {
+                state = adapter.getState();
+                if (bluetoothStateMatches(adapter, state, enabled)) return true;
+                SystemClock.sleep(BLUETOOTH_VERIFY_POLL_MS);
+            }
+            logger.warn("Bluetooth " + (enabled ? "enable" : "disable")
+                    + " was accepted but did not reach enabled=" + enabled
+                    + " (last=" + state + ")");
+            return false;
+        } catch (Throwable failure) {
+            logger.warn("Bluetooth " + (enabled ? "enable" : "disable")
+                    + " failed: " + failure.getMessage());
+            return false;
+        }
+    }
+
+    private static boolean bluetoothStateMatches(
+            BluetoothAdapter adapter, int state, boolean enabled) {
+        if (state == BluetoothAdapter.STATE_TURNING_ON
+                || state == BluetoothAdapter.STATE_TURNING_OFF) {
+            return false;
+        }
+        return adapter.isEnabled() == enabled;
     }
 
     /**
@@ -495,6 +827,8 @@ public class VehicleActuatorService extends Service {
     private boolean setMirrorsFolded(boolean fold) {
         Context bydContext = BydDeviceHelper.withBydPermissionBypass(getApplicationContext());
         int value = BydConstants.mirrorFoldCommand(fold);
+        if (DiLink5Platform.isSelected()
+                && setDiLink5MirrorsFolded(bydContext, fold, value)) return true;
         Object settingDevice = BydDeviceHelper.getDevice(
                 BydConstants.MIRROR_FOLD_SETTING_DEVICE_CLASS, bydContext);
         int code = Integer.MIN_VALUE;
@@ -558,6 +892,30 @@ public class VehicleActuatorService extends Service {
         return setMirrorsFoldedViaLegacyBodywork(bydContext, fold);
     }
 
+    private boolean setDiLink5MirrorsFolded(Context bydContext, boolean fold, int value) {
+        Object mirrorDevice = BydDeviceHelper.getDevice(
+                BydConstants.REAR_VIEW_MIRROR_DEVICE_CLASS, bydContext);
+        if (fold && isAppProcessActionBlocked(
+                DrivingSafetyGuard.GUARD_MIRROR_FOLD)) return false;
+        Object result = BydDeviceHelper.callMethod(
+                mirrorDevice, "setAutoExternalRearMirrorFoldState", value);
+        if (result instanceof Number && ((Number) result).intValue() == 0) {
+            logManualMirrorReadback(bydContext, value);
+            return true;
+        }
+
+        Object bodyworkDevice = BydDeviceHelper.getDevice(BODYWORK_DEVICE, bydContext);
+        if (fold && isAppProcessActionBlocked(
+                DrivingSafetyGuard.GUARD_MIRROR_FOLD)) return false;
+        result = BydDeviceHelper.callMethod(
+                bodyworkDevice, "setAutoExternalRearMirrorFoldState", value);
+        if (result instanceof Number && ((Number) result).intValue() == 0) {
+            logManualMirrorReadback(bydContext, value);
+            return true;
+        }
+        return false;
+    }
+
     private void logManualMirrorReadback(Context bydContext, int expected) {
         Object stateDevice = BydDeviceHelper.getDevice(
                 BydConstants.REAR_VIEW_MIRROR_DEVICE_CLASS, bydContext);
@@ -592,6 +950,7 @@ public class VehicleActuatorService extends Service {
             Method m = device.getClass().getMethod("setMirrorFoldState", int.class);
             if (fold && isAppProcessActionBlocked(
                     DrivingSafetyGuard.GUARD_MIRROR_FOLD)) return false;
+            if (VehicleActuatorBridge.isDiLink5RequestExpired()) return false;
             Object r = m.invoke(device, val);
             // CHECK the result. This used to `return true` on any non-throwing invoke, so a
             // HAL that refused the write (BODYWORK_COMMAND_FAILED = -2147482648, returned
@@ -656,6 +1015,7 @@ public class VehicleActuatorService extends Service {
         try {
             Method setter = device.getClass().getMethod(
                     "setAutoExternalRearMirrorFollowUpSwitch", int.class);
+            if (VehicleActuatorBridge.isDiLink5RequestExpired()) return false;
             Object result = setter.invoke(device, value);
             boolean accepted = isWriteAccepted(device, result);
             logger.info("setAutoExternalRearMirrorFollowUpSwitch(" + value + ") returned "
@@ -682,27 +1042,31 @@ public class VehicleActuatorService extends Service {
     }
 
     /**
-     * HUD on/off + brightness (0..100). The OEM reference calls
-     * {@code BYDAutoSettingDevice.setHUDBrightness(int)} from the app process; run it here in
-     * the same environment. Accept-on-no-throw.
+     * HUD brightness (0..100) from the app process. Newer firmware exposes
+     * {@code setHudBrightness(int)}; the older capitalization remains a compatibility fallback.
+     * Accept-on-no-throw.
      */
     private boolean setHud(int level) {
         if (level < 0 || level > 100) return false;
         Object device = com.overdrive.app.byd.BydDeviceHelper.getDevice(SETTING_DEVICE, getApplicationContext());
         if (device == null) { Log.w(TAG, "setting device unavailable"); return false; }
-        try {
-            Method m = device.getClass().getMethod("setHUDBrightness", int.class);
-            if (isAppProcessActionBlocked(
-                    DrivingSafetyGuard.GUARD_DISPLAY_BRIGHTNESS)) return false;
-            m.invoke(device, level);
-            return true;
-        } catch (NoSuchMethodException nsme) {
-            Log.w(TAG, "setHUDBrightness absent on this trim");
-            return false;
-        } catch (Throwable t) {
-            Log.w(TAG, "setHUDBrightness failed: " + t.getMessage());
-            return false;
+        if (isAppProcessActionBlocked(
+                DrivingSafetyGuard.GUARD_DISPLAY_BRIGHTNESS)) return false;
+        if (DiLink5Platform.isSelected()) {
+            boolean invoked = BydDeviceHelper.invokeFirstAvailableIntMethod(
+                    device, level, "setHudBrightness", "setHUDBrightness");
+            if (!invoked) Log.w(TAG, "HUD brightness setter unavailable or failed");
+            return invoked;
         }
+        try {
+            device.getClass().getMethod("setHUDBrightness", int.class).invoke(device, level);
+            return true;
+        } catch (NoSuchMethodException absent) {
+            Log.w(TAG, "setHUDBrightness absent on this trim");
+        } catch (Throwable failed) {
+            Log.w(TAG, "setHUDBrightness failed: " + failed.getMessage());
+        }
+        return false;
     }
 
     /**
@@ -795,19 +1159,15 @@ public class VehicleActuatorService extends Service {
     }
 
     /**
-     * Powertrain mode (EV/HEV) via {@code BYDAutoEnergyDevice.setEnergyMode(int)}, run here in the
+     * Powertrain mode (EV/HEV) via the runtime-resolved ENERGY_MODE_SET feature, run here in the
      * real app process with a handle resolved from {@code getApplicationContext()}.
      *
      * <p>Only in-domain values are written; {@code 0} (STOP) is refused because it is not a user
      * powertrain preference. It is still a valid current readback while the car is stationary, so
      * it must not block a requested EV/HEV transition. STOP is never armed as a rollback command.
-     * The result IS inspected, using the same convention as the daemon-side judge: compare against
-     * the device's own {@code ENERGY_COMMAND_SUCCESS} constant when the firmware exposes it, else
-     * accept any non-negative (documented failures are large negatives returned WITHOUT throwing).
-     * Hardcoding {@code == 0} here would report REFUSED for a success on any firmware whose SUCCESS
-     * constant is non-zero, disagreeing with the daemon's verdict on the identical write. A
-     * post-write read of the axis is the only evidence that distinguishes an
-     * accepted-and-applied write from an accepted-and-ignored one.
+     * Generic feature writes use the SDK's non-negative-success convention. A post-write read of
+     * getEnergyMode() is the only evidence that distinguishes an accepted-and-applied write from
+     * an accepted-and-ignored one.
      *
      * <p>The write runs on one serialized executor, not {@code onStartCommand}'s main thread. A
      * generation ticket plus a one-slot conflating queue gives latest-request-wins behavior without
@@ -1015,7 +1375,7 @@ public class VehicleActuatorService extends Service {
                     bydContext, device, "Energy");
             Log.i(TAG, "energy device activation=" + activated);
         } catch (Throwable t) {
-            // The same activation step is advisory in collector init; the named setter may still
+            // The same activation step is advisory in collector init; the feature write may still
             // work on firmware whose manager API is absent.
             Log.w(TAG, "energy device activation failed: " + t.getMessage());
         }
@@ -1031,22 +1391,29 @@ public class VehicleActuatorService extends Service {
             return null;
         }
         try {
-            Method m = null;
-            int preference =
-                    com.overdrive.app.byd.VehicleActuatorBridge
-                            .mandatoryElectricStateForEnergyMode(task.mode);
-            if (preference > 0) {
-                int selectedMode = readEnergyMode(
-                        device, ENERGY_READ_TIMEOUT_MS, true);
-                if (isUserWritableEnergyMode(selectedMode)) {
-                    setterName = "setMandatoryElectricPreference";
-                    setterValue = preference;
-                    preferenceAxis = true;
-                } else {
-                    m = device.getClass().getMethod("setEnergyMode", int.class);
-                }
+            Method setter = null;
+            if (DiLink5Platform.isSelected()) {
+                setterName = "setEnergyModeRaw";
+                task.rawEnergyAxis = true;
             } else {
-                m = device.getClass().getMethod("setEnergyMode", int.class);
+                int preference =
+                        com.overdrive.app.byd.VehicleActuatorBridge
+                                .mandatoryElectricStateForEnergyMode(task.mode);
+                if (preference > 0) {
+                    int selectedMode = readEnergyMode(
+                            device, ENERGY_READ_TIMEOUT_MS, true);
+                    if (isUserWritableEnergyMode(selectedMode)) {
+                        setterName = "setMandatoryElectricPreference";
+                        setterValue = preference;
+                        preferenceAxis = true;
+                    } else {
+                        setter = device.getClass().getMethod(
+                                "setEnergyMode", int.class);
+                    }
+                } else {
+                    setter = device.getClass().getMethod(
+                            "setEnergyMode", int.class);
+                }
             }
             task.preferenceAxis = preferenceAxis;
             if (!task.compensation) {
@@ -1106,19 +1473,33 @@ public class VehicleActuatorService extends Service {
                     return null;
                 }
             }
-            Object result = task.invokeSetter(m, device, setterValue);
+            Object result = task.invokeSetter(setter, device, setterValue);
             if (result == EnergyHalTask.INVOCATION_SKIPPED) {
                 Log.i(TAG, "energy_mode mode=" + task.mode + " sourceGeneration="
                         + task.sourceGeneration
                         + " skipped: cancelled or superseded at setter invocation gate");
                 return null;
             }
-            accepted = isWriteAccepted(device, result);
-            Log.i(TAG, setterName + "(" + setterValue + ") desiredMode=" + task.mode
-                    + " sourceGeneration=" + task.sourceGeneration
-                    + " returned " + result + " -> "
-                    + (accepted ? "ACCEPTED" : "REFUSED"));
-        } catch (NoSuchMethodException nsme) {
+            if (task.rawEnergyAxis) {
+                int code = result instanceof Number
+                        ? ((Number) result).intValue() : Integer.MIN_VALUE;
+                accepted = code >= 0;
+                Log.i(TAG, setterName + " mode=" + setterValue
+                        + " feature=" + com.overdrive.app.byd.BydFeatureIds.ENERGY_MODE_SET
+                        + " raw=" + com.overdrive.app.byd.VehicleActuatorBridge
+                        .rawEnergyModeValue(setterValue)
+                        + " desiredMode=" + task.mode
+                        + " sourceGeneration=" + task.sourceGeneration
+                        + " returned " + code + " -> "
+                        + (accepted ? "ACCEPTED" : "REFUSED"));
+            } else {
+                accepted = isWriteAccepted(device, result);
+                Log.i(TAG, setterName + "(" + setterValue + ") desiredMode=" + task.mode
+                        + " sourceGeneration=" + task.sourceGeneration
+                        + " returned " + result + " -> "
+                        + (accepted ? "ACCEPTED" : "REFUSED"));
+            }
+        } catch (NoSuchMethodException absent) {
             Log.w(TAG, "compatible energy preference setter absent on this trim");
             return null;
         } catch (Throwable t) {
@@ -1274,7 +1655,8 @@ public class VehicleActuatorService extends Service {
         }
     }
 
-    private static int readEnergyModeDirect(Object device, boolean preferenceAxis) {
+    private static int readEnergyModeDirect(
+            Object device, boolean preferenceAxis) {
         if (preferenceAxis) {
             return com.overdrive.app.byd.VehicleActuatorBridge
                     .energyModeForMandatoryElectricState(
@@ -1282,10 +1664,11 @@ public class VehicleActuatorService extends Service {
                                     .readMandatoryElectricState(device));
         }
         try {
-            Object result = device.getClass().getMethod("getEnergyMode").invoke(device);
+            Object result = device.getClass()
+                    .getMethod("getEnergyMode")
+                    .invoke(device);
             if (result instanceof Number) return ((Number) result).intValue();
         } catch (Throwable ignored) {
-            // The final verification log distinguishes no answer from a real axis value.
         }
         return Integer.MIN_VALUE;
     }
@@ -1375,7 +1758,6 @@ public class VehicleActuatorService extends Service {
         private final java.util.concurrent.locks.ReentrantLock invocationGate =
                 new java.util.concurrent.locks.ReentrantLock();
         volatile Object device;
-        volatile boolean preferenceAxis;
         private EnergyWriteResult result;
         private boolean completed;
         private volatile boolean cancelled;
@@ -1383,6 +1765,8 @@ public class VehicleActuatorService extends Service {
         private volatile boolean compensationRequired;
         private volatile boolean abandoned;
         private volatile boolean persistedReconciliationRequired;
+        volatile boolean preferenceAxis;
+        volatile boolean rawEnergyAxis;
         private volatile int previousMode = Integer.MIN_VALUE;
         private volatile int compensationClaim = Integer.MIN_VALUE;
         private volatile boolean compensationPreconfirmed;
@@ -1434,18 +1818,26 @@ public class VehicleActuatorService extends Service {
             previousMode = mode;
         }
 
-        Object invokeSetter(Method method, Object target, int value) throws Exception {
+        Object invokeSetter(Method method, Object target, int value)
+                throws Exception {
             invocationGate.lock();
             try {
                 if (cancelled || !isEnergyHalTaskCurrent(this)) {
                     return INVOCATION_SKIPPED;
                 }
                 actuationStarted = true;
-                Object result = method != null
-                        ? method.invoke(target, value)
-                        : Integer.valueOf(
-                                com.overdrive.app.byd.VehicleActuatorBridge
-                                        .writeMandatoryElectricState(target, value));
+                Object result;
+                if (rawEnergyAxis) {
+                    result = Integer.valueOf(
+                            com.overdrive.app.byd.VehicleActuatorBridge
+                                    .writeEnergyModeRaw(target, value));
+                } else if (method != null) {
+                    result = method.invoke(target, value);
+                } else {
+                    result = Integer.valueOf(
+                            com.overdrive.app.byd.VehicleActuatorBridge
+                                    .writeMandatoryElectricState(target, value));
+                }
                 if (cancelled || !isEnergyHalTaskCurrent(this)) {
                     if (!compensation) compensationRequired = true;
                 }
@@ -2391,6 +2783,8 @@ public class VehicleActuatorService extends Service {
     private void shutdownInstanceExecutors() {
         ExecutorService actuatorExecutor = guardedActuatorExecutor;
         if (actuatorExecutor != null) actuatorExecutor.shutdownNow();
+        ExecutorService bridgeExecutor = diLink5BridgeExecutor;
+        if (bridgeExecutor != null) bridgeExecutor.shutdownNow();
         ExecutorService executor = energyExecutor;
         if (executor != null) executor.shutdownNow();
         synchronized (energyReconcileLock) {

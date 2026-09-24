@@ -861,7 +861,9 @@ BYD.performance = {
         const badge = document.getElementById('topLiveBadge');
         if (!badge) return;
         badge.classList.toggle('is-live', !!live);
-        badge.textContent = live ? 'Live' : 'Paused';
+        badge.textContent = live
+            ? ((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('performance.live') : 'Live')
+            : ((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('performance.paused') : 'Paused');
     },
 
     renderTopUnavailable(error) {
@@ -873,13 +875,17 @@ BYD.performance = {
         this._setText('topMemoryDetail', '--');
         this._setText('topSwap', '--');
         this._setText('topSwapDetail', '--');
-        this._setText('topUpdated', error ? 'Unavailable' : 'Waiting');
+        this._setText('topUpdated', error
+            ? ((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('performance.unavailable') : 'Unavailable')
+            : ((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('performance.waiting') : 'Waiting'));
         const rows = document.getElementById('topProcessRows');
         if (rows) {
             rows.textContent = '';
             const empty = document.createElement('div');
             empty.className = 'process-empty';
-            empty.textContent = error || 'Process data unavailable';
+            empty.textContent = error || ((BYD.i18n && BYD.i18n.t)
+                ? BYD.i18n.t('performance.process_unavailable')
+                : 'Process data unavailable');
             rows.appendChild(empty);
         }
     },
@@ -932,7 +938,7 @@ BYD.performance = {
         const duration = Number(data.durationMs);
         let updated = isFinite(sampledAt)
             ? new Date(sampledAt).toLocaleTimeString()
-            : 'Updated';
+            : ((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('performance.meta_updated') : 'Updated');
         if (isFinite(duration)) updated += ' · ' + Math.round(duration) + ' ms';
         this._setText('topUpdated', updated);
 
@@ -945,7 +951,9 @@ BYD.performance = {
         if (!processes.length) {
             const empty = document.createElement('div');
             empty.className = 'process-empty';
-            empty.textContent = 'No process rows returned';
+            empty.textContent = (BYD.i18n && BYD.i18n.t)
+                ? BYD.i18n.t('performance.no_process_rows')
+                : 'No process rows returned';
             rows.appendChild(empty);
             return;
         }
@@ -3244,8 +3252,11 @@ BYD.performance = {
         // Pre-populate the inputs from the current status
         var input = document.getElementById('sohCapacityModalInput');
         var modelSel = document.getElementById('sohCapacityModalModel');
+        var saveButton = document.getElementById('sohCapacityModalSave');
         if (input) input.value = '';
         if (modelSel) modelSel.innerHTML = '';
+        if (saveButton) saveButton.disabled = false;
+        this._sohModelChanged = false;
 
         // Fetch current state in parallel: nominal + model + manifest
         var nominalReq = new XMLHttpRequest();
@@ -3278,14 +3289,9 @@ BYD.performance = {
                 selReq.onload = function() {
                     try {
                         var sel = JSON.parse(selReq.responseText);
-                        var modelId = (sel && sel.modelId) ? sel.modelId : '';
-                        // If no selected model came back, fall back to the
-                        // first model in the manifest — every dropdown should
-                        // surface a sensible default capacity on open.
-                        if (!modelId && modelSel && modelSel.options.length) {
-                            modelId = modelSel.options[0].value;
-                        }
-                        if (modelSel && modelId) modelSel.value = modelId;
+                        var modelId = (sel && sel.selectedModelId)
+                            ? sel.selectedModelId : '';
+                        if (modelSel) modelSel.value = modelId;
                         if (input && (!input.value || input.value === '')) {
                             var kwh = self._modelNominalById[modelId];
                             if (typeof kwh === 'number' && kwh > 0) {
@@ -3307,6 +3313,10 @@ BYD.performance = {
         if (!modelSel) return;
         modelSel.innerHTML = '';
         var models = (manifest && manifest.models) ? manifest.models : [];
+        var custom = document.createElement('option');
+        custom.value = '';
+        custom.textContent = BYD.i18n.t('charge.filter_custom');
+        modelSel.appendChild(custom);
         // Cache so the change handler can look up nominalKwh by id without
         // re-parsing the manifest each time the user moves the dropdown.
         this._modelNominalById = {};
@@ -3333,6 +3343,7 @@ BYD.performance = {
         // one. Mirrors the Android dialog's behavior.
         var self = this;
         modelSel.onchange = function() {
+            self._sohModelChanged = true;
             var input = document.getElementById('sohCapacityModalInput');
             if (!input) return;
             var kwh = self._modelNominalById[modelSel.value];
@@ -3351,45 +3362,76 @@ BYD.performance = {
         var self = this;
         var input = document.getElementById('sohCapacityModalInput');
         var modelSel = document.getElementById('sohCapacityModalModel');
+        var saveButton = document.getElementById('sohCapacityModalSave');
         var kwh = input ? parseFloat(input.value) : NaN;
-        // Floor is 8 (not 15) to match the backend's PHEV-aware range — the
-        // smallest BYD Blade DM-i gross packs sit below 15 kWh (e.g. ~8.3-12.9).
-        if (isNaN(kwh) || kwh < 8 || kwh > 120) {
-            alert(BYD.i18n.t('soh.modal_capacity_label') + ': 8 - 120');
+        if (isNaN(kwh) || kwh < 5 || kwh > 120) {
+            alert(BYD.i18n.t('soh.modal_capacity_label') + ': 5 - 120');
             return;
         }
         var modelId = modelSel ? modelSel.value : '';
 
-        // Persist nominal first, then model. Each request is independent;
-        // a failure on either leaves the other applied (intentional — the
-        // user can retry a single field).
-        var nomXhr = new XMLHttpRequest();
-        nomXhr.open('POST', '/api/performance/soh/nominal', true);
-        nomXhr.setRequestHeader('Content-Type', 'application/json');
-        nomXhr.onload = function() {
-            if (modelId) {
-                var modelXhr = new XMLHttpRequest();
-                modelXhr.open('POST', '/api/models/selected', true);
-                modelXhr.setRequestHeader('Content-Type', 'application/json');
-                modelXhr.onload = function() {
-                    self.closeSohCapacityModal();
-                    self.fetchSohStatus();
-                };
-                modelXhr.onerror = function() {
-                    self.closeSohCapacityModal();
-                    self.fetchSohStatus();
-                };
-                modelXhr.send(JSON.stringify({ modelId: modelId }));
-            } else {
-                self.closeSohCapacityModal();
-                self.fetchSohStatus();
+        function postJson(url, payload, successKey, done) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', url, true);
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            xhr.onload = function() {
+                var data;
+                try { data = JSON.parse(xhr.responseText); } catch (_) { data = {}; }
+                if (xhr.status >= 200 && xhr.status < 300 && data[successKey] === true) {
+                    done(null);
+                } else {
+                    done(data.error || ('HTTP ' + xhr.status));
+                }
+            };
+            xhr.onerror = function() { done('Network error'); };
+            xhr.send(JSON.stringify(payload));
+        }
+
+        function finish(error) {
+            if (saveButton) saveButton.disabled = false;
+            if (error) {
+                alert(error);
+                return;
             }
-        };
-        nomXhr.onerror = function() {
             self.closeSohCapacityModal();
             self.fetchSohStatus();
-        };
-        nomXhr.send(JSON.stringify({ nominalKwh: kwh }));
+        }
+
+        function saveNominal() {
+            postJson(
+                '/api/performance/soh/nominal',
+                { nominalKwh: kwh },
+                'success',
+                finish
+            );
+        }
+
+        if (saveButton) saveButton.disabled = true;
+        if (this._sohModelChanged) {
+            if (modelId) {
+                postJson(
+                    '/api/models/selected',
+                    { modelId: modelId, nominalKwh: kwh },
+                    'ok',
+                    finish
+                );
+            } else {
+                postJson(
+                    '/api/models/selected',
+                    { clearModelSelection: true },
+                    'ok',
+                    function(error) {
+                        if (error) {
+                            finish(error);
+                        } else {
+                            saveNominal();
+                        }
+                    }
+                );
+            }
+        } else {
+            saveNominal();
+        }
     },
 
     resetSohCapacityToAuto: function() {

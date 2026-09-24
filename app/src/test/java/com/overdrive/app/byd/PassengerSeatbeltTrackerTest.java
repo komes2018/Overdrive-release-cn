@@ -13,35 +13,50 @@ public class PassengerSeatbeltTrackerTest {
     public void emptySeatAtStartupNeverPublishesBuckled() {
         PassengerSeatbeltTracker tracker = new PassengerSeatbeltTracker();
 
-        assertReading(tracker.resolveGetter(1, 100L), 1, UNKNOWN, false, false);
-        assertReading(tracker.resolveGetter(1, 600L), 1, UNKNOWN, false, false);
-        assertEquals("AWAITING_CLOSED_DOOR_UNBUCKLED", tracker.diagnosticState());
+        assertReading(tracker.resolveGetter(1, UNKNOWN, 100L), 1, UNKNOWN, false, false);
+        assertReading(tracker.resolveGetter(1, UNKNOWN, 600L), 1, UNKNOWN, false, false);
+        assertEquals("AWAITING_CONFIRMED_UNBUCKLED", tracker.diagnosticState());
     }
 
     @Test
-    public void fullPassengerLifecycleSuppressesEveryEmptySeatRebound() {
+    public void closedDoorUnbuckledArmsWhenOccupancyIsUnavailable() {
         PassengerSeatbeltTracker tracker = new PassengerSeatbeltTracker();
 
         assertTrue(tracker.onPassengerDoorState(true));
-        assertReading(tracker.resolveGetter(1, 100L), 1, UNKNOWN, false, false);
-        assertReading(tracker.resolveGetter(0, 200L), 0, 0, false, false);
+        assertReading(tracker.resolveGetter(1, UNKNOWN, 100L), 1, UNKNOWN, false, false);
+        assertReading(tracker.resolveGetter(0, UNKNOWN, 200L), 0, 0, false, false);
         assertTrue(tracker.onPassengerDoorState(false));
 
-        // A raw 1 immediately after the door closes is still the empty-seat idle value.
-        assertReading(tracker.resolveGetter(1, 300L), 1, UNKNOWN, false, false);
-        assertReading(tracker.resolveGetter(0, 400L), 0, 0, true, false);
-        assertReading(tracker.resolveGetter(1, 500L), 1, 1, true, false);
-        assertReading(tracker.resolveGetter(0, 600L), 0, 0, true, false);
+        // Exact regression sequence: this trim has no occupancy reading, but after the door closes
+        // a real unbuckled 0 must still arm the following buckle transition.
+        assertReading(tracker.resolveGetter(0, UNKNOWN, 300L), 0, 0, true, false);
+        assertReading(tracker.resolveGetter(1, UNKNOWN, 400L), 1, 1, true, false);
+        assertEquals("TRACKING", tracker.diagnosticState());
+    }
 
-        // This is the exact logged failure: unbuckle, door opens, getter rebounds to 1.
+    @Test
+    public void confirmedEmptySeatDoesNotArmUnavailableFallback() {
+        PassengerSeatbeltTracker tracker = new PassengerSeatbeltTracker();
+
+        assertReading(tracker.resolveGetter(0, 0, 100L), 0, 0, false, false);
+        assertReading(tracker.resolveGetter(1, 0, 200L), 1, UNKNOWN, false, false);
+        assertEquals("AWAITING_CONFIRMED_UNBUCKLED", tracker.diagnosticState());
+    }
+
+    @Test
+    public void confirmedOccupiedUnbucklePreservesRealBuckleTransitions() {
+        PassengerSeatbeltTracker tracker = new PassengerSeatbeltTracker();
+
+        assertReading(tracker.resolveGetter(0, 1, 100L), 0, 0, true, false);
+        assertReading(tracker.resolveGetter(1, 1, 200L), 1, 1, true, false);
+        assertReading(tracker.resolveGetter(0, 1, 300L), 0, 0, true, false);
+
+        // Door-open and confirmed-empty evidence both revoke trust for the next passenger.
         assertTrue(tracker.onPassengerDoorState(true));
-        assertReading(tracker.resolveGetter(1, 700L), 1, UNKNOWN, false, false);
+        assertReading(tracker.resolveGetter(1, UNKNOWN, 400L), 1, UNKNOWN, false, false);
         assertTrue(tracker.onPassengerDoorState(false));
-        assertReading(tracker.resolveGetter(1, 800L), 1, UNKNOWN, false, false);
-
-        // A second passenger cycle must establish itself independently.
-        assertReading(tracker.resolveGetter(0, 900L), 0, 0, true, false);
-        assertReading(tracker.resolveGetter(1, 1_000L), 1, 1, true, false);
+        assertReading(tracker.resolveGetter(0, 1, 500L), 0, 0, true, false);
+        assertReading(tracker.resolveGetter(1, 0, 600L), 1, UNKNOWN, false, false);
     }
 
     @Test
@@ -49,11 +64,11 @@ public class PassengerSeatbeltTrackerTest {
         PassengerSeatbeltTracker tracker = new PassengerSeatbeltTracker();
 
         assertTrue(tracker.recordCallback(1, 1_000L));
-        assertReading(tracker.resolveGetter(0, 1_100L), 1, 1, true, true);
-        assertReading(tracker.resolveGetter(1, 1_200L), 1, 1, true, true);
+        assertReading(tracker.resolveGetter(0, UNKNOWN, 1_100L), 1, 1, true, true);
+        assertReading(tracker.resolveGetter(1, UNKNOWN, 1_200L), 1, 1, true, true);
 
         // Once the getter converges, a later real unbuckle is no longer masked.
-        assertReading(tracker.resolveGetter(0, 1_300L), 0, 0, true, false);
+        assertReading(tracker.resolveGetter(0, UNKNOWN, 1_300L), 0, 0, true, false);
     }
 
     @Test
@@ -61,9 +76,12 @@ public class PassengerSeatbeltTrackerTest {
         PassengerSeatbeltTracker tracker = new PassengerSeatbeltTracker();
 
         assertTrue(tracker.recordCallback(1, 1_000L));
-        assertReading(tracker.resolveGetter(0, 2_000L), 1, 1, true, true);
+        assertReading(tracker.resolveGetter(0, UNKNOWN, 2_000L), 1, 1, true, true);
         assertReading(
-                tracker.resolveGetter(0, 1_000L + PassengerSeatbeltTracker.CALLBACK_OVERRIDE_MS + 1L),
+                tracker.resolveGetter(
+                        0,
+                        UNKNOWN,
+                        1_000L + PassengerSeatbeltTracker.CALLBACK_OVERRIDE_MS + 1L),
                 0, 0, true, false);
     }
 
@@ -73,7 +91,7 @@ public class PassengerSeatbeltTrackerTest {
 
         assertTrue(tracker.recordCallback(1, 1_000L));
         assertTrue(tracker.onPassengerDoorState(true));
-        assertReading(tracker.resolveGetter(1, 1_100L), 1, UNKNOWN, false, false);
+        assertReading(tracker.resolveGetter(1, UNKNOWN, 1_100L), 1, UNKNOWN, false, false);
         assertFalse(tracker.onPassengerDoorState(true));
     }
 

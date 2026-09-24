@@ -851,9 +851,10 @@ public final class RecordingsIndex {
                 + " mp4_mtime, sidecar_mtime, schema_version, peak_severity, peak_proximity,"
                 + " person_count, vehicle_count, bike_count, animal_count, hero_thumb,"
                 + " actor_classes, place_short, place_medium, place_display, place_country,"
-                + " place_source, start_lat, start_lng, ymd, storage) KEY(recording_id) VALUES ("
+                + " place_source, start_lat, start_lng, ymd, storage,"
+                + " parking_session_id, event_cameras, peak_confidence) KEY(recording_id) VALUES ("
                 + "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-                + " ?, ?, ?, ?, ?, ?, ?, ?)";
+                + " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
             try (PreparedStatement ps = connection.prepareStatement(sql)) {
                 ps.setString(1, r.recordingId);
                 ps.setString(2, r.filename);
@@ -887,6 +888,9 @@ public final class RecordingsIndex {
                 setNullableDouble(ps, 30, r.startLng);
                 ps.setString(31, r.ymd);
                 setNullableString(ps, 32, r.storage);
+                setNullableString(ps, 33, r.parkingSessionId);
+                setNullableString(ps, 34, r.eventCameras);
+                setNullableDouble(ps, 35, r.peakConfidence);
                 ps.executeUpdate();
                 invalidateStatsCache();   // row counts/bytes changed
                 return Boolean.TRUE;
@@ -1711,6 +1715,10 @@ public final class RecordingsIndex {
          * the auto-include for backward compat with web clients.)
          */
         public java.util.Set<String> types;
+        /** Inclusive epoch-ms lower bound for recording timestamp. null = unbounded. */
+        public Long fromMs;
+        /** Inclusive epoch-ms upper bound for recording timestamp. null = unbounded. */
+        public Long toMs;
         /** "yyyy-MM-dd" local; null = no date narrowing. */
         public String date;
         /** lowercase class names ("person", "vehicle", ...). Empty = no narrowing. */
@@ -1748,6 +1756,12 @@ public final class RecordingsIndex {
          * before the lazy backfill completes.
          */
         public Set<String> storages;
+        /** Exact parking session id (Parking Intelligence). null = no narrowing. */
+        public String parkingSessionId;
+        /** Lowercase quadrant names ("front","right","rear","left") — any match. Empty = none. */
+        public Set<String> cameras;
+        /** Minimum peak confidence of a non-static actor (0..1). null = no narrowing. */
+        public Double minConfidence;
     }
 
     /**
@@ -1962,6 +1976,14 @@ public final class RecordingsIndex {
     private static void buildWhere(Filter f, StringBuilder where, List<Object> args) {
         appendAnd(where, "is_available = TRUE");
         if (f == null) return;
+        if (f.fromMs != null) {
+            appendAnd(where, "ts_ms >= ?");
+            args.add(f.fromMs);
+        }
+        if (f.toMs != null) {
+            appendAnd(where, "ts_ms <= ?");
+            args.add(f.toMs);
+        }
         if (f.types != null && !f.types.isEmpty()) {
             // Multi-type path: literal IN(...) — caller is explicit about
             // which types to include. No auto-folding (single-type path
@@ -2028,6 +2050,26 @@ public final class RecordingsIndex {
         if (f.country != null && !f.country.isEmpty()) {
             appendAnd(where, "LOWER(place_country) = ?");
             args.add(f.country.toLowerCase(Locale.US));
+        }
+        if (f.parkingSessionId != null && !f.parkingSessionId.isEmpty()) {
+            appendAnd(where, "parking_session_id = ?");
+            args.add(f.parkingSessionId);
+        }
+        if (f.cameras != null && !f.cameras.isEmpty()) {
+            // Same CSV-any pattern as actor_classes.
+            StringBuilder clause = new StringBuilder("(");
+            int i = 0;
+            for (String c : f.cameras) {
+                if (i++ > 0) clause.append(" OR ");
+                clause.append("',' || COALESCE(event_cameras, '') || ',' LIKE ?");
+                args.add("%," + c.toLowerCase(Locale.US) + ",%");
+            }
+            clause.append(")");
+            appendAnd(where, clause.toString());
+        }
+        if (f.minConfidence != null) {
+            appendAnd(where, "peak_confidence >= ?");
+            args.add(f.minConfidence);
         }
         if (f.storages != null && !f.storages.isEmpty()) {
             // Primary match is the indexed `storage` column. For legacy rows
@@ -2106,7 +2148,8 @@ public final class RecordingsIndex {
     private static Filter copyFilter(Filter f) {
         Filter c = new Filter();
         if (f == null) return c;
-        c.type = f.type; c.date = f.date; c.place = f.place;
+        c.type = f.type; c.fromMs = f.fromMs; c.toMs = f.toMs;
+        c.date = f.date; c.place = f.place;
         c.placeContains = f.placeContains;
         c.country = f.country;
         c.types = f.types == null ? null : new HashSet<>(f.types);
@@ -2114,6 +2157,9 @@ public final class RecordingsIndex {
         c.severities = f.severities == null ? null : new HashSet<>(f.severities);
         c.proximities = f.proximities == null ? null : new HashSet<>(f.proximities);
         c.storages = f.storages == null ? null : new HashSet<>(f.storages);
+        c.parkingSessionId = f.parkingSessionId;
+        c.cameras = f.cameras == null ? null : new HashSet<>(f.cameras);
+        c.minConfidence = f.minConfidence;
         return c;
     }
 
@@ -2231,15 +2277,39 @@ public final class RecordingsIndex {
                 }
                 String hero = side.optString("heroThumbnail", null);
                 if (hero != null && !hero.isEmpty()) r.heroThumb = hero;
+                // Parking Intelligence session stamp (v4 sidecar addition).
+                String psid = side.optString("parkingSessionId", null);
+                if (psid != null && !psid.isEmpty()) r.parkingSessionId = clamp(psid, 64);
 
                 JSONArray actors = side.optJSONArray("actors");
                 if (actors != null && actors.length() > 0) {
                     StringBuilder cls = new StringBuilder();
                     Set<String> seen = new HashSet<>();
+                    // Camera + confidence roll-ups over NON-static actors only, so
+                    // a parked car's quadrant/confidence never anchors the filters.
+                    StringBuilder cams = new StringBuilder();
+                    Set<String> camsSeen = new HashSet<>();
+                    double peakConf = -1.0;
                     for (int i = 0; i < actors.length(); i++) {
                         JSONObject a = actors.optJSONObject(i);
                         if (a == null) continue;
                         String c = a.optString("class", "").toLowerCase(Locale.US);
+                        boolean staticForRollup = a.optBoolean("isStaticForTimeline",
+                                a.optBoolean("isStatic", false));
+                        if (!staticForRollup || "person".equals(c)) {
+                            JSONArray acams = a.optJSONArray("cameras");
+                            if (acams != null) {
+                                for (int k = 0; k < acams.length(); k++) {
+                                    String camName = acams.optString(k, "").toLowerCase(Locale.US);
+                                    if (!camName.isEmpty() && camsSeen.add(camName)) {
+                                        if (cams.length() > 0) cams.append(',');
+                                        cams.append(camName);
+                                    }
+                                }
+                            }
+                            double pc = a.optDouble("peakConfidence", -1.0);
+                            if (pc > peakConf) peakConf = pc;
+                        }
                         // Skip static NON-person actors (parked cars, hydrants):
                         // they are background, not threats, and shouldn't surface
                         // a "Vehicle" chip / class filter on the events page.
@@ -2280,6 +2350,8 @@ public final class RecordingsIndex {
                         }
                     }
                     if (cls.length() > 0) r.actorClasses = cls.toString();
+                    if (cams.length() > 0) r.eventCameras = clamp(cams.toString(), 32);
+                    if (peakConf >= 0.0) r.peakConfidence = peakConf;
                 }
 
                 JSONObject geo = side.optJSONObject("geo");
@@ -2440,6 +2512,18 @@ public final class RecordingsIndex {
         double sLng = rs.getDouble("start_lng");
         if (!rs.wasNull()) rec.put("startLng", sLng);
 
+        // v5 Parking Intelligence roll-ups (all optional / null-safe).
+        String psid = rs.getString("parking_session_id");
+        if (psid != null && !psid.isEmpty()) rec.put("parkingSessionId", psid);
+        String cams = rs.getString("event_cameras");
+        if (cams != null && !cams.isEmpty()) {
+            JSONArray camArr = new JSONArray();
+            for (String c : cams.split(",")) if (!c.isEmpty()) camArr.put(c);
+            rec.put("cameras", camArr);
+        }
+        double pconf = rs.getDouble("peak_confidence");
+        if (!rs.wasNull()) rec.put("peakConfidence", Math.round(pconf * 100) / 100.0);
+
         // bucketLabel — used by the native fragment for sticky time-of-day
         // headers without needing the full list. Format: "Today", "Yesterday",
         // or "MMM d, yyyy" — matches RecordingSectionHeaderDecoration.
@@ -2539,6 +2623,10 @@ public final class RecordingsIndex {
         Double startLng;
         String ymd;
         String storage;   // "INTERNAL" / "SD_CARD" / "USB" / null
+        // v5 (Parking Intelligence)
+        String parkingSessionId;
+        String eventCameras;      // CSV of quadrant names for non-static actors
+        Double peakConfidence;    // max peakConfidence over non-static actors
     }
 
     private static final class DirEntry {

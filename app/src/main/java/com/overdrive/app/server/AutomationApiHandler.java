@@ -350,11 +350,19 @@ public final class AutomationApiHandler {
             // the editor they therefore had no publisher at all, which is why gear read "not
             // reported yet on this car" whatever the car was doing. seedForEditor also drives each
             // owned key's live poller.
-            com.overdrive.app.automation.condition.BydEvent.seedForEditor(snapshot);
-            com.overdrive.app.automation.condition.DynamicsEvent.seedForEditor();
-            com.overdrive.app.automation.condition.BlindSpotEvent.seedForEditor();
-            com.overdrive.app.automation.condition.EnergyRegenEvent.seedForEditor();
-            com.overdrive.app.automation.condition.DoorEvent.seedForEditor();
+            com.overdrive.app.byd.BydDataCollector.getInstance()
+                    .runWithDiLink5AutomationFreshness(() -> {
+                        com.overdrive.app.automation.condition.BydEvent
+                                .seedForEditor(snapshot);
+                        com.overdrive.app.automation.condition.DynamicsEvent
+                                .seedForEditor();
+                        com.overdrive.app.automation.condition.BlindSpotEvent
+                                .seedForEditor();
+                        com.overdrive.app.automation.condition.EnergyRegenEvent
+                                .seedForEditor();
+                        com.overdrive.app.automation.condition.DoorEvent
+                                .seedForEditor();
+                    });
             com.overdrive.app.automation.condition.TimeEvent.seedForEditor();
             com.overdrive.app.automation.condition.NetworkEvent.seedForEditor();
         } catch (Throwable t) {

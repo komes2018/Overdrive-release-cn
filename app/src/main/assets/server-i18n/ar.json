@@ -1083,11 +1083,7 @@
     "mqtt_retain": "احتفظ",
     "mqtt_trigger": "رسالة MQTT",
     "mqtt_channel": "قناة",
-    "mqtt_value": "القيمة",
-      "save_seat_position": "حفظ موضع المقعد",
-      "save_seat_position_description": "تخزين موقع القيادة الحالي في فتحة الذاكرة.",
-      "set_seat_position": "مكان السيطرة على المقعد",
-      "set_seat_position_description": "تحميل موقع ذاكرة المقعد. تأكد من حفظ الذاكرة أولا من السيارة. هذا التحكم لا يعمل أثناء إيقاف تشغيل السيارة."
+    "mqtt_value": "القيمة"
   },
   "units": {
     "bar": "bar",

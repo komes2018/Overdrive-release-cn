@@ -64,6 +64,11 @@ public class ModelsApiHandler {
 
     // Per-model download state. Concurrent because handler threads read while downloader writes.
     private static final ConcurrentHashMap<String, DownloadState> downloads = new ConcurrentHashMap<>();
+    // Avoid re-hashing every cached GLB on repeated /list and /status calls.
+    // The key includes file metadata plus the manifest hash, so either an APK
+    // manifest update or an on-disk replacement forces a fresh validation.
+    private static final ConcurrentHashMap<String, Boolean> cachedModelValidations =
+            new ConcurrentHashMap<>();
     private static final Object MODEL_SELECTION_LOCK = new Object();
 
     public static final class SelectedModelConfigUnavailableException
@@ -391,17 +396,21 @@ public class ModelsApiHandler {
         }
         JSONObject patch = new JSONObject();
         boolean modelSelectionChanged = false;
+        boolean selectedModelPhev = false;
         if (incoming.has("modelId")) {
             String id = incoming.optString("modelId");
             // Validate against manifest so a typo or stale client can't poison the config.
             JSONObject manifest = readManifest();
-            if (manifest != null && findModel(manifest, id) == null) {
+            JSONObject selectedModel = manifest != null ? findModel(manifest, id) : null;
+            if (manifest != null && selectedModel == null) {
                 HttpResponse.sendJsonError(out, Messages.get("errors.models_unknown_id_with_id", id));
                 return;
             }
             patch.put("modelId", id);
             patch.put("modelSource", VehicleModelSelection.SOURCE_USER);
             modelSelectionChanged = true;
+            selectedModelPhev =
+                selectedModel != null && selectedModel.optBoolean("phev", false);
         } else if (incoming.optBoolean("clearModelSelection", false)) {
             JSONObject manifest = readManifest();
             String defaultId = manifest != null
@@ -410,6 +419,31 @@ public class ModelsApiHandler {
             patch.put("modelId", defaultId);
             patch.put("modelSource", VehicleModelSelection.SOURCE_UNSET);
             modelSelectionChanged = true;
+        }
+        boolean nominalChangeRequested =
+            incoming.has("nominalKwh") && !incoming.isNull("nominalKwh");
+        double requestedNominalKwh = Double.NaN;
+        if (nominalChangeRequested) {
+            if (!modelSelectionChanged) {
+                HttpResponse.sendJsonError(
+                    out, "nominalKwh requires a model selection");
+                return;
+            }
+            try {
+                requestedNominalKwh = incoming.getDouble("nominalKwh");
+            } catch (Exception invalidNominal) {
+                HttpResponse.sendJsonError(out, "nominalKwh must be a number");
+                return;
+            }
+            double floor = selectedModelPhev ? 5.0 : 15.0;
+            if (!Double.isFinite(requestedNominalKwh)
+                    || requestedNominalKwh < floor
+                    || requestedNominalKwh > 120.0) {
+                HttpResponse.sendJsonError(
+                    out, "nominalKwh must be between " + (int) floor + " and 120");
+                return;
+            }
+            patch.put("nominalKwh", requestedNominalKwh);
         }
         if (incoming.has("color")) {
             String color = incoming.optString("color", "");
@@ -434,6 +468,8 @@ public class ModelsApiHandler {
             return;
         }
         final boolean changesModelSelection = modelSelectionChanged;
+        final boolean changesNominal = nominalChangeRequested;
+        final double replacementNominal = requestedNominalKwh;
         final double selectedModelNominal = changesModelSelection
             ? nominalKwhForModelId(patch.optString("modelId", ""))
             : 0;
@@ -466,7 +502,9 @@ public class ModelsApiHandler {
                     // acquiring its mutation lock. The stable order is always
                     // config -> estimator.
                     final double configuredUserNominal =
-                        UnifiedConfigManager.readVehicleNominalKwhStrict();
+                        changesNominal
+                            ? replacementNominal
+                            : UnifiedConfigManager.readVehicleNominalKwhStrict();
                     final boolean[] configSaved = {false};
                     estimator.runWithEstimatorLock(() -> {
                         if (!estimator.isInitializationReady()) {
@@ -517,6 +555,65 @@ public class ModelsApiHandler {
     }
 
     /**
+     * Returns a cached GLB only when it still matches the effective manifest.
+     *
+     * <p>This matters across app updates: model releases can replace a GLB
+     * without changing its filename. An existence-only cache hit would keep
+     * serving the old geometry forever even after the APK ships a newer
+     * manifest. Size and SHA-256 validation make the next model load download
+     * the replacement automatically.
+     */
+    private static File validatedCachedModelFile(JSONObject entry) {
+        if (entry == null) return null;
+        String fileName = entry.optString("file", "");
+        File file = cachedModelFile(fileName);
+        if (file == null) return null;
+
+        long expectedSize = entry.optLong("sizeBytes", 0);
+        String expectedSha = entry.optString("sha256", "");
+        String validationKey = file.getAbsolutePath()
+                + "|" + file.length()
+                + "|" + file.lastModified()
+                + "|" + expectedSize
+                + "|" + expectedSha.toLowerCase(java.util.Locale.ROOT);
+        Boolean cachedResult = cachedModelValidations.get(validationKey);
+        if (cachedResult == null) {
+            boolean valid = cacheMatchesManifest(
+                    file, expectedSize, expectedSha);
+            if (cachedModelValidations.size() > 128) {
+                cachedModelValidations.clear();
+            }
+            cachedModelValidations.put(validationKey, valid);
+            cachedResult = valid;
+            if (!valid) {
+                logger.warn(TAG + ": cached model is stale or corrupt: "
+                        + fileName);
+            }
+        }
+        return cachedResult ? file : null;
+    }
+
+    /** Package-visible for upgrade/cache validation tests. */
+    static boolean cacheMatchesManifest(
+            File file, long expectedSize, String expectedSha) {
+        if (file == null || !file.exists() || !file.isFile()) return false;
+        if (expectedSize > 0 && file.length() != expectedSize) return false;
+        if (expectedSha == null || expectedSha.isEmpty()) return true;
+
+        try (InputStream in = new FileInputStream(file)) {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[16384];
+            int count;
+            while ((count = in.read(buffer)) != -1) {
+                md.update(buffer, 0, count);
+            }
+            return bytesToHex(md.digest()).equalsIgnoreCase(expectedSha);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
      * Look up the canonical pack capacity (kWh) for the user-selected
      * vehicle model from the bundled/cached manifest. Returns 0 when the
      * user hasn't picked a model, the model has no capacity declared,
@@ -539,6 +636,19 @@ public class ModelsApiHandler {
             throw new SelectedModelConfigUnavailableException(unavailable);
         }
         return nominalKwhForModelId(modelId);
+    }
+
+    /** Best-effort drivetrain hint for capacity validation. Unknown stays false. */
+    public static boolean isSelectedModelPhev() {
+        try {
+            String modelId = UnifiedConfigManager.getSelectedVehicleModelIdStrict();
+            if (modelId == null || modelId.isEmpty()) return false;
+            JSONObject manifest = readManifest();
+            JSONObject model = manifest != null ? findModel(manifest, modelId) : null;
+            return model != null && model.optBoolean("phev", false);
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     private static double nominalKwhForModelId(String modelId) {
@@ -604,7 +714,7 @@ public class ModelsApiHandler {
             o.put("sizeBytes", m.optLong("sizeBytes", 0));
             o.put("bundled", m.optBoolean("bundled", false));
 
-            File cached = cachedModelFile(file);
+            File cached = validatedCachedModelFile(m);
             o.put("downloaded", m.optBoolean("bundled", false) || cached != null);
             o.put("cachedSizeBytes", cached != null ? cached.length() : 0);
 
@@ -639,7 +749,7 @@ public class ModelsApiHandler {
         if (manifest != null) {
             JSONObject entry = findModel(manifest, id);
             if (entry != null) {
-                File cached = cachedModelFile(entry.optString("file"));
+                File cached = validatedCachedModelFile(entry);
                 response.put("downloaded", entry.optBoolean("bundled", false) || cached != null);
             }
         }
@@ -664,7 +774,7 @@ public class ModelsApiHandler {
 
         // Already-cached short-circuit — surface as "done" so the JS poller can resolve immediately
         // even if it bypassed the /list check (e.g. user mashed the dropdown).
-        File cached = cachedModelFile(entry.optString("file"));
+        File cached = validatedCachedModelFile(entry);
         if (cached != null || entry.optBoolean("bundled", false)) {
             DownloadState ds = new DownloadState();
             ds.state = "done";
@@ -763,6 +873,7 @@ public class ModelsApiHandler {
                 return;
             }
             dest.setReadable(true, false);
+            cachedModelValidations.clear();
             ds.state = "done";
             logger.info(TAG + ": downloaded " + id + " -> " + dest.getAbsolutePath() + " (" + dest.length() + " bytes)");
         } catch (Exception e) {

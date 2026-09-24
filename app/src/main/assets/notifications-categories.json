@@ -147,6 +147,24 @@
       "note": "Sent only when AI insight notification delivery is explicitly enabled."
     },
     {
+      "id": "parking.session.started",
+      "label": "Parked — where and what's around",
+      "group": "Parking",
+      "defaultEnabled": true,
+      "severity": "info",
+      "defaultClickUrl": "/parking.html",
+      "note": "About 90 s after switch-off: place, GPS freshness, whether sentry armed, and the four-camera still. Requires Parking Intelligence to be enabled in Surveillance settings."
+    },
+    {
+      "id": "parking.session.ended",
+      "label": "Back at car — what happened",
+      "group": "Parking",
+      "defaultEnabled": true,
+      "severity": "info",
+      "defaultClickUrl": "/parking.html",
+      "note": "On the first unlock / door open: time away, number of sentry events and how many neighbouring vehicles came or went."
+    },
+    {
       "id": "network.hotspot.limit",
       "label": "Hotspot data limit reached",
       "group": "Network",

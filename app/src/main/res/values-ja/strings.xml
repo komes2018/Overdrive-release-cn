@@ -239,7 +239,7 @@
     <string name="onboarding_camera_windshield_skip">いいえ結構です</string>
     <!-- Vehicle profile chapter -->
     <string name="onboarding_vehicle_title">Overdrive にバッテリー情報を設定</string>
-    <string name="onboarding_vehicle_body">モデルを選んで、kWhを入力するか、自分で入力してください(15-120)。 これにより、範囲と充電の見積もりが正確になります。スキップして後で設定できます。</string>
+    <string name="onboarding_vehicle_body">モデルを選んで、kWhを入力するか、自分で入力してください(5-120)。 これにより、範囲と充電の見積もりが正確になります。スキップして後で設定できます。</string>
     <string name="onboarding_vehicle_primary">バッテリーを設定</string>
     <!-- Dashboard orientation chapter -->
     <string name="onboarding_dash_tiles_title">あなたのコックピットを一目で確認できます</string>
@@ -735,6 +735,7 @@
     <string name="rail_vehicle">車両</string>
     <string name="rail_projection">投影図</string>
     <string name="rail_trips">走行履歴</string>
+    <string name="rail_parking">駐車</string>
     <string name="rail_charging">充電中</string>
     <string name="rail_automations">オートメーション</string>
     <string name="rail_key_mapping">キーマッピング</string>
@@ -903,7 +904,6 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">監視中</string>
-    <string name="dashboard_modern_vehicle_status">車両ステータス</string>
     <string name="dashboard_subtitle_all_systems">すべてのシステムはオンライン</string>
     <string name="dashboard_subtitle_some_offline">オンラインでの%1$dの%2$dサービス</string>
     <string name="dashboard_subtitle_no_tunnel">遠隔アクセスオフライン</string>
@@ -923,14 +923,11 @@
     <string name="vehicle_dialog_title">バッテリーの容量設定</string>
     <string name="vehicle_dialog_capacity_label">容量 (kWh)</string>
     <string name="vehicle_dialog_capacity_suffix">kWh</string>
-    <string name="vehicle_dialog_capacity_helper">15 ～ 120 kWh.モデルのデフォルトを使用する場合はそのままにします。</string>
+    <string name="vehicle_dialog_capacity_helper">5 ～ 120 kWh.モデルのデフォルトを使用する場合はそのままにします。</string>
     <string name="vehicle_dialog_model_label">モデル</string>
     <string name="vehicle_dialog_save">保存</string>
     <string name="vehicle_dialog_reset">自動検出にリセット</string>
-    <string name="vehicle_dialog_detection">検出: %1$s</string>
-    <string name="vehicle_dialog_detection_auto">自動</string>
-    <string name="vehicle_dialog_detection_manual">手動</string>
-    <string name="vehicle_dialog_invalid_capacity">容量は15~120ZkWh</string>
+    <string name="vehicle_dialog_invalid_capacity">容量は5~120ZkWh</string>
     <string name="vehicle_dialog_summary_effective">効力: %1$.1f kWh</string>
     <string name="vehicle_dialog_summary_calibration">Last calibrated: %1$.1f%% on %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">入手できない</string>
@@ -1360,6 +1357,10 @@
     <string name="projection_preset_right">右半分</string>
     <string name="projection_preset_center">中央揃え</string>
     <string name="projection_lock_aspect">クラスターの側面を維持する</string>
+    <string name="dashboard_modern_vehicle_status">車両ステータス</string>
+    <string name="vehicle_dialog_detection">検出: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">自動</string>
+    <string name="vehicle_dialog_detection_manual">手動</string>
     <!-- Rail category headers -->
     <string name="rail_section_cameras">カメラ</string>
     <string name="rail_section_controls">車両操作</string>

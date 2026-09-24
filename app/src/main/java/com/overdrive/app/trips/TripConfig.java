@@ -22,7 +22,7 @@ public class TripConfig {
     // initComponents() never runs, so there is no database, no detector and no
     // recorder — the Trips page can only ever show "No trips recorded yet", and
     // the sole enable switch lives on the Storage tab where users never find it.
-    // Reference implementations (e.g. BYDMate) ship trip logging always-on with
+    // Trip logging remains enabled by default with
     // no toggle at all.
     //
     // PRIVACY CAVEAT — be honest about this. load() honours an explicitly

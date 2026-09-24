@@ -9,8 +9,8 @@
     <link rel="apple-touch-icon" href="../shared/app-icon-dark.webp">
     <title data-i18n="app.notifications_title">Notifications - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
-    <script src="../shared/theme.js?v=6"></script>
-    <script src="../shared/app-shell.js?v=5"></script>
+    <script src="../shared/theme.js?v=8"></script>
+    <script src="../shared/app-shell.js?v=7"></script>
     <!--
       WebView detection MUST run before app-tabs.js builds the tab bar so
       we can filter OT_TABS to the Telegram-only flow on the head unit.
@@ -58,7 +58,7 @@
             : __OT_ALL_TABS;
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=24">
+    <link rel="stylesheet" href="../shared/styles.css?v=34">
     <link rel="manifest" href="/manifest.json">
     <style>
         .notif-page-body { max-width: 720px; margin: 0 auto; }
@@ -672,7 +672,7 @@
                 <button class="menu-toggle" onclick="toggleSidebar()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
                 </button>
-                <span style="font-weight:600;">Notifications</span>
+                <span style="font-weight:600;" data-i18n="notif.page_title">Notifications</span>
                 <div style="width:40px;"></div>
             </div>
 
@@ -980,7 +980,7 @@
                                     <div class="notif-row-note" data-i18n="surveillance.telegram_two_stage_desc">Send a quick "recording started" message, then the photo when it ends. Off by default — the photo alone is usually enough.</div>
                                 </div>
                                 <label class="toggle-switch">
-                                    <input type="checkbox" id="v2TelegramSendStartPing" onchange="SurvSettings.updateTelegramStartPing()">
+                                    <input type="checkbox" id="v2TelegramSendStartPing" disabled onchange="SurvSettings.updateTelegramStartPing()">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -1002,7 +1002,7 @@
                                         <div class="notif-row-note" data-i18n="surveillance.tier_notice_desc">Routine activity (parked cars, distant movement)</div>
                                     </div>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="v2TelegramNotices" onchange="SurvSettings.updateTelegramTiers()">
+                                        <input type="checkbox" id="v2TelegramNotices" disabled onchange="SurvSettings.updateTelegramTiers()">
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
@@ -1015,7 +1015,7 @@
                                         <div class="notif-row-note" data-i18n="surveillance.tier_alert_desc">Approaching person, vehicle close enough to warrant attention</div>
                                     </div>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="v2TelegramAlerts" onchange="SurvSettings.updateTelegramTiers()">
+                                        <input type="checkbox" id="v2TelegramAlerts" disabled onchange="SurvSettings.updateTelegramTiers()">
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
@@ -1028,7 +1028,7 @@
                                         <div class="notif-row-note" data-i18n="surveillance.tier_critical_desc">Person at very close range — likely tampering / loitering</div>
                                     </div>
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="v2TelegramCritical" onchange="SurvSettings.updateTelegramTiers()">
+                                        <input type="checkbox" id="v2TelegramCritical" disabled onchange="SurvSettings.updateTelegramTiers()">
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
@@ -1097,6 +1097,21 @@
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="tgPrefTyreAlerts" onchange="TelegramPrefs.save()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <!-- Parking Intelligence "Parked" / "Back at car"
+                                 messages. INFO-tier on purpose (a summary, not
+                                 an alert), so they get their own toggle rather
+                                 than riding Critical alerts. Only fires when the
+                                 feature itself is enabled under Surveillance. -->
+                            <div class="notif-row">
+                                <div class="notif-row-text">
+                                    <div class="notif-row-label" data-i18n="telegram.parking_messages">Parking messages</div>
+                                    <div class="notif-row-note" data-i18n="telegram.parking_messages_desc">Send "Parked" (place, GPS freshness, sentry state, four-camera still) and "Back at car" (time away, events, neighbours that came or went). Requires Parking Intelligence under Surveillance settings.</div>
+                                </div>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="tgPrefParkingMessages" onchange="TelegramPrefs.save()">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -1173,7 +1188,7 @@
          tier toggles. We load it here so the v2TelegramSendStartPing /
          v2TelegramTierGroup controls hooked into surveillance.js wiring
          keep firing without a per-page bridge. -->
-    <script src="../shared/surveillance.js?v=survtoggle1"></script>
+    <script src="../shared/surveillance.js?v=survtoggle9"></script>
     <script src="../shared/notif-log.js?v=3"></script>
     <script>
         function toggleSidebar() {
@@ -1256,7 +1271,7 @@
             // visual state always matches what we just sent / what we're
             // reverting to.
             function _repaint(state) {
-                var ids = ['tgPrefCriticalAlerts','tgPrefConnectivity','tgPrefMotionText','tgPrefVideoUploads','tgPrefTyreAlerts'];
+                var ids = ['tgPrefCriticalAlerts','tgPrefConnectivity','tgPrefMotionText','tgPrefVideoUploads','tgPrefTyreAlerts','tgPrefParkingMessages'];
                 ids.forEach(function (id) {
                     if (!(id in state)) return;
                     var el = $(id); if (!el) return;
@@ -1287,7 +1302,8 @@
                             // Default ON (matches UnifiedTelegramConfig), so an
                             // older daemon that omits the field doesn't paint
                             // the toggle off and imply alerts are disabled.
-                            tgPrefTyreAlerts:     s.tyreAlerts !== false
+                            tgPrefTyreAlerts:     s.tyreAlerts !== false,
+                            tgPrefParkingMessages: s.parkingMessages !== false
                         });
                     })
                     .catch(function () { /* status endpoint unreachable — leave defaults */ });
@@ -1301,14 +1317,16 @@
                     tgPrefConnectivity:   $('tgPrefConnectivity')   && $('tgPrefConnectivity').checked,
                     tgPrefMotionText:     $('tgPrefMotionText')     && $('tgPrefMotionText').checked,
                     tgPrefVideoUploads:   $('tgPrefVideoUploads')   && $('tgPrefVideoUploads').checked,
-                    tgPrefTyreAlerts:     $('tgPrefTyreAlerts')     && $('tgPrefTyreAlerts').checked
+                    tgPrefTyreAlerts:     $('tgPrefTyreAlerts')     && $('tgPrefTyreAlerts').checked,
+                    tgPrefParkingMessages: $('tgPrefParkingMessages') && $('tgPrefParkingMessages').checked
                 };
                 var body = {
                     criticalAlerts:      pending.tgPrefCriticalAlerts,
                     connectivityUpdates: pending.tgPrefConnectivity,
                     motionText:          pending.tgPrefMotionText,
                     videoUploads:        pending.tgPrefVideoUploads,
-                    tyreAlerts:          pending.tgPrefTyreAlerts
+                    tyreAlerts:          pending.tgPrefTyreAlerts,
+                    parkingMessages:     pending.tgPrefParkingMessages
                 };
                 fetch('/api/telegram/preferences', {
                     method: 'POST',
@@ -2547,9 +2565,9 @@
                 await loadSubscriptions();
                 renderCategories();
                 renderMinSeverity();
-                showStatus('ok', 'Notifications disabled on this device.');
+                showStatus('ok', BYD.i18n.t('notif.disabled_on_device'));
             } catch (e) {
-                showStatus('error', 'Disable failed: ' + (e && e.message ? e.message : e));
+                showStatus('error', BYD.i18n.t('notif.disable_failed', {error: (e && e.message ? e.message : e)}));
             }
         });
 
@@ -2572,17 +2590,17 @@
                     body: JSON.stringify(testBody)
                 });
                 if (r.status === 503) {
-                    showStatus('warn', 'Backend not initialized. Reserve a Zrok URL first.');
+                    showStatus('warn', BYD.i18n.t('notif.backend_not_initialized'));
                     return;
                 }
                 if (!r.ok) {
-                    showStatus('error', 'Test failed: HTTP ' + r.status);
+                    showStatus('error', BYD.i18n.t('notif.test_failed_http', {status: r.status}));
                     return;
                 }
-                showStatus('ok', 'Test sent. Check your notification center.');
+                showStatus('ok', BYD.i18n.t('notif.test_sent'));
             } catch (e) {
                 if (isNetworkError(e)) showTunnelUnreachable();
-                else showStatus('error', 'Test failed: ' + (e && e.message ? e.message : e));
+                else showStatus('error', BYD.i18n.t('notif.test_failed', {error: (e && e.message ? e.message : e)}));
             }
         });
 

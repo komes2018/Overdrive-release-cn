@@ -268,7 +268,7 @@ class YoloDetector(private val context: Context) {
             // core.
             try {
                 val cpuOptions = Interpreter.Options()
-                cpuOptions.setNumThreads(2)
+                cpuOptions.setNumThreads(4)
                 interpreter = Interpreter(modelFile, cpuOptions)
                 interpreter!!.allocateTensors()
             } catch (e: Exception) {

@@ -33,6 +33,33 @@ public class AccMonitor {
     // the recording pipeline can't tell that apart from a real ACC OFF, so
     // it stays unrecorded for the rest of the drive.
     private static volatile boolean accOnAuthoritative = false;
+    private static volatile long accStateUpdatedAtElapsedMs;
+    private static final long DILINK5_SAFETY_STATE_MAX_AGE_MS = 15_000L;
+
+    // DiLink 5 car_service power-mode dump source: ACC-OFF admission dampener.
+    // A single OFF-looking dump row must never flip a drive into sentry (the
+    // dc327fe bug class) — require DILINK5_DUMP_OFF_CONFIRMATIONS consistent
+    // OFF readings, spaced at least DILINK5_DUMP_OFF_MIN_SPACING_MS apart
+    // (so one glitch re-read by CameraDaemon's 200ms retry loop counts once),
+    // all inside DILINK5_DUMP_OFF_WINDOW_MS (so observations from different
+    // parking events never combine). ON-looking rows immediately reset this
+    // OFF streak; their final transition admission remains source-aware below.
+    // Guarded by DILINK5_DUMP_ADMISSION_LOCK; this is
+    // internal probe bookkeeping, NOT published ACC state — probeDiLink5AccOn
+    // stays side-effect-free with respect to accOn/inSentryMode/authoritative.
+    static final int DILINK5_DUMP_OFF_CONFIRMATIONS = 2;
+    static final long DILINK5_DUMP_OFF_WINDOW_MS = 30_000L;
+    static final long DILINK5_DUMP_OFF_MIN_SPACING_MS = 3_000L;
+    private static final Object DILINK5_DUMP_ADMISSION_LOCK = new Object();
+    private static int diLink5DumpOffStreak = 0;
+    private static long diLink5DumpOffFirstAtElapsedMs;
+    private static long diLink5DumpOffLastCountedAtElapsedMs;
+    static final int DILINK5_POWER_MODE_UNKNOWN = -1;
+    static final int DILINK5_POWER_MODE_OFF = 0;
+    static final int DILINK5_POWER_MODE_STARTUP = 1;
+    static final int DILINK5_POWER_MODE_IVI_AWAKE = 2;
+    private static volatile String lastDiLink5ObservationSummary = "unavailable";
+    private static volatile String lastLoggedDiLink5ObservationSignature = "";
 
     // Trustworthiness of the MOST RECENT probeAccState() call. True only when the
     // last probe landed on a CLEAN bodywork power level (0-3); false when it
@@ -103,6 +130,29 @@ public class AccMonitor {
         return accOn;
     }
 
+    /** Fail-safe guard used immediately before any full-screen deterrent render. */
+    public static boolean isVehicleActive() {
+        return accOn
+                || (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                        && hasDrivingTelemetry());
+    }
+
+    private static boolean hasDrivingTelemetry() {
+        try {
+            com.overdrive.app.byd.BydDataCollector collector =
+                    com.overdrive.app.byd.BydDataCollector.getInstance();
+            return hasDrivingTelemetry(
+                    collector.readCurrentSpeedKmh(), collector.readGearNow());
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    static boolean hasDrivingTelemetry(double speedKmh, int gear) {
+        return (!Double.isNaN(speedKmh) && speedKmh > 0)
+                || (gear > GearMonitor.GEAR_P && gear <= GearMonitor.GEAR_S);
+    }
+
     public static boolean isInSentryMode() {
         return inSentryMode;
     }
@@ -121,16 +171,47 @@ public class AccMonitor {
         return accOnAuthoritative;
     }
 
+    /** Freshness is enforced only by the DiLink 5 movement gate. */
+    public static boolean isAccStateFreshForSafety() {
+        return isStateFresh(
+                android.os.SystemClock.elapsedRealtime(),
+                accStateUpdatedAtElapsedMs,
+                DILINK5_SAFETY_STATE_MAX_AGE_MS);
+    }
+
+    public static long accStateFreshUntilForSafety() {
+        return stateFreshUntil(
+                accStateUpdatedAtElapsedMs,
+                DILINK5_SAFETY_STATE_MAX_AGE_MS);
+    }
+
+    static long stateFreshUntil(long updatedAtElapsedMs, long maxAgeMs) {
+        if (updatedAtElapsedMs <= 0L || maxAgeMs <= 0L
+                || updatedAtElapsedMs > Long.MAX_VALUE - maxAgeMs) {
+            return 0L;
+        }
+        return updatedAtElapsedMs + maxAgeMs;
+    }
+
+    static boolean isStateFresh(long nowElapsedMs, long updatedAtElapsedMs, long maxAgeMs) {
+        long age = nowElapsedMs - updatedAtElapsedMs;
+        return updatedAtElapsedMs > 0L && maxAgeMs > 0L
+                && age >= 0L && age <= maxAgeMs;
+    }
+
     /**
      * Called by SurveillanceEngine IPC when AccSentryDaemon sends ACC state.
      */
     public static void setAccState(boolean isAccOn) {
-        accOn = isAccOn;
-        inSentryMode = !isAccOn;
-        // First IPC marks the state authoritative; stays authoritative for
-        // the rest of the process lifetime (subsequent IPCs just refresh
-        // the value).
-        accOnAuthoritative = true;
+        synchronized (AccMonitor.class) {
+            accOn = isAccOn;
+            inSentryMode = !isAccOn;
+            // First IPC marks the state authoritative; stays authoritative for
+            // the rest of the process lifetime (subsequent IPCs just refresh
+            // the value).
+            accOnAuthoritative = true;
+            accStateUpdatedAtElapsedMs = android.os.SystemClock.elapsedRealtime();
+        }
         CameraDaemon.log("ACC state updated via IPC: accOn=" + isAccOn + ", sentryMode=" + inSentryMode);
         notifyAccEdge(isAccOn);
     }
@@ -166,6 +247,22 @@ public class AccMonitor {
         if (lastEdgeState == (isAccOn ? 1 : 0)) return;  // no real transition
         lastEdgeState = isAccOn ? 1 : 0;
         if (!isAccOn) {
+            // Load-bearing ordering for BOTH legacy and DI5: every map/app stop
+            // below may physically retire the OEM projection source. Detach
+            // both consumers first so SurfaceFlinger never sees a live virtual
+            // display reading a source that is being destroyed.
+            try {
+                com.overdrive.app.surveillance.ClusterViewMirrorService
+                        .forceDetachIfActive("acc-off");
+                if (!com.overdrive.app.surveillance.ClusterMirrorController
+                        .forceCloseIfActive("acc-off")) {
+                    CameraDaemon.log("ACC-off mirror detach not yet confirmed; "
+                            + "projection close paths will retain recovery ownership");
+                }
+            } catch (Throwable t) {
+                CameraDaemon.log("notifyAccEdge ACC-off cluster mirror stop failed: "
+                        + t.getMessage());
+            }
             // ACC-OFF: stop the cluster map projector so its holder releases + the
             // launched cluster Activity is torn down. Safe + idempotent if not active.
             try {
@@ -192,24 +289,6 @@ public class AccMonitor {
                 }
             } catch (Throwable t) {
                 CameraDaemon.log("notifyAccEdge ACC-off cluster cast stop failed: " + t.getMessage());
-            }
-            // ACC-OFF: tear down the head-unit cluster MIRROR FIRST — BEFORE the OEM
-            // projection close below. ORDER IS LOAD-BEARING: the mirror owns its OWN
-            // SurfaceFlinger virtual display that reads the fission cluster layerStack (the
-            // SOURCE) and outputs into a head-unit SurfaceControl layer. If the OEM
-            // projection close destroys the fission source display while our virtual display
-            // is still bound + compositing (and the head-unit panel is power-gating at
-            // ACC-off), SurfaceFlinger faults natively and the crash cascades to kill BOTH
-            // the daemon and the app until the next ACC-on. forceCloseIfActive is
-            // SYNCHRONOUS (awaits the unbind+destroy) so the mirror's VD is fully gone
-            // before we touch the source. No-op if the mirror was never started.
-            try {
-                // Detach the view-into-Surface mirror FIRST (unbind its SF display before the
-                // fission source closes — same load-bearing ordering as the legacy mirror).
-                com.overdrive.app.surveillance.ClusterViewMirrorService.forceDetachIfActive("acc-off");
-                com.overdrive.app.surveillance.ClusterMirrorController.forceCloseIfActive("acc-off");
-            } catch (Throwable t) {
-                CameraDaemon.log("notifyAccEdge ACC-off cluster mirror stop failed: " + t.getMessage());
             }
             // ACC-OFF: THEN force-close any TRANSIENT blind-spot cluster projection so the
             // gauges are restored IMMEDIATELY (not after the 8s linger). No-op if the
@@ -258,37 +337,61 @@ public class AccMonitor {
         } catch (Throwable t) {
             CameraDaemon.log("notifyAccEdge panel wake dispatch failed: " + t.getMessage());
         }
+        maybeAutoStartClusterProjection("ACC-on edge");
+    }
+
+    /**
+     * Replays a consumed ACC-on auto-projection request after cross-mode boot
+     * recovery drops its admission fence. If ACC has not yet been established,
+     * the normal future ACC edge remains the owner and this is a no-op.
+     */
+    public static void retryClusterAutoProjectionAfterRecovery() {
+        if (!isAccStateAuthoritative() || !isAccOn()) return;
         try {
-            // ACC-ON: at most ONE cluster takeover can auto-start (the cluster is a single
-            // surface). Read BOTH auto-start settings from a SINGLE config snapshot:
-            //   navMap.autoProjectCluster      → auto-project the RoadSense map, and
-            //   projection.autoStartOnAcc      → auto-cast projection.autoStartPackage.
-            // The two toggles are mutually exclusive at the WRITE layer (each UI clears the
-            // sibling), but a client race / OTA merge could leave both true — so we also
-            // enforce a deterministic tiebreak HERE: the map wins (established feature, and
-            // navigation is the safer thing to surface on the gauges).
-            org.json.JSONObject cfg = com.overdrive.app.config.UnifiedConfigManager.forceReload();
+            if (com.overdrive.app.navmap.ClusterMapProjector.isActive()
+                    || com.overdrive.app.launcher.ClusterCast.isActive()) {
+                return;
+            }
+        } catch (Throwable ignored) {
+        }
+        maybeAutoStartClusterProjection("projection-recovery");
+    }
+
+    private static void maybeAutoStartClusterProjection(String reason) {
+        try {
+            // At most ONE cluster takeover can auto-start. Read both settings
+            // from one snapshot and keep the established map-wins tiebreak.
+            org.json.JSONObject cfg =
+                    com.overdrive.app.config.UnifiedConfigManager
+                            .forceReload();
             org.json.JSONObject nav = cfg.optJSONObject("navMap");
-            boolean mapAuto = nav != null && nav.optBoolean("autoProjectCluster", false);
+            boolean mapAuto = nav != null
+                    && nav.optBoolean("autoProjectCluster", false);
             org.json.JSONObject proj = cfg.optJSONObject("projection");
-            boolean projAuto = proj != null && proj.optBoolean("autoStartOnAcc", false);
-            String projPkg = proj != null ? proj.optString("autoStartPackage", "") : "";
+            boolean projAuto = proj != null
+                    && proj.optBoolean("autoStartOnAcc", false);
+            String projPkg = proj != null
+                    ? proj.optString("autoStartPackage", "")
+                    : "";
             if (mapAuto && projAuto) {
-                CameraDaemon.log("ACC-on edge: BOTH cluster auto-starts enabled "
-                        + "(mutual-exclusion violated) — map wins, skipping projection auto-cast");
+                CameraDaemon.log(reason + ": BOTH cluster auto-starts "
+                        + "enabled — map wins");
                 projAuto = false;
             }
             if (mapAuto) {
-                CameraDaemon.log("ACC-on edge: auto-projecting map to cluster");
+                CameraDaemon.log(reason
+                        + ": auto-projecting map to cluster");
                 com.overdrive.app.navmap.ClusterMapProjector.start();
-            } else if (projAuto && projPkg != null && !projPkg.isEmpty()) {
-                CameraDaemon.log("ACC-on edge: auto-casting projection app " + projPkg + " to cluster");
-                // Cast ONLY — the head-unit mirror is app-foreground-only (needs a resumed
-                // ProjectionFragment + live box geometry), so it is NOT started here.
+            } else if (projAuto
+                    && projPkg != null
+                    && !projPkg.isEmpty()) {
+                CameraDaemon.log(reason
+                        + ": auto-casting projection app " + projPkg);
                 com.overdrive.app.launcher.ClusterCast.start(projPkg);
             }
         } catch (Throwable t) {
-            CameraDaemon.log("notifyAccEdge auto-start check failed: " + t.getMessage());
+            CameraDaemon.log(reason
+                    + " auto-start check failed: " + t.getMessage());
         }
     }
 
@@ -302,112 +405,16 @@ public class AccMonitor {
     public static boolean probeAccState(android.content.Context context) {
         // 1. DI-LINK 5.0 (Android 11 Automotive / SA8155P) ACC PROBE
         // On DiLink 5.0, BYDAutoBodyworkDevice is virtualized/missing or returns sentinel 4/255.
-        // We probe dumpsys car_service PowerMode, Android PowerManager/Display power state and doorLockStatus.
-        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
-            try {
-                // 1. Check Automotive BYD PowerMode enum (Standby=4, Sleep=8, Str=5, Off=0, Pre StartUp=1 vs StartUp=2, DisPlay on=10)
-                String carServicePower = execShell("dumpsys car_service 2>/dev/null | grep -i 'Power Mute State' -A 3 | grep 'current' | head -1");
-                if (!carServicePower.isEmpty()) {
-                    if (carServicePower.contains("4=PowerMode Standby") || carServicePower.contains("8=PowerMode Sleep") ||
-                        carServicePower.contains("5=PowerMode Str") || carServicePower.contains("0=PowerMode Off") ||
-                        carServicePower.contains("1=PowerMode Pre StartUp") || carServicePower.contains("12=PowerMode Tod") ||
-                        carServicePower.contains("9=PowerMode Str Suspending")) {
-                        accOn = false;
-                        inSentryMode = true;
-                        lastProbeTrustworthy = true;
-                        accOnAuthoritative = true;
-                        notifyAccEdge(false);
-                        CameraDaemon.log("AccMonitor [DiLink5]: Vehicle PowerMode is STANDBY/OFF (" + carServicePower.trim() + ") -> accOn=false, sentryMode=true");
-                        return true;
-                    } else if (carServicePower.contains("2=PowerMode StartUp") ||
-                               carServicePower.contains("10=PowerMode DisPlay on") || carServicePower.contains("3=PowerMode Degraded")) {
-                        accOn = true;
-                        inSentryMode = false;
-                        lastProbeTrustworthy = true;
-                        accOnAuthoritative = true;
-                        notifyAccEdge(true);
-                        CameraDaemon.log("AccMonitor [DiLink5]: Vehicle PowerMode is ACTIVE/READY (" + carServicePower.trim() + ") -> accOn=true, sentryMode=false");
-                        return false;
-                    }
-                }
-
-                // 2. Check Display Interactive State on DiLink 5 (Display OFF = Definitely Sleep/Parked)
-                if (context != null) {
-                    android.os.PowerManager pm = (android.os.PowerManager) context.getSystemService(android.content.Context.POWER_SERVICE);
-                    if (pm != null && !pm.isInteractive()) {
-                        accOn = false;
-                        inSentryMode = true;
-                        lastProbeTrustworthy = true;
-                        accOnAuthoritative = true;
-                        notifyAccEdge(false);
-                        CameraDaemon.log("AccMonitor [DiLink5]: Display is OFF (isInteractive=false) -> accOn=false, sentryMode=true");
-                        return true;
-                    }
-                }
-
-                // 3. Check Lock State (Vehicle Locked = ACC OFF)
-                com.overdrive.app.byd.BydDataCollector collector = com.overdrive.app.byd.BydDataCollector.getInstance();
-                if (collector != null) {
-                    com.overdrive.app.byd.BydVehicleData vd = collector.getData();
-                    if (vd != null && vd.doorLockStatus != null && vd.doorLockStatus.length > 0) {
-                        // In BYD doorLockStatus: 1 = LOCKED
-                        if (vd.doorLockStatus[0] == 1) {
-                            accOn = false;
-                            inSentryMode = true;
-                            lastProbeTrustworthy = true;
-                            accOnAuthoritative = true;
-                            notifyAccEdge(false);
-                            CameraDaemon.log("AccMonitor [DiLink5]: Vehicle is LOCKED -> accOn=false, sentryMode=true");
-                            return true;
-                        }
-                    }
-
-                    // 4. Check Vehicle Active Telemetry ONLY if not parked (Gear != P and Speed >= 3 km/h)
-                    if (vd != null) {
-                        if (vd.gearMode > com.overdrive.app.monitor.GearMonitor.GEAR_P && vd.gearMode <= com.overdrive.app.monitor.GearMonitor.GEAR_S) {
-                            accOn = true;
-                            inSentryMode = false;
-                            lastProbeTrustworthy = true;
-                            accOnAuthoritative = true;
-                            notifyAccEdge(true);
-                            CameraDaemon.log("AccMonitor [DiLink5]: Vehicle is IN GEAR (" + vd.gearMode + ") -> accOn=true, sentryMode=false");
-                            return false;
-                        }
-                        if (vd.gearMode != com.overdrive.app.monitor.GearMonitor.GEAR_P
-                                && vd.speedKmh >= 3.0f && vd.speedKmh != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE) {
-                            accOn = true;
-                            inSentryMode = false;
-                            lastProbeTrustworthy = true;
-                            accOnAuthoritative = true;
-                            notifyAccEdge(true);
-                            CameraDaemon.log("AccMonitor [DiLink5]: Vehicle is MOVING in non-P gear (speed=" + vd.speedKmh + " km/h) -> accOn=true, sentryMode=false");
-                            return false;
-                        }
-                    }
-                }
-
-                // 5. Fallback: check sys.accanim.status if explicitly set to "1" (OFF)
-                String accAnim = getSystemProperty("sys.accanim.status", "");
-                if ("1".equals(accAnim)) {
-                    accOn = false;
-                    inSentryMode = true;
-                    lastProbeTrustworthy = true;
-                    accOnAuthoritative = true;
-                    notifyAccEdge(false);
-                    CameraDaemon.log("AccMonitor [DiLink5]: sys.accanim.status=1 -> accOn=false, sentryMode=true");
-                    return true;
-                } else if ("0".equals(accAnim)) {
-                    accOn = true;
-                    inSentryMode = false;
-                    lastProbeTrustworthy = true;
-                    accOnAuthoritative = true;
-                    notifyAccEdge(true);
-                    CameraDaemon.log("AccMonitor [DiLink5]: sys.accanim.status=0 -> accOn=true, sentryMode=false");
-                    return false;
-                }
-            } catch (Throwable t) {
-                CameraDaemon.log("AccMonitor [DiLink5]: power probe error: " + t.getMessage());
+        // We probe the local Automotive power mode and shutdown-animation state.
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            Boolean isOn = probeDiLink5AccOnForTransition(
+                    context,
+                    accOnAuthoritative && accOn);
+            if (isOn != null) {
+                return publishDiLink5State(isOn, "local power probe");
             }
+            lastProbeTrustworthy = false;
+            return false;
         }
 
         // 2. LEGACY DILINK 3.0 / 4.0 BYDAutoBodyworkDevice PROBE (Preserved 100% untouched)
@@ -540,6 +547,384 @@ public class AccMonitor {
     }
 
     /**
+     * Side-effect-free DiLink 5 power read. CameraDaemon uses this before its
+     * generation check, so this method must not update global ACC state.
+     * (The dump-source OFF dampener keeps private streak bookkeeping, but
+     * accOn/inSentryMode/authoritative are never written here.)
+     */
+    public static Boolean probeDiLink5AccOn(android.content.Context context) {
+        return probeDiLink5AccObservation(context).accOn;
+    }
+
+    /**
+     * Transition-safe DiLink 5 ACC read.
+     *
+     * <p>Automotive {@code Display on}/{@code Degraded} modes prove that the
+     * IVI/AP is awake, not that the driver switched the vehicle on. They may
+     * appear during a CameraDaemon restart or a parked cloud wake. Such a weak
+     * observation may maintain an already-ON state, but cannot by itself
+     * disarm a confirmed parked session. A real transition is still immediate
+     * when corroborated by driving telemetry, {@code sys.accanim.status=0}, or
+     * the vehicle {@code StartUp} power mode.
+     */
+    public static Boolean probeDiLink5AccOnForTransition(
+            android.content.Context context, boolean currentlyAccOn) {
+        return probeDiLink5AccOnForTransition(context, currentlyAccOn, false);
+    }
+
+    /**
+     * Transition-safe DiLink 5 ACC read with an optional independent corroborator.
+     *
+     * @param independentIgnitionEvidence true when a source OTHER than the IVI
+     *        power mode has just reported the vehicle switching on — the
+     *        app-process {@code com.byd.action.ACC_ON} / {@code IGN_ON} broadcast,
+     *        carried across processes by
+     *        {@link com.overdrive.app.power.IgnitionBroadcastHint}. This is the
+     *        "second, independent source" a weak IVI-awake reading needs to be
+     *        admitted as ACC ON from a confirmed parked state. It never overrides a
+     *        strong OFF and never resolves an UNKNOWN observation.
+     */
+    public static Boolean probeDiLink5AccOnForTransition(
+            android.content.Context context, boolean currentlyAccOn,
+            boolean independentIgnitionEvidence) {
+        return admitDiLink5AccObservation(
+                probeDiLink5AccObservation(context),
+                currentlyAccOn || independentIgnitionEvidence);
+    }
+
+    /**
+     * Source-aware DiLink 5 power observation. This method is side-effect-free
+     * with respect to the published ACC state; only the existing dump-source
+     * OFF confirmation bookkeeping and diagnostic snapshot are updated.
+     */
+    public static DiLink5AccObservation probeDiLink5AccObservation(
+            android.content.Context context) {
+        if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            return rememberDiLink5Observation(
+                    DiLink5AccObservation.unknown(
+                            "platform", "DiLink 5 not selected"));
+        }
+        try {
+            // Moving/in-gear is authoritative and must win over stale parked signals.
+            if (hasDrivingTelemetry()) {
+                return rememberDiLink5Observation(
+                        DiLink5AccObservation.strong(
+                                true, "driving telemetry", "moving/in-gear"));
+            }
+
+            String systemPowerRaw =
+                    getSystemProperty("sys.byd.power_mode", "");
+            int systemPowerKind =
+                    classifyDiLink5PowerModeKind(systemPowerRaw);
+
+            String dumpPowerRaw =
+                    com.overdrive.app.byd.CarSvcTelemetry.powerModeLine();
+            int dumpPowerKind =
+                    classifyDiLink5PowerModeKind(dumpPowerRaw);
+            Boolean dumpOffAdmitted = null;
+            if (dumpPowerKind == DILINK5_POWER_MODE_OFF) {
+                dumpOffAdmitted = admitDiLink5DumpPowerReading(
+                        false,
+                        android.os.SystemClock.elapsedRealtime());
+            } else if (dumpPowerKind
+                    != DILINK5_POWER_MODE_UNKNOWN) {
+                // Any live ON-looking row retires an incomplete OFF streak.
+                admitDiLink5DumpPowerReading(
+                        true,
+                        android.os.SystemClock.elapsedRealtime());
+            }
+
+            String accAnimRaw =
+                    getSystemProperty("sys.accanim.status", "");
+            int accAnim = classifyAccAnim(accAnimRaw);
+            String diagnostics = "accanim=" + compactDiagnostic(accAnimRaw)
+                    + ", sysPower=" + compactDiagnostic(systemPowerRaw)
+                    + ", dumpPower=" + compactDiagnostic(dumpPowerRaw);
+
+            boolean startupOn =
+                    systemPowerKind == DILINK5_POWER_MODE_STARTUP
+                    || dumpPowerKind == DILINK5_POWER_MODE_STARTUP;
+            boolean iviAwake =
+                    systemPowerKind == DILINK5_POWER_MODE_IVI_AWAKE
+                    || dumpPowerKind == DILINK5_POWER_MODE_IVI_AWAKE;
+            boolean powerOff =
+                    systemPowerKind == DILINK5_POWER_MODE_OFF
+                    || Boolean.FALSE.equals(dumpOffAdmitted);
+
+            return rememberDiLink5Observation(
+                    resolveDiLink5AccObservation(
+                            accAnim,
+                            startupOn,
+                            iviAwake,
+                            powerOff,
+                            diagnostics));
+        } catch (Throwable t) {
+            return rememberDiLink5Observation(
+                    DiLink5AccObservation.unknown(
+                            "probe error",
+                            t.getClass().getSimpleName() + ": "
+                                    + t.getMessage()));
+        }
+    }
+
+    static DiLink5AccObservation resolveDiLink5AccObservation(
+            int accAnim,
+            boolean startupOn,
+            boolean iviAwake,
+            boolean powerOff,
+            String diagnostics) {
+        String detail = diagnostics == null ? "" : diagnostics;
+
+        // An ON accanim signal is drive-safe and may immediately disarm.
+        // An OFF accanim signal must not override a simultaneous StartUp
+        // mode: that conflict is common while ignition sources settle and
+        // falsely entering sentry is more dangerous than preserving the
+        // prior state for one poll.
+        if (accAnim == 1) {
+            return DiLink5AccObservation.strong(
+                    true,
+                    "sys.accanim.status",
+                    detail);
+        }
+        if (accAnim == 0) {
+            if (startupOn) {
+                return DiLink5AccObservation.unknown(
+                        "ignition-source conflict",
+                        detail);
+            }
+            return DiLink5AccObservation.strong(
+                    false,
+                    "sys.accanim.status",
+                    detail);
+        }
+
+        // Conflicting lifecycle rows are not an ignition edge. Preserve the
+        // caller's admitted state until a coherent source arrives.
+        if ((startupOn || iviAwake) && powerOff) {
+            return DiLink5AccObservation.unknown(
+                    "power-mode conflict", detail);
+        }
+        if (startupOn) {
+            return DiLink5AccObservation.strong(
+                    true, "vehicle PowerMode StartUp", detail);
+        }
+        if (powerOff) {
+            return DiLink5AccObservation.strong(
+                    false, "vehicle PowerMode stopped", detail);
+        }
+        if (iviAwake) {
+            return DiLink5AccObservation.weakOn(
+                    "IVI PowerMode awake", detail);
+        }
+        return DiLink5AccObservation.unknown(
+                "no source", "all local power sources unavailable");
+    }
+
+    static Boolean admitDiLink5AccObservation(
+            DiLink5AccObservation observation, boolean currentlyAccOn) {
+        if (observation == null || observation.accOn == null) {
+            return null;
+        }
+        if (!observation.accOn.booleanValue()) {
+            return Boolean.FALSE;
+        }
+        if (observation.strong || currentlyAccOn) {
+            return Boolean.TRUE;
+        }
+        // Display-on/degraded is an IVI lifecycle observation only. It cannot
+        // turn a confirmed parked state into vehicle ACC ON without a second,
+        // independent source; doing so is the restart/deep-sleep failure mode.
+        return null;
+    }
+
+    public static String describeLastDiLink5AccObservation() {
+        return lastDiLink5ObservationSummary;
+    }
+
+    private static DiLink5AccObservation rememberDiLink5Observation(
+            DiLink5AccObservation observation) {
+        String summary = observation.summary();
+        lastDiLink5ObservationSummary = summary;
+        String signature = observation.source + "|"
+                + observation.accOn + "|" + observation.strong + "|"
+                + observation.detail;
+        if (!signature.equals(lastLoggedDiLink5ObservationSignature)) {
+            lastLoggedDiLink5ObservationSignature = signature;
+            CameraDaemon.log("AccMonitor [DiLink5]: observation " + summary);
+        }
+        return observation;
+    }
+
+    private static String compactDiagnostic(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return "<empty>";
+        String compact = raw.trim().replaceAll("\\s+", " ");
+        return compact.length() <= 160
+                ? compact : compact.substring(0, 157) + "...";
+    }
+
+    public static final class DiLink5AccObservation {
+        public final Boolean accOn;
+        public final boolean strong;
+        public final String source;
+        public final String detail;
+
+        private DiLink5AccObservation(
+                Boolean accOn, boolean strong,
+                String source, String detail) {
+            this.accOn = accOn;
+            this.strong = strong;
+            this.source = source == null ? "unknown" : source;
+            this.detail = detail == null ? "" : detail;
+        }
+
+        static DiLink5AccObservation strong(
+                boolean accOn, String source, String detail) {
+            return new DiLink5AccObservation(
+                    Boolean.valueOf(accOn), true, source, detail);
+        }
+
+        static DiLink5AccObservation weakOn(
+                String source, String detail) {
+            return new DiLink5AccObservation(
+                    Boolean.TRUE, false, source, detail);
+        }
+
+        static DiLink5AccObservation unknown(
+                String source, String detail) {
+            return new DiLink5AccObservation(
+                    null, false, source, detail);
+        }
+
+        String summary() {
+            return "state="
+                    + (accOn == null ? "UNKNOWN"
+                            : accOn.booleanValue() ? "ON" : "OFF")
+                    + ", confidence=" + (strong ? "strong" : "weak")
+                    + ", source=" + source
+                    + (detail.isEmpty() ? "" : ", raw={" + detail + "}");
+        }
+    }
+
+    /**
+     * ACC-OFF admission dampener for the DiLink 5 car_service power-mode dump
+     * source. Returns {@code TRUE} immediately for an ON reading (and resets
+     * the OFF streak), {@code FALSE} once an OFF reading has been confirmed
+     * {@link #DILINK5_DUMP_OFF_CONFIRMATIONS} times inside
+     * {@link #DILINK5_DUMP_OFF_WINDOW_MS} with observations spaced at least
+     * {@link #DILINK5_DUMP_OFF_MIN_SPACING_MS} apart, and {@code null} while
+     * an OFF streak is still pending confirmation (callers treat null as
+     * indeterminate and preserve prior state).
+     */
+    static Boolean admitDiLink5DumpPowerReading(boolean isOn, long nowElapsedMs) {
+        synchronized (DILINK5_DUMP_ADMISSION_LOCK) {
+            if (isOn) {
+                diLink5DumpOffStreak = 0;
+                return Boolean.TRUE;
+            }
+            if (diLink5DumpOffStreak >= DILINK5_DUMP_OFF_CONFIRMATIONS) {
+                // Already confirmed — a steadily parked car keeps reading OFF
+                // until a genuine ON observation resets the streak. The
+                // confirmation window only constrains the UNCONFIRMED phase.
+                return Boolean.FALSE;
+            }
+            if (diLink5DumpOffStreak > 0
+                    && nowElapsedMs - diLink5DumpOffFirstAtElapsedMs
+                            > DILINK5_DUMP_OFF_WINDOW_MS) {
+                // Partial streak went stale — this OFF starts a new streak.
+                diLink5DumpOffStreak = 0;
+            }
+            if (diLink5DumpOffStreak == 0) {
+                diLink5DumpOffStreak = 1;
+                diLink5DumpOffFirstAtElapsedMs = nowElapsedMs;
+                diLink5DumpOffLastCountedAtElapsedMs = nowElapsedMs;
+                return null;
+            }
+            if (nowElapsedMs - diLink5DumpOffLastCountedAtElapsedMs
+                    < DILINK5_DUMP_OFF_MIN_SPACING_MS) {
+                // Same observation glitch re-read by a retry loop — do not
+                // double-count, keep waiting for an independent confirmation.
+                return null;
+            }
+            diLink5DumpOffStreak++;
+            diLink5DumpOffLastCountedAtElapsedMs = nowElapsedMs;
+            return diLink5DumpOffStreak >= DILINK5_DUMP_OFF_CONFIRMATIONS
+                    ? Boolean.FALSE : null;
+        }
+    }
+
+    /** Test hook: clears the dump-source ACC-OFF admission streak. */
+    static void resetDiLink5DumpAdmissionForTest() {
+        synchronized (DILINK5_DUMP_ADMISSION_LOCK) {
+            diLink5DumpOffStreak = 0;
+            diLink5DumpOffFirstAtElapsedMs = 0L;
+            diLink5DumpOffLastCountedAtElapsedMs = 0L;
+        }
+    }
+
+    private static boolean publishDiLink5State(boolean isOn, String source) {
+        synchronized (AccMonitor.class) {
+            accOn = isOn;
+            inSentryMode = !isOn;
+            lastProbeTrustworthy = true;
+            accOnAuthoritative = true;
+            accStateUpdatedAtElapsedMs = android.os.SystemClock.elapsedRealtime();
+        }
+        notifyAccEdge(isOn);
+        CameraDaemon.log("AccMonitor [DiLink5]: " + source + " -> accOn=" + isOn);
+        return !isOn;
+    }
+
+    static int classifyDiLink5PowerMode(String raw) {
+        int kind = classifyDiLink5PowerModeKind(raw);
+        if (kind == DILINK5_POWER_MODE_UNKNOWN) return -1;
+        return kind == DILINK5_POWER_MODE_OFF ? 0 : 1;
+    }
+
+    static int classifyDiLink5PowerModeKind(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return -1;
+        String value = raw.toLowerCase(java.util.Locale.US)
+                .replace('_', ' ')
+                .replace('-', ' ');
+        if (value.contains("standby") || value.contains("sleep")
+                || value.contains("pre startup") || value.contains("tod")
+                || value.contains("powermode off")
+                || java.util.regex.Pattern.compile("\\bstr\\b").matcher(value).find()
+                || hasPowerModeCode(value, 0) || hasPowerModeCode(value, 1)
+                || hasPowerModeCode(value, 4)
+                || hasPowerModeCode(value, 5) || hasPowerModeCode(value, 8)
+                || hasPowerModeCode(value, 9) || hasPowerModeCode(value, 12)) {
+            return DILINK5_POWER_MODE_OFF;
+        }
+        if (value.contains("startup") || hasPowerModeCode(value, 2)) {
+            return DILINK5_POWER_MODE_STARTUP;
+        }
+        if (value.contains("display on") || value.contains("degraded")
+                || hasPowerModeCode(value, 3)
+                || hasPowerModeCode(value, 10)) {
+            return DILINK5_POWER_MODE_IVI_AWAKE;
+        }
+        return DILINK5_POWER_MODE_UNKNOWN;
+    }
+
+    private static boolean hasPowerModeCode(String value, int code) {
+        return java.util.regex.Pattern
+                .compile("(^|\\D)" + code + "(?:\\s*=|\\s*$)")
+                .matcher(value)
+                .find();
+    }
+
+    static int classifyAccAnim(String raw) {
+        if (raw == null) return -1;
+        try {
+            int value = Integer.parseInt(raw.trim());
+            if (value == 0) return 1;
+            return value > 0 ? 0 : -1;
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
+    }
+
+    /**
      * @return true iff the MOST RECENT {@link #probeAccState} call landed on a
      * clean bodywork power level (0-3). False after a sentinel/error/default
      * reading. The ACC-ON disarm watchdog gates on this so it never disarms a
@@ -578,16 +963,22 @@ public class AccMonitor {
 
     public static String execShell(String command) {
         StringBuilder output = new StringBuilder();
+        Process process = null;
         try {
-            Process process = Runtime.getRuntime().exec(new String[]{"sh", "-c", command});
+            process = Runtime.getRuntime().exec(new String[]{"sh", "-c", command});
+            if (!process.waitFor(1500L, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                process.destroyForcibly();
+                return "";
+            }
             java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream()));
             String line;
             while ((line = reader.readLine()) != null) {
                 output.append(line).append("\n");
             }
             reader.close();
-            process.waitFor();
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {
+            if (process != null) process.destroy();
+        }
         return output.toString();
     }
 }

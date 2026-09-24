@@ -103,6 +103,29 @@ public class HttpResponse {
     }
 
     /**
+     * Start a connection-close-delimited attachment response for content that
+     * is generated while it is streamed and therefore has no known length.
+     */
+    public static void sendAttachmentNoStoreHeaders(
+            OutputStream out, String contentType, String filename)
+            throws Exception {
+        String safeName = safeHeader(filename)
+                .replace('"', '_')
+                .replace('\\', '_')
+                .replace('/', '_');
+        String headers = "HTTP/1.1 200 OK\r\n"
+                + "Content-Type: " + safeHeader(contentType) + "\r\n"
+                + "Content-Disposition: attachment; filename=\""
+                + safeName + "\"\r\n"
+                + "Cache-Control: no-store, no-cache, must-revalidate, private\r\n"
+                + "Pragma: no-cache\r\n"
+                + "X-Content-Type-Options: nosniff\r\n"
+                + "Connection: close\r\n\r\n";
+        out.write(headers.getBytes(StandardCharsets.UTF_8));
+        out.flush();
+    }
+
+    /**
      * Send a JSON body with a non-200 status. Used when the body shape is
      * still application JSON (so {@link #sendError} would obscure it) but
      * the HTTP semantics require a 4xx/5xx — for example 410 Gone when a
@@ -259,7 +282,7 @@ public class HttpResponse {
     /**
      * Stream a media file with a caller-chosen Content-Type and full HTTP Range support.
      * Honours a {@code bytes=start-end} request header with a 206 Partial Content reply;
-     * a null/blank/malformed range falls back to a 200 full-file stream.
+     * a null/non-byte range falls back to a 200 full-file stream.
      *
      * <p>This is what {@link #sendMediaFile} could not do: a streaming {@code MediaPlayer}
      * (VideoView / audio service) issues Range requests to locate an MP4's {@code moov}
@@ -275,35 +298,19 @@ public class HttpResponse {
             return;
         }
         long fileLength = file.length();
-        long start = 0, end = fileLength - 1;
-        boolean partial = false;
-        if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
-            try {
-                String spec = rangeHeader.substring(6).trim();
-                int dash = spec.indexOf('-');
-                if (dash < 0) { sendError(out, 400, "Invalid Range header"); return; }
-                String from = spec.substring(0, dash).trim();
-                String to = spec.substring(dash + 1).trim();
-                if (from.isEmpty()) {
-                    // Suffix range "bytes=-N" — the LAST N bytes. Split-on-"-" would lose
-                    // this (it produces ["","N"]), so parse the two sides by the dash index.
-                    long suffix = Long.parseLong(to);
-                    if (suffix <= 0) { sendError(out, 416, "Range Not Satisfiable"); return; }
-                    start = Math.max(0, fileLength - suffix);
-                    end = fileLength - 1;
-                } else {
-                    start = Long.parseLong(from);
-                    if (!to.isEmpty()) end = Long.parseLong(to);
-                }
-                if (start < 0 || start >= fileLength) { sendError(out, 416, "Range Not Satisfiable"); return; }
-                if (end < 0 || end >= fileLength) end = fileLength - 1;
-                if (end < start) end = start;
-                partial = true;
-            } catch (NumberFormatException e) {
-                sendError(out, 400, "Invalid Range header");
-                return;
-            }
+        long[] range;
+        try {
+            range = parseSingleByteRange(rangeHeader, fileLength);
+        } catch (IndexOutOfBoundsException e) {
+            sendRangeNotSatisfiable(out, fileLength, "Range Not Satisfiable");
+            return;
+        } catch (IllegalArgumentException e) {
+            sendError(out, 400, "Invalid Range header");
+            return;
         }
+        long start = range == null ? 0 : range[0];
+        long end = range == null ? fileLength - 1 : range[1];
+        boolean partial = range != null;
         long contentLength = end - start + 1;
 
         StringBuilder headers = new StringBuilder();
@@ -331,6 +338,55 @@ public class HttpResponse {
                 remaining -= read;
             }
         }
+        out.flush();
+    }
+
+    /**
+     * Parse one HTTP byte range. Returns {@code null} when no byte range was requested.
+     * Malformed ranges throw {@link IllegalArgumentException}; valid but unsatisfiable
+     * ranges throw {@link IndexOutOfBoundsException}.
+     */
+    static long[] parseSingleByteRange(String rangeHeader, long fileLength) {
+        String header = rangeHeader == null ? null : rangeHeader.trim();
+        if (header == null || !header.regionMatches(true, 0, "bytes=", 0, 6)) {
+            return null;
+        }
+
+        String spec = header.substring(6).trim();
+        int dash = spec.indexOf('-');
+        if (dash < 0 || dash != spec.lastIndexOf('-') || spec.indexOf(',') >= 0) {
+            throw new IllegalArgumentException("Invalid Range header");
+        }
+
+        String from = spec.substring(0, dash).trim();
+        String to = spec.substring(dash + 1).trim();
+        if (from.isEmpty()) {
+            if (to.isEmpty()) throw new IllegalArgumentException("Invalid Range header");
+            long suffixLength = Long.parseLong(to);
+            if (suffixLength <= 0 || fileLength <= 0) {
+                throw new IndexOutOfBoundsException("Range Not Satisfiable");
+            }
+            return new long[]{Math.max(0, fileLength - suffixLength), fileLength - 1};
+        }
+
+        long start = Long.parseLong(from);
+        long end = to.isEmpty() ? fileLength - 1 : Long.parseLong(to);
+        if (start < 0 || start >= fileLength || end < start) {
+            throw new IndexOutOfBoundsException("Range Not Satisfiable");
+        }
+        return new long[]{start, Math.min(end, fileLength - 1)};
+    }
+
+    static void sendRangeNotSatisfiable(OutputStream out, long fileLength, String message)
+            throws Exception {
+        byte[] body = message.getBytes(StandardCharsets.UTF_8);
+        String headers = "HTTP/1.1 416 Range Not Satisfiable\r\n"
+                + "Content-Type: text/plain; charset=utf-8\r\n"
+                + "Content-Range: bytes */" + fileLength + "\r\n"
+                + "Content-Length: " + body.length + "\r\n"
+                + "Connection: close\r\n\r\n";
+        out.write(headers.getBytes(StandardCharsets.UTF_8));
+        out.write(body);
         out.flush();
     }
 
@@ -389,14 +445,15 @@ public class HttpResponse {
 
         long fileLength = file.length();
         if (start < 0 || start >= fileLength) {
-            sendError(out, 416, "Range Not Satisfiable");
+            sendRangeNotSatisfiable(out, fileLength, "Range Not Satisfiable");
             return;
         }
         if (end < 0 || end >= fileLength) {
             end = fileLength - 1;
         }
         if (end < start) {
-            end = start;
+            sendRangeNotSatisfiable(out, fileLength, "Range Not Satisfiable");
+            return;
         }
         long contentLength = end - start + 1;
 

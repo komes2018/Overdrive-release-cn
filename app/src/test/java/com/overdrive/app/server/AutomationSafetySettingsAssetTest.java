@@ -58,7 +58,7 @@ public class AutomationSafetySettingsAssetTest {
         assertFalse(guard.contains("d.gearMode == GearMonitor.GEAR_P"));
         assertFalse(guard.contains("d.speedKmh"));
         assertTrue(guard.contains(
-                "return BydDataCollector.getInstance().readCurrentSpeedKmh();"));
+                "BydDataCollector.getInstance().readCurrentSpeedKmh();"));
         assertTrue(guard.contains(
                 "SystemClock.elapsedRealtime() - gm.getLastUpdateTime()"));
         assertTrue(gearMonitor.contains("private volatile long lastUpdateTime"));
@@ -133,21 +133,19 @@ public class AutomationSafetySettingsAssetTest {
         assertTrue(collector.contains(
                 "setMirrorsFoldedOnSettingDevice(int value, boolean folded)"));
         assertTrue(collector.contains(
-                "if (drivingSafetyBlocked(DrivingSafetyGuard.GUARD_DISPLAY_BRIGHTNESS)) return false;\n"
-                        + "        try {\n"
+                "if (VehicleActuatorBridge.isDiLink5RequestExpired()) return false;\n"
                         + "            m.invoke(dev, level);"));
         assertTrue(collector.contains(
                 "if (drivingSafetyBlocked(DrivingSafetyGuard.GUARD_DISPLAY_BRIGHTNESS)) return false;\n"
                         + "            Process p = new ProcessBuilder(\"sh\", \"-c\", script)"));
         assertTrue(collector.contains(
-                "if (drivingSafetyBlocked(DrivingSafetyGuard.GUARD_DISPLAY_POWER)) return false;\n"
+                "if (VehicleActuatorBridge.isDiLink5RequestExpired()) return false;\n"
                         + "                m.invoke(settingDevice);"));
         assertTrue(collector.contains(
                 "if (drivingSafetyBlocked(DrivingSafetyGuard.GUARD_DISPLAY_POWER)) return false;\n"
                         + "            Process p = new ProcessBuilder(\"sh\", \"-c\", script)"));
         assertTrue(collector.contains(
-                "if (folded && drivingSafetyBlocked(\n"
-                        + "                        DrivingSafetyGuard.GUARD_MIRROR_FOLD)) return false;\n"
+                "if (VehicleActuatorBridge.isDiLink5RequestExpired()) return false;\n"
                         + "                Object r = m.invoke(bodyworkDevice, val);"));
         assertTrue(actuator.contains("isAppProcessActionBlocked(String guardKey)"));
         assertTrue(actuator.contains(
@@ -155,7 +153,7 @@ public class AutomationSafetySettingsAssetTest {
                         + "                    DrivingSafetyGuard.GUARD_MIRROR_FOLD)"));
         assertTrue(actuator.contains(
                 "isAppProcessActionBlocked(\n"
-                        + "                    DrivingSafetyGuard.GUARD_DISPLAY_BRIGHTNESS)"));
+                        + "                DrivingSafetyGuard.GUARD_DISPLAY_BRIGHTNESS)"));
         assertTrue(actuator.contains(
                 "isAppProcessActionBlocked(\n"
                         + "                DrivingSafetyGuard.GUARD_DISPLAY_POWER)"));

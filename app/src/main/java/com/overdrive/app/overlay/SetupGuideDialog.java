@@ -16,7 +16,9 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.overdrive.app.R;
+import com.overdrive.app.camera.dilink5.DiLink5Platform;
 import com.overdrive.app.services.KeepAliveAccessibilityService;
+import com.overdrive.app.util.BydDataCacheWhitelist;
 
 /**
  * First-launch and post-update setup guide.
@@ -244,6 +246,24 @@ public class SetupGuideDialog {
 
     private static void runAutoStartWhenServiceReady(
             Context context, StepRow step, long deadline) {
+        // DiLink 5 has no autostart-management app; the daemon applies the cache
+        // allowlist instead. Post back on the main looper rather than a step view,
+        // which may not be inflated.
+        if (DiLink5Platform.isSelected()) {
+            new Thread(() -> {
+                final boolean applied =
+                        BydDataCacheWhitelist.applyViaDaemonWhenReady();
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(
+                        () -> finishAutoStartAttempt(
+                                context,
+                                step,
+                                applied,
+                                applied
+                                        ? com.overdrive.app.services.AutoStartEnabler.Result.SUCCESS
+                                        : null));
+            }, "BackgroundAccessSetup").start();
+            return;
+        }
         KeepAliveAccessibilityService service = KeepAliveAccessibilityService.getInstance();
         if (service != null) {
             service.runAutoStartEnabler((success, result) ->

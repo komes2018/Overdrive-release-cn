@@ -156,6 +156,17 @@ public final class VehicleCloudSnapshot {
         return (System.currentTimeMillis() - receivedAt) < CONNECTION_HEALTH_MAX_AGE_MS;
     }
 
+    /**
+     * Window state is usable only while the vehicle is online and the source observation is fresh.
+     */
+    public boolean isWindowStateFresh() {
+        if (!isOnline()) return false;
+        long observedAt = vehicleInfoTimestamp > 0
+                ? Math.min(vehicleInfoTimestamp, receivedAt) : receivedAt;
+        long ageMs = System.currentTimeMillis() - observedAt;
+        return ageMs >= 0 && ageMs < CONNECTION_HEALTH_MAX_AGE_MS;
+    }
+
     public boolean isOnline() {
         return onlineState == ONLINE;
     }
@@ -299,55 +310,6 @@ public final class VehicleCloudSnapshot {
 
     public boolean hasPm25Outside() {
         return pm25Outside > 0 || (pm25Outside == 0 && isOnline());
-    }
-
-    public boolean hasDoors() {
-        return leftFrontDoor != SENTINEL_INT || rightFrontDoor != SENTINEL_INT
-                || leftRearDoor != SENTINEL_INT || rightRearDoor != SENTINEL_INT
-                || trunkLid != SENTINEL_INT;
-    }
-
-    public boolean hasWindows() {
-        return leftFrontWindow != SENTINEL_INT || rightFrontWindow != SENTINEL_INT
-                || leftRearWindow != SENTINEL_INT || rightRearWindow != SENTINEL_INT
-                || skylight != SENTINEL_INT;
-    }
-
-    /**
-     * Map cloud window state (1=CLOSED, 2=OPEN) to open percent (0=closed, 100=open, -1=unknown).
-     * Array index: 0=LF, 1=RF, 2=LR, 3=RR, 4=sunroof, 5=sunshade
-     */
-    public int[] getWindowOpenPercentAsArray() {
-        int[] w = new int[6];
-        w[0] = cloudWindowToPercent(leftFrontWindow);
-        w[1] = cloudWindowToPercent(rightFrontWindow);
-        w[2] = cloudWindowToPercent(leftRearWindow);
-        w[3] = cloudWindowToPercent(rightRearWindow);
-        w[4] = cloudWindowToPercent(skylight);
-        w[5] = -1; // sunshade not reported by cloud
-        return w;
-    }
-
-    private static int cloudWindowToPercent(int cloudVal) {
-        if (cloudVal == 1) return 0;   // CLOSED
-        if (cloudVal == 2) return 100; // OPEN
-        return -1;                     // UNKNOWN
-    }
-
-    /**
-     * Map cloud door locks (1=UNLOCKED, 2=LOCKED) to SDK lock array convention (1=UNLOCKED, 2=LOCKED).
-     * Array index: 0=RF, 1=LF, 2=RR, 3=LR, 4=trunk, 5=hood, 6=overall
-     */
-    public int[] getDoorLockStatusAsArray() {
-        int[] d = new int[7];
-        d[0] = rightFrontDoorLock > 0 ? rightFrontDoorLock : -1;
-        d[1] = leftFrontDoorLock > 0 ? leftFrontDoorLock : -1;
-        d[2] = rightRearDoorLock > 0 ? rightRearDoorLock : -1;
-        d[3] = leftRearDoorLock > 0 ? leftRearDoorLock : -1;
-        d[4] = -1; // trunk lock not reported directly in lock array
-        d[5] = -1; // hood not reported
-        d[6] = isAllLocked() ? LOCK_LOCKED : (isAnyUnlocked() ? LOCK_UNLOCKED : -1);
-        return d;
     }
 
     // ── Charging state translation ──────────────────────────────────────

@@ -1085,14 +1085,7 @@
     "mqtt_trigger": "MQTT 메시지",
     "mqtt_trigger_description": "MQTT 브로커가 <base>/automation/<channel>에 발행할 때 실행됩니다(예: Home Assistant에서). 채널 이름을 입력하고 그 값과 일치시키세요.",
     "mqtt_channel": "채널",
-    "mqtt_value": "값",
-      "wait_until_state_description": "선택한 켜짐/꺼짐 신호가 특정 상태에 도달하거나 시간 초과될 때까지 나머지 작업을 일시정지합니다. 예: 계속하기 전에 Indicators = Off가 될 때까지 대기.",
-      "wait_timeout": "시간 초과 (초)",
-      "wait_until_description": "선택한 신호가 비교 조건을 충족하거나 시간 초과될 때까지 나머지 작업을 일시정지합니다. 예: 창문을 닫기 전에 Speed = 0이 될 때까지 대기.",
-      "save_seat_position": "시트 위치 저장",
-      "save_seat_position_description": "현재 운전석 위치를 메모리 슬롯에 저장합니다.",
-      "set_seat_position": "시트 위치 제어",
-      "set_seat_position_description": "시트 메모리 위치를 불러옵니다. 먼저 차량에서 메모리를 저장했는지 확인하세요. 차량 전원이 꺼져 있으면 이 컨트롤은 작동하지 않습니다."
+    "mqtt_value": "값"
   },
   "messages": {
     "logged_out": "로그아웃",

@@ -172,6 +172,30 @@
     "soh_frame_mismatch_title": "Battery capacity needs review",
     "soh_frame_mismatch_body": "Vehicle reports {0} kWh at full charge but pack capacity is set to {1} kWh. Open Battery Health to fix in one tap."
   },
+  "parking": {
+    "notify": {
+      "started_title": "Parked",
+      "ended_title": "Back at car",
+      "ended_body": "Away {0} · {1} events · {2} vehicles came or went",
+      "ended_body_short": "{0} vehicles came or went",
+      "ended_body_unwatched": "Away {0} · Sentry not armed ({1})",
+      "ended_events": "{0} events",
+      "nothing_critical": "Nothing critical",
+      "no_place": "Location unavailable",
+      "gps_fresh": "GPS fresh",
+      "gps_recent": "GPS recent",
+      "gps_stale": "GPS stale — garage?",
+      "gps_unknown": "No GPS fix",
+      "sentry_off": "Sentry not armed ({0})",
+      "sentry_safe_zone": "safe zone",
+      "sentry_schedule": "outside schedule",
+      "sentry_disabled": "surveillance off",
+      "sentry_vehicle_on_only": "vehicle-on-only mode",
+      "sentry_pipeline_down": "camera not running",
+      "sentry_unknown": "unknown",
+      "btn_walk": "Walk me back"
+    }
+  },
   "telegram": {
     "recording_caption": "📹 Recording ({0}) - {1}s",
     "recording_caption_no_label": "📹 Recording - {0}s",
@@ -255,7 +279,23 @@
       "error": "⚠️ Error: {0}"
     },
     "help": {
-      "text": "📖 *Commands*\n_OverDrive {0}_\n\n*Surveillance*\n`/start` - Start surveillance\n`/stop` - Stop surveillance\n`/status` - System status\n\n*Events*\n`/events [hours] [page]` - List recordings\n`/download <file>` - Download video\n\n*Daemons*\n`/daemons` - List all daemons\n`/daemon <name> start|stop`\n\n*System*\n`/url` - Tunnel URL\n`/update` - Check for app update\n`/backup` - Export settings backup\n`/backup trips` - Backup incl. trip history\n`/help` - This message"
+      "text": "📖 *Commands*\n_OverDrive {0}_\n\n*Surveillance*\n`/start` - Start surveillance\n`/stop` - Stop surveillance\n`/status` - System status\n\n*Events*\n`/events [hours] [page]` - List recordings\n`/download <file>` - Download video\n\n*Daemons*\n`/daemons` - List all daemons\n`/daemon <name> start|stop`\n\n*System*\n`/url` - Tunnel URL\n`/update` - Check for app update\n`/backup` - Export settings backup\n`/backup trips` - Backup incl. trip history\n`/where` - Where did I park?\n`/help` - This message"
+    },
+    "parking": {
+      "where": {
+        "unavailable": "⚠️ Could not reach the camera daemon. Try `/daemon camera start`.",
+        "disabled": "🅿️ Parking Intelligence is off. Enable it under Surveillance settings → Parking.",
+        "none": "🅿️ No parking session recorded yet.",
+        "title_open": "🅿️ *Your car is parked*",
+        "title_last": "🅿️ *Last parking session*",
+        "parked_for": "Parked for {0}",
+        "was_away": "You were away {0}",
+        "counts": "{0} sentry events · {1} vehicles around you",
+        "gps_fresh": "GPS fix fresh",
+        "gps_recent": "GPS fix a few minutes old",
+        "gps_stale": "GPS fix is stale — probably an indoor garage; shown position is the entrance",
+        "gps_unknown": "No GPS fix"
+      }
     },
     "surveillance": {
       "started": "✅ Surveillance started",
@@ -674,6 +714,8 @@
     "cpd_description": "The current state of the Child Presence Detection setting.",
     "seat_climate": "Seat Heating/Cooling",
     "seat_climate_description": "The current state of the Seat Climate settings.",
+    "steering_heat": "Steering Wheel Heating",
+    "steering_heat_description": "Whether the steering-wheel heater is on or off. Unavailable on vehicles that do not report its state.",
     "low": "Low",
     "high": "High",
     "type": "Type",
@@ -871,6 +913,10 @@
     "open_app_description": "Launch an installed app when this automation fires.",
     "open_app_split": "Open App (Split Screen)",
     "open_app_split_description": "Launch an installed app docked to one half of the screen (split-screen) when this automation fires.",
+    "open_apps_split": "Open Two Apps (Split Screen)",
+    "open_apps_split_description": "Open two selected apps together in split screen when this automation fires.",
+    "primary_app": "Primary app",
+    "secondary_app": "Secondary app",
     "show_camera_view": "Show Camera View",
     "show_camera_view_description": "Show a camera view on the head unit or driver cluster at the chosen position. Choose a single camera, all four, or the combined rear + side view for either side. The combined views follow your Blind Spot settings for cameras shown, fisheye correction and rotation. Shares the blind-spot display; blind-spot takes priority while active.",
     "show_camera_feed": "Show Camera Feed",
@@ -1190,6 +1236,8 @@
     "nav_recents": "Recent Apps",
     "screenshot": "Take Screenshot",
     "screenshot_description": "Capture a screenshot of the chosen display to storage.",
+    "ivi_reboot": "Reboot IVI",
+    "ivi_reboot_description": "Restart the Android head unit. Runs only while parked and is blocked during the first five minutes after startup or another reboot request to prevent reboot loops.",
     "display_head_unit": "Head Unit",
     "move_app_display": "Move App to Display",
     "move_app_display_description": "Move an app to the head-unit or driver-cluster display.",

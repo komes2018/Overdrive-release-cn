@@ -1,7 +1,7 @@
 package android.hardware.bydauto.statistic;
 import android.hardware.bydauto.BYDAutoEventValue;
-// DiLink-5 compile-only stub (float signatures). Real class from libs/dilink5-sdk.jar at runtime.
-// Only on the dilink5 flavor's compile classpath; not used by src/main (D3 statistic is poll-only).
+// DiLink-5 compile-only stub (float signatures). The real class is loaded from the installed OEM
+// APK at runtime; this stub is compileOnly and is never packaged into the universal app.
 public abstract class AbsBYDAutoStatisticListener {
     public AbsBYDAutoStatisticListener() {}
     public void onElecPercentageChanged(double v) {}

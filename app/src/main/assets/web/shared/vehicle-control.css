@@ -40,7 +40,8 @@
        amount, which clipped the bottom .vc-bar control panel. The notch /
        cutout offset is now applied per-element to the floating overlay
        chrome (hamburger, status bars) inside .vc-viewport. */
-    height: 100%;
+    height: 100vh;
+    height: calc(var(--vh, 1vh) * 100);
     background: var(--vc-canvas-bg);
     overflow: hidden;
 }
@@ -158,7 +159,11 @@
     -webkit-tap-highlight-color: transparent; touch-action: manipulation;
 }
 .vc-swatch-custom svg { width: 16px; height: 16px; }
-.vc-swatch-custom.active { color: var(--primary); border-color: var(--primary); }
+.vc-swatch-custom.active {
+    color: var(--primary);
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px var(--vc-pill-bg), 0 0 0 4px var(--primary);
+}
 
 /* Custom listbox: the WebView paints a native <select> popup with its own
    orange highlight that CSS cannot reach. The hidden <select> stays the
@@ -831,11 +836,20 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     position: relative;
     z-index: 1;
     width: 100%;
-    height: 20px;
+    /* 20px of visible ramp, 44px of touch. The padding is transparent because
+       the background is clipped to the content box, and the negative margin
+       gives the row back the 20px it used to occupy, so nothing moves. The
+       gradient must be set as background-image, never the background
+       shorthand, or it resets the clip. */
+    -webkit-box-sizing: border-box; box-sizing: border-box;
+    height: 44px;
+    padding: 12px 0;
+    margin: -12px 0;
     border-radius: var(--radius-sm);
     background: var(--vc-tile-bg);
+    -webkit-background-clip: content-box;
+    background-clip: content-box;
     outline: none;
-    margin: 0;
 }
 .vc-ambient-slider:disabled {
     opacity: .45;
@@ -878,6 +892,12 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     /* Gaps the ramp around the cube without reading as a second border. */
     box-shadow: 0 0 0 2px var(--vc-tile-bg);
     pointer-events: none;
+}
+.vc-ambient-slider::-moz-range-track {
+    height: 20px;
+    border: 0;
+    border-radius: 3px;
+    background: var(--vc-tile-bg);
 }
 .vc-ambient-slider:disabled::-webkit-slider-thumb {
     cursor: not-allowed;
@@ -1061,16 +1081,25 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
 .vc-soc-slider {
     -webkit-appearance: none; appearance: none;
     width: 100%;
+    /* The visible bar moves to the track so the input box can grow into a
+       touch target without the border growing with it. 8px each way is the
+       clearance the charge-limit toggle above leaves. */
+    height: 22px;
+    margin: -8px 0;
+    border: 0;
+    background: transparent;
+}
+.vc-soc-slider::-webkit-slider-runnable-track {
+    -webkit-box-sizing: border-box; box-sizing: border-box;
     height: 6px;
+    border: 1px solid var(--vc-border-subtle);
     border-radius: 3px;
     background: var(--vc-tile-bg);
-    border: 1px solid var(--vc-border-subtle);
-    outline: none;
-    margin: 0 6px;
 }
 .vc-soc-slider::-webkit-slider-thumb {
     -webkit-appearance: none; appearance: none;
     width: 18px; height: 18px;
+    margin-top: -7px;
     border-radius: 50%;
     background: var(--primary);
     cursor: pointer;
@@ -1081,6 +1110,12 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     border-radius: 50%;
     background: var(--primary);
     cursor: pointer;
+}
+.vc-soc-slider::-moz-range-track {
+    height: 6px;
+    border: 1px solid var(--vc-border-subtle);
+    border-radius: 3px;
+    background: var(--vc-tile-bg);
 }
 
 /* Tiles inside the charging panel are inline-shaped: icon next to label,
@@ -1257,8 +1292,68 @@ button.vc-pill:active { -webkit-transform: scale(.95); transform: scale(.95); }
 /* ===== MOBILE RESPONSIVE ===== */
 @media (max-width: 768px) {
     .vc-nav-btn { display: -webkit-flex; display: flex; }
-    .vc-status-bar { top: calc(10px + env(safe-area-inset-top, 0px)); left: 56px; right: 10px; }
-    .vc-bar { left: 2%; right: 2%; }
+    .vc-status-bar {
+        top: calc(10px + env(safe-area-inset-top, 0px));
+        left: 66px;
+        right: 8px;
+        height: auto;
+        min-height: 48px;
+        -webkit-flex-wrap: wrap;
+        flex-wrap: wrap;
+        -webkit-align-items: flex-start;
+        align-items: flex-start;
+        -webkit-align-content: flex-start;
+        align-content: flex-start;
+    }
+    .vc-status-slot--start {
+        -webkit-order: 1;
+        order: 1;
+        -webkit-flex: 0 0 50%;
+        flex: 0 0 50%;
+        width: 50%;
+        -webkit-justify-content: flex-start;
+        justify-content: flex-start;
+    }
+    .vc-status-slot--end {
+        -webkit-order: 2;
+        order: 2;
+        -webkit-flex: 0 0 50%;
+        flex: 0 0 50%;
+        width: 50%;
+        -webkit-justify-content: flex-end;
+        justify-content: flex-end;
+    }
+    .vc-status-slot--mid {
+        -webkit-order: 3;
+        order: 3;
+        -webkit-flex: 0 0 100%;
+        flex: 0 0 100%;
+        width: 100%;
+        height: auto;
+        min-height: 48px;
+        margin-top: 6px;
+        -webkit-flex-wrap: wrap;
+        flex-wrap: wrap;
+        -webkit-justify-content: flex-start;
+        justify-content: flex-start;
+    }
+    .vc-status-slot--mid > * { margin-bottom: 6px; }
+    .vc-status-slot--start .vc-pill,
+    .vc-status-slot--end .vc-pill {
+        max-width: 100%;
+        overflow: hidden;
+    }
+    #lockStatus,
+    #cloudStatusText {
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .vc-bar { left: 0; right: 0; bottom: 0; }
+    .vc-dock {
+        border-bottom: 0;
+        border-radius: var(--radius-md) var(--radius-md) 0 0;
+    }
+    .vc-tabs { padding-bottom: 6px; }
     .vc-tab { height: 48px; }
     .vc-tab svg { width: 18px; height: 18px; }
     .vc-tile { width: 50px; height: 52px; }
@@ -1292,11 +1387,11 @@ button.vc-pill:active { -webkit-transform: scale(.95); transform: scale(.95); }
 [dir="rtl"] .vc-status-bar { left: 10px; right: 66px; }
 
 @media (max-width: 768px) {
-    [dir="rtl"] .vc-status-bar { left: 10px; right: 66px; }
+    [dir="rtl"] .vc-status-bar { left: 8px; right: 66px; }
 }
 
 @media (max-width: 480px) {
-    .vc-status-bar { left: 54px; right: 8px; }
+    .vc-status-bar { left: 66px; right: 8px; }
     .vc-pill { padding: 0 8px; font-size: 10px; }
     .vc-pill .dot { width: 5px; height: 5px; }
     .vc-colors { padding: 0 5px; }
@@ -1306,8 +1401,10 @@ button.vc-pill:active { -webkit-transform: scale(.95); transform: scale(.95); }
     .vc-3d-btn { padding: 0 9px; }
     .vc-3d-btn svg { width: 14px; height: 14px; }
     .vc-3d-btn span { font-size: 11px; margin-left: 6px; }
-    .vc-bar { left: 1%; right: 1%; }
-    .vc-tabs { padding: 5px 6px; }
+    .vc-bar { left: 0; right: 0; }
+    .vc-tabs {
+        padding: 5px 6px;
+    }
     .vc-tabs > * { margin: 0 1px; }
     .vc-tab { height: 44px; }
     .vc-tab svg { width: 16px; height: 16px; }
@@ -1428,13 +1525,78 @@ button.vc-pill:active { -webkit-transform: scale(.95); transform: scale(.95); }
     -webkit-transform: scale(0.97); transform: scale(0.97);
 }
 
-/* ===== CUSTOM PAINT MODAL =====
-   In-app replacement for <input type="color">, whose OS picker arrives with its
-   own chrome (blue title bar on Android 7) that no page style can reach. */
+/* ===== CUSTOM PAINT MODAL ===== */
+.vc-color-spectrum {
+    position: relative;
+    height: 150px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    border: 1px solid var(--vc-border);
+    border-radius: var(--radius-md);
+    background-color: #f00;
+    background-image:
+        linear-gradient(to top, #000, transparent),
+        linear-gradient(to right, #fff, rgba(255,255,255,0));
+    cursor: crosshair;
+    touch-action: none;
+}
+.vc-color-spectrum-thumb {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 18px;
+    height: 18px;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    box-shadow: 0 1px 4px rgba(0,0,0,.75);
+    -webkit-transform: translate(-50%, -50%);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+.vc-color-hue {
+    -webkit-appearance: none;
+    appearance: none;
+    box-sizing: border-box;
+    width: 100%;
+    height: 26px;
+    margin: 0 0 14px;
+    padding: 5px 0;
+    border: 1px solid var(--vc-border);
+    border-radius: var(--radius-md);
+    background: linear-gradient(to right,
+        #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+    cursor: pointer;
+}
+.vc-color-hue::-webkit-slider-runnable-track {
+    height: 14px;
+    background: transparent;
+}
+.vc-color-hue::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 24px;
+    height: 24px;
+    margin-top: -5px;
+    border: 3px solid #fff;
+    border-radius: 50%;
+    background: transparent;
+    box-shadow: 0 1px 4px rgba(0,0,0,.7);
+}
+.vc-color-hue::-moz-range-track {
+    height: 14px;
+    background: transparent;
+}
+.vc-color-hue::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border: 3px solid #fff;
+    border-radius: 50%;
+    background: transparent;
+    box-shadow: 0 1px 4px rgba(0,0,0,.7);
+}
 .vc-color-grid {
     display: -webkit-flex; display: flex;
     -webkit-flex-wrap: wrap; flex-wrap: wrap;
-    margin-bottom: 16px;
+    margin-bottom: 8px;
 }
 .vc-color-cell {
     width: 44px; height: 44px;
@@ -1457,6 +1619,7 @@ button.vc-pill:active { -webkit-transform: scale(.95); transform: scale(.95); }
     -webkit-flex-shrink: 0; flex-shrink: 0;
     border-radius: var(--radius-md);
     border: 1px solid var(--vc-border);
+    background: var(--vc-tile-bg);
 }
 .vc-color-hex {
     -webkit-flex: 1; flex: 1;
@@ -1476,6 +1639,21 @@ button.vc-pill:active { -webkit-transform: scale(.95); transform: scale(.95); }
 [dir="rtl"] .vc-color-hex { margin-left: 0; margin-right: 12px; }
 .vc-color-hex:focus { border-color: var(--primary); }
 .vc-color-hex.invalid { border-color: var(--status-danger); }
+
+@media (max-width: 480px), (max-height: 650px) {
+    #colorModal .vc-modal {
+        max-height: calc(100% - 24px);
+        padding: 18px;
+        overflow-y: auto;
+    }
+    .vc-color-spectrum { height: 130px; }
+    .vc-color-cell {
+        width: 36px;
+        height: 36px;
+        margin-right: 6px;
+        margin-bottom: 6px;
+    }
+}
 
 /* ==================== LITE MODE ====================
    html.vc-mode-lite is set by the inline bootstrap in vehicle-control.html

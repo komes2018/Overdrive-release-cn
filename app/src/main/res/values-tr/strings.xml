@@ -622,6 +622,7 @@
     <string name="rail_vehicle">Araç</string>
     <string name="rail_projection">Yansıtma</string>
     <string name="rail_trips">Seyahatler</string>
+    <string name="rail_parking">Park</string>
     <string name="rail_integrations">Entegreler</string>
     <string name="rail_diagnostics">Teşhisler</string>
     <string name="rail_settings">Ayarlar</string>
@@ -760,7 +761,6 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Nöbette</string>
-    <string name="dashboard_modern_vehicle_status">Araç durumu</string>
     <string name="dashboard_subtitle_all_systems">Tüm sistemler çevrimiçi</string>
     <string name="dashboard_subtitle_some_offline">%1$d of %2$d online hizmetleri</string>
     <string name="dashboard_subtitle_no_tunnel">Uzaktan erişim çevrimdışı</string>
@@ -780,14 +780,11 @@
     <string name="vehicle_dialog_title">Batarya kapasitesini ayarlayın</string>
     <string name="vehicle_dialog_capacity_label">Kapasite (kWh)</string>
     <string name="vehicle_dialog_capacity_suffix">kWh</string>
-    <string name="vehicle_dialog_capacity_helper">15 ila 120 kWh. Model varsayılanını kullanmak için bırakın.</string>
+    <string name="vehicle_dialog_capacity_helper">5 ila 120 kWh. Model varsayılanını kullanmak için bırakın.</string>
     <string name="vehicle_dialog_model_label">Model</string>
     <string name="vehicle_dialog_save">Kaydet</string>
     <string name="vehicle_dialog_reset">Otomatik tespit için yeniden ayarlayın</string>
-    <string name="vehicle_dialog_detection">Algılama: %1$s</string>
-    <string name="vehicle_dialog_detection_auto">Otomatik</string>
-    <string name="vehicle_dialog_detection_manual">Manuel</string>
-    <string name="vehicle_dialog_invalid_capacity">Kapasite 15 - 120 kWh olmalıdır.</string>
+    <string name="vehicle_dialog_invalid_capacity">Kapasite 5 - 120 kWh olmalıdır.</string>
     <string name="vehicle_dialog_summary_effective">Etkili: %1$.1f kWh</string>
     <string name="vehicle_dialog_summary_calibration">Son kalibrasyon: %1$.1f%% %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">kullanılamıyor</string>
@@ -1227,7 +1224,7 @@
     <string name="settings_backup_restore_confirm_title">Ayarlar geri yüklensin mi?</string>
     <string name="settings_backup_exporting">Yedek oluşturuluyor…</string>
     <string name="settings_backup_export_failed">Yedek dışa aktarma başarısız oldu</string>
-    <string name="onboarding_vehicle_body">Modelinizi seçin, kWh\'yi biz dolduralım ya da kendiniz yazın (15–120). Bu, menzil ve şarj tahminlerini doğru hale getirir. Atlayıp sonra ayarlayabilirsiniz.</string>
+    <string name="onboarding_vehicle_body">Modelinizi seçin, kWh\'yi biz dolduralım ya da kendiniz yazın (5–120). Bu, menzil ve şarj tahminlerini doğru hale getirir. Atlayıp sonra ayarlayabilirsiniz.</string>
     <string name="onboarding_expert_vehicle_title">Araç profili</string>
     <string name="onboarding_done_primary">Bitti</string>
     <string name="settings_backup_export_title">Ayarları dışa aktar</string>
@@ -1341,6 +1338,10 @@
     <string name="projection_autostart_conflict_confirm">Bu uygulamayı kullan</string>
     <string name="projection_app_uninstalled">O uygulama artık yüklü değil.</string>
     <string name="projection_status_service_down">Ayna hizmeti hazır değil — uygulamayı (veya kamera arka plan hizmetini) yeniden başlatıp tekrar deneyin.</string>
+    <string name="dashboard_modern_vehicle_status">Araç durumu</string>
+    <string name="vehicle_dialog_detection">Algılama: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Otomatik</string>
+    <string name="vehicle_dialog_detection_manual">Manuel</string>
     <!-- Rail category headers -->
     <string name="rail_section_cameras">Kameralar</string>
     <string name="rail_section_controls">Kontroller</string>

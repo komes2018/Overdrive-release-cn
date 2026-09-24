@@ -7,6 +7,7 @@ import android.opengl.GLES20;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Process;
+import android.os.SystemClock;
 import android.view.Surface;
 
 import com.overdrive.app.config.UnifiedConfigManager;
@@ -27,6 +28,7 @@ import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * OemDashcamPipeline — single-sensor forward dashcam.
@@ -103,6 +105,11 @@ public class OemDashcamPipeline {
     // daemon kill.
     private static final long WATCHDOG_TIMEOUT_MS = 30_000;
     private static final long WATCHDOG_POLL_INTERVAL_MS = 5_000;
+    // Legacy AVMCamera.open is a vendor Binder transaction and cannot be
+    // cancelled safely once dispatched. Bound the caller's wait; if the worker
+    // is still alive at the deadline, process retirement is the only teardown
+    // that cannot race a late camera-handle publication.
+    private static final long LEGACY_CAMERA_OPEN_HARD_TIMEOUT_MS = 10_000L;
     // After this many consecutive renderLoop catch-block firings, stop the
     // pipeline — bounded retry instead of unbounded 20Hz spin on a persistently
     // failing eglCore.makeCurrent or AVMCamera HAL.
@@ -211,6 +218,15 @@ public class OemDashcamPipeline {
 
     // Camera HAL
     private volatile Object cameraObj;
+    // Set only around the legacy vendor open/attach worker. Exposed as state,
+    // rather than inferred from cameraObj, because constructor-style firmware
+    // publishes a partial handle before AVMCamera.open() returns.
+    private final AtomicBoolean legacyCameraOpenInFlight = new AtomicBoolean(false);
+    // Terminal latch for a legacy open that outlived its hard deadline. Once
+    // set, no Java teardown may touch the partial camera/EGL stack; the urgent
+    // process-restart deadline owns cleanup.
+    private final AtomicBoolean legacyCameraOpenTerminalRestart =
+        new AtomicBoolean(false);
 
     // Recording encoder — H.265 @ recording quality, writes dvr_*.mp4.
     // volatile: assigned on the GL thread (initEglAndEncoder /
@@ -400,8 +416,31 @@ public class OemDashcamPipeline {
      * or if the HAL-declared dims look like a panoramic strip.
      */
     public void start() throws Exception {
+        final long cameraStartEpoch =
+            com.overdrive.app.daemon.CameraDaemon.captureCameraStartEpoch();
+        start(cameraStartEpoch, () -> true);
+    }
+
+    /**
+     * Starts under both the daemon-wide camera epoch and the caller's lifecycle
+     * ownership token. The latter closes the OEM-specific config/viewer race:
+     * its resolver can be superseded while EGL setup or AVC warmup is running
+     * without necessarily changing the global pano camera epoch.
+     */
+    public void start(
+            long cameraStartEpoch,
+            java.util.function.BooleanSupplier lifecycleOwnerCurrent)
+            throws Exception {
         lifecycleLock.lock();
         try {
+            if (legacyCameraOpenTerminalRestart.get()
+                    || com.overdrive.app.daemon.CameraDaemon
+                            .isProcessRestartPending()) {
+                throw new IllegalStateException(
+                    "OEM camera start refused while process retirement is pending");
+            }
+            requireStartAdmissionCurrent(
+                cameraStartEpoch, lifecycleOwnerCurrent, "start admission");
             if (running.getAndSet(true)) {
                 logger.warn("start() called while already running");
                 return;
@@ -430,17 +469,33 @@ public class OemDashcamPipeline {
             startThreads();
             try {
                 initEglAndEncoder();
-                openCameraAndAttach();
+                requireStartCurrent(
+                    cameraStartEpoch, lifecycleOwnerCurrent, "post-EGL setup");
+                openCameraAndAttach(
+                    cameraStartEpoch, lifecycleOwnerCurrent);
+                requireStartCurrent(
+                    cameraStartEpoch, lifecycleOwnerCurrent, "post-camera open");
                 installFrameCallback();
+                requireStartCurrent(
+                    cameraStartEpoch, lifecycleOwnerCurrent, "pre-render loop");
                 startRenderLoop();
                 logger.info("OemDashcamPipeline started: " + width + "x" + height + " @ "
                     + fps + " fps, " + (bitrate / 1_000_000) + " Mbps, id=" + oemDashcamCameraId
                     + ", codec=" + (isHevc() ? "H.265" : "H.264"));
             } catch (Throwable t) {
                 running.set(false);
-                // Reentrant lock: stopInternal acquires the same lock,
-                // safe to call from inside start's catch.
-                stopInternal(true);
+                if (legacyCameraOpenTerminalRestart.get()) {
+                    // The open worker still owns an uninterruptible vendor
+                    // transaction and may publish cameraObj after this catch.
+                    // Closing camera/EGL here would overlap that late worker.
+                    logger.error("OEM legacy camera open exceeded its hard "
+                        + "deadline — preserving partial state for terminal "
+                        + "process retirement");
+                } else {
+                    // Reentrant lock: stopInternal acquires the same lock,
+                    // safe to call from inside start's catch.
+                    stopInternal(true);
+                }
                 throw t;
             }
         } finally {
@@ -448,8 +503,58 @@ public class OemDashcamPipeline {
         }
     }
 
+    private static void requireStartAdmissionCurrent(
+            long cameraStartEpoch,
+            java.util.function.BooleanSupplier lifecycleOwnerCurrent,
+            String phase) {
+        if (!isStartAdmissionCurrent(
+                cameraStartEpoch, lifecycleOwnerCurrent)) {
+            throw new IllegalStateException(
+                "OEM camera start superseded at " + phase);
+        }
+    }
+
+    private static boolean isStartAdmissionCurrent(
+            long cameraStartEpoch,
+            java.util.function.BooleanSupplier lifecycleOwnerCurrent) {
+        boolean ownerCurrent = false;
+        try {
+            ownerCurrent = lifecycleOwnerCurrent != null
+                && lifecycleOwnerCurrent.getAsBoolean();
+        } catch (Throwable ignored) {
+            // Fail closed. A broken owner check must never authorize a new
+            // camera/GPU stack.
+        }
+        if (!ownerCurrent
+                || !com.overdrive.app.daemon.CameraDaemon
+                    .isCameraStartEpochCurrent(cameraStartEpoch)
+                || com.overdrive.app.daemon.CameraDaemon
+                    .isProcessRestartPending()) {
+            return false;
+        }
+        return true;
+    }
+
+    private void requireStartCurrent(
+            long cameraStartEpoch,
+            java.util.function.BooleanSupplier lifecycleOwnerCurrent,
+            String phase) {
+        if (!running.get()) {
+            throw new IllegalStateException(
+                "OEM camera start stopped at " + phase);
+        }
+        requireStartAdmissionCurrent(
+            cameraStartEpoch, lifecycleOwnerCurrent, phase);
+    }
+
     /** Stop the pipeline. Safe to call from any thread. */
     public void stop() {
+        if (legacyCameraOpenTerminalRestart.get()) {
+            running.set(false);
+            logger.warn("stop: legacy camera open is terminally wedged; "
+                + "process retirement owns cleanup");
+            return;
+        }
         if (!running.getAndSet(false)) return;
         stopInternal(false);
     }
@@ -457,6 +562,11 @@ public class OemDashcamPipeline {
     /** True if start() was called and the GL/HAL handles are still live. */
     public boolean isRunning() {
         return running.get();
+    }
+
+    /** Camera id currently selected for this pipeline, or -1 before startup. */
+    public int getCameraId() {
+        return oemDashcamCameraId;
     }
 
     /**
@@ -1318,7 +1428,7 @@ public class OemDashcamPipeline {
     }
 
     private void startWatchdog() {
-        lastRenderHeartbeat = System.currentTimeMillis();
+        lastRenderHeartbeat = SystemClock.elapsedRealtime();
         watchdogThread = new Thread(() -> {
             while (running.get()) {
                 try {
@@ -1328,7 +1438,7 @@ public class OemDashcamPipeline {
                     return;
                 }
                 if (!running.get()) return;
-                long age = System.currentTimeMillis() - lastRenderHeartbeat;
+                long age = SystemClock.elapsedRealtime() - lastRenderHeartbeat;
                 if (age > WATCHDOG_TIMEOUT_MS) {
                     logger.error("OEM render-loop watchdog: no heartbeat for "
                         + age + " ms — forcing stop()");
@@ -1527,19 +1637,113 @@ public class OemDashcamPipeline {
     /** GLES external-OES texture target. We don't link android-opengl-extensions. */
     private static final int GLES11_OES_TEXTURE_EXTERNAL = 0x8D65;
 
-    private void openCameraAndAttach() throws Exception {
-        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
-            logger.info("DiLink 5 platform: dashcam integrated into primary QCarCam pipeline");
+    private void openCameraAndAttach(
+            long cameraStartEpoch,
+            java.util.function.BooleanSupplier lifecycleOwnerCurrent)
+            throws Exception {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            logger.info("DiLink 5 uses the primary QCarCam pipeline; skipping AVMCamera DVR.");
             return;
+        }
+        if (!AvcHalWarmup.warmupBeforeColdOpen(
+                () -> running.get()
+                    && isStartAdmissionCurrent(
+                        cameraStartEpoch, lifecycleOwnerCurrent))) {
+            throw new InterruptedException(
+                "AVC HAL warmup interrupted before OEM AVMCamera open");
+        }
+        requireStartCurrent(
+            cameraStartEpoch, lifecycleOwnerCurrent,
+            "post-warmup camera acquisition");
+        if (isLegacyAvmMode()) {
+            openLegacyCameraAndAttachWithHardTimeout();
+        } else {
+            // Preserve the existing DiLink 4 synchronous open behavior.
+            openCameraAndAttachAfterWarmup();
+        }
+    }
+
+    private static boolean isLegacyAvmMode() {
+        return !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+            && !com.overdrive.app.camera.dilink5.DiLink5Platform
+                .isDiLink4Selected();
+    }
+
+    /**
+     * Bounds the legacy vendor open without pretending a Java interrupt can
+     * cancel its Binder transaction. A timeout arms the urgent process-release
+     * deadline and latches teardown closed so no stop/restart can overlap a
+     * late cameraObj publication.
+     */
+    private void openLegacyCameraAndAttachWithHardTimeout() throws Exception {
+        final AtomicReference<Throwable> openFailure = new AtomicReference<>();
+        legacyCameraOpenInFlight.set(true);
+        Thread openThread = new Thread(() -> {
+            try {
+                openCameraAndAttachAfterWarmup();
+            } catch (Throwable t) {
+                openFailure.set(t);
+            } finally {
+                legacyCameraOpenInFlight.set(false);
+            }
+        }, "OemDvr-LegacyCameraOpen");
+        openThread.setDaemon(true);
+        try {
+            openThread.start();
+        } catch (Throwable startFailure) {
+            legacyCameraOpenInFlight.set(false);
+            if (startFailure instanceof Exception) {
+                throw (Exception) startFailure;
+            }
+            throw new RuntimeException(startFailure);
         }
 
-        Class<?> avmClass;
-        try {
-            avmClass = Class.forName("android.hardware.AVMCamera");
-        } catch (ClassNotFoundException e) {
-            logger.warn("android.hardware.AVMCamera not present on this device");
-            return;
+        final long deadlineElapsed = SystemClock.elapsedRealtime()
+            + LEGACY_CAMERA_OPEN_HARD_TIMEOUT_MS;
+        while (openThread.isAlive()) {
+            long remaining = deadlineElapsed - SystemClock.elapsedRealtime();
+            if (remaining <= 0L) break;
+            try {
+                openThread.join(Math.min(remaining, 200L));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                if (openThread.isAlive()) {
+                    armTerminalLegacyOpenRestart(
+                        "OEM legacy AVMCamera open interrupted in flight");
+                    throw new IllegalStateException(
+                        "OEM legacy camera open interrupted while vendor "
+                            + "transaction remained in flight",
+                        interrupted);
+                }
+                throw interrupted;
+            }
         }
+
+        if (openThread.isAlive()) {
+            armTerminalLegacyOpenRestart(
+                "OEM legacy AVMCamera open blocked for "
+                    + LEGACY_CAMERA_OPEN_HARD_TIMEOUT_MS + "ms");
+            throw new IllegalStateException(
+                "OEM legacy AVMCamera open exceeded "
+                    + LEGACY_CAMERA_OPEN_HARD_TIMEOUT_MS + "ms hard deadline");
+        }
+
+        Throwable failure = openFailure.get();
+        if (failure instanceof Exception) throw (Exception) failure;
+        if (failure instanceof Error) throw (Error) failure;
+        if (failure != null) throw new RuntimeException(failure);
+    }
+
+    private void armTerminalLegacyOpenRestart(String reason) {
+        legacyCameraOpenTerminalRestart.set(true);
+        com.overdrive.app.daemon.CameraDaemon
+            .requestUrgentCameraReleaseRestart(reason);
+        logger.error(reason + " — terminal restart armed; overlapping "
+            + "OEM opens and teardown are fenced");
+    }
+
+    private void openCameraAndAttachAfterWarmup() throws Exception {
+        Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
 
         try {
             Constructor<?> c = avmClass.getDeclaredConstructor(int.class);
@@ -1644,9 +1848,9 @@ public class OemDashcamPipeline {
         int consecutiveErrors = 0;
         while (running.get()) {
             try {
-                lastRenderHeartbeat = System.currentTimeMillis();
+                lastRenderHeartbeat = SystemClock.elapsedRealtime();
                 synchronized (frameSync) {
-                    long start = System.currentTimeMillis();
+                    long start = SystemClock.elapsedRealtime();
                     while (!imagePending && running.get()) {
                         try {
                             // FIX H4: 250 ms timeout (was 100 ms). The watchdog's
@@ -1668,7 +1872,7 @@ public class OemDashcamPipeline {
                         // legitimately-slow HAL warmup. Continuing into
                         // updateTexImage with imagePending=false would do
                         // wasted GL work and encode a duplicate frame.
-                        if (System.currentTimeMillis() - start > 5_000) break;
+                        if (SystemClock.elapsedRealtime() - start > 5_000) break;
                     }
                     if (!imagePending) {
                         // Wait timed out without a frame; iterate to refresh
@@ -2016,6 +2220,11 @@ public class OemDashcamPipeline {
     }
 
     private void stopInternal(boolean fromStartFailure) {
+        if (legacyCameraOpenTerminalRestart.get()) {
+            running.set(false);
+            logger.warn("stopInternal: terminal legacy open owns cleanup");
+            return;
+        }
         // R8-A #14: interrupt the watchdog BEFORE acquiring lifecycleLock.
         // Without this, watchdog's mid-sleep cycle (up to 5s) keeps the
         // thread alive past stop completion, which is harmless but
@@ -2035,6 +2244,12 @@ public class OemDashcamPipeline {
 
         lifecycleLock.lock();
         try {
+            if (legacyCameraOpenTerminalRestart.get()) {
+                running.set(false);
+                logger.warn("stopInternal: terminal legacy open latched while "
+                    + "waiting for lifecycle lock; skipping concurrent teardown");
+                return;
+            }
             stopInternalLocked(fromStartFailure, panoGpuQuiesced);
         } finally {
             lifecycleLock.unlock();

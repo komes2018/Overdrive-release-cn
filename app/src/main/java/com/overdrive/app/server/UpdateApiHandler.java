@@ -587,6 +587,14 @@ public class UpdateApiHandler {
             }
         }
 
+        String storageError = updater.getUpdateStorageError();
+        if (storageError != null) {
+            AppUpdater.endInstall();
+            try { updater.close(); } catch (Exception ignored) {}
+            HttpResponse.sendJsonError(out, storageError);
+            return;
+        }
+
         // Reply to the webapp BEFORE kicking the install. Once daemons start
         // dying, the response would never make it back. From here on, the
         // webapp polls /api/update/progress. The gate is already held (acquired

@@ -1085,14 +1085,7 @@
     "mqtt_trigger": "ข้อความ MQTT",
     "mqtt_trigger_description": "ทำงานเมื่อ MQTT broker ของคุณเผยแพร่ไปยัง <base>/automation/<channel> (เช่น จาก Home Assistant) ใส่ชื่อ channel และจับคู่กับค่าของมัน",
     "mqtt_channel": "ช่อง",
-    "mqtt_value": "ค่า",
-      "wait_until_state_description": "หยุดการกระทำที่เหลือไว้จนกว่าสัญญาณเปิด/ปิดที่เลือกจะถึงสถานะหนึ่ง หรือหมดเวลา ตัวอย่าง: รอจนกว่า Indicators = Off ก่อนดำเนินการต่อ",
-      "wait_timeout": "หมดเวลา (วินาที)",
-      "wait_until_description": "หยุดการกระทำที่เหลือไว้จนกว่าสัญญาณที่เลือกจะเข้าเงื่อนไขเปรียบเทียบ หรือหมดเวลา ตัวอย่าง: รอจนกว่า Speed = 0 ก่อนปิดหน้าต่าง",
-      "save_seat_position": "บันทึกตำแหน่งเบาะ",
-      "save_seat_position_description": "เก็บตำแหน่งเบาะคนขับปัจจุบันไว้ในช่องหน่วยความจำ",
-      "set_seat_position": "ควบคุมตำแหน่งเบาะ",
-      "set_seat_position_description": "โหลดตำแหน่งหน่วยความจำเบาะ ตรวจสอบว่าได้บันทึกหน่วยความจำจากรถก่อนแล้ว ตัวควบคุมนี้ใช้ไม่ได้ขณะรถดับเครื่อง"
+    "mqtt_value": "ค่า"
   },
   "messages": {
     "logged_out": "ออกจากระบบแล้ว",

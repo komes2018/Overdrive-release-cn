@@ -23,10 +23,24 @@ public class AutoStartEnablerReliabilityContractTest {
         assertTrue(setup.contains("runAutoStartWhenServiceReady"));
         assertTrue(setup.contains("AUTOSTART_SERVICE_WAIT_MS"));
         assertTrue(setup.contains("button.postDelayed("));
+        assertTrue(setup.contains(
+                "BydDataCacheWhitelist.applyViaDaemonWhenReady()"));
+        assertFalse(setup.contains(
+                "BydDataCacheWhitelist.applyViaDaemon()"));
         assertTrue(enabler.contains("ACTION_SCROLL_BACKWARD"));
         assertTrue(enabler.contains("rewindToStart(root)"));
         assertTrue(enabler.contains("return tapCenter(sw);"));
         assertFalse(enabler.contains("ACTION_CLICK on clickable ancestor"));
+
+        String daemon = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/daemon/AccSentryDaemon.java");
+        assertTrue(daemon.contains(
+                "android.hardware.bydauto.startup.BYDAutoStartupAppDevice"));
+        String helper = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/byd/BydDeviceHelper.java");
+        assertTrue(helper.contains(
+                "Boolean.TRUE.equals(getter.invoke(device, packageName))"));
+        assertTrue(daemon.contains("&& startupApp"));
     }
 
     private static String readRepositoryFile(String relativePath) throws IOException {

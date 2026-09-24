@@ -571,9 +571,14 @@ public class TripDatabase {
 
     /**
      * Update all fields of an existing trip by id.
+     *
+     * @return true iff exactly the row was updated. The finalize-at-trip-end
+     *         path branches on this (retry-once, then defer to next-boot
+     *         recovery); legacy callers that treated this as fire-and-forget
+     *         may keep ignoring the result.
      */
-    public synchronized void updateTrip(TripRecord trip) {
-        if (!ensureConnection()) return;
+    public synchronized boolean updateTrip(TripRecord trip) {
+        if (!ensureConnection()) return false;
 
         String sql = "UPDATE trips SET start_time=?, end_time=?, distance_km=?, duration_seconds=?, " +
                 "avg_speed_kmh=?, max_speed_kmh=?, soc_start=?, soc_end=?, kwh_start=?, kwh_end=?, energy_per_km=?, " +
@@ -603,12 +608,14 @@ public class TripDatabase {
             pstmt.setDouble(50, trip.elecConStart);
             pstmt.setDouble(51, trip.elecConEnd);
             pstmt.setLong(52, trip.id);
-            pstmt.executeUpdate();
-            logger.debug("Updated trip id=" + trip.id);
+            int rows = pstmt.executeUpdate();
+            logger.debug("Updated trip id=" + trip.id + " (rows=" + rows + ")");
+            return rows > 0;
         } catch (Exception e) {
             logger.error("Failed to update trip id=" + trip.id, e);
             reconnect();
         }
+        return false;
     }
 
     /**
@@ -630,6 +637,28 @@ public class TripDatabase {
             reconnect();
         }
         return null;
+    }
+
+    /**
+     * Half-open rows (inserted at trip START, never finalized), newest first.
+     * Used by the same-session resume in TripAnalyticsManager.initComponents
+     * to re-adopt the drive that a process restart interrupted. Normally at
+     * most one row; older stragglers belong to recovery / the 24h janitor.
+     */
+    public synchronized List<TripRecord> getUnfinalizedTrips() {
+        List<TripRecord> trips = new ArrayList<>();
+        if (!ensureConnection()) return trips;
+        String sql = "SELECT * FROM trips WHERE end_time = 0 ORDER BY start_time DESC LIMIT 10";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+            while (rs.next()) {
+                trips.add(readTripFromResultSet(rs));
+            }
+        } catch (Exception e) {
+            logger.error("Failed to list unfinalized trips", e);
+            reconnect();
+        }
+        return trips;
     }
 
     /**
@@ -660,7 +689,11 @@ public class TripDatabase {
         if (offset < 0) offset = 0;
 
         long cutoff = System.currentTimeMillis() - ((long) days * 86400000L);
-        String sql = "SELECT * FROM trips WHERE start_time >= ? ORDER BY start_time DESC LIMIT ? OFFSET ?";
+        // end_time > 0: rows are inserted at trip START now; a half-open row
+        // (in-flight drive, or a crash awaiting the recovery finalize pass)
+        // must not surface in the trips list as a zero-distance entry.
+        String sql = "SELECT * FROM trips WHERE start_time >= ? AND end_time > 0 " +
+                "ORDER BY start_time DESC LIMIT ? OFFSET ?";
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setLong(1, cutoff);
@@ -696,8 +729,9 @@ public class TripDatabase {
         if (toMs <= 0) toMs = System.currentTimeMillis();
         if (fromMs > toMs) { long t = fromMs; fromMs = toMs; toMs = t; }
 
+        // end_time > 0: exclude in-flight / not-yet-finalized rows (see getTrips).
         String sql = "SELECT * FROM trips WHERE start_time >= ? AND start_time <= ? "
-                + "ORDER BY start_time DESC LIMIT ? OFFSET ?";
+                + "AND end_time > 0 ORDER BY start_time DESC LIMIT ? OFFSET ?";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setLong(1, fromMs);
             pstmt.setLong(2, toMs);
@@ -819,7 +853,7 @@ public class TripDatabase {
             // rebuild a genuinely-gone one later; a wrongly-kept row just lingers).
             List<Long> safeOrphans = new ArrayList<>();      // null/blank path
             List<Long> missingFileOrphans = new ArrayList<>(); // file gone, vol up
-            String sel = "SELECT id, telemetry_file_path FROM trips";
+            String sel = "SELECT id, telemetry_file_path, end_time FROM trips";
             try (PreparedStatement pstmt = connection.prepareStatement(sel);
                  ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
@@ -829,6 +863,13 @@ public class TripDatabase {
                     // Do NOT treat them as orphans, or a restore would be wiped
                     // the next time the trips category goes over its limit.
                     if (isImportedPath(path)) continue;
+                    // An end_time=0 row is a trip inserted at START whose path
+                    // is bound only at finalize. Its blank path does NOT mean
+                    // "never had a file" — the file is being written right now
+                    // as <startTime>.jsonl.gz (or awaits the recovery finalize
+                    // pass after a crash). Reaping it here would delete the
+                    // CURRENT drive mid-trip. The >24h janitor owns stale ones.
+                    if (rs.getLong("end_time") == 0) continue;
                     // A null/blank path never had a backing file — always reapable.
                     if (path == null || path.isEmpty()) {
                         safeOrphans.add(rs.getLong("id"));
@@ -891,7 +932,8 @@ public class TripDatabase {
     public synchronized int getTripCount() {
         if (!ensureConnection()) return 0;
 
-        String sql = "SELECT COUNT(*) FROM trips";
+        // end_time > 0: don't count the in-flight drive (see getTrips).
+        String sql = "SELECT COUNT(*) FROM trips WHERE end_time > 0";
         try (PreparedStatement pstmt = connection.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) {
             if (rs.next()) {
@@ -1001,8 +1043,12 @@ public class TripDatabase {
     public synchronized void backfillRouteIds() {
         if (!ensureConnection()) return;
 
+        // end_time > 0: an ACTIVE row (inserted at trip start) can already
+        // carry start GPS but has end 0,0 and distance 0 — assigning it a
+        // route here would create a bogus route cluster from half a trip.
+        // Its route is assigned at finalize (live or recovery) like always.
         String sql = "SELECT id, start_lat, start_lon, end_lat, end_lon, distance_km FROM trips " +
-                "WHERE route_id IS NULL AND start_lat != 0 ORDER BY start_time ASC";
+                "WHERE route_id IS NULL AND start_lat != 0 AND end_time > 0 ORDER BY start_time ASC";
         int assigned = 0;
         try (PreparedStatement pstmt = connection.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) {
@@ -1493,16 +1539,25 @@ public class TripDatabase {
 
     private RecoveryResult recoverTripsFromDiskLocked(java.util.List<java.io.File> tripsDirs) {
 
-        // The trip CURRENTLY being recorded has NO DB row yet (the row is
-        // inserted only at trip end), and its file is named <startTime>.jsonl.gz
-        // — so none of the dedup keys match it. Recovering it mid-drive would
-        // create a phantom row that the trip-end insert then duplicates. Skip
-        // that exact file (and its .tmp sibling), mirroring the reaper's
-        // protectedTripPath guard. Best-effort: null when no trip is active.
-        String activePath = null, activeTmp = null;
+        // The trip CURRENTLY being recorded has a half-open row (end_time=0 —
+        // rows are inserted at trip START) and a live <startTime>.jsonl.gz.
+        // Touching that file mid-drive would finalize the active row (or, on
+        // the fallback path, insert a phantom) UNDERNEATH the in-progress
+        // trip, which the trip-end finalize then fights. Skip that exact file
+        // (and its .tmp sibling), mirroring the reaper's protectedTripPath
+        // guard. Best-effort: null when no trip is active.
+        String activePath = null, activeTmp = null, activeBase = null;
         try {
             activePath = com.overdrive.app.storage.StorageManager.getInstance().getActiveTripFilePath();
-            if (activePath != null) activeTmp = activePath + ".tmp";
+            if (activePath != null) {
+                activeTmp = activePath + ".tmp";
+                // BASENAME identity too: during a mid-trip volume migration
+                // the recorder re-points the marker at the DESTINATION before
+                // deleting the source copy, so for that window the SAME
+                // trip's file exists at a path the exact-path check misses.
+                // Basenames are stable across volumes (<startTime>.jsonl.gz).
+                activeBase = basenameOf(activePath);
+            }
         } catch (Throwable ignored) {}
 
         // De-dupe directories (the active dir is often also one of the per-volume
@@ -1531,6 +1586,9 @@ public class TripDatabase {
                 if (!n.endsWith(".jsonl.gz")) continue;   // bounded list isn't pre-filtered
                 String ap = ff.getAbsolutePath();
                 if (ap.equals(activePath) || ap.equals(activeTmp)) continue;   // in-flight trip
+                if (activeBase != null && !activeBase.isEmpty() && n.equals(activeBase)) {
+                    continue;   // in-flight trip's file on ANOTHER volume (mid-migration copy)
+                }
                 files.add(ff);
             }
         }
@@ -1552,21 +1610,37 @@ public class TripDatabase {
         final java.util.Set<String> existingPaths = new java.util.HashSet<>();
         final java.util.Set<String> existingBasenames = new java.util.HashSet<>();
         final java.util.Set<Long> existingStartSec = new java.util.HashSet<>();
+        // end_time=0 rows: inserted at trip START, never finalized (mid-drive
+        // process kill before handleTripEnded's UPDATE). Keyed by whole-second
+        // start time. Their surviving <startTime>.jsonl.gz files must FINALIZE
+        // these rows IN PLACE — so they contribute NO dedup keys (the
+        // start-second band would otherwise dedup-skip exactly those files,
+        // stranding the row for the janitor and losing the trip). The
+        // currently-recording trip's row can't be touched through this map
+        // because its FILE was excluded above (active-file marker skip).
+        final java.util.Map<Long, Long> activeRowsByStartSec = new java.util.HashMap<>();
         synchronized (this) {
             if (!ensureConnection()) return new RecoveryResult(0, 0, 0);
             try (PreparedStatement pstmt = connection.prepareStatement(
                     "SELECT id, start_time, end_time, distance_km, telemetry_file_path FROM trips");
                  ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
+                    long rowId = rs.getLong(1);
+                    long rowStart = rs.getLong(2);
+                    long rowEnd = rs.getLong(3);
+                    if (rowEnd == 0) {
+                        activeRowsByStartSec.put(rowStart / 1000L, rowId);
+                        continue;
+                    }
                     // Also register the row's CANONICAL "<id>.jsonl.gz" basename.
-                    // The live flow inserts the row (path=<startTime>.jsonl.gz),
+                    // The live flow completes the row (path=<startTime>.jsonl.gz),
                     // renames the file to <dbId>.jsonl.gz, THEN updateTrip()s the
                     // path — a crash between rename and updateTrip leaves the disk
                     // file at <dbId>.jsonl.gz but the row path at <startTime>. The
                     // <id>.jsonl.gz key matches that orphaned-but-real file to its
                     // row, so recovery won't rebuild a degraded duplicate.
-                    existingBasenames.add(rs.getLong(1) + ".jsonl.gz");
-                    existingSigs.add(tripSignature(rs.getLong(2), rs.getLong(3), rs.getDouble(4)));
+                    existingBasenames.add(rowId + ".jsonl.gz");
+                    existingSigs.add(tripSignature(rowStart, rowEnd, rs.getDouble(4)));
                     // START-TIME (whole-second) key. A trip's start_time is the
                     // same regardless of how the row was created — live, imported
                     // from a backup (IMPORTED_PATH row, no file/basename match),
@@ -1576,7 +1650,7 @@ public class TripDatabase {
                     // sentinel path + a fresh id, and its odometer distance won't
                     // match recovery's GPS distance, so path/basename/signature
                     // all miss). Second granularity tolerates ms rounding.
-                    existingStartSec.add(rs.getLong(2) / 1000L);
+                    existingStartSec.add(rowStart / 1000L);
                     String p = rs.getString(5);
                     if (p != null && !p.isEmpty()) {
                         existingPaths.add(p);
@@ -1595,6 +1669,115 @@ public class TripDatabase {
             scanned++;
             String absPath = f.getAbsolutePath();
             String baseName = f.getName();
+
+            // RE-CHECK the in-flight marker PER FILE, not only via the
+            // snapshot taken at scan start: a trip can START during a slow
+            // FUSE scan (its row is inserted at trip start; its file exists
+            // from the first 5s telemetry flush). With only the stale
+            // snapshot, that live file could reach the finalize-in-place
+            // branch below, fail the duration floor, and DELETE the live
+            // trip's row and file mid-drive.
+            if (isActiveTripFileNow(absPath)) { skipped++; continue; }
+
+            // FINALIZE-IN-PLACE: a "<startTimeMs>.jsonl.gz" whose start second
+            // matches an end_time=0 row is the surviving telemetry of a trip
+            // whose row was inserted at start but never finalized (mid-drive
+            // process kill). Complete THAT row — same id, live start-side
+            // snapshots preserved — instead of dedup-skipping the file or
+            // reconstructing a degraded duplicate under a fresh id.
+            long activeKey = -1;
+            Long activeRowId = null;
+            if (!activeRowsByStartSec.isEmpty()) {
+                String stem = baseName.substring(0, baseName.length() - ".jsonl.gz".length());
+                try {
+                    activeKey = Long.parseLong(stem) / 1000L;
+                    activeRowId = activeRowsByStartSec.get(activeKey);
+                } catch (NumberFormatException ignored) {
+                    // Renamed/foreign file — falls through to the normal path.
+                }
+            }
+            if (activeRowId != null) {
+                // Decode OUTSIDE the lock (slow FUSE read), like the normal path.
+                Reconstruction reconstruction = reconstructTripFromTelemetry(f);
+                TripRecord recon = reconstruction != null ? reconstruction.trip : null;
+                if (recon == null) {
+                    // Unreadable telemetry: leave the row for the >24h janitor.
+                    skipped++; continue;
+                }
+                // The decode itself can take seconds on FUSE — re-check the
+                // marker before acting. The below-floor branch is DESTRUCTIVE
+                // (deletes row + file) and must never touch a live trip.
+                if (isActiveTripFileNow(absPath)) { skipped++; continue; }
+                if (recon.durationSeconds * 1000L < MIN_TRIP_DURATION_MS
+                        || recon.distanceKm < MIN_TRIP_DISTANCE_KM) {
+                    // Mirror the live discard path: a below-threshold trip
+                    // leaves no history — drop the half-open row AND its file.
+                    // Under the monitor, RE-READ the row first: if the live
+                    // finalize (updateTrip is synchronized on this same
+                    // monitor) or another recovery completed it since the
+                    // preload snapshot, this destructive branch must not
+                    // touch the row or the file.
+                    boolean rowDeleted = false;
+                    synchronized (this) {
+                        TripRecord current = getTrip(activeRowId);
+                        if (current != null && current.endTime == 0) {
+                            // Trust deleteTrip's OWN result: on an H2 hiccup it
+                            // returns false with the row still present — the
+                            // file must then survive too (it is that row's
+                            // only recovery source; the pair stays consistent
+                            // for the next scan / the >24h janitor).
+                            rowDeleted = deleteTrip(activeRowId);
+                        }
+                    }
+                    if (rowDeleted) {
+                        try {
+                            if (!f.delete()) {
+                                logger.warn("recover: could not delete below-threshold file " + baseName);
+                            }
+                        } catch (Throwable ignored) { }
+                    } else {
+                        logger.info("recover: active row id=" + activeRowId
+                                + " was completed concurrently — leaving " + baseName + " alone");
+                    }
+                    activeRowsByStartSec.remove(activeKey);
+                    skipped++;
+                    continue;
+                }
+                long sz;
+                try { sz = f.length(); } catch (Throwable e) { sz = 0; }
+                // Score from the surviving telemetry OUTSIDE the monitor (pure
+                // CPU over ≤ a few thousand samples). The five DNA axes minus
+                // efficiency are fully derivable from the journal; the row
+                // used to be finalized with all scores at 0 and the UI showed
+                // a "never scored" trip (field incident log_DG87KWQX).
+                scoreReconstruction(recon, reconstruction.samples);
+                boolean finalized;
+                synchronized (this) {
+                    finalized = finalizeActiveRowFromReconstruction(
+                            activeRowId, recon, absPath, sz > 0 ? sz : 1);
+                }
+                if (finalized) {
+                    // Register the now-complete row's dedup keys so a
+                    // same-second sibling file can't double-recover.
+                    existingPaths.add(absPath);
+                    existingBasenames.add(baseName);
+                    existingStartSec.add(recon.startTime / 1000L);
+                    existingSigs.add(tripSignature(recon.startTime, recon.endTime, recon.distanceKm));
+                    activeRowsByStartSec.remove(activeKey);
+                    recovered++;
+                    // A journal-dir file belongs in the trips dir once its row
+                    // is complete (storage accounting + cleanup walk that dir).
+                    String relocated = relocateJournalToTripsDir(activeRowId, f);
+                    if (relocated != null) {
+                        existingPaths.add(relocated);
+                        existingBasenames.add(basenameOf(relocated));
+                    }
+                } else {
+                    skipped++;
+                }
+                continue;
+            }
+
             // Dedup by exact path, then by BASENAME (the reliable cross-volume /
             // post-rename key). We deliberately do NOT dedup on the parsed <id>:
             // the row reinserts with a fresh auto-id, and an id-based skip would
@@ -1606,8 +1789,15 @@ public class TripDatabase {
             }
 
             // Decode + reconstruct OUTSIDE the lock — this is the slow FUSE read.
-            TripRecord t = reconstructTripFromTelemetry(f);
+            Reconstruction freshRecon = reconstructTripFromTelemetry(f);
+            TripRecord t = freshRecon != null ? freshRecon.trip : null;
             if (t == null) { skipped++; continue; }
+
+            // Same mid-scan trip-start race as the finalize branch: a trip
+            // that began during this scan has a row NOT in the preload
+            // snapshot, so its file would fall through HERE and could be
+            // re-inserted as a phantom duplicate of the live trip. Re-check.
+            if (isActiveTripFileNow(absPath)) { skipped++; continue; }
 
             // Same minimum-trip thresholds the live path enforces (TripDetector
             // MIN_TRIP_DURATION_MS / MIN_TRIP_DISTANCE_KM), so a tiny/idle junk
@@ -1656,11 +1846,27 @@ public class TripDatabase {
             t.sizeBytes = sz > 0 ? sz : 1;
             t.sidecarSizeBytes = 0;
 
+            // DNA scores from the telemetry itself (outside the monitor) —
+            // see the finalize-in-place branch above for the rationale.
+            scoreReconstruction(t, freshRecon.samples);
+
             // Brief per-row write under the lock (insertTrip/rollups/route are
             // each synchronized(this) — reentrant, so this groups them atomically
             // without holding the monitor across the next file's decode).
             long id;
             synchronized (this) {
+                // FRESH start-time recheck under the monitor: the preload's
+                // dedup keys are a snapshot. A trip COMPLETED during a slow
+                // scan (live finalize + rename) contributed NO keys at preload
+                // time (it was half-open then), and during the rename window
+                // the marker points at the renamed path — so this file could
+                // reach here and re-insert the just-finalized trip as a
+                // phantom duplicate. Same ±1s band as the preload key.
+                if (hasRowNearStartTime(t.startTime)) {
+                    logger.info("recover: a row for start=" + t.startTime
+                            + " appeared during the scan — skipping " + baseName);
+                    skipped++; continue;
+                }
                 id = insertTrip(t);
                 if (id <= 0) { skipped++; continue; }
                 t.id = id;
@@ -1685,6 +1891,11 @@ public class TripDatabase {
             existingBasenames.add(baseName);
             existingStartSec.add(t.startTime / 1000L);
             recovered++;
+            String relocated = relocateJournalToTripsDir(id, f);
+            if (relocated != null) {
+                existingPaths.add(relocated);
+                existingBasenames.add(basenameOf(relocated));
+            }
         }
         logger.info("recoverTripsFromDisk: scanned " + scanned + ", recovered " + recovered
                 + ", skipped " + skipped);
@@ -1692,14 +1903,203 @@ public class TripDatabase {
     }
 
     /**
+     * Fresh read of the in-flight trip marker. Recovery snapshots the marker
+     * once at scan start, but a trip can START during a slow FUSE scan (rows
+     * are inserted at trip start; the file exists from the first 5s flush).
+     * Any branch that acts on a file — especially the below-floor finalize
+     * branch, which DELETES the row and file — re-checks through this
+     * immediately before acting. Marker writes and this read are in-process
+     * (CameraDaemon), and startRecording sets the marker before the file's
+     * first byte reaches disk, so a fresh read is authoritative for any file
+     * this scan can see. Fail-open to "not active" mirrors the scan-start
+     * snapshot's best-effort semantics.
+     */
+    private static boolean isActiveTripFileNow(String absPath) {
+        try {
+            String active = com.overdrive.app.storage.StorageManager
+                    .getInstance().getActiveTripFilePath();
+            if (active == null) return false;
+            if (active.equals(absPath) || (active + ".tmp").equals(absPath)) return true;
+            // BASENAME identity: during a mid-trip volume migration the
+            // recorder points the marker at the DESTINATION before the source
+            // copy is deleted — exact-path matching would leave that source
+            // unprotected for the copy window even though it is the SAME
+            // trip's file. Basenames are stable across volumes
+            // (<startTime>.jsonl.gz), so basename equality IS trip identity.
+            String base = basenameOf(absPath);
+            return !base.isEmpty() && base.equals(basenameOf(active));
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * Complete an end_time=0 row (inserted at trip START, never finalized —
+     * mid-drive process kill) using fields reconstructed from its surviving
+     * telemetry file. End-side data that never reaches telemetry (end SoC/kWh,
+     * accumulator ends, DNA scores, cost) stays at defaults, exactly like a
+     * legacy recovered row — but the row KEEPS its id and the live start-side
+     * snapshots (start SoC/kWh, accumulator starts, PHEV flags) that telemetry
+     * cannot rebuild. Caller holds the monitor.
+     */
+    private boolean finalizeActiveRowFromReconstruction(long rowId, TripRecord recon,
+                                                        String absPath, long sizeBytes) {
+        TripRecord row = getTrip(rowId);
+        if (row == null) return false;
+        if (row.endTime != 0) {
+            // Completed concurrently (live finalize or another recovery)
+            // since the preload snapshot — never overwrite real end data
+            // with a telemetry reconstruction.
+            logger.info("recover: row id=" + rowId + " already finalized concurrently — skipping");
+            return false;
+        }
+        row.endTime = recon.endTime;
+        row.durationSeconds = recon.durationSeconds;
+        row.distanceKm = recon.distanceKm;
+        row.avgSpeedKmh = recon.avgSpeedKmh;
+        row.maxSpeedKmh = recon.maxSpeedKmh;
+        if (row.startLat == 0 && row.startLon == 0) {
+            row.startLat = recon.startLat;
+            row.startLon = recon.startLon;
+        }
+        row.endLat = recon.endLat;
+        row.endLon = recon.endLon;
+        row.elevationGainM = recon.elevationGainM;
+        row.elevationLossM = recon.elevationLossM;
+        // Telemetry-derived DNA scores (computed by scoreReconstruction on the
+        // scratch record before this monitor was taken). Efficiency stays at
+        // the engine's neutral 50 — energy is not in the telemetry stream.
+        copyTelemetryScores(recon, row);
+        // The live finalize publishes the odometer PAIR only when both edges
+        // were read and self-consistent; only the start edge exists here, so
+        // mirror the suppression (the UI would otherwise render "12345 → --",
+        // an incomplete pair presented as data).
+        row.odometerStartKm = 0;
+        row.odometerEndKm = 0;
+        row.telemetryFilePath = absPath;
+        row.sizeBytes = sizeBytes;
+        row.sidecarSizeBytes = 0;
+        boolean ok = updateTrip(row);
+        if (ok) {
+            logger.info("recover: FINALIZED active row id=" + rowId + " in place from "
+                    + basenameOf(absPath) + " (distance="
+                    + String.format("%.2f", row.distanceKm) + "km, duration="
+                    + row.durationSeconds + "s, scores=[A=" + row.anticipationScore
+                    + " S=" + row.smoothnessScore + " SD=" + row.speedDisciplineScore
+                    + " E=" + row.efficiencyScore + " C=" + row.consistencyScore + "])");
+            // Deliberately NO weekly/monthly rollup replay — recovered rows
+            // carry no energy data and their scores come from a 1 Hz journal,
+            // same policy as reconstructed inserts (see the comment on the
+            // insert path). Routes ARE updated: distance + coords are valid
+            // and useful for similar-trip maps.
+            if (row.startLat != 0 && row.startLon != 0) {
+                long routeId = findOrCreateRoute(row.startLat, row.startLon,
+                        row.endLat, row.endLon, row.distanceKm);
+                if (routeId > 0) {
+                    row.routeId = routeId;
+                    updateTrip(row);
+                }
+            }
+        }
+        return ok;
+    }
+
+    /** A telemetry reconstruction: the derived record plus the moving-portion samples it was built from. */
+    static final class Reconstruction {
+        final TripRecord trip;
+        /** Samples [0..lastMovingIdx] — the parked tail is already trimmed. */
+        final java.util.List<TelemetrySample> samples;
+        Reconstruction(TripRecord trip, java.util.List<TelemetrySample> samples) {
+            this.trip = trip;
+            this.samples = samples;
+        }
+    }
+
+    /**
+     * Run the DNA score engine over reconstructed telemetry and store the
+     * result on {@code target}. The engine also rewrites avg/max speed from a
+     * sample mean — biased low by the journal's retained synthetic-zero
+     * samples — so the reconstruction's distance/duration figures are
+     * restored afterwards. Energy is not in the telemetry, so the efficiency
+     * axis lands on the engine's neutral 50 rather than a fabricated value.
+     * Never throws: a scoring failure leaves the scores at 0 (= "unscored").
+     */
+    static void scoreReconstruction(TripRecord target, java.util.List<TelemetrySample> samples) {
+        if (target == null || samples == null || samples.isEmpty()) return;
+        double avg = target.avgSpeedKmh;
+        int max = target.maxSpeedKmh;
+        try {
+            new TripScoreEngine().computeSummary(target, samples);
+        } catch (Throwable t) {
+            logger.warn("recover: scoring from telemetry failed: " + t.getMessage());
+        } finally {
+            target.avgSpeedKmh = avg;
+            target.maxSpeedKmh = max;
+        }
+    }
+
+    /** Copy the engine-written fields from a scored scratch record onto the row being finalized. */
+    private static void copyTelemetryScores(TripRecord from, TripRecord to) {
+        to.anticipationScore = from.anticipationScore;
+        to.smoothnessScore = from.smoothnessScore;
+        to.speedDisciplineScore = from.speedDisciplineScore;
+        to.efficiencyScore = from.efficiencyScore;
+        to.consistencyScore = from.consistencyScore;
+        to.kinematicState = from.kinematicState;
+        to.gradientProfile = from.gradientProfile;
+        to.avgGradientPercent = from.avgGradientPercent;
+        to.microMomentsJson = from.microMomentsJson;
+    }
+
+    /**
+     * After a recovery completes a row whose telemetry still sits in the
+     * internal journal dir (see StorageManager.getTripJournalDir), move the
+     * file to the trips dir as {@code <id>.jsonl.gz} — the same place and
+     * name the live trip-end flow produces — and re-point the row. Returns the
+     * new absolute path, or null when nothing moved (file not in the journal
+     * dir, move failed, or row update failed; the row keeps its current path,
+     * which is still valid).
+     */
+    private String relocateJournalToTripsDir(long rowId, java.io.File f) {
+        try {
+            com.overdrive.app.storage.StorageManager sm =
+                    com.overdrive.app.storage.StorageManager.getInstance();
+            java.io.File journal = sm.getTripJournalDir();
+            java.io.File parent = f.getParentFile();
+            if (journal == null || parent == null || !journal.equals(parent)) return null;
+            java.io.File tripsDir = sm.getTripsDir();
+            if (tripsDir == null) return null;
+            java.io.File dest = new java.io.File(tripsDir, rowId + ".jsonl.gz");
+            if (!com.overdrive.app.storage.StorageManager.moveFileCrossVolume(f, dest)) return null;
+            synchronized (this) {
+                TripRecord row = getTrip(rowId);
+                if (row == null) return dest.getAbsolutePath();
+                row.telemetryFilePath = dest.getAbsolutePath();
+                if (!updateTrip(row)) {
+                    // Row still points at the journal path; put the file back so
+                    // the path stays valid.
+                    com.overdrive.app.storage.StorageManager.moveFileCrossVolume(dest, f);
+                    return null;
+                }
+            }
+            logger.info("recover: journal " + f.getName() + " moved to trips dir as " + dest.getName());
+            return dest.getAbsolutePath();
+        } catch (Throwable t) {
+            logger.warn("recover: journal relocation failed for " + f.getName() + ": " + t.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Rebuild a {@link TripRecord} from a telemetry file's samples. Derives
      * start/end time, duration, distance (GPS haversine integration), avg/max
-     * speed, start/end GPS, and elevation gain/loss. Energy/SoC/cost/DNA-score
-     * fields are NOT in the telemetry stream, so they stay at their defaults
-     * (0 / empty) — recovered trips show in history + maps but without the
-     * energy-analytics axes. Returns null if the file has too few usable samples.
+     * speed, start/end GPS, and elevation gain/loss. Energy/SoC/cost fields
+     * are NOT in the telemetry stream, so they stay at their defaults
+     * (0 / empty); the DNA scores are computed separately from the returned
+     * samples by {@link #scoreReconstruction}. Returns null if the file has
+     * too few usable samples.
      */
-    private TripRecord reconstructTripFromTelemetry(java.io.File f) {
+    private Reconstruction reconstructTripFromTelemetry(java.io.File f) {
         java.util.List<TelemetrySample> samples;
         try {
             samples = TelemetryStore.readFromFile(f);
@@ -1718,21 +2118,7 @@ public class TripDatabase {
         // movement vs the next fix — the GPS clause matters for trips whose
         // speed channel was down (all speedKmh==0) but GPS was recorded, so the
         // whole trip isn't wrongly trimmed to zero-length and dropped.
-        int lastIdx = samples.size() - 1;
-        double nextGpsLat = 0, nextGpsLon = 0; boolean haveNextGps = false;
-        while (lastIdx > 0) {
-            TelemetrySample s = samples.get(lastIdx);
-            boolean gpsMoved = false;
-            if (s.lat != 0 || s.lon != 0) {
-                if (haveNextGps && haversineKm(s.lat, s.lon, nextGpsLat, nextGpsLon) > 0.01) {
-                    gpsMoved = true;   // >10 m between this fix and the later one
-                }
-                nextGpsLat = s.lat; nextGpsLon = s.lon; haveNextGps = true;
-            }
-            boolean moving = s.speedKmh > 0 || (s.gearMode != 0 && s.gearMode != 1) || gpsMoved;
-            if (moving) break;
-            lastIdx--;
-        }
+        int lastIdx = lastMovingSampleIndex(samples);
 
         TripRecord t = new TripRecord();
         t.startTime = samples.get(0).timestampMs;
@@ -1819,8 +2205,156 @@ public class TripDatabase {
         t.currency = "";
         t.kinematicState = "";
         t.gradientProfile = "";
-        // Energy / SoC / cost / DNA scores unavailable from telemetry → defaults.
-        return t;
+        // Energy / SoC / cost unavailable from telemetry → defaults. DNA scores
+        // are derived from the returned samples by scoreReconstruction.
+        return new Reconstruction(t, new java.util.ArrayList<>(samples.subList(0, lastIdx + 1)));
+    }
+
+    /**
+     * Index of the last MOVING sample (speed > 0, non-Park gear, or GPS
+     * displacement > 10 m vs the following fix), i.e. where the parked tail
+     * begins. Shared by reconstruction and the same-session resume so both
+     * agree on when a journaled trip actually stopped. Returns 0 when nothing
+     * in the list moved.
+     */
+    static int lastMovingSampleIndex(java.util.List<TelemetrySample> samples) {
+        if (samples == null || samples.isEmpty()) return 0;
+        int lastIdx = samples.size() - 1;
+        double nextGpsLat = 0, nextGpsLon = 0; boolean haveNextGps = false;
+        while (lastIdx > 0) {
+            TelemetrySample s = samples.get(lastIdx);
+            boolean gpsMoved = false;
+            if (s.lat != 0 || s.lon != 0) {
+                if (haveNextGps && haversineKm(s.lat, s.lon, nextGpsLat, nextGpsLon) > 0.01) {
+                    gpsMoved = true;
+                }
+                nextGpsLat = s.lat; nextGpsLon = s.lon; haveNextGps = true;
+            }
+            boolean moving = s.speedKmh > 0 || (s.gearMode != 0 && s.gearMode != 1) || gpsMoved;
+            if (moving) break;
+            lastIdx--;
+        }
+        return lastIdx;
+    }
+
+    // ==================== RE-SCORING ====================
+
+    /**
+     * Recompute the telemetry-derived DNA scores of an already-finalized trip
+     * from its {@code .jsonl.gz}. Backs {@code POST /api/trips/{id}/rescore}
+     * and the manual recover pass's sweep over legacy rows that recovery
+     * finalized with all five scores at 0 (before recovery scored anything).
+     * Energy/SoC/cost are untouched — they are not in the telemetry. Weekly /
+     * monthly rollups are deliberately NOT replayed (runningAvg is not
+     * idempotent and these rows never contributed to them).
+     *
+     * @return the updated row, or null when the trip is missing, imported
+     *         (no file), still in flight, or its telemetry is unreadable.
+     */
+    public TripRecord rescoreTripFromTelemetry(long tripId) {
+        TripRecord row;
+        synchronized (this) {
+            row = getTrip(tripId);
+        }
+        if (row == null || row.endTime == 0) return null;
+        String path = row.telemetryFilePath;
+        if (path == null || path.isEmpty() || isImportedPath(path)) return null;
+        java.io.File f = new java.io.File(path);
+        if (!f.isFile()) return null;
+        if (isActiveTripFileNow(f.getAbsolutePath())) return null;
+
+        java.util.List<TelemetrySample> samples;
+        try {
+            samples = new java.util.ArrayList<>(TelemetryStore.readFromFile(f));
+        } catch (Throwable e) {
+            logger.warn("rescore: unreadable telemetry " + f.getName() + ": " + e.getMessage());
+            return null;
+        }
+        if (samples.size() < 2) return null;
+        // Mirror the live scoring stream: samples past the row's end time (the
+        // recorder's park-debounce tail) are excluded.
+        if (row.endTime > 0) {
+            final long scoringEndMs = row.endTime + 1_000;
+            samples.removeIf(s -> s.timestampMs > scoringEndMs);
+        }
+        if (samples.size() < 2) return null;
+
+        TripRecord scratch = new TripRecord();
+        scratch.distanceKm = row.distanceKm;
+        scratch.durationSeconds = row.durationSeconds;
+        scratch.avgSpeedKmh = row.avgSpeedKmh;
+        scratch.maxSpeedKmh = row.maxSpeedKmh;
+        // Give the efficiency axis the row's real energy figure when it has one
+        // (a rescored LIVE trip keeps its measured kWh; a recovered one has none
+        // and lands on the neutral 50).
+        scratch.kwhStart = row.kwhStart;
+        scratch.kwhEnd = row.kwhEnd;
+        scratch.elecConStart = row.elecConStart;
+        scratch.elecConEnd = row.elecConEnd;
+        scratch.energyPerKm = row.energyPerKm;
+        scoreReconstruction(scratch, samples);
+        if (scratch.anticipationScore == 0 && scratch.smoothnessScore == 0
+                && scratch.speedDisciplineScore == 0 && scratch.efficiencyScore == 0
+                && scratch.consistencyScore == 0) {
+            return null;   // engine declined (too few samples) — leave the row alone
+        }
+
+        synchronized (this) {
+            TripRecord fresh = getTrip(tripId);
+            if (fresh == null || fresh.endTime == 0) return null;
+            copyTelemetryScores(scratch, fresh);
+            if (fresh.elevationGainM == 0 && fresh.elevationLossM == 0) {
+                fresh.elevationGainM = scratch.elevationGainM;
+                fresh.elevationLossM = scratch.elevationLossM;
+            }
+            if (!updateTrip(fresh)) return null;
+            logger.info("rescore: trip id=" + tripId + " scores=[A=" + fresh.anticipationScore
+                    + " S=" + fresh.smoothnessScore + " SD=" + fresh.speedDisciplineScore
+                    + " E=" + fresh.efficiencyScore + " C=" + fresh.consistencyScore + "]");
+            return fresh;
+        }
+    }
+
+    /**
+     * Sweep finalized rows that carry NO scores (all five at 0 — the signature
+     * of a pre-fix recovery) and rescore them from their telemetry files.
+     * Bounded per call; runs on the manual recover worker, never at startup.
+     *
+     * @return number of rows whose scores were filled in
+     */
+    public int rescoreUnscoredTrips(int maxRows) {
+        java.util.List<Long> ids = new java.util.ArrayList<>();
+        synchronized (this) {
+            if (!ensureConnection()) return 0;
+            String sql = "SELECT id FROM trips WHERE end_time > 0 AND anticipation_score = 0 "
+                    + "AND smoothness_score = 0 AND speed_discipline_score = 0 "
+                    + "AND efficiency_score = 0 AND consistency_score = 0 "
+                    + "AND telemetry_file_path IS NOT NULL AND telemetry_file_path <> ? "
+                    + "ORDER BY start_time DESC LIMIT ?";
+            try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+                pstmt.setString(1, IMPORTED_PATH);
+                pstmt.setInt(2, Math.max(1, maxRows));
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    while (rs.next()) ids.add(rs.getLong(1));
+                }
+            } catch (Exception e) {
+                logger.error("rescoreUnscoredTrips: query failed", e);
+                reconnect();
+                return 0;
+            }
+        }
+        int rescored = 0;
+        for (long id : ids) {
+            try {
+                if (rescoreTripFromTelemetry(id) != null) rescored++;
+            } catch (Throwable t) {
+                logger.warn("rescoreUnscoredTrips: id=" + id + " failed: " + t.getMessage());
+            }
+        }
+        if (rescored > 0) {
+            logger.info("rescoreUnscoredTrips: filled in scores for " + rescored + " trip(s)");
+        }
+        return rescored;
     }
 
     /** Haversine great-circle distance in km. Mirrors TripDetector.haversineKm. */
@@ -1843,7 +2377,9 @@ public class TripDatabase {
         org.json.JSONArray arr = new org.json.JSONArray();
         if (!ensureConnection()) return arr;
         synchronized (this) {
-            String sql = "SELECT * FROM trips ORDER BY start_time ASC";
+            // end_time > 0: never export a half-open (in-flight/unfinalized)
+            // row — importing one elsewhere would plant a phantom active trip.
+            String sql = "SELECT * FROM trips WHERE end_time > 0 ORDER BY start_time ASC";
             try (PreparedStatement pstmt = connection.prepareStatement(sql);
                  ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
@@ -1931,6 +2467,30 @@ public class TripDatabase {
      *  metres so float round-trips through JSON can't split a match. */
     private static String tripSignature(long startMs, long endMs, double distanceKm) {
         return startMs + ":" + endMs + ":" + Math.round(distanceKm * 1000.0);
+    }
+
+    /**
+     * True iff any row's start_time lies within ±1s of {@code startTimeMs} —
+     * the same band the recovery preload keys on. Used as a FRESH duplicate
+     * check immediately before recovery inserts a reconstructed row: the
+     * preload snapshot goes stale over a long FUSE scan, and a trip finalized
+     * mid-scan must not be re-inserted. Caller holds the monitor. Fail-open
+     * (false) on store errors — the preload's snapshot keys still apply
+     * upstream, so this only ever ADDS protection.
+     */
+    private boolean hasRowNearStartTime(long startTimeMs) {
+        if (!ensureConnection()) return false;
+        String sql = "SELECT 1 FROM trips WHERE start_time >= ? AND start_time <= ? LIMIT 1";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setLong(1, startTimeMs - 1000);
+            pstmt.setLong(2, startTimeMs + 1000);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                return rs.next();
+            }
+        } catch (Exception e) {
+            logger.warn("hasRowNearStartTime failed: " + e.getMessage());
+            return false;
+        }
     }
 
     /** Final path segment of a stored telemetry path, handling both '/' and the
@@ -2429,8 +2989,16 @@ public class TripDatabase {
 
     /**
      * Delete orphaned trips — trips with end_time == 0 or duration_seconds == 0
-     * that are older than the given cutoff. These are leftovers from daemon crashes
-     * mid-trip. Returns the number of deleted rows.
+     * that are older than the given cutoff. These are half-open rows from
+     * mid-trip daemon crashes whose telemetry could NOT complete them.
+     *
+     * <p>ORDERING CONTRACT: rows are inserted at trip START (end_time=0 until
+     * finalize), and {@link #recoverTripsFromDisk} FINALIZES such rows in
+     * place from their surviving telemetry. This janitor must therefore run
+     * strictly AFTER the recovery pass (see TripAnalyticsManager.initComponents)
+     * — running it first would delete exactly the rows recovery completes.
+     * The 24h cutoff additionally protects the current drive's row and any
+     * fresh crash awaiting its first recovery pass. Returns deleted count.
      */
     public synchronized int deleteOrphanedTrips(long olderThanMs) {
         if (!ensureConnection()) return 0;
@@ -2501,7 +3069,12 @@ public class TripDatabase {
         synchronized (this) {
             // LIMIT 1 keeps this O(1) even with hundreds of legacy rows —
             // we only need to know "any zero?", not the exact count.
-            String sql = "SELECT 1 FROM trips WHERE size_bytes = 0 LIMIT 1";
+            // end_time > 0: an ACTIVE row (inserted at trip start) always has
+            // size_bytes=0 until finalize — without this predicate, every
+            // drive flips isBackfillComplete() false for its whole duration
+            // and StorageManager falls back to the multi-minute FUSE walk,
+            // the exact pathology this DB-backed accounting exists to avoid.
+            String sql = "SELECT 1 FROM trips WHERE size_bytes = 0 AND end_time > 0 LIMIT 1";
             try (PreparedStatement pstmt = connection.prepareStatement(sql);
                  ResultSet rs = pstmt.executeQuery()) {
                 return !rs.next();
@@ -2560,8 +3133,11 @@ public class TripDatabase {
                             logger.warn("Trips size backfill aborted — DB connection unavailable");
                             return;
                         }
+                        // end_time > 0: never try to stat/backfill an ACTIVE
+                        // row — its file is still being written and its path
+                        // is bound only at finalize (see isBackfillComplete).
                         String sql = "SELECT id, telemetry_file_path FROM trips " +
-                                "WHERE size_bytes = 0 AND id > ? ORDER BY id ASC LIMIT ?";
+                                "WHERE size_bytes = 0 AND end_time > 0 AND id > ? ORDER BY id ASC LIMIT ?";
                         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
                             pstmt.setLong(1, lastId);
                             pstmt.setInt(2, batchSize);

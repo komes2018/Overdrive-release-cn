@@ -23,12 +23,14 @@ public class ScreenDeterrentSettingsContractTest {
         assertTrue(server.contains("screenDeterrentUpdates"));
         assertTrue(server.contains("if (!persisted)"));
         assertTrue(server.contains("Could not save screen deterrent settings"));
-        assertTrue(web.contains("_screenDeterrentSaveChain"));
-        assertTrue(web.contains("if (!data || !data.success)"));
+        assertTrue(web.contains(
+                "var request = this._writeJson('/api/surveillance/config', body);"));
+        assertTrue(web.contains("data.success !== true"));
+        assertTrue(web.contains("_screenDeterrentFieldSequences"));
         assertTrue(web.contains("self.config[configKey] = self.savedConfig"));
         assertTrue(web.contains("_deterrentPreviewRequestId"));
         assertTrue(web.contains("previewVideo.muted = true"));
-        assertTrue(html.contains("surveillance.js?v=survvideo1"));
+        assertTrue(html.contains("surveillance.js?v=survtoggle8"));
     }
 
     private static String readRepositoryFile(String relativePath) throws Exception {

@@ -8,7 +8,9 @@ import com.overdrive.app.genai.GenAiAutomation;
 import com.overdrive.app.genai.GenAiConfig;
 import com.overdrive.app.genai.GenAiContext;
 import com.overdrive.app.genai.GenAiInsights;
+import com.overdrive.app.genai.GenAiRoutineLearner;
 import com.overdrive.app.genai.GenAiRuntime;
+import com.overdrive.app.genai.GenAiVehicleHistory;
 import com.overdrive.app.byd.routing.VehicleCommandRouter;
 import com.overdrive.app.byd.routing.VehicleCommandRouter.CommandResult;
 
@@ -47,6 +49,189 @@ public final class GenAiApiHandler {
             String method, String path, String body, OutputStream out)
             throws Exception {
         String pathOnly = stripQuery(path);
+
+        if ("/api/genai/routines".equals(pathOnly)
+                && "GET".equals(method)) {
+            HttpResponse.sendJsonNoCors(
+                    out, GenAiRoutineLearner.statusJson().toString());
+            return true;
+        }
+
+        if ("/api/genai/routines/config".equals(pathOnly)
+                && "POST".equals(method)) {
+            JSONObject input = parseBody(body, out);
+            if (input == null) return true;
+            Object enabled = input.opt("enabled");
+            if (!(enabled instanceof Boolean)) {
+                sendError(out, 400, "invalid_routine_config",
+                        "enabled must be true or false.");
+                return true;
+            }
+            GenAiConfig.SaveResult saved = GenAiConfig.save(
+                    new JSONObject().put(
+                            "routineLearningEnabled", enabled));
+            if (!saved.success) {
+                sendError(out, 400, "invalid_routine_config",
+                        saved.error);
+                return true;
+            }
+            JSONObject response = GenAiRoutineLearner.statusJson();
+            response.put("success", true);
+            response.put("message", Boolean.TRUE.equals(enabled)
+                    ? "Routine learning enabled."
+                    : "Routine learning disabled and observations cleared.");
+            HttpResponse.sendJsonNoCors(out, response.toString());
+            return true;
+        }
+
+        if ("/api/genai/routines/decision".equals(pathOnly)
+                && "POST".equals(method)) {
+            JSONObject input = parseBody(body, out);
+            if (input == null) return true;
+            JSONObject response = GenAiRoutineLearner.decision(
+                    input.optString("suggestionId", ""),
+                    input.optString("decision", ""));
+            if (!response.optBoolean("success")) {
+                sendError(out, 400,
+                        response.optString(
+                                "error", "routine_decision_failed"),
+                        response.optString(
+                                "message",
+                                "Could not apply the routine decision."));
+                return true;
+            }
+            if (!response.has("message")) {
+                response.put("message",
+                        "save".equals(response.optString("decision"))
+                                ? "Manual-only automation saved for review."
+                                : "Routine preference saved.");
+            }
+            HttpResponse.sendJsonNoCors(out, response.toString());
+            return true;
+        }
+
+        if ("/api/genai/routines/reset".equals(pathOnly)
+                && "POST".equals(method)) {
+            JSONObject response =
+                    GenAiRoutineLearner.decision("", "reset");
+            if (!response.optBoolean("success")) {
+                sendError(out, 500,
+                        response.optString(
+                                "error", "routine_reset_failed"),
+                        response.optString(
+                                "message",
+                                "Could not reset routine learning."));
+                return true;
+            }
+            response.put("message", "Learned routine patterns reset.");
+            HttpResponse.sendJsonNoCors(out, response.toString());
+            return true;
+        }
+
+        if ("/api/genai/history/query".equals(pathOnly)
+                && "POST".equals(method)) {
+            JSONObject input = parseBody(body, out);
+            if (input == null) return true;
+            JSONArray messages = sanitizeMessages(input, out);
+            if (messages == null) return true;
+            if (!GenAiConfig.fromUnifiedConfig().enabled) {
+                sendError(out, 409, "genai_disabled",
+                        "GenAI is disabled.");
+                return true;
+            }
+            GenAiRuntime runtime = runtimeOrError(out);
+            if (runtime == null) return true;
+            try {
+                HttpResponse.sendJsonNoCors(out,
+                        GenAiVehicleHistory.execute(
+                                runtime, messages,
+                                input.optString("language", ""))
+                                .toString());
+            } catch (GenAiRuntime.GenAiException e) {
+                sendError(out, e.status, e.code, e.getMessage());
+            }
+            return true;
+        }
+
+        if ("/api/genai/incidents".equals(pathOnly)
+                && "GET".equals(method)) {
+            try {
+                JSONObject listed = GenAiIncidentPacks.list();
+                JSONArray items = listed.optJSONArray("items");
+                JSONArray packs = new JSONArray();
+                int limit = Math.max(
+                        1, Math.min(50, queryInt(path, "limit", 20)));
+                if (items != null) {
+                    for (int i = 0;
+                         i < items.length() && packs.length() < limit;
+                         i++) {
+                        JSONObject metadata = items.optJSONObject(i);
+                        if (metadata != null) {
+                            packs.put(incidentSummary(metadata, null));
+                        }
+                    }
+                }
+                HttpResponse.sendJsonNoCors(out, new JSONObject()
+                        .put("success", true)
+                        .put("packs", packs)
+                        .toString());
+            } catch (GenAiIncidentPacks.PackException e) {
+                sendError(out, e.status, e.code, e.getMessage());
+            }
+            return true;
+        }
+
+        if ("/api/genai/incidents".equals(pathOnly)
+                && "POST".equals(method)) {
+            JSONObject input = parseBody(body, out);
+            if (input == null) return true;
+            String recordingId = input.optString(
+                    "recordingId", "").trim().toLowerCase(
+                            java.util.Locale.US);
+            try {
+                GenAiRuntime runtime =
+                        GenAiConfig.fromUnifiedConfig().enabled
+                                ? CameraDaemon.getGenAiRuntime() : null;
+                JSONObject created = GenAiIncidentPacks.create(
+                        recordingId, runtime);
+                HttpResponse.sendJsonNoCors(out, incidentSummary(
+                        created.getJSONObject("metadata"),
+                        created.optJSONObject("report")).toString());
+            } catch (GenAiIncidentPacks.PackException e) {
+                sendError(out, e.status, e.code, e.getMessage());
+            }
+            return true;
+        }
+
+        String incidentPrefix = "/api/genai/incidents/";
+        if (pathOnly.startsWith(incidentPrefix)) {
+            String target = pathOnly.substring(incidentPrefix.length());
+            boolean download = target.endsWith("/download");
+            String packId = download
+                    ? target.substring(
+                            0, target.length() - "/download".length())
+                    : target;
+            try {
+                if (download && "GET".equals(method)) {
+                    boolean includeVideo = !"false".equalsIgnoreCase(
+                            queryParam(path, "includeVideo"));
+                    GenAiIncidentPacks.download(
+                            packId, includeVideo, out);
+                } else if (!download && "GET".equals(method)) {
+                    HttpResponse.sendJsonNoCors(
+                            out, GenAiIncidentPacks.get(packId).toString());
+                } else if (!download && "DELETE".equals(method)) {
+                    HttpResponse.sendJsonNoCors(
+                            out, GenAiIncidentPacks.delete(packId).toString());
+                } else {
+                    sendError(out, 405, "method_not_allowed",
+                            "Unsupported incident-pack operation.");
+                }
+            } catch (GenAiIncidentPacks.PackException e) {
+                sendError(out, e.status, e.code, e.getMessage());
+            }
+            return true;
+        }
 
         if ("/api/genai/status".equals(pathOnly) && "GET".equals(method)) {
             GenAiRuntime runtime = runtimeOrError(out);
@@ -367,6 +552,16 @@ public final class GenAiApiHandler {
         }
         CommandResult result =
                 VehicleCommandRouter.getInstance().execute(command);
+        if (result.outcome == VehicleCommandRouter.Outcome.SUCCESS) {
+            if ("climate_temperature".equals(type)) {
+                GenAiRoutineLearner.recordClimate(
+                        action.optInt("zone", 0),
+                        action.optDouble("temperatureC"));
+            } else if ("sunshade".equals(type)) {
+                GenAiRoutineLearner.setSunshade(
+                        action.optString("operation", ""));
+            }
+        }
         JSONObject response = VehicleControlApiHandler.routedResponse(
                 result, commandName);
         response.put("confirmed", true);
@@ -592,6 +787,34 @@ public final class GenAiApiHandler {
             JSONObject source, JSONObject destination, String key)
             throws Exception {
         if (source.has(key)) destination.put(key, source.opt(key));
+    }
+
+    private static JSONObject incidentSummary(
+            JSONObject metadata, JSONObject report) throws Exception {
+        String packId = metadata.optString("packId", "");
+        String title = report == null
+                ? metadata.optString("title", "").trim()
+                : report.optString("title", "").trim();
+        if (title.isEmpty()) {
+            title = "OverDrive Incident Evidence Report";
+        }
+        return new JSONObject()
+                .put("success", true)
+                .put("id", packId)
+                .put("packId", packId)
+                .put("title", title)
+                .put("createdAt",
+                        metadata.optLong("createdAtMs", 0L))
+                .put("createdAtMs",
+                        metadata.optLong("createdAtMs", 0L))
+                .put("recordingId",
+                        metadata.optString("recordingId", ""))
+                .put("filename",
+                        metadata.optString("filename", ""))
+                .put("recordingType",
+                        metadata.optString("recordingType", ""))
+                .put("reportMode",
+                        metadata.optString("reportMode", ""));
     }
 
     private static int queryInt(

@@ -5,6 +5,7 @@ import android.content.Context;
 import com.overdrive.app.byd.BydDataCollector;
 import com.overdrive.app.byd.BydVehicleData;
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.monitor.AccMonitor;
 import com.overdrive.app.monitor.BatterySocData;
 import com.overdrive.app.monitor.BatteryThermalData;
 import com.overdrive.app.monitor.ChargingStateData;
@@ -319,14 +320,15 @@ public class AbrpTelemetryService {
                 payload.put("is_dcfc", dcFastFlag.intValue());
             }
 
-            // is_parked — gear from collector
-            boolean isParked = false;
-            if (vd != null && vd.gearMode != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE) {
-                isParked = vd.gearMode == GearMonitor.GEAR_P;
-            } else {
-                isParked = gearMonitor.getCurrentGear() == GearMonitor.GEAR_P;
+            // is_parked — prefer GearMonitor's freshness-checked 5 Hz value.
+            // The collector snapshot is updated far less often and deliberately
+            // stops polling gearbox data with ACC off, so it can retain the last
+            // driving gear indefinitely. That stale D made ABRP show Drive while
+            // the dashboard (which uses GearMonitor) correctly showed Park.
+            Boolean isParked = resolveCurrentParkedState(vd, accOn);
+            if (isParked != null) {
+                payload.put("is_parked", isParked ? 1 : 0);
             }
-            payload.put("is_parked", isParked ? 1 : 0);
 
             // elevation, heading
             if (gpsMonitor.hasLocation()) {
@@ -410,6 +412,58 @@ public class AbrpTelemetryService {
 
         lastTelemetrySnapshot = payload;
         return payload;
+    }
+
+    /**
+     * Resolve ABRP's parked flag without allowing an old collector gear to
+     * override the live gear monitor. Unknown stays unknown (field omitted)
+     * rather than being manufactured into Drive.
+     */
+    private Boolean resolveCurrentParkedState(
+            BydVehicleData vd, boolean collectorAccOn) {
+        int freshGear = BydVehicleData.UNAVAILABLE;
+        try {
+            freshGear = gearMonitor.getCurrentGearIfFresh();
+        } catch (Throwable ignored) {
+        }
+
+        boolean accOffConfirmed = !collectorAccOn;
+        try {
+            if (AccMonitor.isAccStateAuthoritative()) {
+                boolean accOn = AccMonitor.isAccOn();
+                boolean accFreshEnough =
+                        !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                                || AccMonitor.isAccStateFreshForSafety();
+                accOffConfirmed = !accOn && accFreshEnough;
+            }
+        } catch (Throwable ignored) {
+        }
+
+        int snapshotGear = vd != null
+                ? vd.gearMode : BydVehicleData.UNAVAILABLE;
+        return resolveParkedState(
+                freshGear, snapshotGear, accOffConfirmed);
+    }
+
+    /**
+     * Source precedence:
+     *  1. fresh GearMonitor observation;
+     *  2. confirmed powered-off state;
+     *  3. slower collector snapshot;
+     *  4. unknown.
+     */
+    static Boolean resolveParkedState(
+            int freshGear, int snapshotGear, boolean accOffConfirmed) {
+        if (GearMonitor.isValidGearMode(freshGear)) {
+            return freshGear == GearMonitor.GEAR_P;
+        }
+        if (accOffConfirmed) {
+            return Boolean.TRUE;
+        }
+        if (GearMonitor.isValidGearMode(snapshotGear)) {
+            return snapshotGear == GearMonitor.GEAR_P;
+        }
+        return null;
     }
 
     // ==================== UPLOAD LOGIC ====================
@@ -627,7 +681,19 @@ public class AbrpTelemetryService {
      * 5s when driving (not parked AND not charging), 30s when parked or charging.
      */
     int getAdaptiveInterval() {
-        boolean isParked = (gearMonitor.getCurrentGear() == GearMonitor.GEAR_P);
+        boolean collectorAccOn = true;
+        BydVehicleData vd = null;
+        try {
+            BydDataCollector collector = BydDataCollector.getInstance();
+            collectorAccOn = collector.isAccOn();
+            vd = collector.getData();
+        } catch (Throwable ignored) {
+        }
+        Boolean parkedState =
+                resolveCurrentParkedState(vd, collectorAccOn);
+        // Unknown uses the lower-frequency parked cadence; it must never be
+        // interpreted as actively driving.
+        boolean isParked = !Boolean.FALSE.equals(parkedState);
         boolean isCharging = false;
 
         ChargingStateData chargingState = vehicleDataMonitor.getChargingState();

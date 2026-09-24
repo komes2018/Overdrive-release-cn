@@ -59,6 +59,34 @@
     {
       "name": "Cedric Carre",
       "github": "ccarrebdl"
+    },
+    {
+      "name": "Dmitry",
+      "github": "Dmitrijsmok"
+    },
+    {
+      "name": "Francesco",
+      "github": "francescodoffizi"
+    },
+    {
+      "name": "Chris Hemmings",
+      "github": "chris-hemmings"
+    },
+    {
+      "name": "Salty",
+      "github": "UnrealSalty"
+    },
+    {
+      "name": "mustafabulbul1986",
+      "github": "mustafabulbul1986"
+    },
+    {
+      "name": "CongHoang",
+      "github": "conghoang"
+    },
+    {
+      "name": "Zalman",
+      "github": "HTTPS1121"
     }
   ],
   "supporters": [
@@ -109,6 +137,23 @@
       "tier": "gold"
     },
     {
+      "name": "Fermin Rodriguez",
+      "tier": "gold"
+    },
+    {
+      "name": "Paul Gotzl",
+      "tier": "gold"
+    },
+    {
+      "name": "Terence Jether Naparan",
+      "tier": "gold"
+    },
+    {
+      "name": "Amarildo Souza",
+      "tier": "gold",
+      "count": 2
+    },
+    {
       "name": "Jan Bleckmann",
       "tier": "silver",
       "count": 2
@@ -143,10 +188,6 @@
     },
     {
       "name": "aa b",
-      "tier": "silver"
-    },
-    {
-      "name": "Amarildo Souza",
       "tier": "silver"
     },
     {
@@ -231,7 +272,8 @@
     },
     {
       "name": "Hooi Jack",
-      "tier": "bronze"
+      "tier": "bronze",
+      "count": 2
     },
     {
       "name": "Ioannis Kazakopoulos",
@@ -243,7 +285,8 @@
     },
     {
       "name": "Muhammad Azham Abu Rahman",
-      "tier": "bronze"
+      "tier": "bronze",
+      "count": 2
     },
     {
       "name": "Freddy Liaw",
@@ -255,6 +298,22 @@
     },
     {
       "name": "Bartlomiej Jedrzejczyk",
+      "tier": "bronze"
+    },
+    {
+      "name": "Jose Souza",
+      "tier": "bronze"
+    },
+    {
+      "name": "Jacques Millard",
+      "tier": "bronze"
+    },
+    {
+      "name": "Andrea Enrico Rossi",
+      "tier": "bronze"
+    },
+    {
+      "name": "Carios Medina",
       "tier": "bronze"
     }
   ]

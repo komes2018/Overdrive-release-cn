@@ -224,6 +224,109 @@ public final class CarPropertyBridge {
         }
     }
 
+    // ── DiLink 5 resolution guard ──
+    //
+    // Field evidence (BYD Seal on DiLink 5 firmware, Sep 2026): the DiCarServer
+    // provider handshake fails 100% of the time on some DI5 trims, and the
+    // 1 Hz gear poll then re-runs the full AMS reflection + ServiceManager walk
+    // every second for the life of the daemon. Two system_server deaths were
+    // logged on that unit with this loop as the only daemon activity common to
+    // both. Everything below is reachable ONLY after the provider path has
+    // already failed AND only when DiLink 5 is selected, so a car where the
+    // bridge works today sees byte-identical behaviour.
+
+    /** persist prop; "0"/"false"/"off" disables the DI5 bridge entirely. */
+    static final String DILINK5_BRIDGE_PROPERTY =
+            "persist.overdrive.dilink5_carprop_bridge";
+    /**
+     * Pure breaker state so the policy is unit-testable without Binder.
+     * A "hard failure" is the specific rejection signature (provider returned
+     * a null holder AND no ServiceManager candidate carried the right
+     * descriptor). DeadObjectException / transient throws never count.
+     */
+    static final class DiLink5BreakerState {
+        /** Consecutive hard rejections before the breaker opens (30 s at 1 Hz). */
+        static final int DILINK5_BREAKER_TRIP_FAILURES = 30;
+        static final long DILINK5_BREAKER_INITIAL_OPEN_MS = 60_000L;
+        static final long DILINK5_BREAKER_MAX_OPEN_MS = 30L * 60_000L;
+
+        int consecutiveHardFailures;
+        long openUntilElapsedMs;
+        long currentOpenMs = DILINK5_BREAKER_INITIAL_OPEN_MS;
+        int trips;
+
+        boolean isOpen(long nowElapsedMs) {
+            return openUntilElapsedMs > 0L && nowElapsedMs < openUntilElapsedMs;
+        }
+
+        /** @return true if this failure just opened (tripped) the breaker. */
+        boolean recordHardFailure(long nowElapsedMs) {
+            consecutiveHardFailures++;
+            if (consecutiveHardFailures < DILINK5_BREAKER_TRIP_FAILURES) {
+                return false;
+            }
+            consecutiveHardFailures = 0;
+            openUntilElapsedMs = nowElapsedMs + currentOpenMs;
+            trips++;
+            currentOpenMs = Math.min(currentOpenMs * 2L, DILINK5_BREAKER_MAX_OPEN_MS);
+            return true;
+        }
+
+        void recordSuccess() {
+            consecutiveHardFailures = 0;
+            openUntilElapsedMs = 0L;
+            currentOpenMs = DILINK5_BREAKER_INITIAL_OPEN_MS;
+        }
+
+        /** Transient failure (binder died / threw): not evidence of rejection. */
+        void recordTransientFailure() {
+            consecutiveHardFailures = 0;
+        }
+    }
+
+    private final DiLink5BreakerState diLink5Breaker = new DiLink5BreakerState();
+    private volatile Boolean diLink5BridgeEnabledCache;
+    private boolean diLink5BreakerOpenLogged;
+
+    /** Outcome of one DI5 resolution attempt, used to feed the breaker. */
+    private ICarPropertyService lastServiceManagerCandidate;
+    private boolean lastServiceManagerHadWrongDescriptorOnly;
+
+    /**
+     * Kill-switch parsing kept in a nested holder (no outer-class static init,
+     * which touches {@code android.net.Uri}) so plain-JVM tests can cover it.
+     */
+    static final class DiLink5KillSwitch {
+        private DiLink5KillSwitch() {}
+
+        static boolean isEnabled(String rawProperty) {
+            if (rawProperty == null) return true;
+            String v = rawProperty.trim().toLowerCase(java.util.Locale.US);
+            return !("0".equals(v) || "false".equals(v) || "off".equals(v));
+        }
+    }
+
+    private boolean diLink5BridgeEnabled() {
+        Boolean cachedFlag = diLink5BridgeEnabledCache;
+        if (cachedFlag != null) return cachedFlag;
+        boolean enabled = true;
+        try {
+            Class<?> sp = Class.forName("android.os.SystemProperties");
+            java.lang.reflect.Method get =
+                    sp.getMethod("get", String.class, String.class);
+            enabled = DiLink5KillSwitch.isEnabled(
+                    (String) get.invoke(null, DILINK5_BRIDGE_PROPERTY, ""));
+        } catch (Throwable ignore) {
+            // Property surface unavailable → default ON (unchanged behaviour).
+        }
+        if (!enabled) {
+            log("DiLink 5 bridge disabled via " + DILINK5_BRIDGE_PROPERTY
+                    + " — skipping provider and ServiceManager resolution");
+        }
+        diLink5BridgeEnabledCache = enabled;
+        return enabled;
+    }
+
     // ── Service discovery ──
 
     private ICarPropertyService ensureService() {
@@ -238,36 +341,113 @@ public final class CarPropertyBridge {
                 IBinder b = svc.asBinder();
                 if (b != null && b.isBinderAlive()) return svc;
             }
-            svc = resolveServiceViaProvider();
-            if (svc == null) {
-                svc = resolveServiceViaServiceManager();
+            if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                // Every non-DiLink 5 trim: provider-only resolution, unchanged.
+                svc = resolveServiceViaProvider();
+                cached = svc;
+                return svc;
             }
+            svc = resolveDiLink5ServiceLocked();
             cached = svc;
             return svc;
         }
     }
 
+    /**
+     * DiLink 5 resolution: kill switch → breaker → provider → descriptor-
+     * validated ServiceManager fallback. Caller holds {@link #LOCK}.
+     */
+    private ICarPropertyService resolveDiLink5ServiceLocked() {
+        if (!diLink5BridgeEnabled()) return null;
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (diLink5Breaker.isOpen(now)) {
+            if (!diLink5BreakerOpenLogged) {
+                log("DiLink 5 bridge breaker OPEN for "
+                        + ((diLink5Breaker.openUntilElapsedMs - now) / 1000L)
+                        + "s (trip #" + diLink5Breaker.trips
+                        + ") — resolution suppressed; gear falls back to car_service dump");
+                diLink5BreakerOpenLogged = true;
+            }
+            return null;
+        }
+        diLink5BreakerOpenLogged = false;
+
+        ProviderAttempt providerAttempt = new ProviderAttempt();
+        ICarPropertyService svc = resolveServiceViaProvider(providerAttempt);
+        if (svc != null) {
+            diLink5Breaker.recordSuccess();
+            return svc;
+        }
+        if (!providerAttempt.nullHolder) {
+            // Threw (DeadObjectException while system_server restarts, etc.):
+            // not a rejection signature. Do not walk ServiceManager either —
+            // a dying system_server is the last thing to poke.
+            diLink5Breaker.recordTransientFailure();
+            return null;
+        }
+
+        lastServiceManagerHadWrongDescriptorOnly = false;
+        svc = resolveServiceViaServiceManager();
+        if (svc != null) {
+            diLink5Breaker.recordSuccess();
+            return svc;
+        }
+        // Hard rejection: provider refused AND no correctly-typed binder exists.
+        if (diLink5Breaker.recordHardFailure(now)) {
+            log("DiLink 5 bridge breaker TRIPPED after "
+                    + DiLink5BreakerState.DILINK5_BREAKER_TRIP_FAILURES
+                    + " consecutive rejections (provider null holder"
+                    + (lastServiceManagerHadWrongDescriptorOnly
+                            ? ", ServiceManager exposed only foreign binders" : "")
+                    + "); backing off "
+                    + (diLink5Breaker.openUntilElapsedMs - now) / 1000L + "s");
+        }
+        return null;
+    }
+
+    /** Records how the provider path failed so the breaker can classify it. */
+    private static final class ProviderAttempt {
+        boolean nullHolder;
+    }
+
+    /**
+     * DiLink 5 fallback: resolve {@code ICarPropertyService} straight from
+     * {@code android.os.ServiceManager}. A binder is accepted ONLY if its
+     * remote interface descriptor is exactly
+     * {@link ICarPropertyService.Stub#DESCRIPTOR}. {@code Stub.asInterface}
+     * wraps any live binder unconditionally, so without this check the AOSP
+     * {@code car_service} ({@code android.car.ICar}) gets wrapped and every
+     * subsequent call is a malformed transaction into system_server that the
+     * server rejects with "Binder invocation to an incorrect interface".
+     */
     private ICarPropertyService resolveServiceViaServiceManager() {
         try {
             Class<?> smClass = Class.forName("android.os.ServiceManager");
-            java.lang.reflect.Method getService = smClass.getMethod("getService", String.class);
-            
-            // Try car_service first, then direct byd property service names
-            String[] serviceNames = new String[] { "car_service", "byd_car_property", "car_property_service", "byd_car_service" };
+            java.lang.reflect.Method getService =
+                    smClass.getMethod("getService", String.class);
+            String[] serviceNames = new String[] {
+                    "car_service",
+                    "byd_car_property",
+                    "car_property_service",
+                    "byd_car_service"
+            };
             for (String name : serviceNames) {
                 IBinder binder = (IBinder) getService.invoke(null, name);
-                if (binder != null && binder.isBinderAlive()) {
-                    log("Found service binder for: " + name);
-                    try {
-                        ICarPropertyService service = ICarPropertyService.Stub.asInterface(binder);
-                        if (service != null) {
-                            log("Resolved ICarPropertyService via ServiceManager(" + name + ")");
-                            return service;
-                        }
-                    } catch (Throwable t) {
-                        log("Stub.asInterface failed for " + name + ": " + t);
-                    }
+                if (binder == null || !binder.isBinderAlive()) continue;
+                String descriptor;
+                try {
+                    descriptor = binder.getInterfaceDescriptor();
+                } catch (Throwable t) {
+                    // Remote died between lookup and query — skip candidate.
+                    continue;
                 }
+                if (!ICarPropertyService.Stub.DESCRIPTOR.equals(descriptor)) {
+                    lastServiceManagerHadWrongDescriptorOnly = true;
+                    continue;
+                }
+                log("Resolved ICarPropertyService via ServiceManager(" + name
+                        + ") descriptor=" + descriptor);
+                return ICarPropertyService.Stub.asInterface(binder);
             }
         } catch (Throwable t) {
             log("resolveServiceViaServiceManager threw: " + t);
@@ -303,6 +483,10 @@ public final class CarPropertyBridge {
      * uid/package match holds inside the provider.
      */
     private ICarPropertyService resolveServiceViaProvider() {
+        return resolveServiceViaProvider(new ProviderAttempt());
+    }
+
+    private ICarPropertyService resolveServiceViaProvider(ProviderAttempt attempt) {
         try { com.overdrive.app.shell.HiddenApiBypass.INSTANCE.bypass(); }
         catch (Throwable ignore) {}
 
@@ -340,6 +524,8 @@ public final class CarPropertyBridge {
             }
             holder = gcpe.invoke(amsService, authority, userId, externalToken, "CarPropertyBridge");
             if (holder == null) {
+                // AMS answered and refused: the rejection signature (vs. a throw).
+                attempt.nullHolder = true;
                 log("getContentProviderExternal returned null holder for authority=" + authority);
                 return null;
             }

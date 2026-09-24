@@ -525,6 +525,10 @@ BYD.events = {
         // exploit it.
         const qParam = (urlParams.get('q') || '').slice(0, 64).trim();
         if (qParam) this.placeContainsQuery = qParam;
+        // Parking Intelligence deep-link: narrow to the sentry clips stamped
+        // with one parking session (server-side filter, v5 index column).
+        const psidParam = (urlParams.get('parkingSessionId') || '').slice(0, 80).trim();
+        if (psidParam && /^[A-Za-z0-9_\-]+$/.test(psidParam)) this.parkingSessionId = psidParam;
         const idParam = urlParams.get('id');
         const fileParam = urlParams.get('file');
 
@@ -928,6 +932,7 @@ BYD.events = {
             if (this.actorFilter && this.actorFilter.proximity) params.push('proximity=' + encodeURIComponent(this.actorFilter.proximity));
             if (this.placeContainsQuery)                        params.push('placeContains=' + encodeURIComponent(this.placeContainsQuery));
             if (this.storageFilter)                             params.push('storage=' + encodeURIComponent(this.storageFilter));
+            if (this.parkingSessionId)                          params.push('parkingSessionId=' + encodeURIComponent(this.parkingSessionId));
             const queryStr = params.join('&');
             // Fetch memo: paging through the same filter set (prev/next
             // page) reissues loadRecordings → loadPlaceChips with the
@@ -1421,6 +1426,9 @@ BYD.events = {
             if (this.placeContainsQuery)                        params.push('placeContains=' + encodeURIComponent(this.placeContainsQuery));
             // Storage-volume narrowing — '' = all volumes.
             if (this.storageFilter)                             params.push('storage=' + encodeURIComponent(this.storageFilter));
+            // Parking Intelligence deep-link (?parkingSessionId=…): only the
+            // sentry clips stamped with that session.
+            if (this.parkingSessionId)                          params.push('parkingSessionId=' + encodeURIComponent(this.parkingSessionId));
             params.push('page=' + this.currentPage);
             params.push('pageSize=' + this.pageSize);
             url += '?' + params.join('&');
@@ -1663,6 +1671,7 @@ BYD.events = {
                 '</div>' +
                 (this.selectMode ? '' : 
                 '<div class="recording-actions">' +
+                '<button class="action-btn" onclick="event.stopPropagation(); BYD.events.createIncidentPack(\'' + recordingKey + '\')" title="Create AI evidence pack"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/><path d="M5 5l14 14"/></svg></button>' +
                 '<button class="action-btn" onclick="event.stopPropagation(); BYD.events.downloadVideo(\'' + recordingKey + '\')" title="' + BYD.i18n.t('common.download') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>' +
                 '<button class="action-btn delete" onclick="event.stopPropagation(); BYD.events.deleteRecording(\'' + recordingKey + '\')" title="' + BYD.i18n.t('common.delete') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>' +
                 '</div>') +
@@ -1836,6 +1845,50 @@ BYD.events = {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+    },
+
+    async createIncidentPack(recordingKey) {
+        const rec = this.findRecording(recordingKey);
+        if (!rec || !rec.id || !/^[a-f0-9]{32}$/i.test(rec.id)) return;
+        const body = 'OverDrive sends only filtered event metadata to your configured AI provider. '
+            + 'The video stays local and is added only to the downloaded evidence pack.';
+        const confirmed = window.BYD && BYD.utils
+                && BYD.utils.confirmDialog
+            ? await BYD.utils.confirmDialog({
+                title: 'Create evidence pack?',
+                body: body,
+                confirmLabel: 'Create pack',
+                cancelLabel: 'Cancel'
+            })
+            : confirm('Create an incident evidence pack? ' + body);
+        if (!confirmed) return;
+        try {
+            const response = await fetch('/api/genai/incidents', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    recordingId: rec.id,
+                    language: BYD.i18n.getLang()
+                })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || data.success === false) {
+                throw new Error(data.error || 'Could not create evidence pack');
+            }
+            const packId = String(data.id || data.packId || '');
+            if (!/^[a-f0-9-]{36}$/i.test(packId)) {
+                throw new Error('The daemon returned an invalid pack id');
+            }
+            if (BYD.core && BYD.core.toast) {
+                BYD.core.toast('Evidence pack ready', 'success');
+            }
+            window.location.href = '/api/genai/incidents/'
+                + encodeURIComponent(packId) + '/download';
+        } catch (error) {
+            if (BYD.core && BYD.core.toast) {
+                BYD.core.toast(error.message, 'error');
+            }
+        }
     },
     
     async deleteRecording(recordingKey) {
@@ -2245,7 +2298,12 @@ BYD.events = {
         const onLoadedMetadata = () => {
             const wrap = document.getElementById('videoPlayerWrap');
             if (wrap && videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
-                wrap.style.aspectRatio = videoEl.videoWidth + ' / ' + videoEl.videoHeight;
+                if ('aspectRatio' in wrap.style) {
+                    wrap.style.aspectRatio = videoEl.videoWidth + ' / ' + videoEl.videoHeight;
+                } else {
+                    wrap.style.paddingBottom =
+                        ((videoEl.videoHeight / videoEl.videoWidth) * 100) + '%';
+                }
             }
             refreshTime();
             refreshPlayPauseIcon();
@@ -2709,7 +2767,10 @@ BYD.events = {
         // 16/9 default before the next clip's metadata fires. Without this,
         // a Tang clip (16:9) opened after a Seal clip (4:3) would briefly
         // render at 4:3 dimensions until loadedmetadata corrected it.
-        if (wrap) wrap.style.aspectRatio = '';
+        if (wrap) {
+            wrap.style.aspectRatio = '';
+            wrap.style.paddingBottom = '';
+        }
 
         this.unbindTransport();
     }

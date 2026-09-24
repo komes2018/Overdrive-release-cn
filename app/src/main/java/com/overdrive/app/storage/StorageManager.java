@@ -233,6 +233,23 @@ public class StorageManager {
     // tiny (~10 bytes), atomic-write semantics not required because a stale
     // value still resolves to the same physical card.
     private static final String LEARNED_SD_UUID_FILE = "/data/local/tmp/overdrive_sd_uuid";
+
+    /**
+     * Cross-process proof that CameraDaemon recently observed the configured
+     * SD volume mounted and writable. AccSentryDaemon uses this pre-ACC-off
+     * evidence before treating an unreliable vendor "SD absent" property as a
+     * dead rail. The deadline spans four 15-second watchdog intervals so a
+     * lease refreshed immediately before ACC-off is still valid at the first
+     * ~30-second reactive-recovery decision.
+     */
+    private static final String SD_MOUNTED_LEASE_FILE =
+            "/data/local/tmp/overdrive_sd_mounted_lease";
+    private static final long SD_MOUNTED_LEASE_MS = 60_000L;
+    private static final long SD_MOUNTED_LEASE_FAILURE_LOG_INTERVAL_MS =
+            5 * 60_000L;
+    private static final Object SD_MOUNTED_LEASE_LOCK = new Object();
+    private static long lastSdMountedLeaseFailureLogElapsedMs =
+            -SD_MOUNTED_LEASE_FAILURE_LOG_INTERVAL_MS;
     
     // Default limits (in bytes)
     private static final long DEFAULT_RECORDINGS_LIMIT_MB = 500;
@@ -1143,6 +1160,9 @@ public class StorageManager {
         boolean usbMoved = usbBeforeLive && usbAvailable
                 && usbPath != null && !usbPath.equals(usbPathBefore);
         if (sdCameOnline || usbCameOnline || sdMoved || usbMoved) {
+            if ((sdCameOnline || sdMoved) && daemonMaintenanceStarted.get()) {
+                publishSdMountedLease();
+            }
             StringBuilder what = new StringBuilder();
             if (sdCameOnline) what.append("SD came online");
             if (sdMoved) what.append(what.length() > 0 ? ", " : "").append("SD path changed");
@@ -9535,6 +9555,80 @@ public class StorageManager {
         }
     }
 
+    private static void initializeSdMountedLeasePublisher(
+            boolean currentlyMounted) {
+        if (currentlyMounted) {
+            publishSdMountedLease();
+            return;
+        }
+
+        // Publish a zero capability marker only when no still-live mounted
+        // lease exists. A rail can collapse immediately after ACC-off; erasing
+        // the last pre-transition proof on that first failed watchdog tick
+        // would defeat the entire cross-process contract.
+        synchronized (SD_MOUNTED_LEASE_LOCK) {
+            java.io.File lease = new java.io.File(SD_MOUNTED_LEASE_FILE);
+            long deadline = readSdMountedLeaseDeadline(lease);
+            long now = System.currentTimeMillis();
+            if (deadline > now && deadline <= now + SD_MOUNTED_LEASE_MS * 5L) {
+                return;
+            }
+            writeSdMountedLeaseLocked(0L);
+        }
+    }
+
+    private static void publishSdMountedLease() {
+        synchronized (SD_MOUNTED_LEASE_LOCK) {
+            writeSdMountedLeaseLocked(
+                    System.currentTimeMillis() + SD_MOUNTED_LEASE_MS);
+        }
+    }
+
+    private static long readSdMountedLeaseDeadline(java.io.File lease) {
+        if (lease == null || !lease.isFile()) return Long.MIN_VALUE;
+        try {
+            byte[] raw = java.nio.file.Files.readAllBytes(lease.toPath());
+            return Long.parseLong(new String(
+                    raw, java.nio.charset.StandardCharsets.US_ASCII).trim());
+        } catch (Throwable ignored) {
+            return Long.MIN_VALUE;
+        }
+    }
+
+    private static void writeSdMountedLeaseLocked(long deadlineMs) {
+        try {
+            byte[] payload = Long.toString(deadlineMs)
+                    .getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+            java.io.File tmp =
+                    new java.io.File(SD_MOUNTED_LEASE_FILE + ".tmp");
+            try (java.io.FileOutputStream output =
+                         new java.io.FileOutputStream(tmp)) {
+                output.write(payload);
+            }
+            java.io.File destination =
+                    new java.io.File(SD_MOUNTED_LEASE_FILE);
+            if (!tmp.renameTo(destination)) {
+                try (java.io.FileOutputStream output =
+                             new java.io.FileOutputStream(destination)) {
+                    output.write(payload);
+                }
+                tmp.delete();
+            }
+            destination.setReadable(true, false);
+            destination.setWritable(true, false);
+        } catch (Throwable failure) {
+            // Missing/unwritable lease makes AccSentryDaemon retain its legacy
+            // recovery behavior, so this side channel cannot disable recovery.
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (now - lastSdMountedLeaseFailureLogElapsedMs
+                    >= SD_MOUNTED_LEASE_FAILURE_LOG_INTERVAL_MS) {
+                lastSdMountedLeaseFailureLogElapsedMs = now;
+                logWarn("SD mounted lease publish failed: "
+                        + failure.getMessage());
+            }
+        }
+    }
+
     /**
      * Start SD card / USB mount watchdog for sentry mode.
      * Periodically checks if the configured external volume(s) are still
@@ -9578,6 +9672,9 @@ public class StorageManager {
 
         final boolean watchSd = anyOnSd;
         final boolean watchUsb = anyOnUsb;
+        if (watchSd) {
+            initializeSdMountedLeasePublisher(isSdCardLikelyMounted());
+        }
 
         sdCardWatchdog = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "VolumeWatchdog");
@@ -9611,7 +9708,9 @@ public class StorageManager {
                 // SD-handling block via a scoped flag instead of the
                 // historical `return;`.
                 boolean sdHandled = false;
-                if (watchSd && !isSdCardLikelyMounted()) {
+                boolean sdMountedThisTick =
+                        watchSd && isSdCardLikelyMounted();
+                if (watchSd && !sdMountedThisTick) {
                     sdWatchdogConsecutiveFailures++;
 
                     // First failure: silent, just record and let the USB
@@ -9635,6 +9734,7 @@ public class StorageManager {
                     if (ensureSdCardMounted(true)) {
                         logInfo("SD card watchdog: remounted successfully after " +
                             sdWatchdogConsecutiveFailures + " attempts");
+                        publishSdMountedLease();
                         sdWatchdogConsecutiveFailures = 0;
                         // Re-arm the one-time internal-fallback recovery: the card
                         // is back, so if it drops AGAIN later the failure branch
@@ -9897,6 +9997,7 @@ public class StorageManager {
                     }
                     } // end if (!sdHandled) — FIX audit R8 LOW
                 } else if (watchSd) {
+                    publishSdMountedLease();
                     // Card is healthy — reset failure counter (was a single
                     // transient probe failure, not a real unmount).
                     if (sdWatchdogConsecutiveFailures > 0) {
@@ -10231,11 +10332,128 @@ public class StorageManager {
     }
 
     /**
+     * Atomically re-point the active-trip marker at {@code to} AND rename the
+     * on-disk file, under {@link #tripsCleanupLock}.
+     *
+     * <p>The trips reaper snapshots {@code activeTripFilePath} ONCE per pass
+     * and protects that exact path, so a marker transition performed outside
+     * its lock always leaves one of the two paths unprotected for a window:
+     * destination-first exposes the still-on-disk source; source-held exposes
+     * the freshly-renamed destination. Every cleanup pass (ensureTripsSpace,
+     * the deferred and post-save sweeps) holds {@code tripsCleanupLock} for
+     * its whole pass, so flipping the marker and renaming inside one lock
+     * hold makes the pair atomic to cleanup: a pass observes strictly-before
+     * (marker=from, file at from) or strictly-after (marker=to, file at to),
+     * never a mixed state.
+     *
+     * <p>On rename failure the marker is restored to {@code from} — the file
+     * that actually still exists. Returns the rename result. Used by the
+     * trip-end flow's {@code <startTime>.jsonl.gz → <dbId>.jsonl.gz} rename.
+     */
+    public boolean renameActiveTripFile(File from, File to) {
+        synchronized (tripsCleanupLock) {
+            setActiveTripFile(to);
+            boolean renamed = false;
+            try {
+                renamed = from.renameTo(to);
+            } finally {
+                if (!renamed) {
+                    setActiveTripFile(from);
+                }
+            }
+            return renamed;
+        }
+    }
+
+    /**
+     * Cross-volume variant of {@link #renameActiveTripFile}: same marker
+     * atomicity under {@link #tripsCleanupLock}, but falls back to copy+delete
+     * when {@code renameTo} fails because source and destination live on
+     * different filesystems. Used by the trip-end flow now that the active
+     * trip journal is written to internal storage
+     * ({@link #getTripJournalDir()}) and only moved to the (typically
+     * SD-hosted) trips directory once the row is finalized.
+     */
+    public boolean moveActiveTripFile(File from, File to) {
+        synchronized (tripsCleanupLock) {
+            setActiveTripFile(to);
+            boolean moved = false;
+            try {
+                moved = moveFileCrossVolume(from, to);
+            } finally {
+                if (!moved) {
+                    setActiveTripFile(from);
+                }
+            }
+            return moved;
+        }
+    }
+
+    /**
+     * Move a file, preferring an atomic {@code renameTo} and falling back to
+     * copy+delete across filesystems. Returns true only when {@code to} holds
+     * the complete content; on a failed copy the destination is removed and
+     * the source left intact, so the caller never loses the only copy.
+     */
+    public static boolean moveFileCrossVolume(File from, File to) {
+        if (from == null || to == null) return false;
+        if (from.getAbsolutePath().equals(to.getAbsolutePath())) return true;
+        try {
+            File parent = to.getParentFile();
+            if (parent != null && !parent.isDirectory()) parent.mkdirs();
+        } catch (Throwable ignored) {}
+        try {
+            if (from.renameTo(to)) return true;
+        } catch (Throwable ignored) {}
+        try {
+            java.nio.file.Files.copy(from.toPath(), to.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            if (to.length() != from.length()) {
+                try { to.delete(); } catch (Throwable ignored) {}
+                return false;
+            }
+            if (!from.delete()) {
+                // Destination is complete; a lingering source is only an
+                // orphan for the journal janitor to reap.
+                logWarn("moveFileCrossVolume: copied but could not delete source "
+                        + from.getAbsolutePath());
+            }
+            return true;
+        } catch (Throwable e) {
+            logWarn("moveFileCrossVolume failed " + from.getAbsolutePath() + " -> "
+                    + to.getAbsolutePath() + ": " + e.getMessage());
+            try { if (to.exists() && from.exists()) to.delete(); } catch (Throwable ignored) {}
+            return false;
+        }
+    }
+
+    /**
+     * Directory for the telemetry journal of the trip CURRENTLY being
+     * recorded. Deliberately on internal storage ({@code /data/local/tmp},
+     * the same durable location as the trip H2 database) rather than the
+     * user-selected trips volume: the journal is the only recovery source
+     * for an in-flight trip, and the field incident (log_DG87KWQX) showed
+     * the SD card stalling and even dropping off the bus mid-drive. A
+     * finalized trip's file is moved to {@link #getTripsDir()} by the
+     * trip-end flow (see {@link #moveActiveTripFile}). Returns null when the
+     * directory cannot be created (callers fall back to the trips dir).
+     */
+    public File getTripJournalDir() {
+        File dir = new File(TRIP_JOURNAL_DIR);
+        try {
+            if (dir.isDirectory() || dir.mkdirs()) return dir;
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static final String TRIP_JOURNAL_DIR = "/data/local/tmp/overdrive_trip_journal";
+
+    /**
      * Absolute path of the telemetry file for the trip CURRENTLY being recorded,
      * or null if no trip is active. Used by trip recovery to skip the in-flight
-     * file — it has no DB row yet (the row is inserted only at trip end), so
-     * recovery would otherwise rebuild a phantom duplicate that the real
-     * trip-end insert then duplicates. Mirrors the reaper's protectedTripPath.
+     * file — its DB row (inserted at trip START) is still half-open, so
+     * recovery must neither finalize nor duplicate it mid-drive. Mirrors the
+     * reaper's protectedTripPath.
      */
     public String getActiveTripFilePath() {
         return activeTripFilePath;

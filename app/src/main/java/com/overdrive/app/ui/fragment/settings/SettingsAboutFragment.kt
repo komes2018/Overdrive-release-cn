@@ -668,7 +668,8 @@ class SettingsAboutFragment : Fragment() {
         val ctx = ioContext()
         submitIo {
             // Cap the read so a huge/garbage file can't OOM the head unit. A real
-            // bundle is a few KB; 16 MB matches the web import body cap. Read
+            // settings-only bundles are small, but trip history can be much larger.
+            // Keep this aligned with the web and backup HTTP caps. Read
             // bounded and treat overflow as an invalid file. tooLarge is tracked
             // separately so the user gets a precise message.
             var tooLarge = false
@@ -780,8 +781,8 @@ class SettingsAboutFragment : Fragment() {
         private const val REQ_EXPORT_SAVE = 4801
         private const val REQ_IMPORT_PICK = 4802
         // Bound the SAF import read so a malformed/huge file can't OOM the head
-        // unit. 16 MB worth of chars; a real bundle is a few KB.
-        private const val MAX_IMPORT_CHARS = 16 * 1024 * 1024
+        // unit. 32 MiB covers trip-history bundles without allowing unbounded reads.
+        private const val MAX_IMPORT_CHARS = 32 * 1024 * 1024
     }
 
     private fun populateThanks(root: View) {

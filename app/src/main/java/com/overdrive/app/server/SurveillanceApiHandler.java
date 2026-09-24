@@ -73,16 +73,17 @@ public class SurveillanceApiHandler {
             return true;
         }
         if (cleanPath.equals("/api/surveillance/prepare-restart") && method.equals("POST")) {
-            handlePrepareRestart(out);
+            handlePrepareRestart(out, body);
             return true;
         }
         if (cleanPath.equals("/api/surveillance/abort-restart") && method.equals("POST")) {
             // Companion to prepare-restart: if the dialog's SIGKILL fails
             // and the daemon survives, this lets the client unstick the
-            // shutdown latch so future preview requests work again without
-            // needing a manual daemon restart.
+            // camera-start and preview latches without needing a manual
+            // daemon restart.
             // Nothing to resume on the trip side: prepare-restart only
             // flushed telemetry and left the trip open and sampling.
+            CameraDaemon.abortCameraRestartPreparation();
             shutdownInProgress = false;
             CameraDaemon.log("abort-restart: shutdown latch cleared");
             HttpResponse.sendJsonSuccess(out);
@@ -678,12 +679,37 @@ public class SurveillanceApiHandler {
         // default from a deliberate choice, so a stale pending value never clobbers a
         // later Settings change. Default false = never set by a user yet.
         config.put("operatingModeSetByUser", survConfig.optBoolean("operatingModeSetByUser", false));
-        // Keep ONLY the USB/data rail powered after ACC OFF (cameras unaffected).
-        // Default true; read by AccSentryDaemon on the next ACC-OFF cycle.
+        // Parked keep-awake preference. Legacy platforms control the USB/data
+        // power path; DiLink 5 can only request Android CPU/network wakefulness.
         config.put("keepUsbPowerOnAccOff", survConfig.optBoolean("keepUsbPowerOnAccOff", true));
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            config.put("keepUsbPowerControl", "android_wake_only");
+        }
         // Parked cellular keep-alive. Default FALSE (opt-in) — see the daemon's
         // keep-alive loop; only needed where the data module sleeps after ACC OFF.
         config.put("mobileDataKeepAlive", survConfig.optBoolean("mobileDataKeepAlive", false));
+        // Experimental DiLink 5 cloud heartbeat. Keep capability/readiness
+        // separate so the UI can hide it on other generations and explain why
+        // it is disabled when a BYD account has not been verified.
+        boolean di5CloudKeepAliveSupported =
+                com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
+        com.overdrive.app.byd.cloud.BydCloudConfig bydCloudConfig =
+                com.overdrive.app.byd.cloud.BydCloudConfig.fromUnifiedConfig();
+        config.put("di5CloudKeepAlive",
+                survConfig.optBoolean("di5CloudKeepAlive", false));
+        config.put("di5CloudKeepAliveSupported",
+                di5CloudKeepAliveSupported);
+        config.put("di5CloudKeepAliveCloudReady",
+                bydCloudConfig.isVerified());
+        // DiLink 5 parked keep-alive (Experimental). Only the master switch is
+        // surfaced; the lever keys (MCU hold, camera heartbeat, AP hold, cutoff)
+        // are config-only diagnostics and deliberately never reach the UI.
+        // Deliberately NO capability flag: DiLink 5 head units exist with and
+        // without the QCarCam camera stack, so the row must not follow the
+        // camera-mode selection (unlike di5CloudKeepAlive above). The toggle is
+        // the user's own platform declaration.
+        config.put("di5ParkedKeepAlive",
+                survConfig.optBoolean("di5ParkedKeepAlive", false));
         // HV-battery SoC surveillance cutoff (%). Lives in the "power" section
         // (the key SocCutoffMonitor reads), NOT "surveillance" — surface it on
         // the surveillance config so the General-tab slider can hydrate. 0=Off.
@@ -827,8 +853,17 @@ public class SurveillanceApiHandler {
                     // Persisted ingestion mode. Default = "default" (legacy
                     // ImageReader + 4-strip → 2x2). UI uses this to pre-select
                     // the radio group; absence falls back to default.
-                    config.put("cameraMode",
-                        camCfg.optString("cameraMode", "default"));
+                    String cameraMode = camCfg.optString("cameraMode", "default");
+                    config.put("cameraMode", cameraMode);
+                    if ("dilink5".equalsIgnoreCase(cameraMode)) {
+                        config.put(
+                            com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                                .CONFIG_CAMERA_MAPPING_KEY,
+                            camCfg.optString(
+                                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                                    .CONFIG_CAMERA_MAPPING_KEY,
+                                ""));
+                    }
                     // Red-calibration-overlay GL mask fallback. The dialog
                     // reads this to pre-check the switch.
                     config.put("dilink4RedMask",
@@ -985,9 +1020,19 @@ public class SurveillanceApiHandler {
 
             // ---- Bulk reset: revert all role mappings to profile defaults ----
             if (configJson.optBoolean("clearCameraRoleMappings", false)) {
+                if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                    HttpResponse.sendJsonError(out,
+                        "Camera role mappings are unavailable in DiLink 5 mode");
+                    return;
+                }
                 for (com.overdrive.app.camera.CameraRole role
                         : com.overdrive.app.camera.CameraRole.values()) {
-                    com.overdrive.app.camera.CameraConfigResolver.clearRoleMapping(role);
+                    if (!com.overdrive.app.camera.CameraConfigResolver
+                            .clearRoleMapping(role)) {
+                        HttpResponse.sendJsonError(out,
+                            "Failed to clear camera role mappings");
+                        return;
+                    }
                 }
             }
 
@@ -1011,6 +1056,49 @@ public class SurveillanceApiHandler {
             
             boolean configChanged = false;
             boolean reconcileOperatingMode = false;
+            boolean reconcileDi5CloudKeepAlive = false;
+
+            // Optional DiLink 5 hardware-ID order. Empty means Auto and
+            // preserves the existing property/model fallback.
+            if (configJson.has(
+                    com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                        .CONFIG_CAMERA_MAPPING_KEY)) {
+                boolean dilink5Selected =
+                    com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
+                if (!dilink5Selected) {
+                    HttpResponse.sendJsonError(out,
+                        "DiLink 5 camera mapping is unavailable outside DiLink 5 mode");
+                    return;
+                }
+                String requested = configJson.optString(
+                    com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                        .CONFIG_CAMERA_MAPPING_KEY,
+                    "");
+                String normalized =
+                    com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                        .normalizeCameraMapping(requested);
+                if (normalized == null) {
+                    HttpResponse.sendJsonError(out,
+                        "DiLink 5 camera mapping must contain four or five unique "
+                            + "camera IDs from 0 to 255");
+                    return;
+                }
+                org.json.JSONObject camCfg = new org.json.JSONObject();
+                camCfg.put(
+                    com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                        .CONFIG_CAMERA_MAPPING_KEY,
+                    normalized);
+                if (!com.overdrive.app.config.UnifiedConfigManager
+                        .updateSection("camera", camCfg)) {
+                    HttpResponse.sendJsonError(out,
+                        "Could not persist DiLink 5 camera mapping");
+                    return;
+                }
+                CameraDaemon.log(normalized.isEmpty()
+                    ? "DiLink 5 camera mapping reset to Auto"
+                    : "DiLink 5 camera mapping set to " + normalized);
+                configChanged = true;
+            }
             
             if (sentry != null && configJson.has("sadThreshold")) {
                 sentry.setSadThreshold((float) configJson.optDouble("sadThreshold", 0.05));
@@ -1202,8 +1290,15 @@ public class SurveillanceApiHandler {
                         return;
                     }
                     CameraDaemon.log("Operating mode set to: " + opMode);
+                    if ("onAndOff".equals(opMode)) {
+                        // The parked-shutdown marker belongs to onOnly; the app-side
+                        // startup gates honour it without consulting the mode, so it
+                        // must not outlive a switch to onAndOff.
+                        CameraDaemon.clearParkedShutdownMarkerForOnAndOff();
+                    }
                     reconcileOperatingMode =
                             configJson.optBoolean("applyCurrentAccState", false);
+                    reconcileDi5CloudKeepAlive = true;
                     configChanged = true;
                 } else {
                     CameraDaemon.log("Rejected operatingMode: " + opMode);
@@ -1460,6 +1555,77 @@ public class SurveillanceApiHandler {
                 }
                 CameraDaemon.log("Mobile-data keep-alive while parked set to: " + dataKeepAlive
                         + " (takes effect next ACC-OFF cycle)");
+            }
+
+            // DiLink 5 BYD-cloud heartbeat. Unlike the mobile-data bearer hold,
+            // this sends the existing realtime-status request every 15 seconds,
+            // which asks BYD's backend to wake/poll the T-Box. It is opt-in and
+            // rejected unless both platform and cloud-account prerequisites
+            // are satisfied. Disabling is always accepted so users can stop
+            // data/power use even after credentials become unavailable.
+            if (configJson.has("di5CloudKeepAlive")) {
+                boolean cloudKeepAlive =
+                        configJson.optBoolean("di5CloudKeepAlive", false);
+                if (cloudKeepAlive
+                        && !com.overdrive.app.camera.dilink5.DiLink5Platform
+                                .isSelected()) {
+                    HttpResponse.sendJsonError(
+                            out, "This setting is available only in DiLink 5 mode");
+                    return;
+                }
+                if (cloudKeepAlive
+                        && !com.overdrive.app.byd.cloud.BydCloudConfig
+                                .fromUnifiedConfig().isVerified()) {
+                    HttpResponse.sendJsonError(
+                            out, "Connect and verify BYD Cloud before enabling this setting");
+                    return;
+                }
+                boolean persisted =
+                        com.overdrive.app.config.UnifiedConfigManager
+                                .updateValues(
+                                        "surveillance",
+                                        java.util.Collections.singletonMap(
+                                                "di5CloudKeepAlive",
+                                                cloudKeepAlive));
+                if (!persisted) {
+                    CameraDaemon.log(
+                            "Failed to persist di5CloudKeepAlive="
+                                    + cloudKeepAlive);
+                    HttpResponse.sendJsonError(
+                            out, "Failed to save DI5 cloud keep-alive setting");
+                    return;
+                }
+                CameraDaemon.log("DI5 BYD-cloud keep-alive set to: "
+                        + cloudKeepAlive);
+                reconcileDi5CloudKeepAlive = true;
+            }
+
+            // DiLink 5 parked keep-alive (Experimental). Pure persist: the lease
+            // in acc_sentry_daemon re-reads this on its next 10 s parked tick (so
+            // OFF releases within one tick) and on the next ACC-OFF transition.
+            // No camera-mode gate on purpose (two DiLink 5 head-unit flavours;
+            // see the GET side) — the user's opt-in is the platform declaration.
+            if (configJson.has("di5ParkedKeepAlive")) {
+                boolean parkedKeepAlive =
+                        configJson.optBoolean("di5ParkedKeepAlive", false);
+                boolean persisted =
+                        com.overdrive.app.config.UnifiedConfigManager
+                                .updateValues(
+                                        "surveillance",
+                                        java.util.Collections.singletonMap(
+                                                "di5ParkedKeepAlive",
+                                                parkedKeepAlive));
+                if (!persisted) {
+                    CameraDaemon.log(
+                            "Failed to persist di5ParkedKeepAlive="
+                                    + parkedKeepAlive);
+                    HttpResponse.sendJsonError(
+                            out, "Failed to save DI5 parked keep-alive setting");
+                    return;
+                }
+                CameraDaemon.log("DI5 parked keep-alive (Experimental) set to: "
+                        + parkedKeepAlive
+                        + " (acc_sentry_daemon applies it on its next parked tick)");
             }
 
             // HV-battery SoC surveillance cutoff (%). Routed to the "power"
@@ -1915,8 +2081,20 @@ public class SurveillanceApiHandler {
             // via UnifiedConfigManager.updateSection so a partial write can't
             // leave the resolver reading inconsistent state.
             if (configJson.has("manualCameraId")) {
+                if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                    HttpResponse.sendJsonError(out,
+                        "Manual camera IDs are unavailable in DiLink 5 mode");
+                    return;
+                }
                 int camId = configJson.optInt("manualCameraId", -1);
                 if (camId >= 0 && camId <= 5) {
+                    if (!com.overdrive.app.camera.CameraConfigResolver
+                            .isManualPanoCameraIdAllowed(camId)) {
+                        HttpResponse.sendJsonError(out,
+                            "DiLink 4 uses the panoramic camera ID exposed "
+                                + "by the vehicle HAL");
+                        return;
+                    }
                     com.overdrive.app.camera.ResolvedCameraConfig resolvedCamera =
                         com.overdrive.app.camera.CameraConfigResolver.resolve();
                     org.json.JSONObject camCfg = new org.json.JSONObject();
@@ -1950,8 +2128,37 @@ public class SurveillanceApiHandler {
                     return;
                 }
             }
+            // Decoupled encoder lane opt-in (camera.decoupledEncoderLane) —
+            // the native-AVM reverse-camera starvation fix. Persist-only:
+            // PanoramicCameraGpu reads the flag once at construction (USE_*
+            // selector pattern), so it goes live on the next camera restart.
+            // Accepted on every platform because the pipeline hard-gates the
+            // flag off outside the legacy ImageReader path — persisting it on
+            // DiLink 4/5 is inert by construction, and rejecting it here
+            // would only complicate fleet config pushes.
+            if (configJson.has("decoupledEncoderLane")) {
+                boolean laneEnabled = configJson.optBoolean("decoupledEncoderLane", false);
+                boolean laneSaved = com.overdrive.app.camera.CameraConfigResolver
+                    .saveDecoupledEncoderLane(laneEnabled);
+                if (!laneSaved) {
+                    CameraDaemon.log("Failed to persist decoupledEncoderLane="
+                        + laneEnabled
+                        + " — UnifiedConfigManager.updateSection returned false");
+                    HttpResponse.sendJsonError(out,
+                        "Could not persist camera config (filesystem permission?)");
+                    return;
+                }
+                CameraDaemon.log("decoupledEncoderLane set to " + laneEnabled
+                    + " (legacy path only; takes effect on next camera restart)");
+                configChanged = true;
+            }
             if (configJson.has("clearManualCameraId")
                     && configJson.optBoolean("clearManualCameraId", false)) {
+                if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                    HttpResponse.sendJsonError(out,
+                        "Manual camera IDs are unavailable in DiLink 5 mode");
+                    return;
+                }
                 com.overdrive.app.camera.ResolvedCameraConfig resolvedCamera =
                     com.overdrive.app.camera.CameraConfigResolver.resolve();
                 org.json.JSONObject camCfg = new org.json.JSONObject();
@@ -1985,6 +2192,11 @@ public class SurveillanceApiHandler {
             // the red mask remains a cosmetic fallback for baked-in chrome.
             if (configJson.has("dilink4PassiveApaMode")
                     || configJson.has("dilink4RedMask")) {
+                if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                    HttpResponse.sendJsonError(out,
+                        "DiLink 4 camera options are unavailable in DiLink 5 mode");
+                    return;
+                }
                 org.json.JSONObject camCfg = new org.json.JSONObject();
                 try {
                     if (configJson.has("dilink4PassiveApaMode")) {
@@ -2010,23 +2222,35 @@ public class SurveillanceApiHandler {
                 configChanged = true;
             }
 
-            // Camera ingestion mode: "default" (legacy ImageReader + 4-strip
-            // → 2x2 rearrangement) vs "dilink4" (oem SurfaceTexture +
-            // passthrough). Persisted under camera.cameraMode and read by
+            // Camera ingestion mode: legacy, DiLink 4 SurfaceTexture, or
+            // DiLink 5 native QCarCam. Persisted under camera.cameraMode and read by
             // PanoramicCameraGpu / GpuSurveillancePipeline at init. Save
             // triggers the same prepare-restart flow as a manual cam-id
             // change so the new mode takes effect.
             if (configJson.has("cameraMode")) {
                 String mode = configJson.optString("cameraMode", "default")
                     .toLowerCase(java.util.Locale.US);
-                if (!"default".equals(mode) && !"dilink4".equals(mode)) {
+                if (!"default".equals(mode)
+                        && !"dilink4".equals(mode)
+                        && !"dilink5".equals(mode)) {
                     HttpResponse.sendJsonError(out,
-                        "cameraMode must be 'default' or 'dilink4', got '" + mode + "'");
+                        "cameraMode must be 'default', 'dilink4', or 'dilink5', got '"
+                            + mode + "'");
                     return;
                 }
                 org.json.JSONObject camCfg = new org.json.JSONObject();
                 try {
                     camCfg.put("cameraMode", mode);
+                    if (!"dilink5".equals(mode)) {
+                        org.json.JSONObject currentCamera =
+                            com.overdrive.app.camera.CameraConfigResolver.getCameraSection();
+                        if (com.overdrive.app.camera.CameraProfiles.PROFILE_DILINK5_SEALION7
+                                .equalsIgnoreCase(currentCamera.optString(
+                                    "cameraProfile", ""))) {
+                            camCfg.put("cameraProfile",
+                                com.overdrive.app.camera.CameraProfiles.PROFILE_AUTO);
+                        }
+                    }
                 } catch (org.json.JSONException je) {
                     HttpResponse.sendJsonError(out, "Failed to build camera config: " + je.getMessage());
                     return;
@@ -2096,6 +2320,14 @@ public class SurveillanceApiHandler {
                         } catch (Exception e) {
                             CameraDaemon.log("Failed to apply recordingQuality to pipeline: " + e.getMessage());
                         }
+                        // Keep QualitySettingsApiHandler's static tier in step with
+                        // what we just persisted (the IPC path does the same). Its
+                        // persistSettings() — run by unrelated codec/streaming saves
+                        // — writes that static back to recording.recordingQuality,
+                        // so a stale STANDARD there would silently revert this save
+                        // and the next daemon boot would size its encoder (and the
+                        // shared replay ring) for the wrong bitrate.
+                        HttpServer.setRecordingBitrateStatic(appliedTier);
                     }
                     if (configJson.has("recordingCodec")) {
                         String codec = configJson.optString("recordingCodec", "H264");
@@ -2107,6 +2339,8 @@ public class SurveillanceApiHandler {
                         } catch (Exception e) {
                             CameraDaemon.log("Failed to apply codec to pipeline: " + e.getMessage());
                         }
+                        // Same static sync as the tier above, for the codec mirror.
+                        HttpServer.setRecordingCodecStatic(codec);
                     }
                     if (recordingChanged) {
                         com.overdrive.app.config.UnifiedConfigManager.setRecording(recording);
@@ -2121,6 +2355,9 @@ public class SurveillanceApiHandler {
 
             if (reconcileOperatingMode) {
                 CameraDaemon.reconcileOperatingModeForCurrentAccState();
+            }
+            if (reconcileDi5CloudKeepAlive) {
+                CameraDaemon.reconcileDi5CloudKeepAliveFromConfig();
             }
             
             HttpResponse.sendJsonSuccess(out);
@@ -2173,6 +2410,13 @@ public class SurveillanceApiHandler {
     }
 
     private static void handleDisable(OutputStream out) throws Exception {
+        // Persist first so a slow, already-running enable observes the newer
+        // disabled preference and rolls itself back before reporting success.
+        if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(false)) {
+            CameraDaemon.log("Failed to persist surveillanceEnabled=false — surveillance may re-arm on next ACC OFF");
+            HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_persist_failed"));
+            return;
+        }
         // ACC-GATED teardown. While ACC is ON no sentry is armed, so
         // disableSurveillance() has nothing to tear down — its only effects are
         // gpuPipeline.disableSurveillance() and clearing the in-memory
@@ -2185,21 +2429,13 @@ public class SurveillanceApiHandler {
         boolean accIsOn = com.overdrive.app.monitor.AccMonitor.isAccOn();
         if (!accIsOn) {
             CameraDaemon.disableSurveillance();   // fires OEM recalc internally
+        } else {
+            // No runtime teardown while driving, but the resolver still needs
+            // the newly persisted master state.
+            try {
+                com.overdrive.app.server.OemDashcamApiHandler.scheduleLifecycleRecalc();
+            } catch (Throwable ignored) {}
         }
-        if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(false)) {
-            CameraDaemon.log("Failed to persist surveillanceEnabled=false — surveillance may re-arm on next ACC OFF");
-            HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_persist_failed"));
-            return;
-        }
-        // disableSurveillance ran BEFORE the UCM write, so its recalc saw the
-        // old surveillanceEnabled=true. Fire a second recalc post-write so
-        // the resolver picks up the now-disabled master toggle and applies
-        // survSuppressed=true to any in-flight surv=continuous recording.
-        // Also the ONLY recalc on the ACC-ON path, where the disable above is
-        // skipped — the resolver still has to see the new master toggle.
-        try {
-            com.overdrive.app.server.OemDashcamApiHandler.scheduleLifecycleRecalc();
-        } catch (Throwable ignored) {}
         JSONObject response = new JSONObject();
         response.put("success", true);
         // Nothing was armed to stop, so the write only affects the next park.
@@ -2215,56 +2451,24 @@ public class SurveillanceApiHandler {
      * SIGKILL'd mid-write.
      *
      * <p>Synchronous: blocks until pipeline.stop() returns. Bounded by the
-     * pipeline's own teardown timeline (typically 1-2 s) — the dialog's
-     * 4 s read timeout covers it.
+     * pipeline's own bounded teardown timeline; the caller's read timeout
+     * exceeds the daemon's 20-second confirmation window.
      */
-    private static void handlePrepareRestart(OutputStream out) throws Exception {
-        // Mark shutdown so future cold-start requests fall through to
-        // "Preview unavailable" instead of looping the dialog on 503.
-        // Critical: must be set BEFORE we wait on coldStartInProgress —
-        // otherwise a new sendCameraPreview can start another cold-start
-        // immediately after the existing one releases the flag, and we'd
-        // race in a circle.
+    private static void handlePrepareRestart(
+            OutputStream out, String body) throws Exception {
+        JSONObject request = (body == null || body.trim().isEmpty())
+                ? new JSONObject() : new JSONObject(body);
+        String restartReason = sanitizeRestartMetadata(
+                request.optString("reason", "unspecified"), 80);
+        String requestId = sanitizeRestartMetadata(
+                request.optString("requestId", ""), 64);
+        CameraDaemon.log("prepare-restart: requested reason=" + restartReason
+                + (requestId.isEmpty() ? "" : " requestId=" + requestId)
+                + " diLink5="
+                + com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected());
+        // Stop promising new preview work while the durable checkpoint and
+        // daemon-wide camera barrier are established below.
         shutdownInProgress = true;
-        // CAS: take ownership of the cold-start flag. If a panoramic-slice
-        // preview kicked off a cold-start, wait briefly for it to finish
-        // before stop() — running stop() concurrently with start() leaks
-        // encoder/EGL.
-        //
-        // If cold-start is still in flight after 3 s, reject this prepare
-        // instead of force-taking the flag (which would race the still-running
-        // start and corrupt the encoder). The client must not SIGKILL unless
-        // this endpoint confirms that both startup ownership and trip
-        // durability are settled.
-        long deadline = System.currentTimeMillis() + 3000;
-        boolean tookFlag = false;
-        while (true) {
-            if (coldStartInProgress.compareAndSet(false, true)) {
-                tookFlag = true;
-                break;
-            }
-            if (System.currentTimeMillis() > deadline) {
-                CameraDaemon.log("prepare-restart: cold-start still in flight after 3s — "
-                        + "rejecting restart");
-                break;
-            }
-            try {
-                Thread.sleep(50);
-            } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-        if (!tookFlag) {
-            shutdownInProgress = false;
-            JSONObject failure = new JSONObject();
-            failure.put("success", false);
-            failure.put("error", "Camera startup is still in progress; restart was not prepared");
-            failure.put("retryable", true);
-            failure.put("retryAfterMs", 1000);
-            HttpResponse.sendJson(out, 503, failure.toString());
-            return;
-        }
         // CHECKPOINT any in-progress trip before the caller SIGKILLs us. The
         // client's restart flow is prepare-restart + `killall -9`, which never
         // runs the JVM shutdown hook, so the hook's trip finalize is skipped
@@ -2309,7 +2513,6 @@ public class SurveillanceApiHandler {
                     + t.getClass().getSimpleName();
         }
         if (!tripCheckpointDurable) {
-            coldStartInProgress.set(false);
             shutdownInProgress = false;
             JSONObject failure = new JSONObject();
             failure.put("success", false);
@@ -2321,25 +2524,17 @@ public class SurveillanceApiHandler {
             // drain, startup, final flush), so the client should retry.
             failure.put("retryable", true);
             failure.put("retryAfterMs", 1000);
+            failure.put("requestId", requestId);
             HttpResponse.sendJson(out, 503, failure.toString());
             return;
         }
-        boolean pipelinePrepared = true;
-        try {
-            GpuSurveillancePipeline pipeline = CameraDaemon.getGpuPipeline();
-            if (pipeline != null && pipeline.isRunning()) {
-                CameraDaemon.log("prepare-restart: stopping pipeline gracefully");
-                pipeline.stop();
-            }
-        } catch (Exception e) {
-            CameraDaemon.log("prepare-restart: pipeline.stop failed: " + e.getMessage());
-            pipelinePrepared = false;
-        } finally {
-            coldStartInProgress.set(false);
-        }
+        CameraDaemon.log("prepare-restart: stopping all camera consumers");
+        boolean pipelinePrepared =
+                CameraDaemon.stopAllCamerasForProcessRestart();
         if (!pipelinePrepared) {
             // No trip state to undo: the checkpoint above only flushed
             // telemetry and left the trip open and recording.
+            CameraDaemon.abortCameraRestartPreparation();
             shutdownInProgress = false;
             JSONObject failure = new JSONObject();
             failure.put("success", false);
@@ -2349,10 +2544,22 @@ public class SurveillanceApiHandler {
             // the whole block. Retrying that would re-enter stop() on a
             // half-torn-down encoder rather than wait out a transient state.
             failure.put("retryable", false);
+            failure.put("requestId", requestId);
             HttpResponse.sendJson(out, 503, failure.toString());
             return;
         }
-        HttpResponse.sendJsonSuccess(out);
+        JSONObject success = new JSONObject();
+        success.put("success", true);
+        success.put("requestId", requestId);
+        success.put("reason", restartReason);
+        HttpResponse.sendJson(out, success.toString());
+    }
+
+    private static String sanitizeRestartMetadata(String value, int maxLength) {
+        if (value == null) return "";
+        String clean = value.replaceAll("[^A-Za-z0-9_.:-]", "_");
+        if (clean.length() > maxLength) clean = clean.substring(0, maxLength);
+        return clean;
     }
     
     /**
@@ -2623,6 +2830,17 @@ public class SurveillanceApiHandler {
     // a HAL warm-up.
     private static final java.util.concurrent.atomic.AtomicBoolean coldStartInProgress =
         new java.util.concurrent.atomic.AtomicBoolean(false);
+    private static final long CAMERA_PREVIEW_START_WAIT_MS = 60_000L;
+    private static final long CAMERA_PREVIEW_IDLE_LEASE_MS = 30_000L;
+    private static final long CAMERA_PREVIEW_WATCHDOG_POLL_MS = 250L;
+    private static final Object cameraPreviewLeaseLock = new Object();
+    private static long lastCameraPreviewRequestElapsedMs = Long.MIN_VALUE;
+    private static final Object cameraPreviewWatchdogLock = new Object();
+    private static long cameraPreviewWatchdogRequestSequence;
+    private static GpuSurveillancePipeline cameraPreviewWatchdogPipeline;
+    private static boolean cameraPreviewWatchdogWorkerRunning;
+    private static long cameraPreviewWatchdogRelinquishedSequence =
+        Long.MIN_VALUE;
     // Set by prepare-restart to mark the daemon as "shutting down for a
     // restart that the dialog is about to SIGKILL through". When true,
     // requestColdStartAsync returns false → sendCameraPreview falls through
@@ -2648,17 +2866,220 @@ public class SurveillanceApiHandler {
         // the existing executor task will finish and serve subsequent
         // requests. Tell caller to send 503 retry.
         if (!coldStartInProgress.compareAndSet(false, true)) return true;
-        coldStartExecutor.execute(() -> {
-            try {
-                CameraDaemon.log("camera-preview: cold-starting pipeline (single-flight)");
-                pipeline.start(false);
-            } catch (Exception e) {
-                CameraDaemon.log("camera-preview cold start failed: " + e.getMessage());
-            } finally {
-                coldStartInProgress.set(false);
-            }
-        });
+        final long cameraStartEpoch = CameraDaemon.captureCameraStartEpoch();
+        try {
+            coldStartExecutor.execute(() -> {
+                try {
+                    if (shutdownInProgress
+                            || !CameraDaemon.isCameraStartEpochCurrent(
+                                cameraStartEpoch)
+                            || CameraDaemon.isProcessRestartPending()) {
+                        return;
+                    }
+                    CameraDaemon.log("camera-preview: cold-starting pipeline "
+                        + "(single-flight)");
+                    pipeline.start(false, cameraStartEpoch);
+                } catch (Throwable e) {
+                    CameraDaemon.log("camera-preview cold start failed: "
+                        + e.getMessage());
+                } finally {
+                    coldStartInProgress.set(false);
+                }
+            });
+            armCameraPreviewOrphanWatchdog(pipeline);
+        } catch (Throwable scheduleFailure) {
+            coldStartInProgress.set(false);
+            CameraDaemon.log("camera-preview cold start scheduling failed: "
+                + scheduleFailure.getMessage());
+            return false;
+        }
         return true;
+    }
+
+    private static void noteCameraPreviewRequest() {
+        synchronized (cameraPreviewLeaseLock) {
+            lastCameraPreviewRequestElapsedMs =
+                android.os.SystemClock.elapsedRealtime();
+        }
+    }
+
+    /**
+     * Stops only a pipeline that this diagnostics preview cold-started and
+     * that no real camera owner adopted. Every preview request refreshes a
+     * short monotonic lease; the final stop claim is serialized against lease
+     * refresh so a newly-arrived preview cannot be torn down underneath.
+     */
+    private static void armCameraPreviewOrphanWatchdog(
+            GpuSurveillancePipeline pipeline) {
+        if (pipeline == null) return;
+        synchronized (cameraPreviewWatchdogLock) {
+            cameraPreviewWatchdogPipeline = pipeline;
+            cameraPreviewWatchdogRequestSequence++;
+            if (cameraPreviewWatchdogWorkerRunning) return;
+            cameraPreviewWatchdogWorkerRunning = true;
+
+            Thread watchdog = new Thread(
+                SurveillanceApiHandler::runCameraPreviewWatchdogLoop,
+                "CameraPreviewOrphanWatchdog");
+            watchdog.setDaemon(true);
+            try {
+                watchdog.start();
+            } catch (Throwable startFailure) {
+                cameraPreviewWatchdogWorkerRunning = false;
+                CameraDaemon.log(
+                    "camera-preview orphan watchdog could not start: "
+                        + startFailure.getMessage());
+            }
+        }
+    }
+
+    private static void runCameraPreviewWatchdogLoop() {
+        while (true) {
+            final long requestSequence;
+            final GpuSurveillancePipeline pipeline;
+            synchronized (cameraPreviewWatchdogLock) {
+                requestSequence = cameraPreviewWatchdogRequestSequence;
+                pipeline = cameraPreviewWatchdogPipeline;
+            }
+            try {
+                runCameraPreviewWatchdog(pipeline, requestSequence);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } catch (Throwable t) {
+                CameraDaemon.log("camera-preview orphan watchdog failed: "
+                    + t.getMessage());
+            }
+            GpuSurveillancePipeline releasedPipeline = null;
+            synchronized (cameraPreviewWatchdogLock) {
+                if (requestSequence
+                        == cameraPreviewWatchdogRequestSequence) {
+                    cameraPreviewWatchdogWorkerRunning = false;
+                    releasedPipeline = cameraPreviewWatchdogPipeline;
+                    cameraPreviewWatchdogPipeline = null;
+                } else {
+                    continue;
+                }
+            }
+            try {
+                if (releasedPipeline != null) {
+                    releasedPipeline.auditOwnerlessPipelineAfterExternalRelease(
+                        "diagnostics preview lease ended");
+                }
+            } catch (Throwable t) {
+                CameraDaemon.log(
+                    "camera-preview lease-end owner audit failed: "
+                        + t.getMessage());
+            }
+            return;
+        }
+    }
+
+    private static boolean isCameraPreviewWatchdogRequestCurrent(
+            GpuSurveillancePipeline pipeline, long requestSequence) {
+        synchronized (cameraPreviewWatchdogLock) {
+            return cameraPreviewWatchdogWorkerRunning
+                    && pipeline == cameraPreviewWatchdogPipeline
+                    && requestSequence
+                        == cameraPreviewWatchdogRequestSequence;
+        }
+    }
+
+    /**
+     * Short diagnostics-preview lease exposed to the pipeline's centralized
+     * owner verdict. Requests refresh its monotonic deadline separately under
+     * cameraPreviewLeaseLock.
+     */
+    public static boolean hasActiveCameraPreviewLeaseOwner(
+            GpuSurveillancePipeline pipeline) {
+        synchronized (cameraPreviewWatchdogLock) {
+            return cameraPreviewWatchdogWorkerRunning
+                    && pipeline != null
+                    && pipeline == cameraPreviewWatchdogPipeline
+                    && cameraPreviewWatchdogRelinquishedSequence
+                        != cameraPreviewWatchdogRequestSequence;
+        }
+    }
+
+    private static boolean relinquishCameraPreviewLeaseOwner(
+            GpuSurveillancePipeline pipeline, long requestSequence) {
+        synchronized (cameraPreviewWatchdogLock) {
+            if (!cameraPreviewWatchdogWorkerRunning
+                    || pipeline != cameraPreviewWatchdogPipeline
+                    || requestSequence
+                        != cameraPreviewWatchdogRequestSequence) {
+                return false;
+            }
+            cameraPreviewWatchdogRelinquishedSequence = requestSequence;
+            return true;
+        }
+    }
+
+    private static void runCameraPreviewWatchdog(
+            GpuSurveillancePipeline pipeline, long requestSequence)
+            throws InterruptedException {
+        if (pipeline == null) return;
+        long startDeadline = android.os.SystemClock.elapsedRealtime()
+            + CAMERA_PREVIEW_START_WAIT_MS;
+        while (isCameraPreviewWatchdogRequestCurrent(
+                    pipeline, requestSequence)
+                && !pipeline.isRunning()
+                && !shutdownInProgress
+                && !CameraDaemon.isProcessRestartPending()
+                && android.os.SystemClock.elapsedRealtime()
+                    < startDeadline) {
+            Thread.sleep(CAMERA_PREVIEW_WATCHDOG_POLL_MS);
+        }
+        if (!isCameraPreviewWatchdogRequestCurrent(
+                    pipeline, requestSequence)
+                || !pipeline.isRunning()
+                || shutdownInProgress
+                || CameraDaemon.isProcessRestartPending()) {
+            return;
+        }
+
+        long generation = pipeline.getLifecycleGeneration();
+        while (isCameraPreviewWatchdogRequestCurrent(
+                pipeline, requestSequence)) {
+            if (!pipeline.isRunning()
+                    || pipeline.getLifecycleGeneration() != generation
+                    || shutdownInProgress
+                    || CameraDaemon.isProcessRestartPending()) {
+                return;
+            }
+            long remaining;
+            synchronized (cameraPreviewLeaseLock) {
+                remaining = lastCameraPreviewRequestElapsedMs
+                    + CAMERA_PREVIEW_IDLE_LEASE_MS
+                    - android.os.SystemClock.elapsedRealtime();
+            }
+            if (remaining <= 0L) break;
+            Thread.sleep(Math.min(
+                CAMERA_PREVIEW_WATCHDOG_POLL_MS, remaining));
+        }
+
+        if (!isCameraPreviewWatchdogRequestCurrent(
+                pipeline, requestSequence)) {
+            return;
+        }
+        synchronized (cameraPreviewLeaseLock) {
+            long idleFor =
+                android.os.SystemClock.elapsedRealtime()
+                    - lastCameraPreviewRequestElapsedMs;
+            if (idleFor < CAMERA_PREVIEW_IDLE_LEASE_MS
+                    || !isCameraPreviewWatchdogRequestCurrent(
+                        pipeline, requestSequence)
+                    || !pipeline.isRunning()
+                    || pipeline.getLifecycleGeneration() != generation
+                    || shutdownInProgress
+                    || CameraDaemon.isProcessRestartPending()) {
+                return;
+            }
+            if (!relinquishCameraPreviewLeaseOwner(
+                    pipeline, requestSequence)) {
+                return;
+            }
+            pipeline.stopIfLiveViewStartupOrphaned(generation);
+        }
     }
 
     private static void sendWarmingUp(OutputStream out) throws Exception {
@@ -2694,13 +3115,28 @@ public class SurveillanceApiHandler {
      * Retry-After=2s. Direct kind never auto-starts the pipeline.
      */
     private static void sendCameraPreview(String path, OutputStream out) throws Exception {
+        noteCameraPreviewRequest();
         com.overdrive.app.camera.ResolvedCameraConfig resolvedCamera =
             com.overdrive.app.camera.CameraConfigResolver.resolve();
         String kind = getQueryParam(path, "kind");
         GpuSurveillancePipeline gpuPipeline = CameraDaemon.getGpuPipeline();
         byte[] jpegBytes = null;
+        boolean dilink5 =
+            com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
+        if (dilink5
+                && !com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                        .isSupported()) {
+            HttpResponse.sendJsonError(out,
+                "DiLink 5 camera backend is unavailable on this firmware");
+            return;
+        }
 
         if ("direct".equalsIgnoreCase(kind)) {
+            if (dilink5) {
+                HttpResponse.sendJsonError(out,
+                    "Direct camera previews are unavailable in DiLink 5 mode");
+                return;
+            }
             int cameraId = safeParseInt(getQueryParam(path, "cameraId"), -1);
             if (cameraId < 0 || cameraId > 5) {
                 HttpResponse.sendJsonError(out, "Invalid direct camera ID");

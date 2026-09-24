@@ -96,6 +96,8 @@ public class DaemonManager implements IDaemonManager {
             stopped &= execShell("killall -9 byd_cam_daemon 2>/dev/null") != null;
             stopped &= execShell(
                     "rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null") != null;
+            stopped &= execShell(
+                    "rm -rf /data/local/tmp/cam_watchdog.lock 2>/dev/null") != null;
             if (!stopped) {
                 abortCameraRestart();
             }
@@ -123,8 +125,13 @@ public class DaemonManager implements IDaemonManager {
             connection = DaemonHttpClient.open(
                     "/api/surveillance/prepare-restart", "POST", 3000, 10000);
             connection.setDoOutput(true);
+            connection.setRequestProperty(
+                    "Content-Type", "application/json");
             try (OutputStream body = connection.getOutputStream()) {
-                body.write(new byte[0]);
+                body.write(new org.json.JSONObject()
+                        .put("reason", "telegram_daemon_stop")
+                        .toString()
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
             }
             int code = connection.getResponseCode();
             return code >= 200 && code < 300;

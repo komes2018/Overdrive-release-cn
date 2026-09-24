@@ -31,6 +31,10 @@ class CameraDaemonController(
             "ffmpeg",
             "mediamtx"
         )
+        private val DILINK5_PROCESSES = listOf(
+            "fast_cam_capture",
+            "qcarcam_test"
+        )
     }
     
     override val type = DaemonType.CAMERA_DAEMON
@@ -66,8 +70,10 @@ class CameraDaemonController(
         // Try graceful shutdown via TCP command first so the daemon can flush
         // recordings + release codecs cleanly. Then hard-kill everything.
         Thread {
-            sendShutdownCommand()
-            Thread.sleep(500)
+            val diLink5Selected = isDiLink5ModeSelected()
+            val gracefulExitWait = diLink5GracefulExitWaitScript(
+                sendShutdownCommand(), diLink5Selected)
+            if (gracefulExitWait.isEmpty()) Thread.sleep(500)
 
             // Plant the disable sentinel BEFORE the kill so any watchdog we
             // miss (orphan process, race) sees it on its next iteration and
@@ -88,8 +94,9 @@ class CameraDaemonController(
                 append("echo \"disabled by ui at \$(date)\" > /data/local/tmp/camera_daemon.disabled\n")
                 append("chmod 666 /data/local/tmp/camera_daemon.disabled 2>/dev/null\n")
                 append("rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid 2>/dev/null\n")
+                append(gracefulExitWait)
                 append(com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine("cam_daemon"))
-                RELATED_PROCESSES.forEach { proc ->
+                relatedProcesses(diLink5Selected).forEach { proc ->
                     append(com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine(proc))
                     append("killall -9 $proc 2>/dev/null\n")
                 }
@@ -98,6 +105,7 @@ class CameraDaemonController(
                 // (daemon writes PID back into lock between rm and kill).
                 append("sleep 1\n")
                 append("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null\n")
+                append("rm -rf /data/local/tmp/cam_watchdog.lock 2>/dev/null\n")
                 append("echo done\n")
             }
             adbLauncher.executeShellScript(
@@ -135,25 +143,52 @@ class CameraDaemonController(
             false
         }
     }
+
+    private fun isDiLink5ModeSelected(): Boolean {
+        com.overdrive.app.camera.dilink5.DiLink5Platform.refreshActiveMode()
+        return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+    }
+
+    private fun relatedProcesses(diLink5Selected: Boolean): List<String> =
+        if (diLink5Selected) RELATED_PROCESSES + DILINK5_PROCESSES
+        else RELATED_PROCESSES
+
+    private fun diLink5GracefulExitWaitScript(
+        shutdownAccepted: Boolean,
+        diLink5Selected: Boolean,
+    ): String {
+        if (!shutdownAccepted || !diLink5Selected) return ""
+        return "WAIT=0\n" +
+            "while [ \$WAIT -lt 22 ]; do\n" +
+            "  ps -A -o PID,ARGS 2>/dev/null | grep -F 'byd_cam_daemon' " +
+            "| grep -v grep >/dev/null || break\n" +
+            "  sleep 1\n" +
+            "  WAIT=\$((WAIT + 1))\n" +
+            "done\n"
+    }
     
     override fun isRunning(callback: (Boolean) -> Unit) {
         adbLauncher.isDaemonRunning(callback)
     }
     
     override fun cleanup() {
-        sendShutdownCommand()
+        val diLink5Selected = isDiLink5ModeSelected()
+        val gracefulExitWait = diLink5GracefulExitWaitScript(
+            sendShutdownCommand(), diLink5Selected)
         // Same kill cascade as stop() above. cleanup() runs on ViewModel
         // teardown so we don't need the disable sentinel here — the user
         // is exiting the app, not telling the daemon to stay dead.
         val killScript = buildString {
             append("rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid 2>/dev/null\n")
+            append(gracefulExitWait)
             append(com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine("cam_daemon"))
-            RELATED_PROCESSES.forEach { proc ->
+            relatedProcesses(diLink5Selected).forEach { proc ->
                 append(com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine(proc))
                 append("killall -9 $proc 2>/dev/null\n")
             }
             append("sleep 1\n")
             append("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null\n")
+            append("rm -rf /data/local/tmp/cam_watchdog.lock 2>/dev/null\n")
             append("echo done\n")
         }
         adbLauncher.executeShellScript(

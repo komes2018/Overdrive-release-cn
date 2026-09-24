@@ -15,7 +15,7 @@ import org.junit.Test;
 public class AppUpdaterRestartSafetyContractTest {
 
     @Test
-    public void onlySuccessfulPrepareResponsesPermitCameraKill() {
+    public void prepareStatusClassifierRecognizesOnlySuccessfulResponses() {
         assertFalse(AppUpdater.isSuccessfulCameraPrepareStatus(0));
         assertFalse(AppUpdater.isSuccessfulCameraPrepareStatus(199));
         assertTrue(AppUpdater.isSuccessfulCameraPrepareStatus(200));
@@ -26,7 +26,7 @@ public class AppUpdaterRestartSafetyContractTest {
     }
 
     @Test
-    public void coreInstallPreparesBeforeMetadataAndBothKillPaths()
+    public void coreInstallNeverGatesOnCameraPrepareAndUsesBothKillPaths()
             throws IOException {
         String source = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/updater/AppUpdater.java");
@@ -35,31 +35,24 @@ public class AppUpdaterRestartSafetyContractTest {
                 "public void downloadAndInstall(InstallCallback callback)",
                 "// ==================== COMPANION APK INSTALL");
 
-        int prepare = install.indexOf(
-                "String prepareFailure = prepareCameraDaemonForUpdate();");
-        int rejection = install.indexOf(
-                "if (prepareFailure != null)", prepare);
         int metadata = install.indexOf(
-                "android.content.SharedPreferences.Editor ie", prepare);
+                "android.content.SharedPreferences.Editor ie");
         int detached = install.indexOf(
-                "runDetachedInstall(", prepare);
+                "runDetachedInstall(", metadata);
         int synchronous = install.indexOf(
-                "boolean cameraStopped = stopAllDaemons();", prepare);
+                "boolean cameraStopped = stopAllDaemons();", detached);
 
-        assertTrue(prepare >= 0);
-        assertTrue(rejection > prepare);
-        assertTrue(metadata > rejection);
+        assertFalse(install.contains("prepareCameraDaemonForUpdate();"));
+        assertFalse(install.contains("Update stopped safely"));
+        assertTrue(metadata >= 0);
         assertTrue(detached > metadata);
         assertTrue(synchronous > detached);
-
-        String rejectionBlock = install.substring(rejection, metadata);
-        assertTrue(rejectionBlock.contains("abortPreparedCameraRestart();"));
-        assertFalse(rejectionBlock.contains("cleanup(APK_PATH);"));
-        assertTrue(rejectionBlock.contains("return;"));
+        assertTrue(install.contains(
+                "OTA is intentionally force-forward: do not gate installation"));
     }
 
     @Test
-    public void failedPreparedHandoffResumesDaemonAndTripSampling()
+    public void detachedFailureRollsBackButUnconfirmedStopStillInstalls()
             throws IOException {
         String source = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/updater/AppUpdater.java");
@@ -72,32 +65,34 @@ public class AppUpdaterRestartSafetyContractTest {
                 "boolean detachedStarted = runDetachedInstall(");
         int detachedFailure = install.indexOf(
                 "if (!detachedStarted)", detachedCall);
-        int detachedAbort = install.indexOf(
-                "abortPreparedCameraRestart();", detachedFailure);
-        int detachedReturn = install.indexOf("return;", detachedAbort);
+        int detachedRollback = install.indexOf(
+                "rollbackPreparedUpdateMetadata(", detachedFailure);
+        int detachedReturn = install.indexOf("return;", detachedRollback);
 
         assertTrue(detachedCall >= 0);
         assertTrue(detachedFailure > detachedCall);
-        assertTrue(detachedAbort > detachedFailure);
-        assertTrue(detachedReturn > detachedAbort);
+        assertTrue(detachedRollback > detachedFailure);
+        assertTrue(detachedReturn > detachedRollback);
+        assertFalse(install.contains("abortPreparedCameraRestart();"));
         assertTrue(install.contains(
-                "if (cameraRestartPrepared) {\n"
-                + "                    abortPreparedCameraRestart();"));
+                "if (rollbackMetadataOnException && preparedChannel != null)"));
+
         int synchronousCall = install.indexOf(
                 "boolean cameraStopped = stopAllDaemons();");
         int synchronousFailure = install.indexOf(
                 "if (!cameraStopped)", synchronousCall);
-        int synchronousAbort = install.indexOf(
-                "abortPreparedCameraRestart();", synchronousFailure);
-        int synchronousRollback = install.indexOf(
-                "rollbackPreparedUpdateMetadata(", synchronousAbort);
-        int synchronousReturn = install.indexOf(
-                "return;", synchronousRollback);
+        int installSleep = install.indexOf("Thread.sleep(3000);", synchronousFailure);
         assertTrue(synchronousCall >= 0);
         assertTrue(synchronousFailure > synchronousCall);
-        assertTrue(synchronousAbort > synchronousFailure);
-        assertTrue(synchronousRollback > synchronousAbort);
-        assertTrue(synchronousReturn > synchronousRollback);
+        assertTrue(installSleep > synchronousFailure);
+        String unconfirmedStop = install.substring(synchronousFailure, installSleep);
+        assertTrue(unconfirmedStop.contains(
+                "continuing OTA install by force"));
+        assertTrue(unconfirmedStop.contains(
+                "Installing update despite unconfirmed daemon stop"));
+        assertFalse(unconfirmedStop.contains("rollbackPreparedUpdateMetadata("));
+        assertFalse(unconfirmedStop.contains("postInstallError("));
+        assertFalse(unconfirmedStop.contains("return;"));
 
         String detached = methodBody(
                 source,
@@ -109,7 +104,7 @@ public class AppUpdaterRestartSafetyContractTest {
     }
 
     @Test
-    public void allUpdaterCameraKillsRemainBehindTheSharedGate()
+    public void allUpdaterCameraKillsRemainInTheTwoInstallHandoffs()
             throws IOException {
         String source = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/updater/AppUpdater.java");
@@ -151,10 +146,9 @@ public class AppUpdaterRestartSafetyContractTest {
                 source,
                 "public void downloadAndInstall(InstallCallback callback)",
                 "// ==================== COMPANION APK INSTALL");
-        int prepare = install.indexOf("prepareCameraDaemonForUpdate()");
-        assertTrue(prepare >= 0);
-        assertTrue(install.indexOf("runDetachedInstall(", prepare) > prepare);
-        assertTrue(install.indexOf("stopAllDaemons();", prepare) > prepare);
+        assertFalse(install.contains("prepareCameraDaemonForUpdate();"));
+        assertTrue(install.indexOf("runDetachedInstall(") >= 0);
+        assertTrue(install.indexOf("stopAllDaemons();") >= 0);
 
         String stop = source.substring(stopStart, stopEnd);
         int finalKill = stop.lastIndexOf(cameraKill);
@@ -164,6 +158,207 @@ public class AppUpdaterRestartSafetyContractTest {
                 "return cameraStopConfirmed[0];", verification);
         assertTrue(verification > finalKill);
         assertTrue(confirmedReturn > verification);
+    }
+
+    @Test
+    public void otaHandoffsClearWatchdogOwnershipLocksAfterKillingWrappers()
+            throws IOException {
+        String updater = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/updater/AppUpdater.java");
+        String lifecycle = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/updater/UpdateLifecycle.java");
+        String cameraLock = "/data/local/tmp/cam_watchdog.lock";
+        String accLock = "/data/local/tmp/acc_sentry_watchdog.lock";
+
+        String detached = methodBody(
+                updater,
+                "private boolean runDetachedInstall(",
+                "private void cleanup(String path)");
+        int detachedCameraKill = detached.indexOf(
+                "psAwkKillLine(\"cam_daemon\")");
+        int detachedAccKill = detached.indexOf(
+                "psAwkKillLine(\"acc_sentry\")");
+        assertTrue(detachedCameraKill >= 0);
+        assertTrue(detachedAccKill >= 0);
+        assertTrue(detached.indexOf(cameraLock, detachedCameraKill)
+                > detachedCameraKill);
+        assertTrue(detached.indexOf(accLock, detachedAccKill)
+                > detachedAccKill);
+        assertTrue(detached.contains("rm -rf " + cameraLock));
+        assertTrue(detached.contains("rm -rf " + accLock));
+
+        String stop = methodBody(
+                updater,
+                "private boolean stopAllDaemons()",
+                "private static final java.util.regex.Pattern VALID_ALPHA_TAG");
+        int firstCameraKill = stop.indexOf(
+                "psAwkKillLine(\"cam_daemon\")");
+        int firstAccKill = stop.indexOf(
+                "psAwkKillLine(\"acc_sentry\")");
+        assertTrue(stop.indexOf(cameraLock, firstCameraKill)
+                > firstCameraKill);
+        assertTrue(stop.indexOf(accLock, firstAccKill)
+                > firstAccKill);
+        assertTrue(stop.contains("rm -rf " + cameraLock));
+        assertTrue(stop.contains("rm -rf " + accLock));
+
+        int finalCameraKill = stop.lastIndexOf(
+                "psAwkKillLine(\"cam_daemon\")");
+        int finalAccKill = stop.lastIndexOf(
+                "psAwkKillLine(\"acc_sentry\")");
+        int finalSettle = stop.indexOf("\"sleep 1\\n\"", finalCameraKill);
+        assertTrue(finalSettle > finalCameraKill);
+        assertTrue(finalSettle > finalAccKill);
+        assertTrue(stop.indexOf(cameraLock, finalSettle) > finalSettle);
+        assertTrue(stop.indexOf(accLock, finalSettle) > finalSettle);
+
+        int lifecycleReset = lifecycle.indexOf(
+                "public static void hardResetDaemons");
+        int lifecycleCameraKill = lifecycle.indexOf(
+                "psAwkKillLine(\"start_cam_daemon\")", lifecycleReset);
+        int lifecycleAccKill = lifecycle.indexOf(
+                "psAwkKillLine(\"start_acc_sentry\")", lifecycleReset);
+        int lifecycleSettle = lifecycle.indexOf(
+                "\"sleep 1\\n\"", lifecycleCameraKill);
+        assertTrue(lifecycleSettle > lifecycleCameraKill);
+        assertTrue(lifecycleSettle > lifecycleAccKill);
+        assertTrue(lifecycle.indexOf(cameraLock, lifecycleSettle)
+                > lifecycleSettle);
+        assertTrue(lifecycle.indexOf(accLock, lifecycleSettle)
+                > lifecycleSettle);
+        int lifecycleRecursiveRemove = lifecycle.indexOf(
+                "\"rm -rf ", lifecycleSettle);
+        assertTrue(lifecycleRecursiveRemove > lifecycleSettle);
+        assertTrue(lifecycle.indexOf(cameraLock, lifecycleRecursiveRemove)
+                > lifecycleRecursiveRemove);
+        assertTrue(lifecycle.indexOf(accLock, lifecycleRecursiveRemove)
+                > lifecycleRecursiveRemove);
+    }
+
+    @Test
+    public void otaRefreshesAndRestartsTheFastCameraHelper()
+            throws IOException {
+        String backend = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/camera/dilink5/"
+                        + "DiLink5QCarCamBackend.java");
+        String updater = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/updater/AppUpdater.java");
+        String lifecycle = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/updater/UpdateLifecycle.java");
+        String controller = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/daemon/"
+                        + "CameraDaemonController.kt");
+
+        int deploy = backend.indexOf("deployVerifiedAsset(");
+        int reuse = backend.indexOf(
+                "Process existingProcess = sHardwareProcess;",
+                deploy);
+        int verifyRunningBinary = backend.indexOf(
+                "resolveOwnedProcessPid(existingProcess, binary)", reuse);
+        int staleSweep = backend.indexOf(
+                "stopStaleCaptureProcesses(binary)", verifyRunningBinary);
+        int launch = backend.indexOf(
+                "ProcessBuilder processBuilder = new ProcessBuilder(",
+                staleSweep);
+        assertTrue(deploy >= 0);
+        assertTrue(reuse > deploy);
+        assertTrue(verifyRunningBinary > reuse);
+        assertTrue(staleSweep > verifyRunningBinary);
+        assertTrue(launch > staleSweep);
+        assertTrue(backend.contains("MessageDigest.getInstance(\"SHA-256\")"));
+        assertTrue(backend.contains("android.system.Os.rename("));
+        assertTrue(backend.contains("executable.endsWith(\" (deleted)\")"));
+        assertTrue(backend.contains(
+                "LEGACY_QCARCAM_PATH =\n"
+                        + "            \"/data/local/tmp/qcarcam_test\""));
+        assertTrue(backend.contains(
+                "cameraIds.equals(sHardwareCameraIds)"));
+        assertTrue(backend.contains(
+                "\"--cams\", cameraIds"));
+
+        String updaterKill = methodBody(
+                updater,
+                "private static String diLink5CaptureKillScript()",
+                "private static String diLink5CaptureVerificationScript()");
+        assertTrue(updaterKill.contains(
+                "if (!isDiLink5ModeSelected()) return \"\";"));
+        assertTrue(updaterKill.contains(
+                "psAwkKillLine(\"fast_cam_capture\")"));
+        assertTrue(updaterKill.contains(
+                "psAwkKillLine(\"qcarcam_test\")"));
+        String updaterVerify = methodBody(
+                updater,
+                "private static String diLink5CaptureVerificationScript()",
+                "private static final String POST_UPDATE_FILE");
+        assertTrue(updaterVerify.contains(
+                "if (!isDiLink5ModeSelected()) return \"\";"));
+        assertTrue(updaterVerify.contains(
+                "CAPTURE_PIDS=$(ps -A -o PID,ARGS"));
+
+        String lifecycleKill = methodBody(
+                lifecycle,
+                "private static String diLink5CaptureKillScript()",
+                "public static final String UPDATE_IN_PROGRESS_FILE");
+        assertTrue(lifecycleKill.contains(
+                "DiLink5Platform\n                    .isSelected()"));
+        assertTrue(lifecycleKill.contains(
+                "psAwkKillLine(\"fast_cam_capture\")"));
+
+        int commonProcesses = controller.indexOf(
+                "private val RELATED_PROCESSES");
+        int diLink5Processes = controller.indexOf(
+                "private val DILINK5_PROCESSES", commonProcesses);
+        assertTrue(commonProcesses >= 0);
+        assertTrue(diLink5Processes > commonProcesses);
+        String commonList = controller.substring(
+                commonProcesses, diLink5Processes);
+        assertFalse(commonList.contains("fast_cam_capture"));
+        assertFalse(commonList.contains("qcarcam_test"));
+        assertTrue(controller.contains(
+                "if (diLink5Selected) RELATED_PROCESSES + DILINK5_PROCESSES"));
+    }
+
+    @Test
+    public void postUpdateRelaunchStaysHeadlessAndSchedulesDaemons()
+            throws IOException {
+        String updater = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/updater/AppUpdater.java");
+        String main = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/MainActivity.kt");
+        String startup = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/daemon/"
+                        + "DaemonStartupManager.kt");
+
+        String synchronousInstall = methodBody(
+                updater,
+                "public void downloadAndInstall(InstallCallback callback)",
+                "// ==================== COMPANION APK INSTALL");
+        String detachedInstall = methodBody(
+                updater,
+                "private boolean runDetachedInstall(",
+                "private void cleanup(String path)");
+
+        assertTrue(synchronousInstall.contains(
+                "\" --ez minimize_on_start true\""));
+        assertTrue(detachedInstall.contains(
+                ".append(\" true --ez minimize_on_start true\\n\")"));
+
+        assertTrue(main.contains(
+                ".isPostUpdateLaunch(this, intent)"));
+        int postUpdateCheck = main.indexOf(
+                ".isPostUpdateLaunch(this, intent)");
+        int postUpdateConsume = main.indexOf(
+                "intent.removeExtra(com.overdrive.app.updater.UpdateLifecycle.EXTRA_POST_UPDATE)",
+                postUpdateCheck);
+        assertTrue(postUpdateConsume > postUpdateCheck);
+        assertTrue(main.contains(
+                "UpdateLifecycle.hardResetDaemons(this)"));
+        assertTrue(main.contains(
+                "daemonStartupManager.initializeOnAppLaunch()"));
+        assertTrue(startup.contains(
+                "handler.postDelayed({ startCoreDaemons() }, 45000)"));
+        assertTrue(startup.contains(
+                "handler.postDelayed({ startOptionalDaemonsFromPreferences() }, 60000)"));
     }
 
     private static boolean inRange(int value, int start, int end) {

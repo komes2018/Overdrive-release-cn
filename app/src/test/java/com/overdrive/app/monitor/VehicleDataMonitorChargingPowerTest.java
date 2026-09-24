@@ -67,6 +67,26 @@ public class VehicleDataMonitorChargingPowerTest {
     }
 
     @Test
+    public void explicitAcRejectsKnown359AfterSourceResolutionButDcKeepsIt() {
+        assertTrue(Double.isNaN(
+                VehicleDataMonitor.filterKnownImpossibleAcChargingPower(
+                        359.4, 2)));
+        assertEquals(359.4,
+                VehicleDataMonitor.filterKnownImpossibleAcChargingPower(
+                        359.4, 3), 0.0);
+        assertEquals(359.4,
+                VehicleDataMonitor.filterKnownImpossibleAcChargingPower(
+                        359.4, 4), 0.0);
+        assertEquals(359.4,
+                VehicleDataMonitor.filterKnownImpossibleAcChargingPower(
+                        359.4, com.overdrive.app.byd.BydVehicleData.UNAVAILABLE),
+                0.0);
+        assertEquals(22.0,
+                VehicleDataMonitor.filterKnownImpossibleAcChargingPower(
+                        22.0, 2), 0.0);
+    }
+
+    @Test
     public void matchingCapacitySlopeMakesGenuineBevDc359Measured() {
         long now = System.currentTimeMillis();
         long start = now - 20_000L;

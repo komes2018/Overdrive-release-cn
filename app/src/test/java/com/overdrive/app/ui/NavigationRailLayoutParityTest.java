@@ -37,6 +37,7 @@ public class NavigationRailLayoutParityTest {
                 "railDestAssistant",
                 "railDestLive",
                 "railDestRecordings",
+                "railDestParking",
                 "railDestVehicle",
                 "railDestSeatPositions",
                 "railDestProjection",

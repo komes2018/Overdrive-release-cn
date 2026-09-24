@@ -13,10 +13,9 @@ import java.util.Set;
 /**
  * Parsed, per-VIN cloud command capabilities.
  *
- * <p>BYD publishes coarse function numbers through getLatestConfig and a
- * narrower window-open flag through vehicleFunLearnInfo in the vehicle list.
- * The router refreshes this data before dispatching a feature-bearing cloud
- * command, so missing capability data blocks that cloud leg safely.
+ * <p>BYD publishes coarse function numbers through getLatestConfig and may
+ * publish narrower per-vehicle flags through vehicleFunLearnInfo. The router
+ * refreshes this data before dispatching a feature-bearing cloud command.
  */
 public final class CloudCapabilities {
 
@@ -81,13 +80,13 @@ public final class CloudCapabilities {
             case WINDOWS_CLOSE:
                 return hasFunction("1026");
             case WINDOWS_OPEN_VENT:
-                // `1026` covers both close-only and vent-capable cars. OPENWINDOW
-                // must not be sent until this VIN positively advertises one of
-                // the narrower learn-info flags; a failed vehicle-list lookup is
-                // unknown capability, not permission to actuate.
-                return hasFunction("1026") && learnInfoKnown
-                        && (positiveLearnInfo("openWindowLearnInfo")
-                        || positiveLearnInfo("openWindow499LearnInfo"));
+                // Match pyBYD's compatibility gate. Function 1026 is sufficient
+                // when vehicleFunLearnInfo is missing or empty; when BYD does
+                // return learn-info, an explicit 0/0 must still block OPENWINDOW.
+                return hasFunction("1026")
+                        && (!hasLearnInfoData()
+                            || positiveLearnInfo("openWindowLearnInfo")
+                            || positiveLearnInfo("openWindow499LearnInfo"));
             case TRUNK_OPEN:
                 return hasFunction("1020");
             case TRUNK_CLOSE:
@@ -115,6 +114,20 @@ public final class CloudCapabilities {
 
     public boolean hasFunction(String functionNo) {
         return functionNos.contains(functionNo);
+    }
+
+    /** Sanitized diagnostic for the OPENWINDOW capability decision. */
+    public String windowVentGateSummary() {
+        return "function1026=" + hasFunction("1026")
+                + ", learnInfoKnown=" + learnInfoKnown
+                + ", learnInfoPresent=" + hasLearnInfoData()
+                + ", openWindow=" + positiveLearnInfo("openWindowLearnInfo")
+                + ", openWindow499=" + positiveLearnInfo("openWindow499LearnInfo")
+                + ", supported=" + supports(Feature.WINDOWS_OPEN_VENT);
+    }
+
+    private boolean hasLearnInfoData() {
+        return learnInfoKnown && !learnInfo.isEmpty();
     }
 
     private boolean hasAnyFunction(String... values) {

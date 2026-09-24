@@ -15,6 +15,11 @@
         name="logs"
         path="logs/" />
 
+    <!-- Generated incident evidence packs shared from the native recordings UI. -->
+    <cache-path
+        name="incident_packs"
+        path="incident-packs/" />
+
     <!--
       Removable storage volumes (SD card / USB). Recordings on a configured
       SD card live at /storage/<uuid>/Overdrive/recordings/... (e.g.

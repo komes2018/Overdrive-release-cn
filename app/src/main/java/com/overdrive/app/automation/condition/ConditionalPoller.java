@@ -1,6 +1,8 @@
 package com.overdrive.app.automation.condition;
 
 import com.overdrive.app.automation.Automations;
+import com.overdrive.app.byd.BydDataCollector;
+import com.overdrive.app.camera.dilink5.DiLink5Platform;
 import com.overdrive.app.logging.DaemonLogger;
 
 import java.util.concurrent.ScheduledFuture;
@@ -40,17 +42,25 @@ final class ConditionalPoller {
     private final long periodMs;
     private final BooleanSupplier shouldRun;
     private final Runnable task;
+    private final boolean vehicleState;
 
     private ScheduledFuture<?> future;
     private long generation;
 
     ConditionalPoller(
             String name, long periodMs, BooleanSupplier shouldRun, Runnable task) {
+        this(name, periodMs, shouldRun, task, true);
+    }
+
+    ConditionalPoller(
+            String name, long periodMs, BooleanSupplier shouldRun, Runnable task,
+            boolean vehicleState) {
         if (periodMs <= 0L) throw new IllegalArgumentException("periodMs must be positive");
         this.name = name;
         this.periodMs = periodMs;
         this.shouldRun = shouldRun;
         this.task = task;
+        this.vehicleState = vehicleState;
     }
 
     /** Start, keep, or cancel this poll according to its current reference predicate. */
@@ -72,11 +82,16 @@ final class ConditionalPoller {
                     return;
                 }
                 try {
+                    Runnable currentTask = task;
+                    if (vehicleState && DiLink5Platform.isSelected()) {
+                        currentTask = () -> BydDataCollector.getInstance()
+                                .runWithDiLink5AutomationFreshness(task);
+                    }
                     if (first.getAndSet(false)) {
                         // First observation after enabling is a baseline, not a vehicle edge.
-                        Automations.runSilentSeed(task);
+                        Automations.runSilentSeed(currentTask);
                     } else {
-                        task.run();
+                        currentTask.run();
                     }
                 } catch (Throwable t) {
                     logger.error(name + " poll failed", t);

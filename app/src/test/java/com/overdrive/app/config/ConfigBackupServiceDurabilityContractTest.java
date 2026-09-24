@@ -219,6 +219,59 @@ public class ConfigBackupServiceDurabilityContractTest {
     }
 
     @Test
+    public void restoreStagesTheFinalVehicleModeBeforeCommit()
+            throws IOException {
+        String source = source();
+        String apply = between(
+                source,
+                "fun applyBundle(",
+                "// ==================== helpers");
+
+        assertOrdered(
+                apply,
+                "UnifiedConfigManager.ensureDefaults(toWrite)",
+                "val currentVehicleMode =",
+                "val restoredVehicleMode =",
+                "DiLink5Platform.stageConfiguredMode(\n"
+                        + "                            restoredVehicleMode, currentVehicleMode)",
+                "!DiLink5Platform.isActiveMode(restoredVehicleMode)",
+                "UnifiedConfigManager.saveConfig(");
+        assertTrue(source.contains("val restartRequired: Boolean = false"));
+        assertTrue(apply.contains(
+                "restartRequired = transaction.vehicleModeChanged"));
+
+        String ipc = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/server/SurveillanceIpcServer.java");
+        String web = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/server/ConfigBackupApiHandler.java");
+        assertTrue(ipc.contains(
+                "response.put(\"restartRequired\", res.getRestartRequired())"));
+        assertTrue(web.contains(
+                "r.put(\"restartRequired\", result.getRestartRequired())"));
+        assertFalse(ipc.contains(
+                "incoming.optString(\"cameraMode\", \"default\")"));
+        String platform = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/camera/dilink5/"
+                        + "DiLink5Platform.java");
+        assertTrue(platform.contains(
+                "active, pending, configured, requested"));
+        assertTrue(platform.contains(
+                "String active = effectiveMode(readActiveMode(), pending, configured);"));
+        assertTrue(platform.contains(
+                "requested.equals(pending) && requested.equals(configured)"));
+        assertTrue(apply.contains(
+                "DiLink5Platform.currentActiveMode()"));
+        assertTrue(apply.contains(
+                "if (!restoredCamera.has(\"cameraMode\"))"));
+        assertTrue(apply.contains(
+                "restoredCamera.put(\"cameraMode\", currentVehicleMode)"));
+        assertTrue(apply.contains(
+                "DiLink5Platform.normalizeConfiguredMode("));
+        assertFalse(apply.contains(
+                "optString(\"cameraMode\", \"default\")"));
+    }
+
+    @Test
     public void backupStripsInternalClocksAndPendingReprices()
             throws IOException {
         String source = source();

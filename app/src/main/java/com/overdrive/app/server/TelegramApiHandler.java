@@ -126,6 +126,7 @@ public class TelegramApiHandler {
         response.put("videoUploads",        UnifiedTelegramConfig.isVideoUploads());
         response.put("autoStartAccOff",     UnifiedTelegramConfig.isAutoStartAccOff());
         response.put("tyreAlerts",          UnifiedTelegramConfig.isTyreAlerts());
+        response.put("parkingMessages",     UnifiedTelegramConfig.isParkingMessages());
         // The native Daemons-screen switch ("keep the bot running") is a separate,
         // stronger signal than the parked-only autoStartAccOff toggle above. Both
         // feed the ACC-off start gate, so the web UI needs to know when this one
@@ -243,7 +244,8 @@ public class TelegramApiHandler {
                 { "criticalAlerts",      UnifiedTelegramConfig.K_CRITICAL_ALERTS },
                 { "connectivityUpdates", UnifiedTelegramConfig.K_CONNECTIVITY },
                 { "motionText",          UnifiedTelegramConfig.K_MOTION_TEXT },
-                { "tyreAlerts",          UnifiedTelegramConfig.K_TYRE_ALERTS }
+                { "tyreAlerts",          UnifiedTelegramConfig.K_TYRE_ALERTS },
+                { "parkingMessages",     UnifiedTelegramConfig.K_PARKING_MESSAGES }
             };
             for (int i = 0; i < map.length; i++) {
                 String jsonKey = map[i][0];

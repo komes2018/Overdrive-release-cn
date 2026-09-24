@@ -135,6 +135,74 @@ public class OemDashcamStreamingReliabilityGuardTest {
         assertTrue(wsServer.contains("idleShutdownTriggered = false;"));
     }
 
+    @Test
+    public void staleLifecycleCannotStartRecordingAfterWarmup() throws IOException {
+        String source = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/server/OemDashcamApiHandler.java");
+
+        int revisionBump = source.indexOf("lifecycleRevision.incrementAndGet();");
+        int pending = source.indexOf("lifecyclePending.set(true);", revisionBump);
+        int schedule = source.indexOf("if (lifecycleInFlight.compareAndSet", revisionBump);
+        assertTrue(revisionBump >= 0 && pending > revisionBump && schedule > pending);
+
+        int resolver = source.indexOf("public static void applyTriggerLifecycleFromUcm()");
+        int capture = source.indexOf(
+                "long expectedRevision = lifecycleRevision.get();", resolver);
+        int apply = source.indexOf(
+                "applyTriggerLifecycle(recordingDesired, keepWarm, expectedRevision);", capture);
+        assertTrue(capture > resolver && apply > capture);
+
+        int lifecycle = source.indexOf("private static void applyTriggerLifecycle(");
+        int pipelineWarmup = source.indexOf(
+                "lifecycle superseded during pipeline warmup", lifecycle);
+        int pipelineGuard = source.lastIndexOf(
+                "if (!isLifecycleRevisionCurrent(expectedRevision))", pipelineWarmup);
+        int encoderWarmup = source.indexOf(
+                "lifecycle superseded during encoder warmup", pipelineWarmup);
+        int encoderGuard = source.lastIndexOf(
+                "if (!isLifecycleRevisionCurrent(expectedRevision))", encoderWarmup);
+        int startRecording = source.indexOf("current.startRecording()", encoderWarmup);
+        assertTrue(lifecycle >= 0);
+        assertTrue(pipelineGuard > lifecycle && pipelineWarmup > pipelineGuard);
+        assertTrue(encoderGuard > pipelineWarmup && encoderWarmup > encoderGuard);
+        assertTrue(startRecording > encoderWarmup);
+    }
+
+    @Test
+    public void automaticOemLifecycleRequiresKnownAccAndPrivacyGatesFailClosed()
+            throws IOException {
+        String source = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/server/OemDashcamApiHandler.java");
+        String resolver = between(
+                source,
+                "public static void applyTriggerLifecycleFromUcm()",
+                "private static boolean isLifecycleRevisionCurrent(");
+
+        int streaming = resolver.indexOf(
+                "boolean streamingDesired = isAnyStreamingViewerActive()");
+        int authoritative = resolver.indexOf(
+                "AccMonitor.isAccStateAuthoritative()", streaming);
+        int trustworthy = resolver.indexOf(
+                "AccMonitor.wasLastProbeTrustworthy()", authoritative);
+        int unknownApply = resolver.indexOf(
+                "applyTriggerLifecycle(false, streamingDesired, expectedRevision)",
+                trustworthy);
+        int configRead = resolver.indexOf(
+                "UnifiedConfigManager.forceReload()", unknownApply);
+        assertTrue(streaming >= 0);
+        assertTrue(authoritative > streaming);
+        assertTrue(trustworthy > authoritative);
+        assertTrue(unknownApply > trustworthy);
+        assertTrue(configRead > unknownApply);
+
+        assertTrue(resolver.contains(
+                "survSuppressed = true;"));
+        assertTrue(resolver.contains(
+                "parked surveillance gate unavailable"));
+        assertTrue(resolver.contains(
+                "|| streamingDesired;"));
+    }
+
     private static String readRepositoryFile(String relativePath) throws IOException {
         Path current = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
         while (current != null) {

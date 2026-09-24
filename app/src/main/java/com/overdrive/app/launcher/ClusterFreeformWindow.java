@@ -7,6 +7,7 @@ import com.overdrive.app.logging.DaemonLogger;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -92,10 +93,10 @@ import java.util.List;
  *       ({@code ClusterCast.castDisplayId}); a package match on any OTHER display is REFUSED, and
  *       a resize is REFUSED outright while that display is still unresolved (rather than falling
  *       back to an unscoped lookup). The reference scopes by display for the same reason.</li>
- *   <li>We deliberately do NOT port the reference's display-level verbs
- *       ({@code setDisplayToSingleTaskInstance}, {@code cleanFissionStacks},
- *       {@code moveTaskToDisplay}) — those reconfigure the SHARED cluster display and are
- *       exactly what could corrupt a co-resident map/blind-spot projection.</li>
+ *   <li>The resize path deliberately does NOT use display-level verbs such as
+ *       {@code setDisplayToSingleTaskInstance} or stack cleanup. The DI5 launch guardian has one
+ *       narrowly-scoped move helper, but it refuses unless the task's root contains exactly one
+ *       live task, so it cannot drag a co-resident map/head-unit task to another display.</li>
  *   <li>The stack rungs are additionally gated on the stack being <b>exclusively ours</b>
  *       ({@link #exclusiveStackIdForTask}): if the resolved task's stack hosts any other task we
  *       SKIP them and rely on the task-level calls. Stricter than the reference, which
@@ -194,6 +195,29 @@ final class ClusterFreeformWindow {
             this.touched = touched;
             this.generation = generation;
         }
+    }
+
+    /**
+     * One ATM task-location snapshot used by the DI5 post-launch guardian.
+     *
+     * <p>{@code known=false} means the task service/query itself was unavailable, while
+     * {@code known=true, taskId=-1} means the query completed and the package genuinely had no
+     * task. Keeping those outcomes separate prevents a transient Binder/read failure from being
+     * mistaken for an app rebound and triggering an unnecessary relaunch.
+     */
+    static final class TaskLocation {
+        final boolean known;
+        final int taskId;
+        final int displayId;
+
+        TaskLocation(boolean known, int taskId, int displayId) {
+            this.known = known;
+            this.taskId = taskId;
+            this.displayId = displayId;
+        }
+
+        static TaskLocation unknown() { return new TaskLocation(false, -1, -1); }
+        static TaskLocation absent() { return new TaskLocation(true, -1, -1); }
     }
 
     private static volatile TaskCache taskCache;
@@ -674,6 +698,263 @@ final class ClusterFreeformWindow {
             logger.debug("findTaskIdViaAtm failed: " + t.getMessage());
         }
         return -1;
+    }
+
+    /**
+     * Locate a package task for the DI5 launch guardian. A task on a display other than
+     * {@code targetDisplayId} is deliberately preferred over one already on the target: navigation
+     * apps can create a second task on display 0 several seconds after their first cluster launch,
+     * and that wrong-display rebound is the task that must be moved back.
+     */
+    static TaskLocation findTaskLocation(String pkg, int targetDisplayId) {
+        if (pkg == null || !AppLauncher.isValidPackageName(pkg) || targetDisplayId <= 0) {
+            return TaskLocation.unknown();
+        }
+        try {
+            Object svc = service();
+            if (svc == null) return TaskLocation.unknown();
+            Method getTasks = null;
+            for (Method method : svc.getClass().getMethods()) {
+                if ("getTasks".equals(method.getName())) {
+                    getTasks = method;
+                    break;
+                }
+            }
+            if (getTasks == null) return TaskLocation.unknown();
+            Class<?>[] parameterTypes = getTasks.getParameterTypes();
+            Object[] args = new Object[parameterTypes.length];
+            for (int i = 0; i < parameterTypes.length; i++) {
+                if (parameterTypes[i] == int.class) args[i] = (i == 0 ? 64 : 0);
+                else if (parameterTypes[i] == boolean.class) args[i] = Boolean.FALSE;
+                else args[i] = null;
+            }
+            Object raw = getTasks.invoke(svc, args);
+            if (!(raw instanceof List)) return TaskLocation.unknown();
+
+            List<TaskLocation> locations = new ArrayList<>();
+            for (Object task : (List<?>) raw) {
+                if (task == null || !taskMatchesPackage(task, pkg)) continue;
+                Object id = readFieldNoThrow(task, "taskId");
+                if (!(id instanceof Integer)) id = readFieldNoThrow(task, "id");
+                if (!(id instanceof Integer)) continue;
+                int taskId = (Integer) id;
+                int displayId = taskDisplayId(svc, task, taskId);
+                locations.add(new TaskLocation(true, taskId, displayId));
+            }
+            return selectTaskLocation(locations, targetDisplayId);
+        } catch (Throwable t) {
+            logger.debug("findTaskLocation failed: " + unwrap(t));
+            return TaskLocation.unknown();
+        }
+    }
+
+    static TaskLocation selectTaskLocation(
+            List<TaskLocation> locations, int targetDisplayId) {
+        if (locations == null) return TaskLocation.unknown();
+        TaskLocation onTarget = null;
+        TaskLocation unknownDisplay = null;
+        for (TaskLocation location : locations) {
+            if (location == null || location.taskId <= 0) continue;
+            if (location.displayId >= 0 &&
+                    location.displayId != targetDisplayId) {
+                return location;
+            }
+            if (location.displayId == targetDisplayId && onTarget == null) {
+                onTarget = location;
+            } else if (location.displayId < 0 && unknownDisplay == null) {
+                unknownDisplay = location;
+            }
+        }
+        if (unknownDisplay != null) return unknownDisplay;
+        if (onTarget != null) return onTarget;
+        return TaskLocation.absent();
+    }
+
+    /**
+     * Move one exclusively-owned task/root-task onto {@code targetDisplayId}. Android 10 exposes
+     * {@code moveStackToDisplay}; Android 12+ renamed the same operation to
+     * {@code moveRootTaskToDisplay}. We try both and verify the task's actual display afterwards.
+     *
+     * <p>The exclusive-root gate is intentional: both APIs move the whole root task, so invoking
+     * them on a root containing siblings would drag unrelated head-unit apps onto the cluster.
+     */
+    static boolean moveTaskToDisplay(int taskId, int targetDisplayId) {
+        if (taskId <= 0 || targetDisplayId <= 0) return false;
+        try {
+            Object svc = service();
+            if (svc == null) return false;
+            int rootTaskId = -1;
+            int currentDisplayId = -1;
+            for (Object info : atmTaskList(svc)) {
+                if (info == null) continue;
+                int[] children = childTaskIds(info);
+                if (children == null) continue;
+                boolean containsTask = false;
+                int liveChildren = 0;
+                for (int child : children) {
+                    if (child > 0) liveChildren++;
+                    if (child == taskId) containsTask = true;
+                }
+                if (!containsTask) continue;
+                if (liveChildren != 1) {
+                    logger.warn("moveTaskToDisplay refused task=" + taskId
+                            + " because its root contains " + liveChildren + " tasks");
+                    return false;
+                }
+                rootTaskId = stackOrRootTaskId(info);
+                Object display = readFieldNoThrow(info, "displayId");
+                if (display instanceof Integer) currentDisplayId = (Integer) display;
+                break;
+            }
+            if (currentDisplayId == targetDisplayId) {
+                focusMovedTask(svc, taskId, rootTaskId);
+                return true;
+            }
+            if (rootTaskId < 0) {
+                logger.warn("moveTaskToDisplay could not resolve root for task=" + taskId);
+                return false;
+            }
+
+            boolean dispatched = false;
+            for (String name : new String[] {
+                    "moveRootTaskToDisplay", "moveStackToDisplay" }) {
+                try {
+                    Method method = svc.getClass().getMethod(
+                            name, int.class, int.class);
+                    method.invoke(svc, rootTaskId, targetDisplayId);
+                    dispatched = true;
+                    logger.info(name + "(" + rootTaskId + "," + targetDisplayId
+                            + ") dispatched for task=" + taskId);
+                    break;
+                } catch (NoSuchMethodException ignored) {
+                    // Try the spelling used by the other Android generation.
+                } catch (Throwable t) {
+                    logger.debug(name + " failed: " + unwrap(t));
+                }
+            }
+            if (!dispatched) return false;
+
+            for (int attempt = 0; attempt < 5; attempt++) {
+                int actualDisplay = taskDisplayIdById(svc, taskId);
+                if (actualDisplay == targetDisplayId) {
+                    focusMovedTask(svc, taskId, rootTaskId);
+                    invalidateTaskCache();
+                    return true;
+                }
+                try {
+                    Thread.sleep(120L);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+            logger.warn("moveTaskToDisplay verification failed task=" + taskId
+                    + " target=" + targetDisplayId);
+        } catch (Throwable t) {
+            logger.warn("moveTaskToDisplay failed: " + unwrap(t));
+        }
+        return false;
+    }
+
+    /**
+     * Bring one exact task to the front without moving its display.
+     *
+     * <p>This is the DI5 same-display recovery path. The OEM projection service can put its own
+     * MeterActivity above a projected app while leaving our task on the correct shared display;
+     * relaunching or reparenting based only on display location cannot distinguish that condition.
+     * Prefer {@code setFocusedTask(taskId)} because it names the exact task. The root-task fallback
+     * is allowed only when that root contains no sibling tasks, so focusing our cast cannot surface
+     * an unrelated head-unit task.
+     */
+    static boolean focusTask(int taskId, int expectedDisplayId) {
+        if (taskId <= 0 || expectedDisplayId <= 0) return false;
+        try {
+            Object svc = service();
+            if (svc == null) return false;
+            int actualDisplayId = taskDisplayIdById(svc, taskId);
+            if (actualDisplayId != expectedDisplayId) {
+                logger.warn("focusTask refused task=" + taskId
+                        + " because display changed from expected=" + expectedDisplayId
+                        + " to actual=" + actualDisplayId);
+                return false;
+            }
+
+            try {
+                Method taskFocus = svc.getClass().getMethod(
+                        "setFocusedTask", int.class);
+                taskFocus.invoke(svc, taskId);
+                logger.info("setFocusedTask(" + taskId + ") dispatched");
+                return true;
+            } catch (NoSuchMethodException ignored) {
+                // API generation exposing only setFocusedRootTask.
+            } catch (Throwable t) {
+                logger.debug("setFocusedTask failed: " + unwrap(t));
+            }
+
+            int rootTaskId = -1;
+            int liveChildren = 0;
+            for (Object info : atmTaskList(svc)) {
+                if (info == null) continue;
+                int[] children = childTaskIds(info);
+                if (children == null) continue;
+                boolean containsTask = false;
+                int count = 0;
+                for (int child : children) {
+                    if (child > 0) count++;
+                    if (child == taskId) containsTask = true;
+                }
+                if (!containsTask) continue;
+                rootTaskId = stackOrRootTaskId(info);
+                liveChildren = count;
+                break;
+            }
+            if (rootTaskId < 0 || liveChildren != 1) {
+                logger.warn("focusTask refused root fallback for task=" + taskId
+                        + " root=" + rootTaskId + " children=" + liveChildren);
+                return false;
+            }
+            Method rootFocus = svc.getClass().getMethod(
+                    "setFocusedRootTask", int.class);
+            rootFocus.invoke(svc, rootTaskId);
+            logger.info("setFocusedRootTask(" + rootTaskId
+                    + ") dispatched for task=" + taskId);
+            return true;
+        } catch (Throwable t) {
+            logger.warn("focusTask failed: " + unwrap(t));
+            return false;
+        }
+    }
+
+    private static int taskDisplayIdById(Object svc, int taskId) {
+        try {
+            for (Object info : atmTaskList(svc)) {
+                if (info == null) continue;
+                int[] children = childTaskIds(info);
+                if (children == null) continue;
+                for (int child : children) {
+                    if (child != taskId) continue;
+                    Object display = readFieldNoThrow(info, "displayId");
+                    return display instanceof Integer ? (Integer) display : -1;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return -1;
+    }
+
+    private static void focusMovedTask(Object svc, int taskId, int rootTaskId) {
+        try {
+            Method taskFocus = svc.getClass().getMethod("setFocusedTask", int.class);
+            taskFocus.invoke(svc, taskId);
+            return;
+        } catch (Throwable ignored) {
+        }
+        try {
+            Method rootFocus = svc.getClass().getMethod(
+                    "setFocusedRootTask", int.class);
+            rootFocus.invoke(svc, rootTaskId);
+        } catch (Throwable ignored) {
+        }
     }
 
     /** Display id for a RunningTaskInfo — the {@code displayId} field when present, else located

@@ -619,6 +619,7 @@
     <string name="rail_vehicle">汽車</string>
     <string name="rail_projection">投影</string>
     <string name="rail_trips">行程</string>
+    <string name="rail_parking">停車</string>
     <string name="rail_integrations">集成</string>
     <string name="rail_diagnostics">診斷結果</string>
     <string name="rail_settings">設定</string>
@@ -757,7 +758,6 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">守望中</string>
-    <string name="dashboard_modern_vehicle_status">車輛狀態</string>
     <string name="dashboard_subtitle_all_systems">所有系統都在網路上</string>
     <string name="dashboard_subtitle_some_offline">在網路上提供%1$d的%2$d服務</string>
     <string name="dashboard_subtitle_no_tunnel">遠端接入無線</string>
@@ -777,14 +777,11 @@
     <string name="vehicle_dialog_title">設定電池容量</string>
     <string name="vehicle_dialog_capacity_label">容量 (kWh)</string>
     <string name="vehicle_dialog_capacity_suffix">kWh</string>
-    <string name="vehicle_dialog_capacity_helper">15至120 kWh。保留以使用模型預設值。</string>
+    <string name="vehicle_dialog_capacity_helper">5至120 kWh。保留以使用模型預設值。</string>
     <string name="vehicle_dialog_model_label">模型</string>
     <string name="vehicle_dialog_save">儲存</string>
     <string name="vehicle_dialog_reset">預定自动檢測</string>
-    <string name="vehicle_dialog_detection">偵測：%1$s</string>
-    <string name="vehicle_dialog_detection_auto">自動</string>
-    <string name="vehicle_dialog_detection_manual">手動</string>
-    <string name="vehicle_dialog_invalid_capacity">容量必須為 15 - 120 kWh</string>
+    <string name="vehicle_dialog_invalid_capacity">容量必須為 5 - 120 kWh</string>
     <string name="vehicle_dialog_summary_effective">有效: %1$.1f kWh</string>
     <string name="vehicle_dialog_summary_calibration">最后校準:%1$.1f%% 在%2$s</string>
     <string name="vehicle_dialog_soh_unavailable">沒有使用</string>
@@ -1217,7 +1214,7 @@
     <string name="settings_backup_restore_confirm_title">要還原設定嗎？</string>
     <string name="settings_backup_exporting">正在建立備份…</string>
     <string name="settings_backup_export_failed">備份匯出失敗</string>
-    <string name="onboarding_vehicle_body">選擇您的車型，我們會自動填入 kWh，或自行輸入（15–120）。這能讓里程與充電估算更準確。您也可以略過，之後再設定。</string>
+    <string name="onboarding_vehicle_body">選擇您的車型，我們會自動填入 kWh，或自行輸入（5–120）。這能讓里程與充電估算更準確。您也可以略過，之後再設定。</string>
     <string name="onboarding_expert_vehicle_title">車輛設定檔</string>
     <string name="onboarding_done_primary">完成</string>
     <string name="settings_backup_export_title">匯出設定</string>
@@ -1331,6 +1328,10 @@
     <string name="projection_autostart_conflict_confirm">使用此應用程式</string>
     <string name="projection_app_uninstalled">該應用程式已被解除安裝。</string>
     <string name="projection_status_service_down">鏡像服務尚未就緒 — 請重新啟動應用程式（或攝影機守護程序）後再試一次。</string>
+    <string name="dashboard_modern_vehicle_status">車輛狀態</string>
+    <string name="vehicle_dialog_detection">偵測：%1$s</string>
+    <string name="vehicle_dialog_detection_auto">自動</string>
+    <string name="vehicle_dialog_detection_manual">手動</string>
     <!-- Rail category headers -->
     <string name="rail_section_cameras">攝影機</string>
     <string name="rail_section_controls">控制</string>

@@ -96,6 +96,11 @@ public final class DoorEvent {
         Automations.update(DOOR_ANY, anyOpen ? "open" : "closed", true);
     }
 
+    /** Seed current state without routing the sample through notification listeners. */
+    public static void acceptSample(int area, int state) {
+        onDoorStateChanged(area, state);
+    }
+
     /** Whether a door getter poll is currently useful. */
     public static boolean shouldPoll() {
         return Automations.isEventReferenced(DOOR_DRIVER)

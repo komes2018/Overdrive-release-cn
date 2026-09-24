@@ -5,6 +5,7 @@ import android.content.ContextWrapper
 import android.os.Build
 import android.util.Log
 import com.overdrive.app.shell.HiddenApiBypass
+import org.json.JSONObject
 
 /**
  * Utility to whitelist the app from BYD's background killing mechanism.
@@ -18,6 +19,10 @@ object BydDataCacheWhitelist {
     
     private const val TAG = "BydDataCacheWhitelist"
     private const val PKG = "com.overdrive.app"
+    private const val DILINK5_READY_ATTEMPTS = 20
+    private const val DILINK5_RETRY_DELAY_MS = 3_000L
+
+    @Volatile private var lastApplyFailure: String? = null
     
     /**
      * Apply all BYD whitelist mechanisms.
@@ -28,7 +33,12 @@ object BydDataCacheWhitelist {
      * 
      * @param context Application or Activity context
      */
-    fun applyAll(context: Context) {
+    fun applyAll(context: Context): Boolean {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            Log.i(TAG, "Applying background access through the daemon")
+            return applyViaDaemonWhenReady()
+        }
+
         // 1. UNLOCK REFLECTION - Must be called before any hidden API access
         val bypassed = HiddenApiBypass.bypass()
         Log.i(TAG, "HiddenApiBypass result: $bypassed")
@@ -40,6 +50,91 @@ object BydDataCacheWhitelist {
             Log.w(TAG, "Failed to create system context - trying with app context")
             whitelistAccPackage(context)
             applyDataCache(context)
+        }
+        return true
+    }
+
+    @JvmStatic
+    fun getLastApplyFailure(): String? = lastApplyFailure
+
+    @JvmStatic
+    fun applyViaDaemonWhenReady(): Boolean {
+        for (attempt in 1..DILINK5_READY_ATTEMPTS) {
+            if (isDaemonReady() && applyViaDaemon()) return true
+            if (attempt < DILINK5_READY_ATTEMPTS && !sleepBeforeRetry()) {
+                return false
+            }
+        }
+        if (lastApplyFailure == null) {
+            lastApplyFailure = "daemon did not become ready"
+        }
+        return false
+    }
+
+    @JvmStatic
+    fun applyViaDaemon(): Boolean {
+        var connection: java.net.HttpURLConnection? = null
+        return try {
+            val conn = DaemonHttpClient.open(
+                "/api/system/background-access", "POST", 3000, 8000)
+            connection = conn
+            conn.doOutput = true
+            conn.outputStream.use { it.write(byteArrayOf()) }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val response = body.takeIf { it.isNotEmpty() }
+                    ?.let { runCatching { JSONObject(it) }.getOrNull() }
+            val success = code in 200..299
+                    && response?.optBoolean("success", false) == true
+            lastApplyFailure = if (success) null else response
+                    ?.optString("error")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: "background access HTTP $code"
+            Log.i(TAG, "Daemon background access result: HTTP $code success=$success")
+            success
+        } catch (e: Exception) {
+            lastApplyFailure =
+                    e.message ?: e.javaClass.simpleName
+            Log.w(TAG, "Daemon background access failed: ${e.message}")
+            false
+        } finally {
+            try {
+                connection?.disconnect()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun isDaemonReady(): Boolean {
+        var connection: java.net.HttpURLConnection? = null
+        return try {
+            val conn = DaemonHttpClient.open("/status", "GET", 1500, 2500)
+            connection = conn
+            val ready = conn.responseCode in 200..299
+            if (!ready) {
+                lastApplyFailure = "daemon status HTTP ${conn.responseCode}"
+            }
+            ready
+        } catch (e: Exception) {
+            lastApplyFailure = "daemon not ready: ${e.message ?: e.javaClass.simpleName}"
+            false
+        } finally {
+            try {
+                connection?.disconnect()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun sleepBeforeRetry(): Boolean {
+        return try {
+            Thread.sleep(DILINK5_RETRY_DELAY_MS)
+            true
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            lastApplyFailure = "background access retry interrupted"
+            false
         }
     }
 

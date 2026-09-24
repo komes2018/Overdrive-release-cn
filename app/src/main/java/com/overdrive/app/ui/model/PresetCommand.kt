@@ -72,7 +72,8 @@ object PresetCommands {
                 "| awk '{print \$1}' | while read pid; do " +
                 "if [ \"\$pid\" != \"\$MY_PID\" ]; then kill -9 \$pid 2>/dev/null; fi; done; " +
                 "killall -9 byd_cam_daemon 2>/dev/null; " +
-                "rm -f /data/local/tmp/camera_daemon.lock",
+                "rm -f /data/local/tmp/camera_daemon.lock; " +
+                "rm -rf /data/local/tmp/cam_watchdog.lock",
             "Control"
         ),
         PresetCommand(

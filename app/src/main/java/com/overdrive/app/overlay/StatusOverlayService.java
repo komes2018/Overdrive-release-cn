@@ -1049,30 +1049,35 @@ public class StatusOverlayService extends Service {
         rescheduleImmediatePoll();
     }
 
-    /**
-     * Build a context whose resources honor the app's day/night override.
-     *
-     * Plain Service contexts read uiMode straight from the system config,
-     * so AppCompatDelegate.setDefaultNightMode(MODE_NIGHT_NO) doesn't reach
-     * the overlay — the pill stays dark on a light-themed system. Mapping
-     * the AppCompat mode onto Configuration.UI_MODE_NIGHT_* and creating a
-     * configuration-context with that override fixes it.
-     */
+    /** Build a context whose resources honor the app's day/night and locale overrides. */
     private Context themedContext() {
-        int mode = androidx.appcompat.app.AppCompatDelegate.getDefaultNightMode();
-        int uiNight;
-        if (mode == androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES) {
-            uiNight = android.content.res.Configuration.UI_MODE_NIGHT_YES;
-        } else if (mode == androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_NO) {
-            uiNight = android.content.res.Configuration.UI_MODE_NIGHT_NO;
-        } else {
-            // Follow-system / unspecified — leave the system's value alone.
-            return this;
-        }
         android.content.res.Configuration cfg = new android.content.res.Configuration(
                 getResources().getConfiguration());
-        cfg.uiMode = (cfg.uiMode & ~android.content.res.Configuration.UI_MODE_NIGHT_MASK) | uiNight;
-        return createConfigurationContext(cfg);
+        boolean overridden = false;
+
+        int mode = androidx.appcompat.app.AppCompatDelegate.getDefaultNightMode();
+        if (mode == androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES) {
+            cfg.uiMode = (cfg.uiMode
+                    & ~android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                    | android.content.res.Configuration.UI_MODE_NIGHT_YES;
+            overridden = true;
+        } else if (mode == androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_NO) {
+            cfg.uiMode = (cfg.uiMode
+                    & ~android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                    | android.content.res.Configuration.UI_MODE_NIGHT_NO;
+            overridden = true;
+        }
+
+        // AppCompat applies an in-app language to Activities, not a plain Service.
+        // Mirror the selected app locale so REC/MIC and accessibility text do not
+        // fall back to the head unit's system language.
+        androidx.core.os.LocaleListCompat appLocales =
+                androidx.appcompat.app.AppCompatDelegate.getApplicationLocales();
+        if (!appLocales.isEmpty() && appLocales.get(0) != null) {
+            cfg.setLocales(new android.os.LocaleList(appLocales.get(0)));
+            overridden = true;
+        }
+        return overridden ? createConfigurationContext(cfg) : this;
     }
 
     @Override
@@ -1431,8 +1436,9 @@ public class StatusOverlayService extends Service {
                     try {
                         android.widget.Toast.makeText(
                             StatusOverlayService.this,
-                            "Recording mode change failed"
-                                + (hint != null ? ": " + hint : ""),
+                            hint != null
+                                ? getString(R.string.overlay_recording_mode_failed_fmt, hint)
+                                : getString(R.string.overlay_recording_mode_failed),
                             android.widget.Toast.LENGTH_SHORT).show();
                     } catch (Exception ignored) {}
                     // Kick an immediate poll so the chip reverts to
@@ -2492,12 +2498,13 @@ public class StatusOverlayService extends Service {
         Intent intent = getPackageManager().getLaunchIntentForPackage(getPackageName());
         PendingIntent pi = PendingIntent.getActivity(this, 0, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Context textContext = themedContext();
 
         // Tag with the shared Overdrive group key so DaemonKeepaliveService's
         // group-summary collapses this entry under a single shade row.
         return new Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle(getString(R.string.status_overlay_notif_title))
-                .setContentText(getString(R.string.status_overlay_notif_text))
+                .setContentTitle(textContext.getString(R.string.status_overlay_notif_title))
+                .setContentText(textContext.getString(R.string.status_overlay_notif_text))
                 .setSmallIcon(R.drawable.ic_recording)
                 .setContentIntent(pi)
                 .setOngoing(true)

@@ -441,7 +441,7 @@
     "tab_stats": "Statistiche",
     "tab_settings": "Impostazioni",
     "state_idle": "Inattivo",
-    "state_plugged": "Collegato",
+    "state_plugged": "Collegato in",
     "state_charging": "Ricarica",
     "state_full": "Pieno",
     "state_fault": "Difetto carica",
@@ -2611,8 +2611,7 @@
       "kofi_value": "Un caffe su Ko-fi aiuta a tenere vivo lo sviluppo.",
       "kofi_url": "https://ko-fi.com/E1E71XALHX"
     },
-    "thanks_subtitle": "Realizzato con l’aiuto di contributori e sostenitori.",
-      "ack_chimes": "RoadSense ammonimento carillon — suoni dalla Google Sound Library, sotto licenza"
+    "thanks_subtitle": "Realizzato con l’aiuto di contributori e sostenitori."
   },
   "byd_cloud": {
     "page_title": "BYD Cloud",

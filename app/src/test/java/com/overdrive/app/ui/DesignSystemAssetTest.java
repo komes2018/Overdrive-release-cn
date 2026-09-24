@@ -93,6 +93,9 @@ public class DesignSystemAssetTest {
         assertTrue(styles.contains("button:focus,"));
         assertTrue(styles.contains("min-height: 48px"));
         assertTrue(tabs.contains("height: 48px"));
+        assertTrue(tabs.contains("html[data-android-embed=\"1\"] .bottom-tabs"));
+        assertTrue(tabs.contains("html[data-app-shell=\"1\"] .bottom-tabs"));
+        assertFalse(tabs.contains("78px + var(--safe-bottom"));
         assertTrue(themePicker.contains("'   width: 48px; height: 48px; border-radius: 50%;'"));
         assertTrue(styles.contains(":root[data-reduced-motion=\"true\"]"));
         assertTrue(styles.contains("@media (prefers-reduced-motion: reduce)"));
@@ -115,6 +118,17 @@ public class DesignSystemAssetTest {
         assertTrue(safeLocations.contains("BYD.theme.attachMapTiles(this.map);"));
         assertTrue(webView.contains("url.contains(\"tile.openstreetmap.de\")"));
         assertFalse(webView.contains("basemaps.cartocdn.com"));
+    }
+
+    @Test
+    public void collapsedSidebarGroupsLeaveTheFlexLayout() throws IOException {
+        String shell =
+                readRepositoryFile("app/src/main/assets/web/shared/app-shell.css");
+
+        assertTrue(shell.contains(
+                ".sidebar-nav [hidden] {\n    display: none !important;\n}"));
+        assertFalse(shell.contains(
+                ".sidebar-nav [hidden] {\n    display: flex !important;"));
     }
 
     @Test

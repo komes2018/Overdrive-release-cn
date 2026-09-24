@@ -240,7 +240,8 @@
 }
 
 .talk-state-copy {
-    width: min(100%, 480px);
+    width: 100%;
+    max-width: 480px;
     min-height: 88px;
     margin-top: 24px;
 }
@@ -271,7 +272,8 @@
 }
 
 .talk-meter {
-    width: min(100%, 300px);
+    width: 100%;
+    max-width: 300px;
     height: 10px;
     margin-top: 14px;
     visibility: hidden;
@@ -334,7 +336,8 @@
 
 .talk-output-control {
     box-sizing: border-box;
-    width: min(100%, 300px);
+    width: 100%;
+    max-width: 300px;
     min-height: 68px;
     margin-top: 10px;
     text-align: left;
@@ -721,6 +724,9 @@
 
     .talk-stage {
         padding: 18px 18px 12px;
+        justify-content: flex-start;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
     }
 
     .ptt-button {

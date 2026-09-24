@@ -41,6 +41,7 @@ public class TripApiHandler {
     private static final Pattern TRIP_TELEMETRY_PATTERN = Pattern.compile("^/api/trips/(\\d+)/telemetry$");
     private static final Pattern TRIP_SIMILAR_PATTERN = Pattern.compile("^/api/trips/(\\d+)/similar$");
     private static final Pattern TRIP_GPS_PATTERN = Pattern.compile("^/api/trips/(\\d+)/gps$");
+    private static final Pattern TRIP_RESCORE_PATTERN = Pattern.compile("^/api/trips/(\\d+)/rescore$");
 
     private final TripAnalyticsManager manager;
 
@@ -128,6 +129,15 @@ public class TripApiHandler {
             if (similarMatcher.matches() && "GET".equals(method)) {
                 long tripId = Long.parseLong(similarMatcher.group(1));
                 return handleGetSimilarTrips(tripId);
+            }
+
+            // Route: POST /api/trips/{id}/rescore — recompute the DNA scores
+            // of a finalized trip from its telemetry file (rows that recovery
+            // closed before it learned to score, or after an engine change).
+            Matcher rescoreMatcher = TRIP_RESCORE_PATTERN.matcher(path);
+            if (rescoreMatcher.matches() && "POST".equals(method)) {
+                long tripId = Long.parseLong(rescoreMatcher.group(1));
+                return handleRescoreTrip(tripId);
             }
 
             // Route: GET /api/trips/{id}/gps
@@ -341,10 +351,17 @@ public class TripApiHandler {
                 + "card that isn't detected right now — insert it and try again.", 409);
         }
 
-        final java.util.List<java.io.File> dirs;
-        java.util.List<java.io.File> resolved;
-        try { resolved = sm.getAllTripsDirs(); } catch (Throwable e) { resolved = null; }
-        dirs = resolved;
+        final java.util.List<java.io.File> dirs = new java.util.ArrayList<>();
+        try {
+            java.util.List<java.io.File> resolved = sm.getAllTripsDirs();
+            if (resolved != null) dirs.addAll(resolved);
+        } catch (Throwable ignored) {}
+        // The in-flight journal lives on internal storage now; a crash leaves
+        // its file there, so the manual recover must scan that dir as well.
+        try {
+            java.io.File journalDir = sm.getTripJournalDir();
+            if (journalDir != null && !dirs.contains(journalDir)) dirs.add(journalDir);
+        } catch (Throwable ignored) {}
         boolean haveAnyDir = false;
         if (dirs != null) {
             for (java.io.File d : dirs) { if (d != null && d.isDirectory()) { haveAnyDir = true; break; } }
@@ -370,7 +387,14 @@ public class TripApiHandler {
                     try { sm.ensureTripsSpace(0); }   // re-enforce limit + refresh size cache
                     catch (Exception ex) { logger.warn("Async trips cleanup after recovery failed: " + ex.getMessage()); }
                 }
-                lastRecoverResult = buildRecoverResult(r);
+                // Also fill in DNA scores for finalized rows that recovery closed
+                // before it learned to score them (all five sub-scores at 0). The
+                // user pressed "Recover" because a trip looks incomplete — this
+                // is the row they are looking at.
+                int rescored = 0;
+                try { rescored = db.rescoreUnscoredTrips(50); }
+                catch (Throwable ex) { logger.warn("Rescore sweep after recovery failed: " + ex.getMessage()); }
+                lastRecoverResult = buildRecoverResult(r, rescored);
             } catch (Throwable t) {
                 logger.error("Trips recovery worker failed", t);
                 JSONObject err = new JSONObject();
@@ -423,7 +447,7 @@ public class TripApiHandler {
         return resp;
     }
 
-    private JSONObject buildRecoverResult(TripDatabase.RecoveryResult r) {
+    private JSONObject buildRecoverResult(TripDatabase.RecoveryResult r, int rescored) {
         JSONObject response = new JSONObject();
         try {
             response.put("success", true);
@@ -431,12 +455,20 @@ public class TripApiHandler {
             response.put("scanned", r.scanned);
             response.put("recovered", r.recovered);
             response.put("skipped", r.skipped);
+            response.put("rescored", rescored);
             String msg;
             if (r.recovered > 0) {
                 msg = "Recovered " + r.recovered + " trip"
                         + (r.recovered == 1 ? "" : "s")
-                        + " from telemetry files. Energy and driving-score details "
-                        + "aren't available for recovered trips.";
+                        + " from telemetry files. End-of-trip battery, energy and cost "
+                        + "details aren't available for recovered trips.";
+                if (rescored > 0) {
+                    msg += " Driving scores were also filled in for " + rescored
+                            + " earlier trip" + (rescored == 1 ? "" : "s") + ".";
+                }
+            } else if (rescored > 0) {
+                msg = "No missing trips found. Driving scores were filled in for " + rescored
+                        + " trip" + (rescored == 1 ? "" : "s") + " that had none.";
             } else if (r.scanned == 0) {
                 msg = "No telemetry files found in trip storage.";
             } else {
@@ -445,6 +477,44 @@ public class TripApiHandler {
             response.put("message", msg);
         } catch (Exception e) {
             logger.error("Error building recover response", e);
+        }
+        return response;
+    }
+
+    /**
+     * POST /api/trips/{id}/rescore — recompute a finalized trip's DNA scores
+     * from its telemetry file and return the updated trip. 409 while the trip
+     * is still in flight; 410 when there is no readable telemetry for it.
+     */
+    private JSONObject handleRescoreTrip(long tripId) {
+        TripDatabase db = manager.getDatabase();
+        if (db == null) {
+            return errorResponse("Trip database not available", 500);
+        }
+        TripRecord existing = db.getTrip(tripId);
+        if (existing == null) {
+            return errorResponse("Trip not found", 404);
+        }
+        TripRecord active = manager.getActiveTrip();
+        if (existing.endTime == 0 || (active != null && active.id == tripId)) {
+            return errorResponse("Trip is still in progress", 409);
+        }
+        if (existing.telemetryFilePath == null || existing.telemetryFilePath.isEmpty()
+                || TripDatabase.isImportedPath(existing.telemetryFilePath)
+                || !new File(existing.telemetryFilePath).isFile()) {
+            return errorResponse("Telemetry data unavailable", 410);
+        }
+        TripRecord updated = db.rescoreTripFromTelemetry(tripId);
+        if (updated == null) {
+            return errorResponse("Not enough telemetry to score this trip", 422);
+        }
+        enrichTripEnergy(updated);
+        JSONObject response = new JSONObject();
+        try {
+            response.put("success", true);
+            response.put("trip", updated.toJson());
+        } catch (Exception e) {
+            logger.error("Error building rescore response", e);
         }
         return response;
     }
@@ -671,15 +741,41 @@ public class TripApiHandler {
             }
 
             int extTemp = 20; // Default mild temperature
+            boolean extTempFromSnapshot = false;
             try {
-                // Read external temperature from BYD instrument device
-                android.hardware.bydauto.instrument.BYDAutoInstrumentDevice instrumentDevice =
-                        android.hardware.bydauto.instrument.BYDAutoInstrumentDevice.getInstance(null);
-                if (instrumentDevice != null) {
-                    extTemp = instrumentDevice.getOutCarTemperature();
+                // NORMALIZED TELEMETRY FIRST (R25). The previous code linked
+                // android.hardware.bydauto.instrument.BYDAutoInstrumentDevice
+                // as a DIRECT compile-time reference: on firmware without the
+                // class the first execution throws NoClassDefFoundError — an
+                // Error, not an Exception — straight through the old catch and
+                // out of this handler. The snapshot read has no SDK linkage,
+                // and the legacy fallback below is reflection-based so it can
+                // only fail with catchable exceptions.
+                com.overdrive.app.byd.BydDataCollector collector =
+                        com.overdrive.app.byd.BydDataCollector.getInstance();
+                if (collector.isInitialized()) {
+                    com.overdrive.app.byd.BydVehicleData data = collector.getData();
+                    if (data != null && !Double.isNaN(data.outsideTempC)) {
+                        extTemp = (int) Math.round(data.outsideTempC);
+                        extTempFromSnapshot = true;
+                    }
                 }
-            } catch (Exception e) {
-                logger.debug("Could not read external temp: " + e.getMessage());
+            } catch (Throwable t) {
+                logger.debug("Could not read external temp from snapshot: " + t.getMessage());
+            }
+            if (!extTempFromSnapshot) {
+                try {
+                    // Legacy fallback: same source as before, linkage-safe.
+                    Class<?> instrumentClass = Class.forName("android.hardware.bydauto.instrument.BYDAutoInstrumentDevice");
+                    java.lang.reflect.Method getInst = instrumentClass.getMethod("getInstance", android.content.Context.class);
+                    Object instrumentDevice = getInst.invoke(null, (android.content.Context) null);
+                    if (instrumentDevice != null) {
+                        java.lang.reflect.Method getTemp = instrumentClass.getMethod("getOutCarTemperature");
+                        extTemp = (Integer) getTemp.invoke(instrumentDevice);
+                    }
+                } catch (Throwable t) {
+                    logger.debug("Could not read external temp: " + t.getMessage());
+                }
             }
 
             int dnaOverall = 50; // Default mid-range

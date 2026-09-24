@@ -23,6 +23,8 @@ import android.view.inputmethod.EditorInfo
 import com.overdrive.app.DeterrentActivity
 import com.overdrive.app.auth.PinManager
 import com.overdrive.app.auth.PinSession
+import com.overdrive.app.ui.MainActivity
+import com.overdrive.app.ui.RemoteMainActivity
 import java.io.ByteArrayOutputStream
 import java.lang.ref.WeakReference
 import java.lang.reflect.Method
@@ -36,14 +38,17 @@ import kotlin.math.roundToInt
  * App-process half of Remote Overdrive Dev View.
  *
  * Live frames come from [RemoteDevVirtualDisplay], which contains only a
- * dedicated Overdrive task. PixelCopy remains available for an explicit
- * lossless Window screenshot. Input is dispatched only into roots owned by
- * the selected Activity on that private display; this class never uses global
- * input injection and cannot address another package or display stack 0.
+ * dedicated Overdrive task. On Android builds that reject Activity launches
+ * on app-owned displays, the controller can instead reuse an already-open
+ * physical [MainActivity] Window. Input is dispatched only into roots owned
+ * by that selected Activity; this class never uses global input injection.
  */
 object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     const val ACCESS_LOCKED_DETAIL =
         "Unlock the physical Overdrive UI before using Remote Dev View"
+    const val PHYSICAL_COMPATIBILITY_DETAIL =
+        "This Android build blocks Remote Dev View's private display. " +
+            "Open and unlock Overdrive on the head unit, then retry."
 
     private const val TAG = "RemoteDevView"
     private const val UI_TIMEOUT_SECONDS = 6L
@@ -55,6 +60,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     private var installed = false
     private var application: Application? = null
     private var currentActivity = WeakReference<Activity>(null)
+    private var physicalMainActivity = WeakReference<Activity>(null)
     @Volatile private var remoteDisplayId = Display.INVALID_DISPLAY
     private var touchRoot = WeakReference<View>(null)
     private var touchDownTime = 0L
@@ -75,6 +81,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     override fun onActivityCreated(activity: Activity, state: Bundle?) = trackIfEmpty(activity)
     override fun onActivityStarted(activity: Activity) = trackIfEmpty(activity)
     override fun onActivityResumed(activity: Activity) {
+        trackPhysicalMainActivity(activity)
         if (isRemoteTarget(activity)) currentActivity = WeakReference(activity)
     }
     override fun onActivityPaused(activity: Activity) = Unit
@@ -82,12 +89,27 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) = Unit
     override fun onActivityDestroyed(activity: Activity) {
         if (currentActivity.get() === activity) currentActivity.clear()
+        if (physicalMainActivity.get() === activity) physicalMainActivity.clear()
     }
 
     private fun trackIfEmpty(activity: Activity) {
+        trackPhysicalMainActivity(activity)
         if (currentActivity.get() == null && isRemoteTarget(activity)) {
             currentActivity = WeakReference(activity)
         }
+    }
+
+    private fun trackPhysicalMainActivity(activity: Activity) {
+        if (isPhysicalMainActivity(activity)) {
+            physicalMainActivity = WeakReference(activity)
+        }
+    }
+
+    private fun isPhysicalMainActivity(activity: Activity): Boolean {
+        val activityDisplay = activity.display?.displayId ?: Display.DEFAULT_DISPLAY
+        return activity is MainActivity &&
+            activity !is RemoteMainActivity &&
+            activityDisplay == Display.DEFAULT_DISPLAY
     }
 
     private fun isRemoteTarget(activity: Activity): Boolean {
@@ -115,7 +137,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     }
 
     fun isRemoteWindowSecure(): Boolean {
-        val activity = currentActivity.get() ?: return false
+        val activity = targetActivity() ?: return false
         return activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0
     }
 
@@ -147,12 +169,33 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
 
     fun status(): InputResult {
         if (!isAccessAllowed()) return lockedInputResult()
+        if (RemoteDevVirtualDisplay.isCompatibilityMode()) {
+            return physicalCompatibilityStatus()
+        }
         val activity = currentActivity.get()
         return InputResult(
             success = activity != null && !activity.isFinishing && !activity.isDestroyed,
             handled = false,
             activityName = activity?.javaClass?.name,
             detail = if (activity == null) "No Overdrive activity is ready" else null,
+        )
+    }
+
+    fun physicalCompatibilityStatus(): InputResult {
+        if (!isAccessAllowed()) return lockedInputResult()
+        val activity = physicalMainActivity.get()
+        val ready = activity != null &&
+            isPhysicalMainActivity(activity) &&
+            !activity.isFinishing &&
+            !activity.isDestroyed &&
+            activity.window.decorView.isAttachedToWindow &&
+            activity.window.decorView.width > 0 &&
+            activity.window.decorView.height > 0
+        return InputResult(
+            success = ready,
+            handled = false,
+            activityName = activity?.javaClass?.name,
+            detail = if (ready) null else PHYSICAL_COMPATIBILITY_DETAIL,
         )
     }
 
@@ -167,7 +210,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
                     resultName = "LIVE",
                     width = cached.width,
                     height = cached.height,
-                    activityName = currentActivity.get()?.javaClass?.name,
+                    activityName = targetActivity()?.javaClass?.name,
                     jpeg = cached.jpeg,
                     detail = "encodeMs=${cached.encodeMs};droppedBlack=${cached.droppedBlackFrames}",
                     mimeType = "image/jpeg",
@@ -178,21 +221,26 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
             if (RemoteDevVirtualDisplay.isRunning()) {
                 return CaptureResult(
                     -1, "NO_VIRTUAL_FRAME", 0, 0,
-                    currentActivity.get()?.javaClass?.name, null,
+                    targetActivity()?.javaClass?.name, null,
                     backend = RemoteDevVirtualDisplay.BACKEND_NAME,
                 )
             }
         }
         captureLock.lock()
-        return try {
+        val captured = try {
             captureSingleFlight(maxWidth, quality, format)
         } finally {
             captureLock.unlock()
         }
+        return if (RemoteDevVirtualDisplay.isCompatibilityMode()) {
+            captured.copy(backend = RemoteDevVirtualDisplay.COMPATIBILITY_BACKEND_NAME)
+        } else {
+            captured
+        }
     }
 
     private fun captureSingleFlight(maxWidth: Int, quality: Int, format: String): CaptureResult {
-        val activity = currentActivity.get()
+        val activity = targetActivity()
         if (activity == null || activity.isFinishing || activity.isDestroyed) {
             return CaptureResult(-1, "NO_ACTIVITY", 0, 0, null, null)
         }
@@ -310,7 +358,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
             normalizedX < 0.0 || normalizedX > 1.0 ||
             normalizedY < 0.0 || normalizedY > 1.0
         ) {
-            return InputResult(false, false, currentActivity.get()?.javaClass?.name,
+            return InputResult(false, false, targetActivity()?.javaClass?.name,
                 "Coordinates must be between 0 and 1")
         }
         val action = when (phase) {
@@ -318,7 +366,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
             "move" -> MotionEvent.ACTION_MOVE
             "up" -> MotionEvent.ACTION_UP
             "cancel" -> MotionEvent.ACTION_CANCEL
-            else -> return InputResult(false, false, currentActivity.get()?.javaClass?.name,
+            else -> return InputResult(false, false, targetActivity()?.javaClass?.name,
                 "Unknown touch phase")
         }
         val result = runOnUiThread {
@@ -373,7 +421,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
             "dpad_left" -> KeyEvent.KEYCODE_DPAD_LEFT
             "dpad_right" -> KeyEvent.KEYCODE_DPAD_RIGHT
             "dpad_center" -> KeyEvent.KEYCODE_DPAD_CENTER
-            else -> return InputResult(false, false, currentActivity.get()?.javaClass?.name,
+            else -> return InputResult(false, false, targetActivity()?.javaClass?.name,
                 "Key is not allowed")
         }
         val result = runOnUiThread {
@@ -398,7 +446,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     fun dispatchText(text: String): InputResult {
         if (!isAccessAllowed()) return lockedInputResult()
         if (text.isEmpty() || text.length > MAX_TEXT_LENGTH || text.any { it == '\u0000' }) {
-            return InputResult(false, false, currentActivity.get()?.javaClass?.name,
+            return InputResult(false, false, targetActivity()?.javaClass?.name,
                 "Text must contain 1-$MAX_TEXT_LENGTH characters")
         }
         val result = runOnUiThread {
@@ -427,9 +475,22 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
         return result
     }
 
+    private fun targetActivity(): Activity? =
+        if (RemoteDevVirtualDisplay.isCompatibilityMode()) {
+            physicalMainActivity.get()
+        } else {
+            currentActivity.get()
+        }
+
     private fun readyActivity(): Activity? {
         if (!isAccessAllowed()) return null
-        return currentActivity.get()?.takeUnless {
+        val activity = targetActivity() ?: return null
+        if (RemoteDevVirtualDisplay.isCompatibilityMode() &&
+            (!isPhysicalMainActivity(activity) ||
+                !activity.window.decorView.isAttachedToWindow ||
+                activity.window.decorView.height <= 0)
+        ) return null
+        return activity.takeUnless {
             it.isFinishing || it.isDestroyed || it.window.decorView.width <= 0
         }
     }
@@ -437,7 +498,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     private fun lockedInputResult() = InputResult(
         success = false,
         handled = false,
-        activityName = currentActivity.get()?.javaClass?.name,
+        activityName = targetActivity()?.javaClass?.name,
         detail = ACCESS_LOCKED_DETAIL,
     )
 
@@ -446,10 +507,10 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
         resultName = "LOCKED",
         width = 0,
         height = 0,
-        activityName = currentActivity.get()?.javaClass?.name,
+        activityName = targetActivity()?.javaClass?.name,
         jpeg = null,
         detail = ACCESS_LOCKED_DETAIL,
-        backend = RemoteDevVirtualDisplay.BACKEND_NAME,
+        backend = RemoteDevVirtualDisplay.currentBackendName(),
     )
 
     private fun <T> runOnUiThread(block: () -> T): T {

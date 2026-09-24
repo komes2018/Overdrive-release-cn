@@ -3,7 +3,6 @@ package com.overdrive.app.byd;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.pm.PackageManager;
-import android.os.Looper;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -20,6 +19,197 @@ public final class BydDeviceHelper {
     private static final DaemonLogger logger = DaemonLogger.getInstance("BydDeviceHelper");
     private static final java.util.Map<Object, Object> safetyBeltListeners =
             java.util.Collections.synchronizedMap(new java.util.IdentityHashMap<>());
+    private static final java.util.Map<Object, RetainedListener> retainedListeners =
+            java.util.Collections.synchronizedMap(new java.util.IdentityHashMap<>());
+
+    private static final class RetainedListener {
+        final Object device;
+        final Object listener;
+        final Method register;
+        final Method unregister;
+        final int[] featureIds;
+        boolean attached = true;
+
+        RetainedListener(Object device, Object listener, Method register,
+                         Method unregister, int[] featureIds) {
+            this.device = device;
+            this.listener = listener;
+            this.register = register;
+            this.unregister = unregister;
+            this.featureIds = featureIds == null ? null : featureIds.clone();
+        }
+
+        synchronized boolean refresh() {
+            if (attached) {
+                if (unregister == null) return false;
+                try {
+                    unregister.invoke(device, listener);
+                    attached = false;
+                } catch (Exception e) {
+                    logger.debug("Listener unregister failed: " + e.getMessage());
+                    return false;
+                }
+            }
+            try {
+                invokeRegister(device, listener, register, featureIds);
+                attached = true;
+                return true;
+            } catch (Exception e) {
+                logger.debug("Listener re-register failed: " + e.getMessage());
+                return false;
+            }
+        }
+
+        synchronized boolean detach() {
+            if (!attached) return true;
+            if (unregister == null) return false;
+            try {
+                unregister.invoke(device, listener);
+                attached = false;
+                return true;
+            } catch (Exception e) {
+                logger.debug("Listener unregister failed: " + e.getMessage());
+                return false;
+            }
+        }
+
+        synchronized boolean isDetached() {
+            return !attached;
+        }
+    }
+
+    private static void ensureRuntimeSdk() {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            com.overdrive.app.byd.dilink5.Dilink5SdkInjector.ensure(null);
+        }
+    }
+
+    static boolean adapterManagerReady(Object manager, String adapterGetter) {
+        if (manager == null || adapterGetter == null || adapterGetter.isEmpty()) {
+            return false;
+        }
+        Object connected = callGetter(manager, "isCarServiceConnect");
+        return Boolean.TRUE.equals(connected)
+                && callGetter(manager, adapterGetter) != null;
+    }
+
+    /**
+     * DiLink 5 returns success-shaped zeroes from several setters while the
+     * underlying vehicle adapter is still disconnected. Check the public TS
+     * manager before treating those writes as accepted.
+     */
+    public static boolean isDiLink5AdapterReady(
+            Context context, Object device, String adapterGetter) {
+        if (context == null || device == null
+                || VehicleActuatorBridge.isDiLink5RequestExpired()) {
+            return false;
+        }
+        try {
+            com.overdrive.app.byd.dilink5.Dilink5SdkInjector.ensure(context);
+            Class<?> managerClass = Class.forName(
+                    "android.hardware.bydauto.TsManagerImpl",
+                    true,
+                    device.getClass().getClassLoader());
+            Method getInstance =
+                    managerClass.getMethod("getInstance", Context.class);
+            Context application = context.getApplicationContext();
+            Object manager = getInstance.invoke(
+                    null, application != null ? application : context);
+            return adapterManagerReady(manager, adapterGetter);
+        } catch (Throwable failure) {
+            logger.debug("DiLink 5 adapter probe failed for "
+                    + adapterGetter + ": " + failure.getMessage());
+            return false;
+        }
+    }
+
+    private static boolean registerRetainedListener(
+            Object device, Object listener, Method register, int[] featureIds)
+            throws Exception {
+        invokeRegister(device, listener, register, featureIds);
+        Class<?> listenerType = register.getParameterTypes()[0];
+        Method unregister = findUnregisterMethod(device.getClass(), listenerType);
+        retainedListeners.put(device,
+                new RetainedListener(device, listener, register, unregister, featureIds));
+        return true;
+    }
+
+    private static void invokeRegister(
+            Object device, Object listener, Method register, int[] featureIds)
+            throws Exception {
+        if (featureIds == null) {
+            register.invoke(device, listener);
+        } else {
+            register.invoke(device, listener, featureIds);
+        }
+    }
+
+    private static boolean registerLegacyAdditive(
+            Object device,
+            Object listener,
+            Class<?> listenerType,
+            int[] featureIds,
+            boolean retryWithEmptyIds,
+            String label) throws Exception {
+        Method registerWithIds = findRegisterMethodWithIds(device.getClass(), listenerType);
+        boolean legacyFilteredRegistered = false;
+        if (registerWithIds != null) {
+            try {
+                registerWithIds.invoke(device, listener, featureIds);
+                legacyFilteredRegistered = true;
+            } catch (Exception firstFailure) {
+                logger.debug(label + " filtered registration failed: "
+                        + firstFailure.getMessage());
+            }
+            if (!legacyFilteredRegistered && retryWithEmptyIds && featureIds.length > 0) {
+                try {
+                    registerWithIds.invoke(device, listener, new int[0]);
+                    legacyFilteredRegistered = true;
+                } catch (Exception fallbackFailure) {
+                    logger.debug(label + " subscribe-all registration failed: "
+                            + fallbackFailure.getMessage());
+                }
+            }
+        }
+        Method register = findRegisterMethod(device.getClass(), listenerType);
+        if (register != null) {
+            register.invoke(device, listener);
+            return true;
+        }
+        return legacyFilteredRegistered;
+    }
+
+    static int refreshRetainedListeners(Object... devices) {
+        if (devices == null) return 0;
+        int refreshed = 0;
+        for (Object device : devices) {
+            RetainedListener retained = retainedListeners.get(device);
+            if (retained != null && retained.refresh()) refreshed++;
+        }
+        return refreshed;
+    }
+
+    static int unregisterRetainedListeners(Object... devices) {
+        if (devices == null) return 0;
+        int removed = 0;
+        for (Object device : devices) {
+            RetainedListener retained = retainedListeners.get(device);
+            if (retained != null && retained.detach()) {
+                retainedListeners.remove(device);
+                removed++;
+            }
+        }
+        return removed;
+    }
+
+    static boolean hasDetachedRetainedListeners(Object... devices) {
+        if (devices == null) return false;
+        for (Object device : devices) {
+            RetainedListener retained = retainedListeners.get(device);
+            if (retained != null && retained.isDetached()) return true;
+        }
+        return false;
+    }
 
     /**
      * Get a BYD device singleton via reflection.
@@ -27,51 +217,31 @@ public final class BydDeviceHelper {
      */
     public static Object getDevice(String className, Context context) {
         try {
-            if (Looper.myLooper() == null) {
-                try {
-                    Looper.prepare();
-                } catch (Throwable ignored) {}
+            boolean dilink5 =
+                    com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
+            if (dilink5) {
+                com.overdrive.app.byd.dilink5.Dilink5SdkInjector.ensure(context);
             }
-            com.overdrive.app.byd.dilink5.Dilink5SdkInjector.ensure(context);
-            Class<?> cls = null;
-            try {
-                cls = Class.forName(className, true, com.overdrive.app.byd.dilink5.Dilink5SdkInjector.class.getClassLoader());
-            } catch (ClassNotFoundException e) {
-                if (context != null && context.getClassLoader() != null) {
-                    cls = Class.forName(className, true, context.getClassLoader());
-                } else {
-                    throw e;
-                }
-            }
+            Class<?> cls = Class.forName(
+                    className,
+                    true,
+                    dilink5
+                            ? com.overdrive.app.byd.dilink5.Dilink5SdkInjector.class
+                                    .getClassLoader()
+                            : BydDeviceHelper.class.getClassLoader());
             Method getInstance = cls.getMethod("getInstance", Context.class);
-            Context effectiveContext = withBydPermissionBypass(context);
-            Object device = null;
-            try {
-                device = getInstance.invoke(null, effectiveContext);
-            } catch (Throwable t) {
-                if (effectiveContext != context) {
-                    device = getInstance.invoke(null, context);
-                } else {
-                    throw t;
-                }
-            }
-            if (device == null && effectiveContext != context) {
-                try {
-                    device = getInstance.invoke(null, context);
-                } catch (Throwable ignored) {}
-            }
+            Object device = getInstance.invoke(
+                    null, dilink5 ? withBydPermissionBypass(context) : context);
             if (device != null) {
                 logger.info("Device OK: " + cls.getSimpleName());
             } else {
                 logger.info("Device NULL: " + cls.getSimpleName());
             }
             return device;
-        } catch (ClassNotFoundException e) {
-            logger.info("Device class not found: " + className);
         } catch (Throwable e) {
             Throwable cause = e instanceof InvocationTargetException && e.getCause() != null
                     ? e.getCause() : e;
-            logger.info("Device init failed: " + className + " — "
+            logger.debug("Device init failed: " + className + " — "
                     + cause.getClass().getSimpleName() + ": " + cause.getMessage());
         }
         return null;
@@ -79,102 +249,18 @@ public final class BydDeviceHelper {
 
     /**
      * Wrap an app context so BYD's SDK-side permission checks see the BYD permissions as granted.
+     *
+     * <p>Some OEM SDK clients use a custom {@code Application}: BYD device
+     * {@code getInstance(Context)} methods enforce signature permissions directly on the supplied
+     * Context before they create their singleton. OverDrive is not platform-signed, so a raw app
+     * context fails before any Binder/HAL call is attempted. The wrapper is opt-in and grants only
+     * {@code android.permission.BYD*}; every unrelated Android permission still delegates to the
+     * real context. Returning the wrapper from {@link Context#getApplicationContext()} prevents
+     * the SDK from normalizing back to the unwrapped context before a later permission check.
      */
     public static Context withBydPermissionBypass(Context context) {
-        if (context == null) return null;
-        fixContextImplForUid2000(context);
-        preinstallSettingsProviderForUid2000(context);
-        if (context instanceof BydPermissionContext) return context;
+        if (context == null || context instanceof BydPermissionContext) return context;
         return new BydPermissionContext(context);
-    }
-
-    public static void fixContextImplForUid2000(Context context) {
-        if (android.os.Process.myUid() != 2000) return;
-        try {
-            Context target = context;
-            while (target instanceof ContextWrapper) {
-                target = ((ContextWrapper) target).getBaseContext();
-            }
-            if (target != null && target.getClass().getName().equals("android.app.ContextImpl")) {
-                try {
-                    Field pkgField = target.getClass().getDeclaredField("mPackageName");
-                    pkgField.setAccessible(true);
-                    pkgField.set(target, "com.android.shell");
-                } catch (Throwable ignored) {}
-
-                try {
-                    Field opPkgField = target.getClass().getDeclaredField("mOpPackageName");
-                    opPkgField.setAccessible(true);
-                    opPkgField.set(target, "com.android.shell");
-                } catch (Throwable ignored) {}
-
-                try {
-                    Field basePkgField = target.getClass().getDeclaredField("mBasePackageName");
-                    basePkgField.setAccessible(true);
-                    basePkgField.set(target, "com.android.shell");
-                } catch (Throwable ignored) {}
-
-                try {
-                    Field attrField = target.getClass().getDeclaredField("mAttributionSource");
-                    attrField.setAccessible(true);
-                    attrField.set(target, null);
-                } catch (Throwable ignored) {}
-            }
-        } catch (Throwable t) {
-            logger.debug("fixContextImplForUid2000 failed: " + t.getMessage());
-        }
-        preinstallSettingsProviderForUid2000(context);
-    }
-
-    private static volatile boolean sSettingsProviderInstalled = false;
-
-    public static void preinstallSettingsProviderForUid2000(Context context) {
-        if (sSettingsProviderInstalled || android.os.Process.myUid() != 2000) return;
-        try {
-            Class<?> atCls = Class.forName("android.app.ActivityThread");
-            Method currentAtMethod = atCls.getMethod("currentActivityThread");
-            Object at = currentAtMethod.invoke(null);
-            if (at == null) return;
-
-            Class<?> amClass = Class.forName("android.app.ActivityManager");
-            Method getService = amClass.getMethod("getService");
-            Object am = getService.invoke(null);
-            if (am == null) return;
-
-            Object holder = null;
-            for (Method m : am.getClass().getMethods()) {
-                if (m.getName().equals("getContentProviderExternal")) {
-                    int pc = m.getParameterTypes().length;
-                    if (pc == 3) {
-                        holder = m.invoke(am, "settings", 0, null);
-                    } else if (pc == 4) {
-                        holder = m.invoke(am, "settings", 0, null, null);
-                    }
-                    break;
-                }
-            }
-
-            if (holder != null) {
-                Field infoField = holder.getClass().getDeclaredField("info");
-                infoField.setAccessible(true);
-                Object info = infoField.get(holder);
-
-                for (Method m : atCls.getDeclaredMethods()) {
-                    if (m.getName().equals("installProvider")) {
-                        m.setAccessible(true);
-                        Class<?>[] pts = m.getParameterTypes();
-                        if (pts.length == 6) {
-                            m.invoke(at, context, holder, info, true, true, true);
-                            sSettingsProviderInstalled = true;
-                            logger.info("Successfully pre-installed settings provider in ActivityThread for UID 2000");
-                            return;
-                        }
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            logger.debug("preinstallSettingsProviderForUid2000 failed: " + t.getMessage());
-        }
     }
 
     static boolean isBydPermissionName(String permission) {
@@ -187,55 +273,96 @@ public final class BydDeviceHelper {
         }
 
         @Override
-        public String getPackageName() {
-            if (android.os.Process.myUid() == 2000 || "android".equals(super.getPackageName())) {
-                return "com.android.shell";
-            }
-            return super.getPackageName();
-        }
-
-        @Override
-        public String getOpPackageName() {
-            if (android.os.Process.myUid() == 2000 || "android".equals(super.getOpPackageName())) {
-                return "com.android.shell";
-            }
-            return super.getOpPackageName();
-        }
-
-        @Override
         public Context getApplicationContext() {
             return this;
         }
 
         @Override
         public int checkPermission(String permission, int pid, int uid) {
-            return PackageManager.PERMISSION_GRANTED;
+            return isBydPermissionName(permission)
+                    ? PackageManager.PERMISSION_GRANTED
+                    : super.checkPermission(permission, pid, uid);
         }
 
         @Override
         public int checkCallingPermission(String permission) {
-            return PackageManager.PERMISSION_GRANTED;
+            return isBydPermissionName(permission)
+                    ? PackageManager.PERMISSION_GRANTED
+                    : super.checkCallingPermission(permission);
         }
 
         @Override
         public int checkCallingOrSelfPermission(String permission) {
-            return PackageManager.PERMISSION_GRANTED;
+            return isBydPermissionName(permission)
+                    ? PackageManager.PERMISSION_GRANTED
+                    : super.checkCallingOrSelfPermission(permission);
         }
 
         @Override
         public int checkSelfPermission(String permission) {
-            return PackageManager.PERMISSION_GRANTED;
+            return isBydPermissionName(permission)
+                    ? PackageManager.PERMISSION_GRANTED
+                    : super.checkSelfPermission(permission);
         }
 
         @Override
         public void enforcePermission(
-                String permission, int pid, int uid, String message) {}
+                String permission, int pid, int uid, String message) {
+            if (!isBydPermissionName(permission)) {
+                super.enforcePermission(permission, pid, uid, message);
+            }
+        }
 
         @Override
-        public void enforceCallingPermission(String permission, String message) {}
+        public void enforceCallingPermission(String permission, String message) {
+            if (!isBydPermissionName(permission)) {
+                super.enforceCallingPermission(permission, message);
+            }
+        }
 
         @Override
-        public void enforceCallingOrSelfPermission(String permission, String message) {}
+        public void enforceCallingOrSelfPermission(String permission, String message) {
+            if (!isBydPermissionName(permission)) {
+                super.enforceCallingOrSelfPermission(permission, message);
+            }
+        }
+    }
+
+    public static boolean verifyStartupAppAccess(
+            Object device, String packageName, int attempts, long retryMs) {
+        if (device == null || packageName == null || packageName.isEmpty()
+                || attempts <= 0) {
+            return false;
+        }
+        try {
+            Method getter = device.getClass().getMethod(
+                    "getStartupAppEnable", String.class);
+            Method setter = device.getClass().getMethod(
+                    "setStartupAppEnable", String.class, Boolean.TYPE);
+            for (int attempt = 0; attempt < attempts; attempt++) {
+                try {
+                    if (Boolean.TRUE.equals(getter.invoke(device, packageName))) {
+                        return true;
+                    }
+                    Object write = setter.invoke(device, packageName, true);
+                    if (write instanceof Number
+                            && ((Number) write).intValue() >= 0
+                            && Boolean.TRUE.equals(
+                                    getter.invoke(device, packageName))) {
+                        return true;
+                    }
+                } catch (Throwable ignored) {
+                    // The settings adapter connects asynchronously; retry until ready.
+                }
+                if (retryMs > 0L && attempt + 1 < attempts) {
+                    android.os.SystemClock.sleep(retryMs);
+                }
+            }
+        } catch (Throwable failure) {
+            logger.debug("Startup app API unavailable: "
+                    + failure.getMessage());
+        }
+        return false;
     }
 
     /**
@@ -248,12 +375,21 @@ public final class BydDeviceHelper {
      */
     public static int callManagerSetInt(
             Context context, int deviceType, int featureId, int value) {
-        if (context == null) return Integer.MIN_VALUE;
+        if (context == null || VehicleActuatorBridge.isDiLink5RequestExpired()) {
+            return Integer.MIN_VALUE;
+        }
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            com.overdrive.app.byd.dilink5.Dilink5SdkInjector.ensure(context);
+        }
         try {
             Class<?> managerClass =
                     Class.forName("android.hardware.bydauto.BYDAutoDeviceManager");
             Method getInstance = managerClass.getMethod("getInstance", Context.class);
-            Object manager = getInstance.invoke(null, context);
+            Object manager = getInstance.invoke(
+                    null,
+                    com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                            ? withBydPermissionBypass(context)
+                            : context);
             if (manager == null) {
                 logger.debug("callManagerSetInt: BYDAutoDeviceManager unavailable");
                 return Integer.MIN_VALUE;
@@ -315,7 +451,7 @@ public final class BydDeviceHelper {
      * Call a getter with one int parameter.
      */
     public static Object callGetter(Object device, String methodName, int param) {
-        if (device == null) return null;
+        if (device == null || VehicleActuatorBridge.isDiLink5RequestExpired()) return null;
         Method m = lookupPublicMethodCached(device.getClass(), methodName,
                 publicIntMethodCache, INT_PARAMS);
         if (m == null) return null;
@@ -336,7 +472,7 @@ public final class BydDeviceHelper {
      * Used for SDK methods like voiceCtlMoonRoof(int), voiceCtlSunshadePanel(int).
      */
     public static Object callMethod(Object device, String methodName, int param1) {
-        if (device == null) return null;
+        if (device == null || VehicleActuatorBridge.isDiLink5RequestExpired()) return null;
         Method m = lookupPublicMethodCached(device.getClass(), methodName,
                 publicIntMethodCache, INT_PARAMS);
         if (m == null) return null;
@@ -353,12 +489,49 @@ public final class BydDeviceHelper {
     }
 
     /**
+     * Invoke the first available public method taking one int. Aliases are tried only when a
+     * method is absent; once a method exists, a thrown invocation is a real failure and no second
+     * command is issued.
+     */
+    public static boolean invokeFirstAvailableIntMethod(
+            Object device, int value, String... methodNames) {
+        if (device == null || methodNames == null
+                || VehicleActuatorBridge.isDiLink5RequestExpired()) {
+            return false;
+        }
+        for (String methodName : methodNames) {
+            if (methodName == null || methodName.isEmpty()) continue;
+            Method method = lookupPublicMethodCached(
+                    device.getClass(), methodName, publicIntMethodCache, INT_PARAMS);
+            if (method == null) continue;
+            try {
+                Object result = method.invoke(device, value);
+                if (result instanceof Boolean) return (Boolean) result;
+                return !(result instanceof Number)
+                        || ((Number) result).intValue() == 0;
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                Throwable cause = e.getCause();
+                logger.debug(methodName + "(" + value + ") threw: "
+                        + (cause != null
+                        ? cause.getClass().getSimpleName() + ": " + cause.getMessage()
+                        : "unknown"));
+                return false;
+            } catch (Exception e) {
+                logger.debug(methodName + "(" + value + ") failed: "
+                        + e.getClass().getSimpleName() + ": " + e.getMessage());
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Call a method with two int parameters.
      * Used for SDK methods like setAcWindLevel(int, int), setAcWindMode(int, int),
      * setSeatHeatingState(int, int), setSeatVentilatingState(int, int).
      */
     public static Object callMethod(Object device, String methodName, int param1, int param2) {
-        if (device == null) return null;
+        if (device == null || VehicleActuatorBridge.isDiLink5RequestExpired()) return null;
         Method m = lookupPublicMethodCached(device.getClass(), methodName,
                 publicIntIntMethodCache, INT_INT_PARAMS);
         if (m == null) return null;
@@ -380,7 +553,7 @@ public final class BydDeviceHelper {
      * setAllWindowState(int lf, int rf, int lr, int rr).
      */
     public static Object callMethod(Object device, String methodName, int p1, int p2, int p3) {
-        if (device == null) return null;
+        if (device == null || VehicleActuatorBridge.isDiLink5RequestExpired()) return null;
         Method m = lookupPublicMethodCached(device.getClass(), methodName,
                 publicInt3MethodCache, INT3_PARAMS);
         if (m == null) return null;
@@ -396,7 +569,7 @@ public final class BydDeviceHelper {
         return null;
     }
     public static Object callMethod(Object device, String methodName, int p1, int p2, int p3, int p4) {
-        if (device == null) return null;
+        if (device == null || VehicleActuatorBridge.isDiLink5RequestExpired()) return null;
         Method m = lookupPublicMethodCached(device.getClass(), methodName,
                 publicInt4MethodCache, INT4_PARAMS);
         if (m == null) return null;
@@ -461,6 +634,21 @@ public final class BydDeviceHelper {
             logger.debug("callGet failed for id=" + featureId + " — " + e.getMessage());
         }
         return null;
+    }
+
+    /** DiLink 5 feature reads whose {@code Class} token must be BYDAutoEventValue itself. */
+    public static Object callGetEventValue(Object device, int featureId) {
+        if (device == null) return null;
+        ensureRuntimeSdk();
+        try {
+            Class<?> eventValueClass =
+                    Class.forName("android.hardware.bydauto.BYDAutoEventValue");
+            return callGet(device, featureId, eventValueClass);
+        } catch (Throwable e) {
+            logger.debug("callGetEventValue failed for id=0x"
+                    + Integer.toHexString(featureId) + " — " + e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -652,6 +840,7 @@ public final class BydDeviceHelper {
      */
     public static boolean registerListener(Object device, ListenerCallback callback) {
         if (device == null) return false;
+        ensureRuntimeSdk();
         try {
             String listenerInterfaceName = "android.hardware.IBYDAutoListener";
             Class<?> iListener = getListenerInterface(device.getClass(), listenerInterfaceName);
@@ -692,6 +881,7 @@ public final class BydDeviceHelper {
      */
     public static boolean registerListener(Object device, int[] featureIds, ListenerCallback callback) {
         if (device == null) return false;
+        ensureRuntimeSdk();
         try {
             String listenerInterfaceName = "android.hardware.IBYDAutoListener";
             Class<?> iListener = getListenerInterface(device.getClass(), listenerInterfaceName);
@@ -729,6 +919,169 @@ public final class BydDeviceHelper {
         return false;
     }
 
+    /** DiLink 5 speed callbacks are concrete methods on the typed listener. */
+    public static boolean registerSpeedListener(Object device, ListenerCallback callback) {
+        if (device == null) return false;
+        ensureRuntimeSdk();
+        try {
+            android.hardware.bydauto.speed.AbsBYDAutoSpeedListener listener =
+                    new android.hardware.bydauto.speed.AbsBYDAutoSpeedListener() {
+                        @Override
+                        public void onSpeedChanged(double speed) {
+                            invokeCallback(callback, "onSpeedChanged", new Object[]{speed});
+                        }
+
+                        @Override
+                        public void onSpeedChanged(int speed) {
+                            invokeCallback(callback, "onSpeedChanged", new Object[]{speed});
+                        }
+
+                        @Override
+                        public void onSpeedValueChanged(double speed) {
+                            invokeCallback(callback, "onSpeedChanged", new Object[]{speed});
+                        }
+
+                        @Override
+                        public void onCurrentSpeedChanged(double speed) {
+                            invokeCallback(callback, "onSpeedChanged", new Object[]{speed});
+                        }
+
+                        @Override
+                        public void onCurrentSpeedChanged(int speed) {
+                            invokeCallback(callback, "onSpeedChanged", new Object[]{speed});
+                        }
+
+                        @Override
+                        public void onAccelerateDeepnessChanged(int value) {
+                            invokeCallback(callback, "onAccelerateDeepnessChanged",
+                                    new Object[]{value});
+                        }
+
+                        @Override
+                        public void onBrakeDeepnessChanged(int value) {
+                            invokeCallback(callback, "onBrakeDeepnessChanged",
+                                    new Object[]{value});
+                        }
+                    };
+            Method register = findRegisterMethod(
+                    device.getClass(),
+                    android.hardware.bydauto.speed.AbsBYDAutoSpeedListener.class);
+            if (register != null) {
+                return registerRetainedListener(device, listener, register, null);
+            }
+        } catch (LinkageError e) {
+            logger.debug("registerSpeedListener: class not available on this firmware");
+        } catch (Exception e) {
+            logger.debug("registerSpeedListener failed: " + e.getMessage());
+        }
+        return false;
+    }
+
+    /** DiLink 5 event-only HV bus and motor telemetry. */
+    public static boolean registerCollectDataListener(
+            Object device, ListenerCallback callback) {
+        if (device == null) return false;
+        ensureRuntimeSdk();
+        try {
+            android.hardware.bydauto.collectdata.AbsBYDAutoCollectDataListener listener =
+                    new android.hardware.bydauto.collectdata.AbsBYDAutoCollectDataListener() {
+                        @Override
+                        public void onMotorMCUGeneratrixVolt(int front, int rear) {
+                            invokeCallback(callback, "onMotorMCUGeneratrixVolt",
+                                    new Object[]{front, rear});
+                        }
+
+                        @Override
+                        public void onMotorMCUGeneratrixCurrent(int front, int rear) {
+                            invokeCallback(callback, "onMotorMCUGeneratrixCurrent",
+                                    new Object[]{front, rear});
+                        }
+
+                        @Override
+                        public void onDriverMotorTemperature(int front, int rear) {
+                            invokeCallback(callback, "onDriverMotorTemperature",
+                                    new Object[]{front, rear});
+                        }
+
+                        @Override
+                        public void onDriverMotorSpeed(int front, int rear) {
+                            invokeCallback(callback, "onDriverMotorSpeed",
+                                    new Object[]{front, rear});
+                        }
+
+                        @Override
+                        public void onDriverMotorTorque(int front, int rear) {
+                            invokeCallback(callback, "onDriverMotorTorque",
+                                    new Object[]{front, rear});
+                        }
+                    };
+            Method register = findRegisterMethod(
+                    device.getClass(),
+                    android.hardware.bydauto.collectdata.AbsBYDAutoCollectDataListener.class);
+            if (register != null) {
+                return registerRetainedListener(device, listener, register, null);
+            }
+        } catch (LinkageError e) {
+            logger.debug("registerCollectDataListener: class not available on this firmware");
+        } catch (Exception e) {
+            logger.debug("registerCollectDataListener failed: " + e.getMessage());
+        }
+        return false;
+    }
+
+    /** DiLink 5 regenerative-braking strength callback. */
+    public static boolean registerSettingListener(Object device, ListenerCallback callback) {
+        if (device == null) return false;
+        ensureRuntimeSdk();
+        try {
+            android.hardware.bydauto.setting.AbsBYDAutoSettingListener listener =
+                    new android.hardware.bydauto.setting.AbsBYDAutoSettingListener() {
+                        @Override
+                        public void onEnergyFeedbackStrengthChanged(int strength) {
+                            invokeCallback(callback, "onEnergyFeedbackStrengthChanged",
+                                    new Object[]{strength});
+                        }
+
+                        @Override
+                        public void onRecoverOrSaveParamsChanged(
+                                int position, int location, int state, int code) {
+                            invokeCallback(callback, "onRecoverOrSaveParamsChanged",
+                                    new Object[]{position, location, state, code});
+                        }
+
+                        @Override
+                        public void onCpdImsSwitchStateChanged(int state) {
+                            invokeCallback(callback, "onCpdImsSwitchStateChanged",
+                                    new Object[]{state});
+                        }
+
+                        @Override
+                        public void onDataChanged(android.hardware.IBYDAutoEvent event) {
+                            invokeCallback(callback, "onDataChanged", new Object[]{event});
+                        }
+
+                        @Override
+                        public void onDataEventChanged(
+                                int featureId,
+                                android.hardware.bydauto.BYDAutoEventValue value) {
+                            invokeCallback(callback, "onDataEventChanged",
+                                    new Object[]{featureId, value});
+                        }
+                    };
+            Method register = findRegisterMethod(
+                    device.getClass(),
+                    android.hardware.bydauto.setting.AbsBYDAutoSettingListener.class);
+            if (register != null) {
+                return registerRetainedListener(device, listener, register, null);
+            }
+        } catch (LinkageError e) {
+            logger.debug("registerSettingListener: class not available on this firmware");
+        } catch (Exception e) {
+            logger.debug("registerSettingListener failed: " + e.getMessage());
+        }
+        return false;
+    }
+
     /**
      * Register a typed (device-specific) listener using a hand-rolled concrete
      * subclass of an abstract listener class. The BYD framework provides the
@@ -749,6 +1102,7 @@ public final class BydDeviceHelper {
      */
     public static boolean registerBodyworkListener(Object device, ListenerCallback callback) {
         if (device == null) return false;
+        ensureRuntimeSdk();
         try {
             android.hardware.bydauto.bodywork.AbsBYDAutoBodyworkListener listener =
                 new android.hardware.bydauto.bodywork.AbsBYDAutoBodyworkListener() {
@@ -787,6 +1141,7 @@ public final class BydDeviceHelper {
 
     public static boolean registerTyreListener(Object device, ListenerCallback callback) {
         if (device == null) return false;
+        ensureRuntimeSdk();
         try {
             android.hardware.bydauto.tyre.AbsBYDAutoTyreListener listener =
                 new android.hardware.bydauto.tyre.AbsBYDAutoTyreListener() {
@@ -795,8 +1150,17 @@ public final class BydDeviceHelper {
                         invokeCallback(callback, "onTyrePressureValueChanged", new Object[]{wheel, value});
                     }
                     @Override
+                    public void onTyrePressureValueByTypeChanged(int wheel, float value) {
+                        invokeCallback(callback, "onTyrePressureValueByTypeChanged",
+                                new Object[]{wheel, value});
+                    }
+                    @Override
                     public void onTyrePressureStateChanged(int wheel, int state) {
                         invokeCallback(callback, "onTyrePressureStateChanged", new Object[]{wheel, state});
+                    }
+                    @Override
+                    public void onTyreBatteryValueChanged(int wheel, float value) {
+                        invokeCallback(callback, "onTyreBatteryValueChanged", new Object[]{wheel, value});
                     }
                     @Override
                     public void onTyreBatteryValueChanged(int wheel, double value) {
@@ -809,6 +1173,11 @@ public final class BydDeviceHelper {
                     @Override
                     public void onTyreTemperatureStateChanged(int state) {
                         invokeCallback(callback, "onTyreTemperatureStateChanged", new Object[]{state});
+                    }
+                    @Override
+                    public void onTyreTemperatureValueChanged(int wheel, int value) {
+                        invokeCallback(callback, "onTyreTemperatureValueChanged",
+                                new Object[]{wheel, value});
                     }
                     @Override
                     public void onTyreAirLeakStateChanged(int wheel, int state) {
@@ -826,20 +1195,8 @@ public final class BydDeviceHelper {
                     public void onIndirectTyreSystemStateChanged(int state) {
                         invokeCallback(callback, "onIndirectTyreSystemStateChanged", new Object[]{state});
                     }
-                    @Override
-                    public void onTyreTemperatureValueChanged(int wheel, int value) {
-                        invokeCallback(callback, "onTyreTemperatureValueChanged", new Object[]{wheel, value});
-                    }
-                    @Override
-                    public void onTyrePressureValueByTypeChanged(int wheel, float value) {
-                        invokeCallback(callback, "onTyrePressureValueByTypeChanged", new Object[]{wheel, value});
-                    }
-                    // Generic feature-ID event channel. When the listener is
-                    // registered via the 2-arg overload with an int[] filter,
-                    // the HAL fires this for each subscribed feature ID
-                    // instead of (or alongside) the typed callbacks above.
-                    // The Tyre device delegates per-wheel temperature reads
-                    // through Instrument-class feature IDs (LF/RF/LB/RB).
+                    // Legacy generic feature-ID event channel. DI5 uses the
+                    // dedicated typed temperature callback above.
                     public void onDataEventChanged(int eventId, android.hardware.bydauto.BYDAutoEventValue value) {
                         invokeCallback(callback, "onDataEventChanged", new Object[]{eventId, value});
                     }
@@ -863,58 +1220,42 @@ public final class BydDeviceHelper {
                 logger.info("TyreDevice registerListener overloads:\n" + overloads);
             }
 
-            // Strategy 1: 2-arg registration with the per-wheel temperature
-            // feature IDs. BYDAutoFeatureIds.Instrument exposes the LF/RF/LB/
-            // RB tyre temperature property IDs — those are the ones the Tyre
-            // device's underlying property tree actually keys on, regardless
-            // of which device class hosts the registerListener overload.
-            // Filtering on this exact set is what wakes up the temperature
-            // event channel on firmwares where the bare typed callbacks
-            // (onTyreBatteryValueChanged) stay dormant.
-            Method registerWithIds = findRegisterMethodWithIds(device.getClass(),
-                android.hardware.bydauto.tyre.AbsBYDAutoTyreListener.class);
-            boolean twoArgRegistered = false;
-            if (registerWithIds != null) {
-                try {
-                    int[] tyreFeatureIds = com.overdrive.app.byd.BydFeatureIds.INSTRUMENT_TYRE_TEMP_IDS;
-                    registerWithIds.invoke(device, listener, tyreFeatureIds);
-                    logger.info("Tyre listener registered via 2-arg overload with LF/RF/LB/RB feature IDs");
-                    twoArgRegistered = true;
-                } catch (Exception e) {
-                    logger.info("Tyre 2-arg registration with LF/RF/LB/RB IDs failed: " + e.getMessage());
-                }
-                // Fallback: empty int[]. Some HAL implementations interpret
-                // this as "subscribe to all features"; others reject it.
-                // We only attempt this if the typed-ID registration above
-                // failed outright (e.g. method threw on invoke).
-                if (!twoArgRegistered) {
-                    try {
-                        registerWithIds.invoke(device, listener, new int[0]);
-                        logger.info("Tyre listener registered via 2-arg overload with empty int[] (subscribe-all fallback)");
-                        twoArgRegistered = true;
-                    } catch (Exception e) {
-                        logger.info("Tyre 2-arg registration with empty int[] failed: " + e.getMessage());
-                    }
-                }
+            if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                return registerLegacyAdditive(
+                        device,
+                        listener,
+                        android.hardware.bydauto.tyre.AbsBYDAutoTyreListener.class,
+                        com.overdrive.app.byd.BydFeatureIds.INSTRUMENT_TYRE_TEMP_IDS,
+                        true,
+                        "Tyre");
             }
 
-            // Strategy 2: Also register via single-arg (ensures pressure/leak/signal
-            // events still arrive even if the two-arg only subscribes to temp events).
-            // If two-arg already succeeded, this is additive — BYD HAL allows multiple
-            // registrations. If two-arg wasn't available, this is the only path.
+            // Use exactly one overload. Some implementations keep a single listener
+            // slot, so a second registration can silently replace the first one.
             Method register = findRegisterMethod(device.getClass(),
                 android.hardware.bydauto.tyre.AbsBYDAutoTyreListener.class);
             if (register != null) {
-                register.invoke(device, listener);
-                if (twoArgRegistered) {
-                    logger.info("Tyre listener also registered via 1-arg overload (pressure/state events)");
-                } else {
-                    logger.info("Tyre listener registered via 1-arg overload only");
+                try {
+                    registerRetainedListener(device, listener, register, null);
+                    logger.info("Tyre listener registered via 1-arg overload");
+                    return true;
+                } catch (Exception e) {
+                    logger.info("Tyre 1-arg registration failed: " + e.getMessage());
                 }
-                return true;
             }
-            // If single-arg failed but two-arg succeeded, still report success
-            if (twoArgRegistered) return true;
+
+            Method registerWithIds = findRegisterMethodWithIds(device.getClass(),
+                android.hardware.bydauto.tyre.AbsBYDAutoTyreListener.class);
+            if (registerWithIds != null) {
+                try {
+                    registerRetainedListener(
+                            device, listener, registerWithIds, new int[0]);
+                    logger.info("Tyre listener registered via subscribe-all fallback");
+                    return true;
+                } catch (Exception e) {
+                    logger.info("Tyre subscribe-all registration failed: " + e.getMessage());
+                }
+            }
             logger.debug("registerTyreListener: no registerListener method on "
                 + device.getClass().getName());
         } catch (NoClassDefFoundError e) {
@@ -932,12 +1273,12 @@ public final class BydDeviceHelper {
      * never invokes the device-specific callbacks on AbsBYDAutoEngineListener
      * subclasses on most firmware).
      *
-     * Mirrors the tyre approach: try the 2-arg overload first (HAL only fires
-     * onDataEventChanged with feature-IDs when registered with int[] filter),
-     * then 1-arg as a baseline. Both succeed additively where supported.
+     * Uses one typed registration. The filtered overload is a fallback when
+     * the normal typed overload is absent or rejects the listener.
      */
     public static boolean registerEngineListener(Object device, ListenerCallback callback) {
         if (device == null) return false;
+        ensureRuntimeSdk();
         try {
             android.hardware.bydauto.engine.AbsBYDAutoEngineListener listener =
                 new android.hardware.bydauto.engine.AbsBYDAutoEngineListener() {
@@ -981,35 +1322,39 @@ public final class BydDeviceHelper {
                 logger.info("EngineDevice registerListener overloads:\n" + overloads);
             }
 
-            // Strategy 1: 2-arg with empty int[]. We don't have engine fluid
-            // feature IDs in BYDAutoFeatureIds.Engine, so empty-array
-            // (subscribe-all) is the only option for the filtered overload.
-            Method registerWithIds = findRegisterMethodWithIds(device.getClass(),
-                android.hardware.bydauto.engine.AbsBYDAutoEngineListener.class);
-            boolean twoArgRegistered = false;
-            if (registerWithIds != null) {
-                try {
-                    registerWithIds.invoke(device, listener, new int[0]);
-                    logger.info("Engine listener registered via 2-arg overload with empty int[]");
-                    twoArgRegistered = true;
-                } catch (Exception e) {
-                    logger.info("Engine 2-arg registration failed: " + e.getMessage());
-                }
+            if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                return registerLegacyAdditive(
+                        device,
+                        listener,
+                        android.hardware.bydauto.engine.AbsBYDAutoEngineListener.class,
+                        new int[0],
+                        false,
+                        "Engine");
             }
 
-            // Strategy 2: 1-arg typed. Even when the HAL never fires the
-            // typed callbacks, this one is harmless and gives us the
-            // baseline that several other devices rely on.
             Method register = findRegisterMethod(device.getClass(),
                 android.hardware.bydauto.engine.AbsBYDAutoEngineListener.class);
             if (register != null) {
-                register.invoke(device, listener);
-                logger.info(twoArgRegistered
-                        ? "Engine listener also registered via 1-arg overload"
-                        : "Engine listener registered via 1-arg overload only");
-                return true;
+                try {
+                    register.invoke(device, listener);
+                    logger.info("Engine listener registered via 1-arg overload");
+                    return true;
+                } catch (Exception e) {
+                    logger.info("Engine 1-arg registration failed: " + e.getMessage());
+                }
             }
-            if (twoArgRegistered) return true;
+
+            Method registerWithIds = findRegisterMethodWithIds(device.getClass(),
+                android.hardware.bydauto.engine.AbsBYDAutoEngineListener.class);
+            if (registerWithIds != null) {
+                try {
+                    registerWithIds.invoke(device, listener, new int[0]);
+                    logger.info("Engine listener registered via subscribe-all fallback");
+                    return true;
+                } catch (Exception e) {
+                    logger.info("Engine subscribe-all registration failed: " + e.getMessage());
+                }
+            }
             logger.debug("registerEngineListener: no registerListener method on "
                 + device.getClass().getName());
         } catch (NoClassDefFoundError e) {
@@ -1021,11 +1366,12 @@ public final class BydDeviceHelper {
     }
 
     /**
-     * Register the concrete energy listener through the SDK's generic listener method.
-     * The generic Proxy path cannot receive methods declared only by the concrete class.
+     * Register the concrete energy listener. The generic Proxy path cannot receive
+     * methods declared only by the concrete class.
      */
     public static boolean registerEnergyListener(Object device, ListenerCallback callback) {
         if (device == null) return false;
+        ensureRuntimeSdk();
         try {
             android.hardware.bydauto.energy.AbsBYDAutoEnergyListener listener =
                     new android.hardware.bydauto.energy.AbsBYDAutoEnergyListener() {
@@ -1048,15 +1394,51 @@ public final class BydDeviceHelper {
                         public void onRoadSurfaceChanged(int mode) {
                             invokeCallback(callback, "onRoadSurfaceChanged", new Object[]{mode});
                         }
+
+                        @Override
+                        public void oniTACModeChanged(int mode) {
+                            invokeCallback(callback, "oniTACModeChanged", new Object[]{mode});
+                        }
                     };
-            Method register = findRegisterMethod(
-                    device.getClass(), android.hardware.IBYDAutoListener.class);
+            if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                Method legacyRegister = findRegisterMethod(
+                        device.getClass(), android.hardware.IBYDAutoListener.class);
+                if (legacyRegister != null) {
+                    legacyRegister.invoke(device, listener);
+                    return true;
+                }
+            }
+            Class<?> listenerType =
+                    android.hardware.bydauto.energy.AbsBYDAutoEnergyListener.class;
+            Method register = findRegisterMethod(device.getClass(), listenerType);
+            if (register != null) {
+                try {
+                    return registerRetainedListener(device, listener, register, null);
+                } catch (Exception e) {
+                    logger.debug("Energy 1-arg registration failed: " + e.getMessage());
+                }
+            }
+
+            Method registerWithIds =
+                    findRegisterMethodWithIds(device.getClass(), listenerType);
+            if (registerWithIds != null) {
+                try {
+                    return registerRetainedListener(
+                            device, listener, registerWithIds, new int[0]);
+                } catch (Exception e) {
+                    logger.debug("Energy subscribe-all registration failed: "
+                            + e.getMessage());
+                }
+            }
+
+            // Compatibility fallback for older SDKs exposing only the marker interface.
+            register = findRegisterMethod(device.getClass(), android.hardware.IBYDAutoListener.class);
             if (register != null) {
                 register.invoke(device, listener);
                 return true;
             }
-            logger.debug("registerEnergyListener: no generic registerListener method on "
-                    + device.getClass().getName());
+            logger.debug("registerEnergyListener: no registerListener method on "
+                + device.getClass().getName());
         } catch (LinkageError e) {
             logger.debug("registerEnergyListener: class not available on this firmware");
         } catch (Exception e) {
@@ -1072,6 +1454,7 @@ public final class BydDeviceHelper {
      */
     public static boolean registerDoorLockListener(Object device, ListenerCallback callback) {
         if (device == null) return false;
+        ensureRuntimeSdk();
         try {
             android.hardware.bydauto.doorlock.AbsBYDAutoDoorLockListener listener =
                 new android.hardware.bydauto.doorlock.AbsBYDAutoDoorLockListener() {
@@ -1105,11 +1488,12 @@ public final class BydDeviceHelper {
      * observed to silently drop on PHEV builds, which is the root cause
      * of charging-detection lag during AC charging start.
      *
-     * Registers both the 2-arg (with empty int[] for subscribe-all) and
-     * 1-arg overloads where present. Both succeed additively where supported.
+     * Uses one typed registration, with the subscribe-all overload as a
+     * fallback when the normal typed overload is unavailable.
      */
     public static boolean registerChargingListener(Object device, ListenerCallback callback) {
         if (device == null) return false;
+        ensureRuntimeSdk();
         try {
             android.hardware.bydauto.charging.AbsBYDAutoChargingListener listener =
                 new android.hardware.bydauto.charging.AbsBYDAutoChargingListener() {
@@ -1130,33 +1514,50 @@ public final class BydDeviceHelper {
                         invokeCallback(callback, "onChargingPowerChanged", new Object[]{power});
                     }
                     @Override
+                    public void onChargingPowerChanged(float power) {
+                        invokeCallback(callback, "onChargingPowerChanged", new Object[]{power});
+                    }
+                    @Override
+                    public void onChargingCapacityChanged(float capacity) {
+                        invokeCallback(callback, "onChargingCapacityChanged", new Object[]{capacity});
+                    }
+                    @Override
                     public void onChargingCapacityChanged(double capacity) {
                         invokeCallback(callback, "onChargingCapacityChanged", new Object[]{capacity});
                     }
                 };
 
-            // Strategy 1: 2-arg with empty int[] (subscribe-all). Some firmware
-            // only delivers events through the filtered overload.
-            Method registerWithIds = findRegisterMethodWithIds(device.getClass(),
-                android.hardware.bydauto.charging.AbsBYDAutoChargingListener.class);
-            boolean twoArgRegistered = false;
-            if (registerWithIds != null) {
-                try {
-                    registerWithIds.invoke(device, listener, new int[0]);
-                    twoArgRegistered = true;
-                } catch (Exception e) {
-                    logger.debug("Charging 2-arg registration failed: " + e.getMessage());
-                }
+            if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                return registerLegacyAdditive(
+                        device,
+                        listener,
+                        android.hardware.bydauto.charging.AbsBYDAutoChargingListener.class,
+                        new int[0],
+                        false,
+                        "Charging");
             }
 
-            // Strategy 2: 1-arg typed.
             Method register = findRegisterMethod(device.getClass(),
                 android.hardware.bydauto.charging.AbsBYDAutoChargingListener.class);
             if (register != null) {
-                register.invoke(device, listener);
-                return true;
+                try {
+                    return registerRetainedListener(device, listener, register, null);
+                } catch (Exception e) {
+                    logger.debug("Charging 1-arg registration failed: " + e.getMessage());
+                }
             }
-            if (twoArgRegistered) return true;
+
+            Method registerWithIds = findRegisterMethodWithIds(device.getClass(),
+                android.hardware.bydauto.charging.AbsBYDAutoChargingListener.class);
+            if (registerWithIds != null) {
+                try {
+                    return registerRetainedListener(
+                            device, listener, registerWithIds, new int[0]);
+                } catch (Exception e) {
+                    logger.debug("Charging subscribe-all registration failed: "
+                            + e.getMessage());
+                }
+            }
             logger.debug("registerChargingListener: no registerListener method on "
                 + device.getClass().getName());
         } catch (NoClassDefFoundError e) {
@@ -1169,7 +1570,7 @@ public final class BydDeviceHelper {
 
     /**
      * Register a typed instrument listener. The instrument device's real
-     * signals — most importantly {@code onExternalChargingPowerChanged(double)}
+     * signals — most importantly {@code onExternalChargingPowerChanged(float)}
      * (live AC/DC charging power in kW) — are CONCRETE methods on the
      * {@code AbsBYDAutoInstrumentListener} abstract class, NOT on the
      * {@code IBYDAutoListener} base interface (which is an empty marker). The
@@ -1181,14 +1582,19 @@ public final class BydDeviceHelper {
      * only to it. Result: charging power never arrives via the listener and the
      * UI falls back to a nominal estimate. Mirrors {@link #registerChargingListener}.
      *
-     * Registers both the 2-arg (empty int[] = subscribe-all) and 1-arg typed
-     * overloads where present; both succeed additively where supported.
+     * Uses one typed registration, with the filtered overload as a fallback
+     * when the normal typed overload is unavailable.
      */
     public static boolean registerInstrumentListener(Object device, ListenerCallback callback) {
         if (device == null) return false;
+        ensureRuntimeSdk();
         try {
             android.hardware.bydauto.instrument.AbsBYDAutoInstrumentListener listener =
                 new android.hardware.bydauto.instrument.AbsBYDAutoInstrumentListener() {
+                    @Override
+                    public void onExternalChargingPowerChanged(float power) {
+                        invokeCallback(callback, "onExternalChargingPowerChanged", new Object[]{power});
+                    }
                     @Override
                     public void onExternalChargingPowerChanged(double power) {
                         invokeCallback(callback, "onExternalChargingPowerChanged", new Object[]{power});
@@ -1197,30 +1603,59 @@ public final class BydDeviceHelper {
                     public void onSafetyBeltStatusChanged(int seat, int state) {
                         invokeCallback(callback, "onSafetyBeltStatusChanged", new Object[]{seat, state});
                     }
+                    @Override
+                    public void onSportModeStateChanged(int state) {
+                        invokeCallback(callback, "onSportModeStateChanged", new Object[]{state});
+                    }
+                    @Override
+                    public void onOutCarTemperatureChanged(int tempC) {
+                        invokeCallback(callback, "onOutCarTemperatureChanged",
+                                new Object[]{tempC});
+                    }
+                    @Override
+                    public void onDataEventChanged(
+                            int featureId,
+                            android.hardware.bydauto.BYDAutoEventValue value) {
+                        invokeCallback(callback, "onDataEventChanged",
+                                new Object[]{featureId, value});
+                    }
                 };
 
-            // Strategy 1: 2-arg with empty int[] (subscribe-all). Some firmware
-            // only delivers events through the filtered overload.
-            Method registerWithIds = findRegisterMethodWithIds(device.getClass(),
-                android.hardware.bydauto.instrument.AbsBYDAutoInstrumentListener.class);
-            boolean twoArgRegistered = false;
-            if (registerWithIds != null) {
-                try {
-                    registerWithIds.invoke(device, listener, new int[0]);
-                    twoArgRegistered = true;
-                } catch (Exception e) {
-                    logger.debug("Instrument 2-arg registration failed: " + e.getMessage());
-                }
+            if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                return registerLegacyAdditive(
+                        device,
+                        listener,
+                        android.hardware.bydauto.instrument.AbsBYDAutoInstrumentListener.class,
+                        new int[0],
+                        false,
+                        "Instrument");
             }
 
-            // Strategy 2: 1-arg typed.
             Method register = findRegisterMethod(device.getClass(),
                 android.hardware.bydauto.instrument.AbsBYDAutoInstrumentListener.class);
             if (register != null) {
-                register.invoke(device, listener);
-                return true;
+                try {
+                    return registerRetainedListener(device, listener, register, null);
+                } catch (Exception e) {
+                    logger.debug("Instrument 1-arg registration failed: " + e.getMessage());
+                }
             }
-            if (twoArgRegistered) return true;
+
+            Method registerWithIds = findRegisterMethodWithIds(device.getClass(),
+                android.hardware.bydauto.instrument.AbsBYDAutoInstrumentListener.class);
+            if (registerWithIds != null) {
+                try {
+                    int[] featureIds =
+                            com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                                    ? new int[]{4208}
+                                    : new int[0];
+                    return registerRetainedListener(
+                            device, listener, registerWithIds, featureIds);
+                } catch (Exception e) {
+                    logger.debug("Instrument filtered registration failed: "
+                            + e.getMessage());
+                }
+            }
             logger.debug("registerInstrumentListener: no registerListener method on "
                 + device.getClass().getName());
         } catch (NoClassDefFoundError e) {
@@ -1238,6 +1673,7 @@ public final class BydDeviceHelper {
      */
     public static boolean registerSafetyBeltListener(Object device, ListenerCallback callback) {
         if (device == null) return false;
+        ensureRuntimeSdk();
         synchronized (safetyBeltListeners) {
             // The caller should already avoid duplicate registration, but retaining only one
             // listener makes a second helper-level registration a leak: the first callback can
@@ -1317,6 +1753,7 @@ public final class BydDeviceHelper {
      */
     public static boolean registerStatisticListener(Object device, ListenerCallback callback) {
         if (device == null) return false;
+        ensureRuntimeSdk();
         try {
             android.hardware.bydauto.statistic.AbsBYDAutoStatisticListener listener =
                 new android.hardware.bydauto.statistic.AbsBYDAutoStatisticListener() {
@@ -1325,127 +1762,93 @@ public final class BydDeviceHelper {
                         invokeCallback(callback, "onElecPercentageChanged", new Object[]{percentage});
                     }
                     @Override
-                    public void onSOCBatteryPercentageChanged(int percentage) {
-                        invokeCallback(callback, "onSOCBatteryPercentageChanged", new Object[]{percentage});
-                    }
-                    @Override
-                    public void onTotalMileageValueChanged(float mileage) {
-                        invokeCallback(callback, "onTotalMileageValueChanged", new Object[]{mileage});
-                    }
-                    @Override
-                    public void onEVMileageValueChanged(int mileage) {
-                        invokeCallback(callback, "onEVMileageValueChanged", new Object[]{mileage});
-                    }
-                    @Override
-                    public void onElecDrivingRangeChanged(int range) {
-                        invokeCallback(callback, "onElecDrivingRangeChanged", new Object[]{range});
-                    }
-                    @Override
-                    public void onFuelDrivingRangeChanged(int range) {
-                        invokeCallback(callback, "onFuelDrivingRangeChanged", new Object[]{range});
-                    }
-                    @Override
-                    public void onDrivingRangeValueChanged(int range) {
-                        invokeCallback(callback, "onDrivingRangeValueChanged", new Object[]{range});
-                    }
-                    @Override
                     public void onFuelPercentageChanged(int percentage) {
                         invokeCallback(callback, "onFuelPercentageChanged", new Object[]{percentage});
                     }
                     @Override
-                    public void onEVRemainingBatteryPowerChanged(float power) {
-                        invokeCallback(callback, "onEVRemainingBatteryPowerChanged", new Object[]{power});
+                    public void onSOCBatteryPercentageChanged(int percentage) {
+                        invokeCallback(callback, "onElecPercentageChanged",
+                                new Object[]{percentage});
                     }
                     @Override
-                    public void onRemainingBatteryPowerChanged(float power) {
-                        invokeCallback(callback, "onRemainingBatteryPowerChanged", new Object[]{power});
+                    public void onTotalMileageValueChanged(float mileage) {
+                        invokeCallback(callback, "onTotalMileageValueChanged",
+                                new Object[]{mileage});
                     }
                     @Override
-                    public void onTotalElecConChanged(double con) {
-                        invokeCallback(callback, "onTotalElecConChanged", new Object[]{con});
+                    public void onEVMileageValueChanged(int mileage) {
+                        invokeCallback(callback, "onEVMileageValueChanged",
+                                new Object[]{mileage});
+                    }
+                    @Override
+                    public void onElecDrivingRangeChanged(int range) {
+                        invokeCallback(callback, "onElecDrivingRangeChanged",
+                                new Object[]{range});
+                    }
+                    @Override
+                    public void onDrivingRangeValueChanged(int range) {
+                        invokeCallback(callback, "onElecDrivingRangeChanged",
+                                new Object[]{range});
+                    }
+                    @Override
+                    public void onFuelDrivingRangeChanged(int range) {
+                        invokeCallback(callback, "onFuelDrivingRangeChanged",
+                                new Object[]{range});
+                    }
+                    @Override
+                    public void onEVRemainingBatteryPowerChanged(float kwh) {
+                        invokeCallback(callback, "onRemainingBatteryPowerChanged",
+                                new Object[]{kwh});
+                    }
+                    @Override
+                    public void onRemainingBatteryPowerChanged(float kwh) {
+                        invokeCallback(callback, "onRemainingBatteryPowerChanged",
+                                new Object[]{kwh});
+                    }
+                    @Override
+                    public void onTotalElecConChanged(double kwh) {
+                        invokeCallback(callback, "onTotalElecConChanged",
+                                new Object[]{kwh});
                     }
                 };
 
-            // Strategy 1: 2-arg with empty int[] (subscribe-all) — some firmware
-            // only delivers through the filtered overload.
-            Method registerWithIds = findRegisterMethodWithIds(device.getClass(),
-                android.hardware.bydauto.statistic.AbsBYDAutoStatisticListener.class);
-            boolean twoArgRegistered = false;
-            if (registerWithIds != null) {
-                try {
-                    registerWithIds.invoke(device, listener, new int[0]);
-                    twoArgRegistered = true;
-                } catch (Exception e) {
-                    logger.debug("Statistic 2-arg registration failed: " + e.getMessage());
-                }
+            if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                return registerLegacyAdditive(
+                        device,
+                        listener,
+                        android.hardware.bydauto.statistic.AbsBYDAutoStatisticListener.class,
+                        new int[0],
+                        false,
+                        "Statistic");
             }
 
-            // Strategy 2: 1-arg typed.
             Method register = findRegisterMethod(device.getClass(),
                 android.hardware.bydauto.statistic.AbsBYDAutoStatisticListener.class);
             if (register != null) {
-                register.invoke(device, listener);
-                return true;
+                try {
+                    return registerRetainedListener(device, listener, register, null);
+                } catch (Exception e) {
+                    logger.debug("Statistic 1-arg registration failed: " + e.getMessage());
+                }
             }
-            if (twoArgRegistered) return true;
+
+            Method registerWithIds = findRegisterMethodWithIds(device.getClass(),
+                android.hardware.bydauto.statistic.AbsBYDAutoStatisticListener.class);
+            if (registerWithIds != null) {
+                try {
+                    return registerRetainedListener(
+                            device, listener, registerWithIds, new int[0]);
+                } catch (Exception e) {
+                    logger.debug("Statistic subscribe-all registration failed: "
+                            + e.getMessage());
+                }
+            }
             logger.debug("registerStatisticListener: no registerListener method on "
                 + device.getClass().getName());
         } catch (NoClassDefFoundError e) {
             logger.debug("registerStatisticListener: class not available on this firmware");
         } catch (Exception e) {
             logger.debug("registerStatisticListener failed: " + e.getMessage());
-        }
-        return false;
-    }
-
-    /**
-     * Register a typed collectdata listener (HV Voltage/Current + Motor RPM).
-     */
-    public static boolean registerCollectDataListener(Object device, ListenerCallback callback) {
-        if (device == null) return false;
-        try {
-            android.hardware.bydauto.collectdata.AbsBYDAutoCollectDataListener listener =
-                new android.hardware.bydauto.collectdata.AbsBYDAutoCollectDataListener() {
-                    @Override
-                    public void onMotorMCUGeneratrixVolt(int a, int b) {
-                        invokeCallback(callback, "onMotorMCUGeneratrixVolt", new Object[]{a, b});
-                    }
-                    @Override
-                    public void onMotorMCUGeneratrixCurrent(int a, int b) {
-                        invokeCallback(callback, "onMotorMCUGeneratrixCurrent", new Object[]{a, b});
-                    }
-                    @Override
-                    public void onDriverMotorSpeed(int a, int b) {
-                        invokeCallback(callback, "onDriverMotorSpeed", new Object[]{a, b});
-                    }
-                    @Override
-                    public void onDriverMotorTemperature(int a, int b) {
-                        invokeCallback(callback, "onDriverMotorTemperature", new Object[]{a, b});
-                    }
-                    @Override
-                    public void onDriverMotorTorque(int a, int b) {
-                        invokeCallback(callback, "onDriverMotorTorque", new Object[]{a, b});
-                    }
-                };
-
-            Method register = findRegisterMethod(device.getClass(),
-                android.hardware.bydauto.collectdata.AbsBYDAutoCollectDataListener.class);
-            if (register != null) {
-                register.invoke(device, listener);
-                return true;
-            }
-            Method registerWithIds = findRegisterMethodWithIds(device.getClass(),
-                android.hardware.bydauto.collectdata.AbsBYDAutoCollectDataListener.class);
-            if (registerWithIds != null) {
-                registerWithIds.invoke(device, listener, new int[0]);
-                return true;
-            }
-            logger.debug("registerCollectDataListener: no registerListener method on "
-                + device.getClass().getName());
-        } catch (NoClassDefFoundError e) {
-            logger.debug("registerCollectDataListener: class not available on this firmware");
-        } catch (Exception e) {
-            logger.debug("registerCollectDataListener failed: " + e.getMessage());
         }
         return false;
     }
@@ -1589,7 +1992,9 @@ public final class BydDeviceHelper {
      * A Boolean SDK result maps to 0 (true) / -1 (false).
      */
     public static int sendSetCommandRaw(Object device, int featureId, int value) {
-        if (device == null) return Integer.MIN_VALUE;
+        if (device == null || VehicleActuatorBridge.isDiLink5RequestExpired()) {
+            return Integer.MIN_VALUE;
+        }
         try {
             Class<?> eventValueClass = Class.forName("android.hardware.bydauto.BYDAutoEventValue");
             Object eventValue = eventValueClass.getConstructor(new Class[0]).newInstance(new Object[0]);
@@ -1618,7 +2023,7 @@ public final class BydDeviceHelper {
      * a void, Boolean, or other non-Integer result is never manufactured into success.
      */
     public static Integer sendSetCommandIntegerResult(Object device, int featureId, int value) {
-        if (device == null) return null;
+        if (device == null || VehicleActuatorBridge.isDiLink5RequestExpired()) return null;
         try {
             Class<?> eventValueClass = Class.forName("android.hardware.bydauto.BYDAutoEventValue");
             Object eventValue = eventValueClass.getConstructor(new Class[0]).newInstance(new Object[0]);
@@ -1638,7 +2043,7 @@ public final class BydDeviceHelper {
      * declaration inherited from an OEM base class. Returns the SDK result code, or -1 on failure.
      */
     public static int callSetSingle(Object device, int featureId, int value) {
-        if (device == null) return -1;
+        if (device == null || VehicleActuatorBridge.isDiLink5RequestExpired()) return -1;
         try {
             int deviceType = resolveDeviceType(device);
             if (deviceType == Integer.MIN_VALUE) return -1;
@@ -1661,7 +2066,7 @@ public final class BydDeviceHelper {
      * Returns the SDK result code, or -1 on any failure.
      */
     public static int callSetBatch(Object device, int[] featureIds, int[] values) {
-        if (device == null) return -1;
+        if (device == null || VehicleActuatorBridge.isDiLink5RequestExpired()) return -1;
         try {
             int deviceType = resolveDeviceType(device);
             if (deviceType == Integer.MIN_VALUE) return -1;
@@ -1684,7 +2089,7 @@ public final class BydDeviceHelper {
      * Returns the SDK result code, or -1 on any failure.
      */
     public static int callSetBuffer(Object device, int featureId, byte[] buffer) {
-        if (device == null) return -1;
+        if (device == null || VehicleActuatorBridge.isDiLink5RequestExpired()) return -1;
         try {
             int deviceType = resolveDeviceType(device);
             if (deviceType == Integer.MIN_VALUE) return -1;
@@ -1992,11 +2397,13 @@ public final class BydDeviceHelper {
     private static Method findUnregisterMethod(Class<?> cls, Class<?> listenerInterface) {
         Class<?> walk = cls;
         while (walk != null && walk != Object.class) {
-            try {
-                Method m = walk.getDeclaredMethod("unregisterListener", listenerInterface);
-                m.setAccessible(true);
-                return m;
-            } catch (NoSuchMethodException ignored) {}
+            for (String name : new String[]{"unregisterListener", "unRegisterListener"}) {
+                try {
+                    Method m = walk.getDeclaredMethod(name, listenerInterface);
+                    m.setAccessible(true);
+                    return m;
+                } catch (NoSuchMethodException ignored) {}
+            }
             walk = walk.getSuperclass();
         }
         return null;

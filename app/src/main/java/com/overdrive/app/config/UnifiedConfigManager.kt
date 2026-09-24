@@ -4,6 +4,7 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import android.util.Log
+import com.overdrive.app.camera.dilink5.DiLink5Platform
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.File
@@ -46,6 +47,7 @@ object UnifiedConfigManager {
     
     // Single source of truth - world-readable location
     private const val CONFIG_PATH = "/data/local/tmp/overdrive_config.json"
+    private const val LIFECYCLE_SNAPSHOT_MAX_BYTES = 2L * 1024L * 1024L
 
     // ==================== DOUBLE-BUFFERED, SEQ-STAMPED DURABILITY ====================
     //
@@ -612,9 +614,9 @@ object UnifiedConfigManager {
         //   "power" — arm immediately on ACC-off, disarm on ACC-on. No lock gate.
         //             Deterministic; works on every trim.
         // Branched in CameraDaemon's ACC-off dispatch + door-lock gate. Both modes
-        // still honor the safe-zone and schedule suppression gates. Default "power"
-        // for autonomous zero-cloud sentry activation.
-        if (!surveillance.has("armMode")) surveillance.put("armMode", "power")
+        // still honor the safe-zone and schedule suppression gates. Default "lock"
+        // to preserve the owner-privacy behaviour of the prior single-mode build.
+        if (!surveillance.has("armMode")) surveillance.put("armMode", "lock")
         // Keep ONLY the USB/data rail powered after ACC OFF (e.g. to charge a phone
         // while parked). DEFAULT TRUE so out-of-box behaviour is unchanged; user
         // opt-out (Surveillance → General) lets just that rail sleep on the next
@@ -625,6 +627,40 @@ object UnifiedConfigManager {
         // whose data module sleeps a while after ACC OFF; elsewhere holding the bearer
         // up just costs battery and data. Read by AccSentryDaemon's keep-alive loop.
         if (!surveillance.has("mobileDataKeepAlive")) surveillance.put("mobileDataKeepAlive", false)
+        // DiLink 5 parked cloud heartbeat. DEFAULT FALSE (experimental opt-in):
+        // CameraDaemon asks BYD Cloud for realtime vehicle status every 15 seconds
+        // while ACC is OFF. The server-side T-Box wake can keep DI5 from
+        // entering the deep-sleep state that drops ADB/camera access, but it uses
+        // internet data and additional parked energy. Read by BydCloudDataProvider.
+        if (!surveillance.has("di5CloudKeepAlive")) surveillance.put("di5CloudKeepAlive", false)
+        // DiLink 5 parked keep-alive (Experimental). DEFAULT FALSE (opt-in). The
+        // single user-visible master switch; while it is OFF every lever below is
+        // inert and the parked path is byte-identical to the prior build. The
+        // lever keys are config-only diagnostics (never normal settings) and
+        // their defaults apply ONLY while the master is ON. Read by
+        // AccSentryDaemon's Di5ParkedPowerHold lease (acc_sentry_daemon process):
+        //   McuHold          — sentry flags 782237711/782237728 + bounded MCU wake
+        //   CameraHeartbeat  — PANORAMA_WORK_MODE_SET=1 every 2 s (off until T4)
+        //   ApHold           — vendor.peripheral shutdown-critical token; also
+        //                      requires ApHoldPreflightPassed (written only by the
+        //                      diagnostics flow after a recorded on-car pre-flight)
+        //   ReassertSeconds  — MCU-hold re-assert cadence ("DiPlus mode-3 parity")
+        //   CutoffVoltage / CutoffSamples / VoltageMaxAgeSeconds — separate 12 V
+        //                      guard (NOT BatteryVoltageMonitorV2's MCU thresholds)
+        if (!surveillance.has("di5ParkedKeepAlive")) surveillance.put("di5ParkedKeepAlive", false)
+        if (!surveillance.has("di5ParkedKeepAliveMcuHold")) surveillance.put("di5ParkedKeepAliveMcuHold", true)
+        // OEM-app parity: while the MCU hold is asserted, also write the
+        // BYDAutoPowerDevice MCU power hold (-1442840502 <- 1). Escape hatch
+        // (set false) in case a unit misbehaves; released with 0 only when
+        // this install asserted the 1.
+        if (!surveillance.has("di5ParkedKeepAliveMcuPowerHold")) surveillance.put("di5ParkedKeepAliveMcuPowerHold", true)
+        if (!surveillance.has("di5ParkedKeepAliveCameraHeartbeat")) surveillance.put("di5ParkedKeepAliveCameraHeartbeat", false)
+        if (!surveillance.has("di5ParkedKeepAliveApHold")) surveillance.put("di5ParkedKeepAliveApHold", false)
+        if (!surveillance.has("di5ParkedKeepAliveApHoldPreflightPassed")) surveillance.put("di5ParkedKeepAliveApHoldPreflightPassed", false)
+        if (!surveillance.has("di5ParkedKeepAliveReassertSeconds")) surveillance.put("di5ParkedKeepAliveReassertSeconds", 30)
+        if (!surveillance.has("di5ParkedKeepAliveCutoffVoltage")) surveillance.put("di5ParkedKeepAliveCutoffVoltage", 11.8)
+        if (!surveillance.has("di5ParkedKeepAliveCutoffSamples")) surveillance.put("di5ParkedKeepAliveCutoffSamples", 3)
+        if (!surveillance.has("di5ParkedKeepAliveVoltageMaxAgeSeconds")) surveillance.put("di5ParkedKeepAliveVoltageMaxAgeSeconds", 120)
         // Operating mode: WHICH lifecycle phases OverDrive is active for.
         //   "onAndOff" — full current behaviour: after the vehicle powers off the
         //                daemon keeps the head unit awake (MCU/USB/AP wake, keep-alive
@@ -1088,8 +1124,15 @@ object UnifiedConfigManager {
         // to camera/SOH logic as a selected physical model on fresh installs.
         // Existing configs predate provenance, so preserve their prior model
         // behavior with the legacy source.
-        val defaultModel = if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) "sealion7" else "seal"
-        if (!vehicle.has("modelId")) vehicle.put("modelId", defaultModel)
+        val defaultModel = if (isDilink5Selected(config)) "sealion7" else "seal"
+        if (!vehicle.has("modelId") ||
+            (defaultModel == "sealion7" &&
+                vehicle.optString("modelId", "") == "seal" &&
+                vehicle.optString("modelSource", VehicleModelSelection.SOURCE_UNSET) ==
+                    VehicleModelSelection.SOURCE_UNSET)
+        ) {
+            vehicle.put("modelId", defaultModel)
+        }
         if (!vehicle.has("modelSource")) {
             vehicle.put(
                 "modelSource",
@@ -1448,7 +1491,7 @@ object UnifiedConfigManager {
                             peerGood
                         } else {
                             defaults.put(SEQ_KEY, nextConfigSeq(defaults))
-                            val writeResult = saveConfigInternal(defaults)
+                            val writeResult = saveRecoveredConfigLocked(defaults)
                             if (writeResult.committed) {
                                 val committed = writeResult.committedConfig ?: defaults
                                 cachedConfig = committed
@@ -1555,7 +1598,7 @@ object UnifiedConfigManager {
                     withConfigFileLockOrNull(
                         "Backup config promotion"
                     ) {
-                        saveConfigInternal(recovered)
+                        saveRecoveredConfigLocked(recovered)
                     }
                 } else {
                     // The app UID cannot create the atomic sibling in sticky
@@ -1634,6 +1677,10 @@ object UnifiedConfigManager {
             Log.w(TAG, "saveConfig(force): writing a validated whole-config restore " +
                 "past the corruption latch (restore is authoritative user data, not defaults)")
         }
+        if (!stageCameraModeChange(config)) {
+            Log.w(TAG, "saveConfig blocked: camera mode transition could not be staged")
+            return false
+        }
         config.put("lastModified", System.currentTimeMillis())
         // Bump the monotonic write sequence so recovery / load-time promotion can
         // ALWAYS identify the newest copy independent of (second-granular,
@@ -1675,6 +1722,58 @@ object UnifiedConfigManager {
             notifyListeners("all", committed)
         }
         return writeResult.committed
+    }
+
+    /** Caller holds the stable config lock through the following commit. */
+    private fun stageCameraModeChange(config: JSONObject): Boolean {
+        val durableCamera = readDurableConfigForRestore()
+            .optJSONObject("camera")
+        val currentMode = if (durableCamera != null
+                && durableCamera.has("cameraMode")
+                && !durableCamera.isNull("cameraMode")) {
+            DiLink5Platform.normalizeConfiguredMode(
+                durableCamera.optString("cameraMode", "")
+            ) ?: DiLink5Platform.currentActiveMode()
+        } else {
+            DiLink5Platform.currentActiveMode()
+        }
+
+        val requestedCamera = config.optJSONObject("camera") ?: JSONObject().also {
+            config.put("camera", it)
+        }
+        val requestedMode = if (!requestedCamera.has("cameraMode")) {
+            // Whole-config promotion, recovery and old backups can legitimately
+            // omit this newer key. Absence means "preserve", never "default".
+            requestedCamera.put("cameraMode", currentMode)
+            currentMode
+        } else {
+            if (requestedCamera.isNull("cameraMode")) return false
+            DiLink5Platform.normalizeConfiguredMode(
+                requestedCamera.optString("cameraMode", "")
+            ) ?: return false
+        }
+        return DiLink5Platform.stageConfiguredMode(requestedMode, currentMode)
+    }
+
+    /**
+     * Recovery replaces an unreadable root. Block active-mode refreshes across
+     * marker staging and the atomic config rename, and restore the old marker
+     * relationship if the rename does not commit.
+     */
+    private fun saveRecoveredConfigLocked(config: JSONObject): ConfigWriteResult {
+        synchronized(DiLink5Platform::class.java) {
+            val markerSnapshot = DiLink5Platform.snapshotModeMarkers()
+                ?: return ConfigWriteResult(ConfigWriteState.NOT_COMMITTED)
+            if (!stageCameraModeChange(config)) {
+                return ConfigWriteResult(ConfigWriteState.NOT_COMMITTED)
+            }
+            val result = saveConfigInternal(config)
+            if (!result.committed
+                    && !DiLink5Platform.restoreModeMarkers(markerSnapshot)) {
+                Log.w(TAG, "Could not restore camera mode markers after failed recovery")
+            }
+            return result
+        }
     }
 
     /**
@@ -2421,6 +2520,30 @@ object UnifiedConfigManager {
         try { (loadConfig().optJSONObject("surveillance")?.optBoolean("mobileDataKeepAlive", false)) ?: false }
         catch (t: Throwable) { false }
 
+    /** Whether the experimental DiLink 5 BYD-cloud parked heartbeat is enabled.
+     *  Fail-CLOSED: a config read problem must never start network traffic or
+     *  intentionally prevent vehicle deep sleep. Runtime eligibility additionally
+     *  requires confirmed ACC OFF, DiLink 5, On & Off mode, and verified cloud
+     *  credentials. */
+    @JvmStatic
+    fun isDi5CloudKeepAliveEnabled(): Boolean =
+        try { (loadConfig().optJSONObject("surveillance")?.optBoolean("di5CloudKeepAlive", false)) ?: false }
+        catch (t: Throwable) { false }
+
+    /** Whether the experimental DiLink 5 parked keep-alive master switch is ON.
+     *  Fail-CLOSED: a config read problem must never start HAL writes or hold the
+     *  MCU/AP awake. Deliberately independent of the camera-mode selection
+     *  (DiLink 5 head units exist with and without the QCarCam camera stack) and
+     *  of di5CloudKeepAlive: this toggle IS the user's platform declaration.
+     *  Runtime eligibility additionally requires On & Off mode, confirmed ACC
+     *  OFF, a fresh 12 V sample above the cutoff and the absence of the
+     *  persist.overdrive.di5_keepalive=0 kill switch — all evaluated by
+     *  Di5ParkedPowerHold, not here. */
+    @JvmStatic
+    fun isDi5ParkedKeepAliveEnabled(): Boolean =
+        try { (loadConfig().optJSONObject("surveillance")?.optBoolean("di5ParkedKeepAlive", false)) ?: false }
+        catch (t: Throwable) { false }
+
     /** The hotspot config section — the USER'S INTENT for the WiFi hotspot:
      *  {enabled, ssid, password, dataCapMb, dataUsedBytes, proxySystemWide,
      *   proxyForClients, autoStartBoot, keepAlive, suppressedByHotspot,
@@ -2948,7 +3071,9 @@ object UnifiedConfigManager {
     fun resolveOemDashcamId(): Int {
         val camera = loadConfig().optJSONObject("camera") ?: return -1
         val mode = camera.optString("cameraMode", "")
-        if (mode.contains("dilink5", ignoreCase = true) || com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+        if (mode.contains("dilink5", ignoreCase = true)
+                || com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()
+                || com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
             return -1
         }
         if (camera.optBoolean("oemDashcamManualOverride", false)) {
@@ -3154,7 +3279,8 @@ object UnifiedConfigManager {
 
     @JvmStatic
     fun getVehicle(): JSONObject {
-        val stored = loadConfig().optJSONObject("vehicle")
+        val config = loadConfig()
+        val stored = config.optJSONObject("vehicle")
         if (stored != null) {
             // Backfill driveSide on configs written before this field existed
             // so call sites can read it unconditionally without a default.
@@ -3169,13 +3295,20 @@ object UnifiedConfigManager {
             }
             return stored
         }
-        val defaultModel = if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) "sealion7" else "seal"
         return JSONObject().apply {
-            put("modelId", defaultModel)
+            put("modelId", if (isDilink5Selected(config)) "sealion7" else "seal")
             put("modelSource", VehicleModelSelection.SOURCE_UNSET)
             put("color", "#E8E8EC")
             put("driveSide", "rhd")
         }
+    }
+
+    private fun isDilink5Selected(config: JSONObject): Boolean {
+        val camera = config.optJSONObject("camera") ?: return false
+        return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected(
+            camera.optString("cameraMode", ""),
+            camera.optString("cameraProfile", "")
+        )
     }
 
     // ==================== TYRE PRESSURE THRESHOLDS ====================
@@ -4044,8 +4177,8 @@ object UnifiedConfigManager {
      */
     @JvmStatic
     fun getSurveillanceArmMode(): String {
-        val mode = getSurveillance().optString("armMode", "power")
-        return if (mode == "lock") "lock" else "power"
+        val mode = getSurveillance().optString("armMode", "lock")
+        return if (mode == "power") "power" else "lock"
     }
 
     /**
@@ -4067,6 +4200,36 @@ object UnifiedConfigManager {
     fun isVehicleOnOnlyMode(): Boolean =
         try { getSurveillance().optString("operatingMode", "onAndOff") == "onOnly" }
         catch (t: Throwable) { false }
+
+    /**
+     * Lock-free, fail-open snapshot for lifecycle entry points that run on the
+     * Android main thread before a service intent can be delivered.
+     *
+     * The durable config is published by atomic rename, so reading it directly
+     * is safe and avoids waiting behind a daemon writer's advisory lock. This
+     * method deliberately does not publish into the normal config cache or run
+     * migrations/recovery; callers only need the parked-mode gate and must keep
+     * the historical fail-open behavior on any transient read problem.
+     */
+    @JvmStatic
+    fun isVehicleOnOnlyModeSnapshot(): Boolean {
+        return try {
+            val file = File(CONFIG_PATH)
+            val length = file.length()
+            if (!file.isFile ||
+                length <= 0L ||
+                length > LIFECYCLE_SNAPSHOT_MAX_BYTES
+            ) {
+                false
+            } else {
+                JSONObject(file.readText())
+                    .optJSONObject("surveillance")
+                    ?.optString("operatingMode", "onAndOff") == "onOnly"
+            }
+        } catch (t: Throwable) {
+            false
+        }
+    }
 
     // ==================== LISTENERS ====================
     

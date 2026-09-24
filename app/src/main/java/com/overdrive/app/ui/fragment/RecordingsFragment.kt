@@ -116,6 +116,15 @@ class RecordingsFragment : Fragment() {
     private var placeContainsQuery: String = ""
 
     /**
+     * Parking Intelligence: narrow the list to the clips stamped with one
+     * parking session. Set only when the user arrives from a park's "Open
+     * events" (WebViewFragment forwards the `parkingSessionId` deep-link
+     * param); shown as a dismissible chip, cleared by its close icon or
+     * Reset. Empty = no narrowing.
+     */
+    private var parkingSessionId: String = ""
+
+    /**
      * Pending debounce post for the place-search EditText. Cancelled in
      * onDestroyView and on each new keystroke so only the final keystroke
      * triggers an API roundtrip.
@@ -228,6 +237,7 @@ class RecordingsFragment : Fragment() {
             dateNarrowed = state.getBoolean(KEY_DATE_NARROWED, false)
             playerFullscreen = state.getBoolean(KEY_PLAYER_FULLSCREEN, false)
             placeContainsQuery = state.getString(KEY_PLACE_CONTAINS, "") ?: ""
+            parkingSessionId = state.getString(KEY_PARKING_SESSION, "") ?: ""
         }
 
         // Deep-link fallback: WebViewFragment routes an events-link it can't
@@ -244,6 +254,11 @@ class RecordingsFragment : Fragment() {
                 "proximity", "normal" -> currentSource = Source.DASHCAM
                 "replay" -> currentSource = Source.REPLAYS
             }
+            // Parking page → "Open events": narrow to that park's clips. Same
+            // token rule as the daemon so a mangled value can't reach the API.
+            arguments?.getString("parkingSessionId")?.trim()
+                ?.takeIf { it.matches(Regex("[A-Za-z0-9_\\-]{1,64}")) }
+                ?.let { parkingSessionId = it }
         }
 
         metricsExecutor = Executors.newSingleThreadExecutor { r ->
@@ -260,6 +275,7 @@ class RecordingsFragment : Fragment() {
         setupChipFilters(view)
         setupPlaceSearch(view)
         setupResetButton(view)
+        setupParkingChip(view)
         setupLibraryActions(view)
         setupPreviewActions(view)
 
@@ -328,6 +344,7 @@ class RecordingsFragment : Fragment() {
         outState.putBoolean(KEY_DATE_NARROWED, dateNarrowed)
         outState.putBoolean(KEY_PLAYER_FULLSCREEN, playerFullscreen)
         outState.putString(KEY_PLACE_CONTAINS, placeContainsQuery)
+        outState.putString(KEY_PARKING_SESSION, parkingSessionId)
     }
 
     override fun onDestroyView() {
@@ -426,6 +443,7 @@ class RecordingsFragment : Fragment() {
             placeFilter.clear()
             storageFilter.clear()
             placeContainsQuery = ""
+            parkingSessionId = ""
             dateNarrowed = false
             view?.let {
                 syncChipChecks(it)
@@ -521,7 +539,8 @@ class RecordingsFragment : Fragment() {
             narrowToDate = dateNarrowed,
             places = placeFilter.toSet(),
             placeContains = placeContainsQuery.takeIf { it.isNotEmpty() },
-            storages = storageFilter.toSet()
+            storages = storageFilter.toSet(),
+            parkingSessionId = parkingSessionId.takeIf { it.isNotEmpty() }
         )
     }
 
@@ -1280,11 +1299,53 @@ class RecordingsFragment : Fragment() {
             placeFilter.clear()
             storageFilter.clear()
             placeContainsQuery = ""
+            parkingSessionId = ""
             syncChipChecks(view)
             renderPlaceChips(view)
             clearPlaceSearchInput(view)
             onFiltersChanged(view)
         }
+    }
+
+    /**
+     * Parking Intelligence chip: visible only while [parkingSessionId] narrows
+     * the list. Its close icon drops the narrowing (Reset does too). The label
+     * shows the park's start time when the id carries one
+     * ("park_yyyyMMdd_HHmmss"), else the generic "This park".
+     */
+    private fun setupParkingChip(view: View) {
+        view.findViewById<Chip>(R.id.chipParkingSession)?.setOnCloseIconClickListener {
+            parkingSessionId = ""
+            onFiltersChanged(view)
+        }
+    }
+
+    private fun renderParkingChip(view: View) {
+        val row = view.findViewById<View>(R.id.rowParkingFilter) ?: return
+        val chip = view.findViewById<Chip>(R.id.chipParkingSession) ?: return
+        if (parkingSessionId.isEmpty()) {
+            row.visibility = View.GONE
+            return
+        }
+        row.visibility = View.VISIBLE
+        chip.text = parkingSessionLabel(view.context, parkingSessionId)
+    }
+
+    private fun parkingSessionLabel(ctx: android.content.Context, sessionId: String): String {
+        val m = Regex("park_(\\d{4})(\\d{2})(\\d{2})_(\\d{2})(\\d{2})\\d{2}(?:_\\d+)?").matchEntire(sessionId)
+            ?: return ctx.getString(R.string.recording_lib_chip_parking_session)
+        val (y, mo, d, h, mi) = m.destructured
+        val cal = Calendar.getInstance().apply {
+            clear()
+            set(y.toInt(), mo.toInt() - 1, d.toInt(), h.toInt(), mi.toInt())
+        }
+        val time = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(cal.time)
+        val today = Calendar.getInstance()
+        val sameDay = today.get(Calendar.YEAR) == cal.get(Calendar.YEAR)
+            && today.get(Calendar.DAY_OF_YEAR) == cal.get(Calendar.DAY_OF_YEAR)
+        val label = if (sameDay) time
+            else java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT).format(cal.time) + " " + time
+        return ctx.getString(R.string.recording_lib_chip_parking_session_at, label)
     }
 
     /**
@@ -1392,10 +1453,11 @@ class RecordingsFragment : Fragment() {
 
     private fun renderActiveFilterAffordances(view: View) {
         val searchActive = placeContainsQuery.isNotEmpty()
-        // Storage applies in BOTH segments, so it contributes to the
-        // active-filter affordance regardless of the current source.
+        // Storage and the parking session apply in BOTH segments, so they
+        // contribute to the active-filter affordance regardless of the source.
         val storageActive = storageFilter.isNotEmpty()
-        val chipsActive = storageActive || when (currentSource) {
+        renderParkingChip(view)
+        val chipsActive = storageActive || parkingSessionId.isNotEmpty() || when (currentSource) {
             Source.ALL -> placeFilter.isNotEmpty() || searchActive
             Source.DASHCAM -> dashcamTypes.isNotEmpty() || placeFilter.isNotEmpty() || searchActive
             Source.REPLAYS -> placeFilter.isNotEmpty() || searchActive
@@ -1969,6 +2031,7 @@ class RecordingsFragment : Fragment() {
         private const val KEY_DATE_NARROWED = "recordings_date_narrowed"
         private const val KEY_PLAYER_FULLSCREEN = "recordings_player_fullscreen"
         private const val KEY_PLACE_CONTAINS = "recordings_place_contains"
+        private const val KEY_PARKING_SESSION = "recordings_parking_session"
         private const val TAG_INLINE_PLAYER = "inline_player"
         /** Cap on chips to avoid sprawl after a long road trip. */
         private const val MAX_PLACE_CHIPS = 8

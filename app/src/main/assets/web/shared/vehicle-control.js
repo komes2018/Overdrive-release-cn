@@ -56,6 +56,7 @@ var VC = {
         trunkOpen: false,
         doors: { lf: 1, rf: 1, lr: 1, rr: 1, trunk: -1, hood: -1 },
         windows: { lf: 0, rf: 0, lr: 0, rr: 0, sunroof: 0, sunshade: 0 },
+        windowOpen: { lf: null, rf: null, lr: null, rr: null, sunroof: null, sunshade: null },
         lights: { dayTimeLight: false, ambientColour: 1, ambientOptions: [] },
         adas: { speedLimitWarning: false },
         setting: { childPresenceDetection: false },
@@ -1023,9 +1024,12 @@ var VC = {
                 if (self._modelLoadTimeout) { clearTimeout(self._modelLoadTimeout); self._modelLoadTimeout = null; }
                 self.carModel = gltf.scene;
 
-                var modelEntry = self.ModelStore.findEntry(self.manifest, self.activeModelId);
-                var paintMeshHint = modelEntry && typeof modelEntry.paintMeshHint === 'string'
-                    ? modelEntry.paintMeshHint.toLowerCase() : '';
+                var modelEntry = self.ModelStore.findEntry(
+                    self.manifest, self.activeModelId);
+                var paintMeshHint = modelEntry
+                        && typeof modelEntry.paintMeshHint === 'string'
+                    ? modelEntry.paintMeshHint.toLowerCase()
+                    : '';
 
                 self.carModel.traverse(function(node) {
                     if (node.isMesh) {
@@ -1034,10 +1038,15 @@ var VC = {
                         var mat = node.material;
                         var isBodyPaint = false;
 
+                        // Some GLBs use a dark factory paint that looks like tyre
+                        // rubber to the generic brightness heuristic, or name an
+                        // accent rim "bodypaint". Their manifest hint identifies
+                        // the exact body mesh/material and takes precedence.
                         if (paintMeshHint) {
                             var paintName = ((node.name || '') + ' '
                                 + (mat && mat.name ? mat.name : '')).toLowerCase();
                             isBodyPaint = !!(mat && mat.color
+                                && !mat.transparent && mat.opacity > 0.9
                                 && paintName.indexOf(paintMeshHint) >= 0);
                         } else if (mat && !mat.transparent && mat.opacity > 0.9) {
                             // Check if it's NOT glass (glass is usually transparent or has low opacity)
@@ -1450,14 +1459,13 @@ var VC = {
             })(this.colorPresets[i], i);
         }
 
-        // Custom color opens an in-app dialog. <input type="color"> would open
-        // the OS picker, which arrives with chrome this page cannot style (and
-        // on Android 7.1 WebView / Chrome 58 often does not open at all).
+        // Custom color opens the same in-app spectrum on every platform.
         var custom = document.createElement('button');
         custom.type = 'button';
         custom.className = 'vc-swatch-custom';
         custom.id = 'colorSwatchCustom';
         custom.title = BYD.i18n.t('vehicle.color_custom');
+        custom.setAttribute('aria-label', custom.title);
         custom.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
             'stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
         custom.addEventListener('click', function(e) {
@@ -1479,6 +1487,8 @@ var VC = {
         var overlay = document.getElementById('colorModal');
         var grid = document.getElementById('colorModalGrid');
         var hex = document.getElementById('colorModalHex');
+        var spectrum = document.getElementById('colorModalSpectrum');
+        var hue = document.getElementById('colorModalHue');
         if (!overlay || !grid || !hex || overlay._vcBound) return;
         overlay._vcBound = true;
 
@@ -1501,6 +1511,53 @@ var VC = {
         hex.addEventListener('input', function() {
             self._setColorModalDraft(hex.value, true);
         });
+        if (spectrum && hue) {
+            var pickSpectrum = function(e) {
+                var point = e.touches && e.touches.length ? e.touches[0] :
+                    e.changedTouches && e.changedTouches.length ? e.changedTouches[0] : e;
+                var rect = spectrum.getBoundingClientRect();
+                spectrum._s = Math.max(0, Math.min(1,
+                    (point.clientX - rect.left) / rect.width));
+                spectrum._v = 1 - Math.max(0, Math.min(1,
+                    (point.clientY - rect.top) / rect.height));
+                self._setColorSpectrumDraft();
+                if (e.cancelable) e.preventDefault();
+            };
+            var stopMouse = function() {
+                document.removeEventListener('mousemove', pickSpectrum, false);
+                document.removeEventListener('mouseup', stopMouse, false);
+            };
+            var stopTouch = function() {
+                document.removeEventListener('touchmove', pickSpectrum, false);
+                document.removeEventListener('touchend', stopTouch, false);
+                document.removeEventListener('touchcancel', stopTouch, false);
+            };
+            spectrum.addEventListener('mousedown', function(e) {
+                pickSpectrum(e);
+                document.addEventListener('mousemove', pickSpectrum, false);
+                document.addEventListener('mouseup', stopMouse, false);
+            });
+            spectrum.addEventListener('touchstart', function(e) {
+                pickSpectrum(e);
+                document.addEventListener('touchmove', pickSpectrum, false);
+                document.addEventListener('touchend', stopTouch, false);
+                document.addEventListener('touchcancel', stopTouch, false);
+            }, false);
+            spectrum.addEventListener('keydown', function(e) {
+                var step = 0.02;
+                if (e.keyCode === 37) spectrum._s = Math.max(0, spectrum._s - step);
+                else if (e.keyCode === 39) spectrum._s = Math.min(1, spectrum._s + step);
+                else if (e.keyCode === 38) spectrum._v = Math.min(1, spectrum._v + step);
+                else if (e.keyCode === 40) spectrum._v = Math.max(0, spectrum._v - step);
+                else return;
+                e.preventDefault();
+                self._setColorSpectrumDraft();
+            });
+            hue.addEventListener('input', function() {
+                spectrum._h = Number(hue.value) || 0;
+                self._setColorSpectrumDraft();
+            });
+        }
         overlay.addEventListener('click', function(e) {
             if (e.target === overlay) self.closeColorModal();
         });
@@ -1544,6 +1601,7 @@ var VC = {
         if (value) {
             field.classList.remove('invalid');
             if (preview) preview.style.backgroundColor = value;
+            this._syncColorSpectrum(value);
         } else {
             field.classList.add('invalid');
         }
@@ -1554,6 +1612,72 @@ var VC = {
             if (match) cells[i].classList.add('active');
             else cells[i].classList.remove('active');
         }
+    },
+
+    _setColorSpectrumDraft: function() {
+        var spectrum = document.getElementById('colorModalSpectrum');
+        if (!spectrum) return;
+        this._setColorModalDraft(this._hsvToHex(
+            typeof spectrum._h === 'number' ? spectrum._h : 0,
+            typeof spectrum._s === 'number' ? spectrum._s : 0,
+            typeof spectrum._v === 'number' ? spectrum._v : 1));
+    },
+
+    _syncColorSpectrum: function(hex) {
+        var spectrum = document.getElementById('colorModalSpectrum');
+        var thumb = document.getElementById('colorModalSpectrumThumb');
+        var hue = document.getElementById('colorModalHue');
+        if (!spectrum || !thumb || !hue) return;
+        var hsv = this._hexToHsv(hex);
+        if (!hsv) return;
+        if (hsv.s > 0.001 || typeof spectrum._h !== 'number') spectrum._h = hsv.h;
+        spectrum._s = hsv.s;
+        spectrum._v = hsv.v;
+        hue.value = Math.round(spectrum._h);
+        spectrum.style.backgroundColor = 'hsl(' + spectrum._h + ',100%,50%)';
+        thumb.style.left = (spectrum._s * 100) + '%';
+        thumb.style.top = ((1 - spectrum._v) * 100) + '%';
+        spectrum.setAttribute('aria-valuenow', Math.round(spectrum._s * 100));
+        spectrum.setAttribute('aria-valuetext', hex);
+    },
+
+    _hexToHsv: function(hex) {
+        var value = this._normalizeHex(hex);
+        if (!value) return null;
+        var n = parseInt(value.substring(1), 16);
+        var r = ((n >> 16) & 255) / 255;
+        var g = ((n >> 8) & 255) / 255;
+        var b = (n & 255) / 255;
+        var max = Math.max(r, g, b);
+        var min = Math.min(r, g, b);
+        var d = max - min;
+        var h = 0;
+        if (d) {
+            if (max === r) h = 60 * (((g - b) / d) % 6);
+            else if (max === g) h = 60 * (((b - r) / d) + 2);
+            else h = 60 * (((r - g) / d) + 4);
+        }
+        if (h < 0) h += 360;
+        return { h: h, s: max ? d / max : 0, v: max };
+    },
+
+    _hsvToHex: function(h, s, v) {
+        h = ((Number(h) || 0) % 360 + 360) % 360;
+        s = Math.max(0, Math.min(1, Number(s) || 0));
+        v = Math.max(0, Math.min(1, Number(v) || 0));
+        var c = v * s;
+        var x = c * (1 - Math.abs((h / 60) % 2 - 1));
+        var m = v - c;
+        var rgb = h < 60 ? [c, x, 0] :
+            h < 120 ? [x, c, 0] :
+            h < 180 ? [0, c, x] :
+            h < 240 ? [0, x, c] :
+            h < 300 ? [x, 0, c] : [c, 0, x];
+        var part = function(n) {
+            var text = Math.round((n + m) * 255).toString(16).toUpperCase();
+            return text.length < 2 ? '0' + text : text;
+        };
+        return '#' + part(rgb[0]) + part(rgb[1]) + part(rgb[2]);
     },
 
     /** Returns a canonical #RRGGBB, or null when the input isn't a hex colour. */
@@ -2194,6 +2318,35 @@ var VC = {
             });
         });
 
+        this.bindBtn('btnIviReboot', function() {
+            var body =
+                'The display and OverDrive will be unavailable while the IVI restarts.';
+            var confirmation = window.BYD && BYD.utils
+                    && BYD.utils.confirmDialog
+                ? BYD.utils.confirmDialog({
+                    title: 'Reboot IVI?',
+                    body: body,
+                    confirmLabel: 'Reboot IVI',
+                    cancelLabel: 'Cancel',
+                    danger: true
+                })
+                : Promise.resolve(window.confirm(
+                    'Reboot the IVI now? ' + body));
+            Promise.resolve(confirmation).then(function(confirmed) {
+                if (!confirmed) return;
+                self.setPending('btnIviReboot', true);
+                self.apiPost('/api/system/ivi-reboot', {
+                    confirm: 'REBOOT'
+                }).then(function(result) {
+                    self.setPending('btnIviReboot', false);
+                    self.toastFromResult(
+                        result,
+                        'IVI reboot requested',
+                        'IVI reboot failed');
+                });
+            });
+        });
+
         // Battery preconditioning heat — cloud-only in both directions. The state
         // now comes from the cloud snapshot via /api/vehicle/state, so the tile
         // reflects reality across reloads; previously it was write-only, and after
@@ -2275,12 +2428,10 @@ var VC = {
                     BYD.i18n.t('vehicle.windows_all_opening'));
             });
         });
-        // OPENWINDOW has only a ventilation-crack semantic in the BYD cloud.
-        // It is deliberately separate from the all-open control above, and is
-        // cloud-only — the neighbouring 0/100 presets have local SDK paths, this
-        // one does not, so it explains itself instead of failing opaquely.
+        // Keep ventilation distinct from full-open. The server uses closed-loop
+        // 15% positioning while the connected car is awake, and BYD OPENWINDOW
+        // when the vehicle is remote.
         this.bindBtn('btnWinAllVent', function() {
-            if (!self.requireCloud()) return;
             self.apiPost('/api/vehicle/window', { action: 'vent' }).then(function(result) {
                 if (result.success) {
                     for (var j = 0; j < 4; j++) self.triggerWindowVFX(areas[j], true);
@@ -3388,6 +3539,7 @@ var VC = {
     fetchState: function() {
         var self = this;
         var climatePowerRevision = this._climatePowerRevision;
+        var climateTempRevision = this._climateTempRevision;
         var climateFanRevision = this._climateFanRevision;
         var seatCommandRevision = this._seatCommandRevision;
         var steeringHeatRevision = this._steeringHeatRevision;
@@ -3395,6 +3547,15 @@ var VC = {
         fetch('/api/vehicle/state').then(function(resp) {
             return resp.json();
         }).then(function(data) {
+            var systemTab = document.querySelector('[data-panel="panelSystem"]');
+            var systemAvailable = data.iviRebootAvailable === true
+                || data.dilink5 === true;
+            if (systemTab) {
+                systemTab.style.display = systemAvailable ? '' : 'none';
+            }
+            if (!systemAvailable && self._activePanel === 'panelSystem') {
+                self.togglePanel('panelSystem', systemTab);
+            }
             if (!data.success) {
                 if (window.BYD && BYD.skeleton) {
                     BYD.skeleton.resolve('vcLock');
@@ -3448,13 +3609,28 @@ var VC = {
                 var winPct = function(v) {
                     return (typeof v === 'number' && v >= 0 && v <= 100) ? v : -1;
                 };
-                self.vehicleState.windows = {
+                var nextWindows = {
                     lf: winPct(w.lf),
                     rf: winPct(w.rf),
                     lr: winPct(w.lr),
                     rr: winPct(w.rr),
                     sunroof: winPct(w.sunroof),
                     sunshade: winPct(w.sunshade)
+                };
+                self.vehicleState.windows = nextWindows;
+
+                var open = data.windowOpen || {};
+                var winOpen = function(v, percent) {
+                    if (typeof v === 'boolean') return v;
+                    return percent >= 0 ? percent > 0 : null;
+                };
+                self.vehicleState.windowOpen = {
+                    lf: winOpen(open.lf, nextWindows.lf),
+                    rf: winOpen(open.rf, nextWindows.rf),
+                    lr: winOpen(open.lr, nextWindows.lr),
+                    rr: winOpen(open.rr, nextWindows.rr),
+                    sunroof: winOpen(open.sunroof, nextWindows.sunroof),
+                    sunshade: winOpen(open.sunshade, nextWindows.sunshade)
                 };
             }
 
@@ -3483,6 +3659,13 @@ var VC = {
                         && data.climate.fanLevel !== undefined
                         && data.climate.fanLevel >= 1 && data.climate.fanLevel <= 7) {
                     self.vehicleState.acFan = data.climate.fanLevel;
+                }
+                if (climateTempRevision === self._climateTempRevision
+                        && !self._climatePending.temp
+                        && data.climate.setpointDriver !== undefined
+                        && data.climate.setpointDriver >= 17
+                        && data.climate.setpointDriver <= 33) {
+                    self.vehicleState.acTemp = data.climate.setpointDriver;
                 }
                 if (data.climate.insideTempC !== undefined && data.climate.insideTempC > 0) {
                     // Use inside temp as display reference (actual set temp not available from state)
@@ -3517,15 +3700,24 @@ var VC = {
                     && typeof data.batteryHeat === 'boolean') {
                 self.vehicleState.batteryHeat = data.batteryHeat;
             }
-            if (data.seats && data.seats.ventilatedSupported === false) {
-                // Trim lacks ventilated seats — disable the cool buttons.
-                // Cars without the hardware return hasFeature=0 from SDK and
-                // 1001 from the BYD cloud, so neither path can succeed.
-                var coolBtns = document.querySelectorAll('[id^="btnSeatCool"]');
-                for (var ci = 0; ci < coolBtns.length; ci++) {
-                    coolBtns[ci].setAttribute('disabled', 'true');
-                    coolBtns[ci].classList.add('disabled');
-                    coolBtns[ci].title = 'Ventilated seats not available on this trim';
+            if (data.seats) {
+                var seatSupport = data.seats.ventilatedSupportedBySeat;
+                for (var ci = 0; ci < 2; ci++) {
+                    var coolBtn = document.getElementById('btnSeatCool' + (ci + 1));
+                    if (!coolBtn) continue;
+                    var unsupported = Array.isArray(seatSupport)
+                        ? seatSupport[ci] === false
+                        : data.seats.ventilatedSupported === false;
+                    if (unsupported) {
+                        coolBtn.setAttribute('disabled', 'true');
+                        coolBtn.classList.add('disabled');
+                        coolBtn.title = 'Ventilated seat not available on this trim';
+                    } else {
+                        coolBtn.removeAttribute('disabled');
+                        coolBtn.classList.remove('disabled');
+                        coolBtn.title = ci === 0
+                            ? 'Driver Seat Cool' : 'Passenger Seat Cool';
+                    }
                 }
             }
 
@@ -3820,9 +4012,17 @@ var VC = {
             var val = this.vehicleState.windows[area];
             var hasReading = (typeof val === 'number' && val >= 0);
             var display = hasReading ? val : 0;
+            var open = this.vehicleState.windowOpen
+                ? this.vehicleState.windowOpen[area] : null;
             if (fill) fill.style.width = display + '%';
             if (pct) pct.textContent = display + '%';
-            if (label) label.textContent = hasReading ? (val + '%') : '—%';
+            if (label) {
+                label.textContent = hasReading
+                    ? (val + '%')
+                    : (open === true
+                        ? this.translatedText('vehicle.open', 'Open')
+                        : '—%');
+            }
             // Reconcile the highlighted preset with the live position. Pick
             // the closest preset within the same ±5% tolerance the backend
             // uses to stop.
@@ -3890,8 +4090,11 @@ var VC = {
         var areas = ['lf', 'rf', 'lr', 'rr', 'sunroof', 'sunshade'];
         for (var i = 0; i < areas.length; i++) {
             var area = areas[i];
-            var pct = this.vehicleState.windows[area] || 0;
-            if (pct > 10) {
+            var pct = this.vehicleState.windows[area];
+            var open = this.vehicleState.windowOpen
+                ? this.vehicleState.windowOpen[area] : null;
+            if ((typeof pct === 'number' && pct > 10)
+                    || (pct < 0 && open === true)) {
                 this.setStateGlow('win_' + area, this.getWindowPosition(area), 0x38BDF8); // blue
             } else {
                 this.removeStateGlow('win_' + area);
@@ -4087,7 +4290,10 @@ var VC = {
                     ? options[colour - 1] : null;
                 if (options && options.length) {
                     slider.disabled = false;
-                    slider.style.background = 'linear-gradient(to right, ' + options.join(',') + ')';
+                    // background-image, not the shorthand: the shorthand resets
+                    // background-clip and the ramp would paint over the touch padding.
+                    slider.style.backgroundImage =
+                        'linear-gradient(to right, ' + options.join(',') + ')';
                 } else {
                     slider.disabled = true;
                 }

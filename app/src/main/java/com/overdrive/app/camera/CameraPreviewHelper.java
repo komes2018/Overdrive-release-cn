@@ -62,6 +62,10 @@ public final class CameraPreviewHelper {
     // through to the panoramic-slice cache path.
     private static final java.util.concurrent.atomic.AtomicBoolean directPreviewBusy =
         new java.util.concurrent.atomic.AtomicBoolean(false);
+    private static final java.util.concurrent.atomic.AtomicBoolean
+        directPreviewTerminalRestart =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+    private static final long DIRECT_PREVIEW_HARD_TIMEOUT_MS = 12_000L;
 
     private CameraPreviewHelper() {
     }
@@ -73,21 +77,37 @@ public final class CameraPreviewHelper {
      */
     public static boolean isCameraHeldByPipeline(int cameraId) {
         try {
+            if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                    .hasOwnedHardwareProcess()
+                    && com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                    .ownsConfiguredInput(cameraId)) {
+                return true;
+            }
             com.overdrive.app.surveillance.GpuSurveillancePipeline p =
                 com.overdrive.app.daemon.CameraDaemon.getGpuPipeline();
-            if (p == null) {
-                logger.info("isCameraHeldByPipeline cam=" + cameraId + " p=null");
-                return false;
+            if (p != null) {
+                boolean running = p.isRunning();
+                com.overdrive.app.camera.PanoramicCameraGpu cam = p.getCamera();
+                int heldCamId = cam != null ? cam.getCameraId() : -1;
+                boolean result = running && cam != null
+                    && heldCamId == cameraId;
+                logger.info("isCameraHeldByPipeline cam=" + cameraId
+                        + " running=" + running + " heldCamId=" + heldCamId
+                        + " → " + result);
+                if (result) return true;
             }
-            boolean running = p.isRunning();
-            com.overdrive.app.camera.PanoramicCameraGpu cam = p.getCamera();
-            int heldCamId = cam != null ? cam.getCameraId() : -1;
-            boolean result = running && cam != null && heldCamId == cameraId;
-            logger.info("isCameraHeldByPipeline cam=" + cameraId
-                    + " running=" + running + " heldCamId=" + heldCamId
-                    + " → " + result);
-            return result;
-        } catch (Exception e) {
+
+            com.overdrive.app.camera.OemDashcamPipeline oem =
+                com.overdrive.app.daemon.CameraDaemon
+                    .getOemDashcamPipeline();
+            if (oem != null && oem.isRunning()
+                    && oem.getCameraId() == cameraId) {
+                logger.info("isCameraHeldByPipeline cam=" + cameraId
+                    + " → true (OEM dashcam owns same id)");
+                return true;
+            }
+            return false;
+        } catch (Throwable e) {
             // If the lookup itself fails we can't be sure — fail closed.
             return true;
         }
@@ -161,6 +181,11 @@ public final class CameraPreviewHelper {
             if (p == null) return null;
             com.overdrive.app.camera.PanoramicCameraGpu cam = p.getCamera();
             if (cam == null) return null;
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {
+                return cam.samplePerQuadrantJpeg(
+                    slice.getStripOffsetX(),
+                    slice.getCornerX(), slice.getCornerY(), 0.0f, 0.0f);
+            }
             if (cam.getCameraLayoutMode() == 3) {
                 // 2x2-native HAL on DiLink 4. Slice → role → Variant A
                 // corner+flip mapping. Reads Dilink4Constants so this stays in
@@ -269,15 +294,98 @@ public final class CameraPreviewHelper {
      * confusing single-claim rejection.
      */
     private static byte[] captureWithSize(int cameraId, int width, int height, int fps, int timeoutMs) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            logger.warn("Direct camera previews are unavailable in DiLink 5 mode");
+            return null;
+        }
+        if (directPreviewTerminalRestart.get()
+                || com.overdrive.app.daemon.CameraDaemon
+                    .isProcessRestartPending()) {
+            logger.warn("Direct camera preview refused while process "
+                + "retirement is pending");
+            return null;
+        }
         if (!directPreviewBusy.compareAndSet(false, true)) {
             logger.info("Direct preview busy — refusing concurrent open for cam=" + cameraId);
             return null;
         }
         try {
+            if (!com.overdrive.app.camera.dilink5.DiLink5Platform
+                    .isDiLink4Selected()) {
+                return captureLegacyPreviewWithHardTimeout(
+                    cameraId, width, height, fps, timeoutMs);
+            }
             return captureWithSizeLocked(cameraId, width, height, fps, timeoutMs);
         } finally {
-            directPreviewBusy.set(false);
+            if (!directPreviewTerminalRestart.get()) {
+                directPreviewBusy.set(false);
+            }
         }
+    }
+
+    private static byte[] captureLegacyPreviewWithHardTimeout(
+            int cameraId, int width, int height, int fps, int timeoutMs) {
+        AtomicReference<byte[]> result = new AtomicReference<>();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread worker = new Thread(() -> {
+            try {
+                result.set(captureWithSizeLocked(
+                    cameraId, width, height, fps, timeoutMs));
+            } catch (Throwable t) {
+                failure.set(t);
+            }
+        }, "LegacyDirectCameraPreview");
+        worker.setDaemon(true);
+        try {
+            worker.start();
+        } catch (Throwable spawnFailure) {
+            logger.warn("Could not start bounded direct-preview worker: "
+                + spawnFailure.getMessage());
+            return null;
+        }
+
+        long hardTimeoutMs = Math.max(
+            DIRECT_PREVIEW_HARD_TIMEOUT_MS,
+            Math.max(0L, (long) timeoutMs) + 5_000L);
+        long deadline = android.os.SystemClock.elapsedRealtime()
+            + hardTimeoutMs;
+        boolean interrupted = false;
+        while (worker.isAlive()) {
+            long remaining =
+                deadline - android.os.SystemClock.elapsedRealtime();
+            if (remaining <= 0L) break;
+            try {
+                worker.join(Math.min(remaining, 200L));
+            } catch (InterruptedException waitInterrupted) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+        if (worker.isAlive()) {
+            directPreviewTerminalRestart.set(true);
+            String reason = "Direct AVMCamera preview blocked for "
+                + hardTimeoutMs + "ms (id=" + cameraId + ")";
+            try {
+                com.overdrive.app.daemon.CameraDaemon
+                    .requestUrgentCameraReleaseRestart(reason);
+            } catch (Throwable restartFailure) {
+                logger.error(reason + "; restart request failed: "
+                    + restartFailure.getMessage());
+            }
+            logger.error(reason + " — terminal process retirement armed; "
+                + "direct-preview gate left latched");
+            return null;
+        }
+
+        Throwable captureFailure = failure.get();
+        if (captureFailure != null) {
+            logger.warn("Direct preview worker failed cam=" + cameraId + ": "
+                + captureFailure.getMessage());
+            return null;
+        }
+        return result.get();
     }
 
     private static byte[] captureWithSizeLocked(int cameraId, int width, int height, int fps, int timeoutMs) {
@@ -310,10 +418,33 @@ public final class CameraPreviewHelper {
             if (reader == null) return null;
             readerSurface = reader.getSurface();
 
+            // Content gate: reject ALL-ZERO frames instead of latching the
+            // first arrival. A camera whose AVM/ISP power rail is down (post
+            // ACC-OFF — see AccSentryDaemon's rail-hold writes) opens fine
+            // and delivers frames, but every byte is zero; YUV(0,0,0) encodes
+            // to a confident SOLID GREEN JPEG (BT.601 maps it to ~RGB 0,135,0),
+            // which the camera-mapping dialog then displays as if it were a
+            // live feed. Skipping zero frames inside the existing timeout
+            // window also self-heals HAL warmup (first frames after open are
+            // often zero-filled); a camera that never produces content times
+            // out to null, so the dialog shows its placeholder + bounded
+            // retry instead of green. The check is fail-open — anything
+            // unexpected counts as content, so a format surprise can never
+            // break previews outright.
+            final java.util.concurrent.atomic.AtomicInteger zeroFramesRejected =
+                new java.util.concurrent.atomic.AtomicInteger(0);
             reader.setOnImageAvailableListener(imageReader -> {
                 Image image = null;
                 try {
                     image = imageReader.acquireLatestImage();
+                    if (image != null && !hasNonZeroLuma(image)) {
+                        if (zeroFramesRejected.incrementAndGet() == 1) {
+                            logger.info("Direct preview cam=" + cameraId
+                                + ": all-zero frame rejected (AVM/ISP rail down"
+                                + " or HAL warmup) — waiting for real content");
+                        }
+                        return; // finally closes it; keep listening
+                    }
                     if (image != null && imageRef.compareAndSet(null, image)) {
                         latch.countDown();
                         image = null;  // ownership transferred to imageRef
@@ -410,8 +541,13 @@ public final class CameraPreviewHelper {
             }
 
             if (!latch.await(timeoutMs, TimeUnit.MILLISECONDS)) {
-                logger.warn("No frame after " + timeoutMs + "ms cam=" + cameraId
-                        + " size=" + width + "x" + height);
+                int zeros = zeroFramesRejected.get();
+                logger.warn("No usable frame after " + timeoutMs + "ms cam=" + cameraId
+                        + " size=" + width + "x" + height
+                        + (zeros > 0
+                            ? " (" + zeros + " all-zero frames rejected — AVM/ISP"
+                              + " rail likely down; tile shows placeholder, not green)"
+                            : ""));
                 return null;
             }
 
@@ -530,6 +666,42 @@ public final class CameraPreviewHelper {
             m.setAccessible(true);
             m.invoke(instance);
         } catch (Throwable ignored) {}
+    }
+
+    /**
+     * True when the frame carries ANY real luma. Sparse-samples the Y plane
+     * (≤256 probes) and accepts a single sample above the near-zero floor —
+     * deliberately strict (>2, not >10) so a genuinely dark night scene,
+     * which still carries sensor noise / IR gain in scattered pixels, is
+     * never mistaken for the rail-down ALL-ZERO condition this gate exists
+     * to catch. FAIL-OPEN: any surprise (non-YUV format, missing planes,
+     * buffer exception) reports "has content" so previews can never be
+     * broken by the gate itself.
+     */
+    private static boolean hasNonZeroLuma(Image image) {
+        try {
+            Image.Plane[] planes = image.getPlanes();
+            if (planes == null || planes.length == 0 || planes[0] == null) {
+                return true;
+            }
+            java.nio.ByteBuffer y = planes[0].getBuffer();
+            if (y == null) {
+                return true;
+            }
+            int limit = y.limit();
+            if (limit <= 0) {
+                return true;
+            }
+            int step = Math.max(1, limit / 256);
+            for (int i = 0; i < limit; i += step) {
+                if ((y.get(i) & 0xFF) > 2) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Throwable t) {
+            return true;
+        }
     }
 
     private static byte[] yuv420888ToJpeg(Image image, int quality) {

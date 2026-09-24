@@ -34,11 +34,13 @@ import com.google.android.material.datepicker.DateValidatorPointBackward
 import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.overdrive.app.R
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Fragment for browsing recorded videos with a slim, list-first UI.
@@ -204,6 +206,7 @@ class RecordingLibraryFragment : Fragment() {
 
     // SOTA: Background executor for scanning operations
     private var scanExecutor = Executors.newSingleThreadExecutor()
+    private val incidentPackInProgress = AtomicBoolean(false)
 
     // -----------------------------------------------------------------
     // Paging — replaces the legacy "load every row at once" path with
@@ -507,6 +510,7 @@ class RecordingLibraryFragment : Fragment() {
         placeFilter.clear()
         storageFilter.clear()
         placeContainsQuery = ""
+        parkingSessionIdFilter = ""
         // Drop date narrowing too — the user's intent is "show me anything".
         dateNarrowed = false
         renderActiveFilters()
@@ -540,6 +544,13 @@ class RecordingLibraryFragment : Fragment() {
      */
     private var placeContainsQuery: String = ""
 
+    /**
+     * Parking Intelligence: narrow to the clips stamped with one parking
+     * session (arrived from a park's "Open events"). Server-side only — the
+     * direct-filesystem fallback has no sidecar index and ignores it.
+     */
+    private var parkingSessionIdFilter: String = ""
+
     fun applyAll(
         source: RecordingFilter,
         actorClasses: Set<String>,
@@ -551,7 +562,8 @@ class RecordingLibraryFragment : Fragment() {
         narrowToDate: Boolean = false,
         places: Set<String> = emptySet(),
         placeContains: String? = null,
-        storages: Set<String> = emptySet()
+        storages: Set<String> = emptySet(),
+        parkingSessionId: String? = null
     ) {
         currentFilter = source
         extraFilter = extraSource
@@ -567,6 +579,7 @@ class RecordingLibraryFragment : Fragment() {
         storageFilter.clear()
         storageFilter.addAll(storages.map { it.uppercase() })
         placeContainsQuery = placeContains?.trim()?.lowercase() ?: ""
+        parkingSessionIdFilter = parkingSessionId?.trim() ?: ""
         calendar.set(year, month, 1)
         selectedDay = day
         // Caller decides whether to narrow. The parent flips this true only
@@ -890,6 +903,7 @@ class RecordingLibraryFragment : Fragment() {
             onDelete = { recording -> confirmDelete(recording) },
             onSelectionChanged = { count -> onSelectionChanged(count) },
             onShare = { recording -> shareSingleRecording(recording) },
+            onEvidencePack = { recording -> confirmCreateIncidentPack(recording) },
             landscapeRows = landscape
         )
 
@@ -1205,7 +1219,8 @@ class RecordingLibraryFragment : Fragment() {
             severities = filterState.normalizedSeverities,
             place = filterState.exactPlace,
             placeContains = filterState.normalizedPlaceContains.takeIf { it.isNotEmpty() },
-            storages = filterState.normalizedStorages
+            storages = filterState.normalizedStorages,
+            parkingSessionId = filterState.normalizedParkingSessionId
         )
     }
 
@@ -1215,7 +1230,8 @@ class RecordingLibraryFragment : Fragment() {
         places = placeFilter,
         placeContains = placeContainsQuery,
         storages = storageFilter,
-        dateNarrowed = dateNarrowed
+        dateNarrowed = dateNarrowed,
+        parkingSessionId = parkingSessionIdFilter
     )
 
     /**
@@ -1799,6 +1815,89 @@ class RecordingLibraryFragment : Fragment() {
         } catch (e: Exception) {
             Log.e(TAG, "Share failed", e)
             appToast?.show(e.message ?: getString(R.string.toast_share_failed), AppToast.Kind.ERROR)
+        }
+    }
+
+    private fun confirmCreateIncidentPack(recording: RecordingFile) {
+        if (recording.recordingId.isNullOrEmpty()) {
+            appToast?.show(
+                getString(R.string.toast_evidence_pack_unavailable), AppToast.Kind.WARNING)
+            return
+        }
+        MaterialAlertDialogBuilder(requireContext(), R.style.Theme_Overdrive_M3_Dialog)
+            .setIcon(R.drawable.ic_smart_toy)
+            .setTitle(getString(R.string.dialog_create_evidence_pack_title))
+            .setMessage(getString(R.string.dialog_create_evidence_pack_message))
+            .setNegativeButton(getString(R.string.action_cancel), null)
+            .setPositiveButton(getString(R.string.action_create_evidence_pack)) { _, _ ->
+                createIncidentPack(recording.recordingId)
+            }
+            .show()
+    }
+
+    private fun createIncidentPack(recordingId: String) {
+        if (scanExecutor.isShutdown ||
+            !incidentPackInProgress.compareAndSet(false, true)
+        ) {
+            return
+        }
+        val cache = File(requireContext().cacheDir, "incident-packs")
+        appToast?.show(
+            getString(R.string.toast_evidence_pack_creating), AppToast.Kind.INFO)
+        scanExecutor.submit {
+            val result = try {
+                RecordingsApiClient.createIncidentPack(recordingId, cache)
+            } finally {
+                incidentPackInProgress.set(false)
+            }
+            activity?.runOnUiThread {
+                if (!isAdded || view == null) return@runOnUiThread
+                val file = result.file
+                if (file == null) {
+                    appToast?.show(
+                        getString(
+                            R.string.toast_evidence_pack_failed,
+                            result.error ?: getString(R.string.error_unknown)
+                        ),
+                        AppToast.Kind.ERROR
+                    )
+                    return@runOnUiThread
+                }
+                shareIncidentPack(file)
+            }
+        }
+    }
+
+    private fun shareIncidentPack(file: File) {
+        val ctx = context ?: return
+        try {
+            val uri = FileProvider.getUriForFile(
+                ctx,
+                "${ctx.packageName}.fileprovider",
+                file
+            )
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/zip"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            appToast?.show(
+                getString(R.string.toast_evidence_pack_ready), AppToast.Kind.SUCCESS)
+            startActivity(
+                Intent.createChooser(
+                    intent,
+                    getString(R.string.action_share_evidence_pack)
+                )
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Evidence-pack share failed", e)
+            appToast?.show(
+                getString(
+                    R.string.toast_evidence_pack_failed,
+                    e.message ?: getString(R.string.error_unknown)
+                ),
+                AppToast.Kind.ERROR
+            )
         }
     }
 

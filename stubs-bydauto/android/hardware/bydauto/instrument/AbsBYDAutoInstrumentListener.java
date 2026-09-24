@@ -10,6 +10,7 @@ public class AbsBYDAutoInstrumentListener {
     public AbsBYDAutoInstrumentListener() {}
     public void onSportModeStateChanged(int state) {}      // drive mode (1=Eco/2=Sport/3=Normal/4=Snow)
     public void onOutCarTemperatureChanged(int tempC) {}   // ambient / outside-air temperature °C
+    public void onExternalChargingPowerChanged(float power) {}
     public void onExternalChargingPowerChanged(double power) {}
     public void onSafetyBeltStatusChanged(int seat, int state) {}
     // Generic feature-ID event tap — INSTRUMENT_UNIT_PRESSURE (fid=4208) has no dedicated

@@ -155,14 +155,6 @@ public class EGLCore {
         EGLContext shareWith = (parent != null) ? parent.eglContext : EGL14.EGL_NO_CONTEXT;
         eglContext = EGL14.eglCreateContext(eglDisplay, eglConfig, shareWith, contextAttribs, 0);
 
-        if (eglContext == EGL14.EGL_NO_CONTEXT && actualGles == 3) {
-            logger.warn("eglCreateContext failed for GLES 3; retrying with GLES 2 context attributes");
-            actualGles = 2;
-            contextAttribs[1] = 2;
-            eglConfig = chooseConfigOrFallback(eglDisplay, actualGles, recordable);
-            eglContext = EGL14.eglCreateContext(eglDisplay, eglConfig, shareWith, contextAttribs, 0);
-        }
-
         if (eglContext == EGL14.EGL_NO_CONTEXT) {
             // FIX (EGL-leak audit): capture eglGetError() IMMEDIATELY — the
             // fleet crash loop ("eglCreateContext failed" x77 until reboot)

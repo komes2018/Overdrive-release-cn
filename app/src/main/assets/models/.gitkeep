@@ -8,3 +8,11 @@
 #   https://raw.githubusercontent.com/FeiGeChuanShu/ncnn-android-yolov8/main/ncnn-android-yolov8/app/src/main/assets/yolov8s.bin
 #
 # Or convert using pnnx from PyTorch YOLOv8 model
+
+# Parking Intelligence garage-signage OCR (bundled):
+# - signage_det.tflite     PaddleOCR en_PP-OCRv3 text detector  (fp16, ~1.2 MB)
+# - signage_rec.tflite     PaddleOCR en_PP-OCRv3 text recogniser (fp16, ~4.3 MB)
+# - signage_charset.txt    PaddleOCR en_dict.txt (95 symbols; blank=0, space appended)
+# Source: PaddlePaddle/PaddleOCR (Apache-2.0), ONNX exports by RapidAI/RapidOCR
+# (Apache-2.0), converted with dev/export_signage_ocr.py (onnxslim + onnx2tf).
+# A newer export placed in /storage/emulated/0/Overdrive/models/ overrides these.

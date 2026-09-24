@@ -1,5 +1,5 @@
 {
-  "version": 12,
+  "version": 13,
   "default": "seal",
   "baseUrl": "https://github.com/yash-srivastava/Overdrive-release/releases/download/models-v1/",
   "batteryChemistryDefinitions": {
@@ -67,12 +67,31 @@
       "batteryChemistryEvidence": {
         "authority": "BYD",
         "technology": "blade",
-        "nominalKwh": 82.5,
-        "configuration": "European Comfort / Design / Excellence AWD 82.5 kWh Blade",
-        "sourceUrl": "https://media.byd.com/all-new-byd-sealion-7-arrives-in-europe/?lang=eng",
-        "verifiedOn": "2026-08-27"
+        "nominalKwh": 91.3,
+        "configuration": "UK Excellence AWD 91.3 kWh",
+        "sourceUrl": "https://www.byd.com/uk/electric-cars/sealion-7",
+        "verifiedOn": "2026-09-01"
       },
-      "nominalKwh": 82.5
+      "nominalKwh": 91.3
+    },
+    {
+      "id": "shark",
+      "name": "BYD Shark",
+      "file": "seal.glb",
+      "sizeBytes": 1653240,
+      "sha256": "1030260cb7dc6b4483cc4f5fd2feb4746870234a87ee3ccf7f3d71e7bd0178fe",
+      "bundled": true,
+      "phev": true,
+      "batteryChemistry": "lfp",
+      "batteryChemistryEvidence": {
+        "authority": "BYD",
+        "technology": "blade",
+        "nominalKwh": 29.6,
+        "configuration": "DMO Super Hybrid Off-road Platform 29.6 kWh Blade",
+        "sourceUrl": "https://media.byd.com/byd-shark-pickup-truck-global-debut/?lang=eng",
+        "verifiedOn": "2026-09-03"
+      },
+      "nominalKwh": 29.6
     },
     {
       "id": "seal-u",
@@ -118,6 +137,7 @@
       "sizeBytes": 1327816,
       "sha256": "94eb27928e410848e22aa92e6cf45fcc1329e941b74602f81c8f4de799abcdb6",
       "bundled": false,
+      "paintMeshHint": "bodypaint_a",
       "batteryChemistry": "lfp",
       "batteryChemistryEvidence": {
         "authority": "BYD",
@@ -228,6 +248,7 @@
       "sizeBytes": 1856336,
       "sha256": "0d89df8d36ec33cd5b8b6041e662b0d0b1c7cdc47cab87cbb2277f16ab95ae13",
       "bundled": false,
+      "paintMeshHint": "carpaint",
       "batteryChemistry": "lfp",
       "batteryChemistryEvidence": {
         "authority": "BYD",

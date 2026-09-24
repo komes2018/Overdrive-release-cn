@@ -10,9 +10,9 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=6"></script>
-    <script src="../shared/app-shell.js?v=5"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=24">
+    <script src="../shared/theme.js?v=8"></script>
+    <script src="../shared/app-shell.js?v=7"></script>
+    <link rel="stylesheet" href="../shared/styles.css?v=34">
     <style>
         /* Events Page Specific Styles */
 
@@ -1367,6 +1367,10 @@
         
         .video-player {
             width: 100%;
+            /* Chrome 58 has no aspect-ratio support. This percentage-height
+               fallback is disabled below on modern engines. */
+            height: 0;
+            padding-bottom: 56.25%;
             /* Initial aspect — replaced at runtime by events.js once
                loadedmetadata fires (videoPlayerWrap.style.aspectRatio is
                set to the actual mosaic dims, typically 4/3 for Seal at
@@ -1402,9 +1406,26 @@
             overflow: hidden;
         }
 
+        @supports (aspect-ratio: 1 / 1) {
+            .video-player {
+                height: auto;
+                padding-bottom: 0;
+            }
+        }
+
+        .video-container:fullscreen .video-player,
+        .video-container:-webkit-full-screen .video-player,
+        .video-container.is-fullscreen .video-player {
+            height: auto;
+            padding-bottom: 0 !important;
+        }
+
         .video-player video {
             position: absolute;
-            inset: 0;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            left: 0;
             width: 100%;
             height: 100%;
             display: block;
@@ -2301,7 +2322,7 @@
     <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js?v=20"></script>
     <script src="../shared/update-flow.js"></script>
-    <script src="../shared/events.js?v=storagefilter1"></script>
+    <script src="../shared/events.js?v=incidentpack2"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

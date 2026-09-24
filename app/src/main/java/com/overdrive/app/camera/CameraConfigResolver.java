@@ -1,6 +1,7 @@
 package com.overdrive.app.camera;
 
 import com.overdrive.app.config.UnifiedConfigManager;
+import com.overdrive.app.camera.dilink5.DiLink5Platform;
 import com.overdrive.app.logging.DaemonLogger;
 
 import org.json.JSONArray;
@@ -32,26 +33,70 @@ public final class CameraConfigResolver {
 
     public static ResolvedCameraConfig resolve(String vehicleModel) {
         JSONObject camera = getCameraSection();
-        String selectedProfileId = camera.optString("cameraProfile", CameraProfiles.PROFILE_AUTO);
-        boolean autoProfile = selectedProfileId.isEmpty()
+        boolean dilink5 = DiLink5Platform.isSelected();
+        boolean dilink4 = !dilink5 && DiLink5Platform.isDiLink4Selected();
+        String selectedProfileId = profileForMode(
+                camera.optString("cameraProfile", CameraProfiles.PROFILE_AUTO),
+                dilink5);
+        boolean requestedAutoProfile = selectedProfileId.isEmpty()
                 || CameraProfiles.PROFILE_AUTO.equalsIgnoreCase(selectedProfileId);
+        boolean autoProfile = requestedAutoProfile && !dilink5;
         String vehicleModelHint = preferSelectedVehicleModel(
                 readSelectedVehicleModel(), vehicleModel);
-        CameraProfile profile = autoProfile
+        CameraProfile profile = dilink5
+                ? CameraProfiles.get(CameraProfiles.PROFILE_DILINK5_SEALION7)
+                : autoProfile
                 ? CameraProfiles.infer(vehicleModelHint)
                 : CameraProfiles.get(selectedProfileId);
 
-        int panoCameraId = optNonNegative(camera, "probedCameraId", profile.getPanoCameraId());
-        int panoSurfaceMode = optNonNegative(camera, "probedSurfaceMode", profile.getPanoSurfaceMode());
-        int panoWidth = optNonNegative(camera, "probedWidth", profile.getPanoWidth());
-        int panoHeight = optNonNegative(camera, "probedHeight", profile.getPanoHeight());
-        boolean manual = camera.optBoolean("manualOverride", false);
-        boolean validated = camera.optBoolean("probedAndValidated", false);
-        boolean fallback = camera.optBoolean("fallbackFromProbe", false);
+        int persistedPanoCameraId = dilink5 ? profile.getPanoCameraId()
+                : optNonNegative(camera, "probedCameraId", profile.getPanoCameraId());
+        int panoCameraId = persistedPanoCameraId;
+        int panoSurfaceMode = dilink5 ? profile.getPanoSurfaceMode()
+                : optNonNegative(camera, "probedSurfaceMode", profile.getPanoSurfaceMode());
+        int panoWidth = dilink5 ? profile.getPanoWidth()
+                : optNonNegative(camera, "probedWidth", profile.getPanoWidth());
+        int panoHeight = dilink5 ? profile.getPanoHeight()
+                : optNonNegative(camera, "probedHeight", profile.getPanoHeight());
+        boolean manual = !dilink5 && camera.optBoolean("manualOverride", false);
+        boolean validated = dilink5 || camera.optBoolean("probedAndValidated", false);
+        boolean fallback = !dilink5 && camera.optBoolean("fallbackFromProbe", false);
+
+        if (dilink4) {
+            // DIPlus panoramic recording does not use a vehicle-profile pin
+            // or a stale saved probe. It resolves the physical source from
+            // BmmCameraInfo every process and keeps that one AVMCamera open.
+            // pano_h/pano_l use preview index 0; APA fallback uses index 1.
+            AvmCameraHelper.PanoCameraSelection halSelection =
+                    AvmCameraHelper.discoverDi4PanoCameraSelection();
+            if (halSelection != null) {
+                if (panoCameraId != halSelection.getCameraId()
+                        || panoSurfaceMode
+                            != halSelection.getPreviewIndex()) {
+                    logger.warn("DiLink 4 HAL camera mapping overrides stored "
+                            + "selection: id=" + panoCameraId
+                            + "/preview=" + panoSurfaceMode
+                            + " -> " + halSelection.getTag()
+                            + " id=" + halSelection.getCameraId()
+                            + "/preview="
+                            + halSelection.getPreviewIndex());
+                }
+                panoCameraId = halSelection.getCameraId();
+                panoSurfaceMode = halSelection.getPreviewIndex();
+            }
+            // Effective DI4 selection is HAL-owned, not a manual/profile pin.
+            manual = false;
+            if (halSelection != null) {
+                validated = true;
+                fallback = false;
+            }
+        }
 
         EnumMap<CameraRole, CameraSourceRef> roleMappings = profile.getDefaultRoleMappings();
         JSONObject mappingsJson = camera.optJSONObject("roleMappings");
-        if (mappingsJson != null) {
+        // The native DiLink 5 hook emits one fixed canonical 2x2 order.
+        // Do not let stale legacy role overrides desynchronize AI/preview geometry.
+        if (!dilink5 && mappingsJson != null) {
             for (CameraRole role : CameraRole.values()) {
                 JSONObject item = mappingsJson.optJSONObject(role.getKey());
                 CameraSourceRef sourceRef = CameraSourceRef.fromJson(item);
@@ -84,6 +129,22 @@ public final class CameraConfigResolver {
                 roleMappings);
     }
 
+    /** Validate a manual camera ID without overriding DI4's HAL tag mapping. */
+    public static boolean isManualPanoCameraIdAllowed(int cameraId) {
+        if (cameraId < 0 || cameraId > PanoCameraFallbackOrder.MAX_CAMERA_ID) {
+            return false;
+        }
+        boolean dilink4 = !DiLink5Platform.isSelected()
+                && DiLink5Platform.isDiLink4Selected();
+        if (!dilink4) {
+            return true;
+        }
+        AvmCameraHelper.PanoCameraSelection halSelection =
+                AvmCameraHelper.discoverDi4PanoCameraSelection();
+        return halSelection == null
+                || cameraId == halSelection.getCameraId();
+    }
+
     /**
      * Returns the camera section, or an empty JSONObject if absent.
      */
@@ -92,11 +153,17 @@ public final class CameraConfigResolver {
         return section != null ? section : new JSONObject();
     }
 
+    private static boolean isDiLink5RuntimeSelected() {
+        DiLink5Platform.refreshActiveMode();
+        return DiLink5Platform.isSelected();
+    }
+
     /** True only for the opt-in DiLink 4 passive APA compatibility path. */
     public static boolean isPassiveApaModeEnabled() {
+        if (!DiLink5Platform.isDiLink4Selected()) return false;
         JSONObject camera = getCameraSection();
         return Di4AvcViewpointPolicy.isPassiveApaModeEnabled(
-                camera.optString("cameraMode", "default"),
+                "dilink4",
                 camera.optBoolean("dilink4PassiveApaMode", false));
     }
 
@@ -109,7 +176,7 @@ public final class CameraConfigResolver {
      * is just durable user intent.
      */
     public static boolean saveRoleMapping(CameraRole role, CameraSourceRef sourceRef) {
-        if (role == null || sourceRef == null) return false;
+        if (role == null || sourceRef == null || isDiLink5RuntimeSelected()) return false;
         // Build a fresh JSONObject from the cached section's serialized form.
         // UnifiedConfigManager.loadConfig returns the cached config by
         // reference, so mutating the inner roleMappings JSONObject directly
@@ -132,7 +199,7 @@ public final class CameraConfigResolver {
      * Remove a single role mapping so it falls back to the profile default.
      */
     public static boolean clearRoleMapping(CameraRole role) {
-        if (role == null) return false;
+        if (role == null || isDiLink5RuntimeSelected()) return false;
         JSONObject camera = getCameraSection();
         JSONObject existing = camera.optJSONObject("roleMappings");
         if (existing == null || !existing.has(role.getKey())) return true;
@@ -143,6 +210,38 @@ public final class CameraConfigResolver {
 
         JSONObject update = new JSONObject();
         putSafely(update, "roleMappings", mappings);
+        return UnifiedConfigManager.updateSection("camera", update);
+    }
+
+    /** Persist legacy OEM-camera controls without exposing them to DiLink 5. */
+    public static boolean saveLegacyOemCameraSettings(
+            boolean manualOverride,
+            int cameraId,
+            boolean concurrentProbeEnabled) {
+        if (isDiLink5RuntimeSelected()
+                || (manualOverride && (cameraId < 0 || cameraId > 5))) {
+            return false;
+        }
+        JSONObject update = new JSONObject();
+        putSafely(update, "oemDashcamManualOverride", manualOverride);
+        putSafely(update, "oemDashcamCameraId",
+                manualOverride ? cameraId : -1);
+        putSafely(update, "concurrentAvmProbeEnabled",
+                concurrentProbeEnabled);
+        return UnifiedConfigManager.updateSection("camera", update);
+    }
+
+    /**
+     * Persist the decoupled-encoder-lane opt-in
+     * (camera.decoupledEncoderLane). Write-through only — the flag is read
+     * once at pipeline construction (PanoramicCameraGpu USE_* selector
+     * pattern), so a change goes live on the next camera restart, never
+     * hot-swapped. The pipeline additionally hard-gates the flag off on the
+     * DiLink 4/5 paths, so persisting it there is inert by construction.
+     */
+    public static boolean saveDecoupledEncoderLane(boolean enabled) {
+        JSONObject update = new JSONObject();
+        putSafely(update, "decoupledEncoderLane", enabled);
         return UnifiedConfigManager.updateSection("camera", update);
     }
 
@@ -169,11 +268,17 @@ public final class CameraConfigResolver {
      * the runtime probe completes.
      */
     public static boolean saveCameraProfile(String profileId) {
+        if (isDiLink5RuntimeSelected()) return false;
         JSONObject update = new JSONObject();
         if (profileId == null || profileId.isEmpty()
                 || CameraProfiles.PROFILE_AUTO.equalsIgnoreCase(profileId)) {
             putSafely(update, "cameraProfile", CameraProfiles.PROFILE_AUTO);
         } else if (CameraProfiles.isKnownProfile(profileId)) {
+            if (CameraProfiles.PROFILE_DILINK5_SEALION7
+                    .equalsIgnoreCase(profileId)) {
+                logger.warn("The DiLink 5 camera profile is selected by camera mode");
+                return false;
+            }
             putSafely(update, "cameraProfile", profileId);
             JSONObject section = getCameraSection();
             CameraProfile profile = CameraProfiles.get(profileId);
@@ -184,6 +289,14 @@ public final class CameraConfigResolver {
             return false;
         }
         return UnifiedConfigManager.updateSection("camera", update);
+    }
+
+    static String profileForMode(String profileId, boolean dilink5) {
+        if (!dilink5 && CameraProfiles.PROFILE_DILINK5_SEALION7
+                .equalsIgnoreCase(profileId)) {
+            return CameraProfiles.PROFILE_AUTO;
+        }
+        return profileId == null ? CameraProfiles.PROFILE_AUTO : profileId;
     }
 
     /**
@@ -225,6 +338,7 @@ public final class CameraConfigResolver {
      */
     public static boolean persistPanoramicProbe(int cameraId, int surfaceMode, int width, int height,
                                                 boolean validated, boolean fallback) {
+        if (isDiLink5RuntimeSelected()) return false;
         JSONObject update = new JSONObject();
         putSafely(update, "probedCameraId", cameraId);
         putSafely(update, "probedSurfaceMode", surfaceMode);
@@ -249,30 +363,40 @@ public final class CameraConfigResolver {
 
     /**
      * Build the candidate list shown in the dialog's Prev/Next navigator:
-     * direct cameras 0–5 plus the four panoramic slices, each tagged with a
-     * recommended preview width/height. UI iterates this list and asks the
-     * server for previews via {@code /api/surveillance/camera-preview?kind=…}.
+     * legacy modes expose direct cameras 0–5 plus panoramic slices; DiLink 5
+     * exposes only the fixed QCarCam mosaic slices.
      */
     public static JSONArray buildPreviewCandidates(ResolvedCameraConfig resolved) {
         JSONArray out = new JSONArray();
+        boolean dilink5 = DiLink5Platform.isSelected();
+        if (dilink5
+                && !com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+            return out;
+        }
         boolean passiveApa = isPassiveApaModeEnabled();
-        for (int cameraId = 0; cameraId <= 5; cameraId++) {
-            JSONObject item = CameraSourceRef.direct(cameraId).toJson();
-            boolean passivePano = passiveApa && cameraId == resolved.getPanoCameraId();
-            putSafely(item, "previewWidth", passivePano
-                    ? PassiveApaGeometry.WIDTH
-                    : resolved.getProfile().getDirectPreviewWidth());
-            putSafely(item, "previewHeight", passivePano
-                    ? PassiveApaGeometry.HEIGHT
-                    : resolved.getProfile().getDirectPreviewHeight());
-            out.put(item);
+        if (!dilink5) {
+            for (int cameraId = 0; cameraId <= 5; cameraId++) {
+                JSONObject item = CameraSourceRef.direct(cameraId).toJson();
+                boolean passivePano = passiveApa && cameraId == resolved.getPanoCameraId();
+                putSafely(item, "previewWidth", passivePano
+                        ? PassiveApaGeometry.WIDTH
+                        : resolved.getProfile().getDirectPreviewWidth());
+                putSafely(item, "previewHeight", passivePano
+                        ? PassiveApaGeometry.HEIGHT
+                        : resolved.getProfile().getDirectPreviewHeight());
+                out.put(item);
+            }
         }
         for (PanoramicSlice slice : PanoramicSlice.values()) {
             JSONObject item = CameraSourceRef.panoramicSlice(slice).toJson();
-            putSafely(item, "previewWidth", passiveApa
-                    ? PassiveApaGeometry.WIDTH : resolved.getPanoWidth() / 4);
-            putSafely(item, "previewHeight", passiveApa
-                    ? PassiveApaGeometry.HEIGHT : resolved.getPanoHeight());
+            putSafely(item, "previewWidth", dilink5
+                    ? resolved.getPanoWidth() / 2
+                    : passiveApa
+                            ? PassiveApaGeometry.WIDTH : resolved.getPanoWidth() / 4);
+            putSafely(item, "previewHeight", dilink5
+                    ? resolved.getPanoHeight() / 2
+                    : passiveApa
+                            ? PassiveApaGeometry.HEIGHT : resolved.getPanoHeight());
             out.put(item);
         }
         return out;

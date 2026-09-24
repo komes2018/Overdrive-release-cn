@@ -91,7 +91,7 @@ data class LogConfig(
          */
         const val DAEMON_LOG_DIR = "/data/local/tmp"
     }
-    
+
     /**
      * Whether a line of [level] survives the severity gate — the same comparison
      * LogManager.log() applies, kept here as a pure function so the policy is

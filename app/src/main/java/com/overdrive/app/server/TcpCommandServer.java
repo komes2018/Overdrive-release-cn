@@ -129,17 +129,25 @@ public class TcpCommandServer {
                 break;
 
             case "stop":
-                // User explicitly requested stop - force stop even if recording
                 boolean forceStop = cmd.optBoolean("force", true);  // Default to force for backward compat
                 JSONArray camsToStop = cmd.optJSONArray("cameras");
-                if (camsToStop != null) {
-                    for (int i = 0; i < camsToStop.length(); i++) {
-                        CameraDaemon.stopCamera(camsToStop.getInt(i), forceStop);
-                    }
+                boolean explicitStop = cmd.optBoolean(
+                        "explicit", camsToStop == null);
+                boolean stopConfirmed = true;
+                if (explicitStop) {
+                    stopConfirmed =
+                            CameraDaemon.stopAllCamerasForExplicitUserStop();
+                } else if (camsToStop != null) {
+                    stopConfirmed = camsToStop.length() > 0
+                            && CameraDaemon.stopAllCameras(forceStop);
                 } else {
-                    CameraDaemon.stopAllCameras(forceStop);
+                    stopConfirmed = false;
                 }
-                response.put("status", "ok");
+                response.put("status", stopConfirmed ? "ok" : "error");
+                if (!stopConfirmed) {
+                    response.put(
+                            "message", "Camera stop was not confirmed");
+                }
                 response.put("recording", getRecordingCameras());
                 break;
 
@@ -285,17 +293,17 @@ public class TcpCommandServer {
                 // pipeline call would re-apply the dashcam layout under a live
                 // recording. See SurveillanceApiHandler.handleDisable.
                 boolean accOn = com.overdrive.app.monitor.AccMonitor.isAccOn();
-                if (!accOn) {
-                    CameraDaemon.disableSurveillance();   // fires OEM recalc
-                }
                 if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(false)) {
                     response.put("status", "error");
                     response.put("message", "Failed to save the surveillance setting");
                     break;
                 }
-                // Second recalc post-write so resolver sees the new master toggle.
-                try { com.overdrive.app.server.OemDashcamApiHandler.scheduleLifecycleRecalc(); }
-                catch (Throwable ignored) {}
+                if (!accOn) {
+                    CameraDaemon.disableSurveillance();   // fires OEM recalc
+                } else {
+                    try { com.overdrive.app.server.OemDashcamApiHandler.scheduleLifecycleRecalc(); }
+                    catch (Throwable ignored) {}
+                }
                 response.put("status", "ok");
                 response.put("deferred", accOn);
                 response.put("surveillance", CameraDaemon.getSurveillanceStatus());

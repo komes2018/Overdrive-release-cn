@@ -14,9 +14,11 @@ import java.io.OutputStream;
  *
  * <ul>
  *   <li>GET  /api/apps/list   — {@code {success, apps:[{package,label}]}} launchable apps, sorted by label.</li>
- *   <li>POST /api/apps/launch — body {@code {package, split?}} → launch it (split=true
- *       docks into split-screen). This is the endpoint an automation {@code ApiAction}
- *       and the keymap {@code openApp} action target (allowlisted in {@link HttpServer}).</li>
+ *   <li>POST /api/apps/launch — body {@code {package, split?, secondaryPackage?}} →
+ *       launch one app, or a deterministic two-app split pair when both
+ *       {@code split=true} and {@code secondaryPackage} are supplied. This is the endpoint
+ *       an automation {@code ApiAction} and the keymap {@code openApp} action target
+ *       (allowlisted in {@link HttpServer}).</li>
  * </ul>
  */
 public final class AppsApiHandler {
@@ -68,9 +70,35 @@ public final class AppsApiHandler {
             // Optional split-screen dock: {"package":..,"split":true}. Defaults to
             // false (normal full-screen launch) so existing callers are unaffected.
             boolean split = req.optBoolean("split", false);
-            boolean ok = AppLauncher.launch(pkg, split);
+            boolean pairRequested = req.has("secondaryPackage");
+            String secondaryPkg = req.optString("secondaryPackage", null);
+            if (pairRequested && (secondaryPkg == null || secondaryPkg.trim().isEmpty())) {
+                resp.put("success", false);
+                resp.put("error", "Missing secondaryPackage");
+                HttpResponse.sendJson(out, resp.toString());
+                return;
+            }
+            if (pairRequested && !split) {
+                resp.put("success", false);
+                resp.put("error", "secondaryPackage requires split=true");
+                HttpResponse.sendJson(out, resp.toString());
+                return;
+            }
+            if (pairRequested && pkg.trim().equals(secondaryPkg.trim())) {
+                resp.put("success", false);
+                resp.put("error", "Split-screen apps must be different");
+                HttpResponse.sendJson(out, resp.toString());
+                return;
+            }
+            boolean ok = pairRequested
+                    ? AppLauncher.launchSplitPair(pkg, secondaryPkg)
+                    : AppLauncher.launch(pkg, split);
             resp.put("success", ok);
-            if (!ok) resp.put("error", "Could not launch " + pkg);
+            if (!ok) {
+                resp.put("error", pairRequested
+                        ? "Could not launch split-screen app pair"
+                        : "Could not launch " + pkg);
+            }
         } catch (Throwable t) {
             logger.warn("apps/launch failed: " + t.getMessage());
             resp.put("success", false);

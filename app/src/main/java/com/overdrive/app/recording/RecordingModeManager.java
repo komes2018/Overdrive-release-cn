@@ -84,6 +84,8 @@ public class RecordingModeManager {
     // its normal state). Recomputed every resync tick; retains its last value
     // between ticks (slow-moving signal).
     private volatile boolean recordingWedged = false;
+    // Log the DI5 safety-suppression edge once, not on every resync tick.
+    private volatile boolean diLink5CaptureSuppressionLogged = false;
 
     // True while activateMode is bringing up a camera-owning mode (CONTINUOUS /
     // DRIVE_MODE / PROXIMITY_GUARD) — the window between pipeline.start() and
@@ -117,6 +119,10 @@ public class RecordingModeManager {
             // blind-spot: while it is active the camera/rails stay up regardless of recording
             // mode or gear so the overlay actually renders frames.
             if (camViewKeepWarmActive()) return true;
+            // Close the narrow admission race where an idle cleanup lands after
+            // a recording activation has claimed ownership but before modeActive
+            // or pendingRecordingPrefix is published.
+            if (activatingCameraOwner) return true;
             if (!modeActive) return false;
             Mode m = currentMode;
             return m == Mode.CONTINUOUS || m == Mode.DRIVE_MODE || m == Mode.PROXIMITY_GUARD;
@@ -161,7 +167,9 @@ public class RecordingModeManager {
                 com.overdrive.app.monitor.GearMonitor.getInstance();
             if (gm.isRunning()) {
                 int gearNow = gm.getCurrentGear();
-                if (gearNow != currentGear) {
+                if (com.overdrive.app.monitor.GearMonitor
+                        .isValidGearMode(gearNow)
+                        && gearNow != currentGear) {
                     logger.info("Constructor gear sync from GearMonitor: "
                         + gearToString(currentGear) + " -> " + gearToString(gearNow));
                     currentGear = gearNow;
@@ -272,17 +280,6 @@ public class RecordingModeManager {
                     + signalled + ")");
                 return;
             }
-
-            boolean isChargingNow = false;
-            try {
-                isChargingNow = com.overdrive.app.monitor.ChargingDetector.getInstance().isCharging();
-            } catch (Throwable ignored) {}
-
-            if (isChargingNow && (targetMode == Mode.CONTINUOUS || targetMode == Mode.DRIVE_MODE)) {
-                logger.info("Boot auto-activate skipped — vehicle is CHARGING (signalled="
-                    + signalled + ")");
-                return;
-            }
             if (targetMode == Mode.CONTINUOUS) {
                 logger.info("Boot auto-activate: CONTINUOUS (signalled=" + signalled + ")");
                 activateModeWithWarmup(targetMode, "boot-auto-activate");
@@ -308,29 +305,6 @@ public class RecordingModeManager {
         // a few seconds after construction; idempotent if mode is already
         // active (modeActive guard in onAccStateChanged + onGearChanged).
         scheduleColdStartResync();
-
-        // Hardware interlock: listen for charging state to stop driving dashcam immediately
-        try {
-            com.overdrive.app.monitor.ChargingDetector.getInstance().addFusedStateListener((isCharging, source) -> {
-                if (isCharging) {
-                    logger.info("Charging started (source=" + source + ") — forcing gear P and stopping driving recording");
-                    onGearChanged(com.overdrive.app.monitor.GearMonitor.GEAR_P);
-                    synchronized (lifecycleSerializer) {
-                        Mode toStop = null;
-                        synchronized (RecordingModeManager.this) {
-                            if (modeActive && (currentMode == Mode.CONTINUOUS || currentMode == Mode.DRIVE_MODE)) {
-                                toStop = currentMode;
-                            }
-                        }
-                        if (toStop != null) {
-                            runDeactivateGuarded(toStop);
-                        }
-                    }
-                }
-            });
-        } catch (Throwable t) {
-            logger.warn("Could not register ChargingDetector listener: " + t.getMessage());
-        }
     }
 
     // Hard upper bound on the boot auto-activate wait. The latch is released
@@ -447,40 +421,37 @@ public class RecordingModeManager {
      * Used both for cold-start re-sync and for any later resync hook.
      */
     public void resyncFromHardware(String reason) {
-        // FIX (rmm medium: stuck-warmup watchdog) — if a warmup worker has
-        // been pinned for >WARMUP_STUCK_THRESHOLD_MS (e.g. AvcHalWarmup
-        // launchAvc blocking forever in Process.waitFor() under
-        // system_server flap / package respawn / binder backpressure),
-        // force-clear the in-flight flag so the wedge-retry / gear-change /
-        // mode-select paths can spawn a fresh warmup. Without this backstop
-        // the daemon would have to be restarted to recover. We can't kill
-        // the stuck worker thread itself (no safe interrupt path through
-        // ProcessBuilder.waitFor()), but releasing the gate unblocks every
-        // future activate-with-warmup caller, and the pendingRetrigger
-        // backstop in the eventually-arriving stuck worker's finally is
-        // benign (pending will already be cleared by the fresh worker).
+        // A worker beyond the complete bounded warmup + pipeline-start budget
+        // cannot be cancelled safely: it may still own an AVMCamera Binder
+        // transaction or activationLock. Never force-clear the single-flight
+        // gate and overlap a second camera/GL activation. Retire the process
+        // through the trip-safe coordinator instead.
         long warmupSince = warmupInFlightSinceMs;
+        long warmupElapsed = warmupSince > 0L
+                ? android.os.SystemClock.elapsedRealtime() - warmupSince
+                : 0L;
         if (warmupInFlight.get() && warmupSince > 0L
-            && (System.currentTimeMillis() - warmupSince) > WARMUP_STUCK_THRESHOLD_MS) {
-            logger.warn("Stuck warmup detected (in-flight for "
-                + (System.currentTimeMillis() - warmupSince) + "ms, threshold "
-                + WARMUP_STUCK_THRESHOLD_MS + "ms) — force-clearing warmupInFlight ("
+                && warmupElapsed > WARMUP_STUCK_THRESHOLD_MS) {
+            CameraDaemon.requestProcessRestartPreservingTrip(
+                    "Recording mode activation stuck for "
+                            + warmupElapsed + "ms");
+            logger.warn("Stuck camera activation detected (in-flight for "
+                + warmupElapsed + "ms, threshold "
+                + WARMUP_STUCK_THRESHOLD_MS + "ms) — keeping the single-flight "
+                + "gate latched; trip-safe process restart requested ("
                 + reason + ")");
-            warmupInFlightSinceMs = 0L;
-            warmupInFlight.set(false);
-            // Surface a pending re-trigger so the eventually-arriving
-            // stuck worker's finally doesn't drop the signal — the new
-            // CAS-winner may still want this resync's intent honored.
-            warmupPendingRetrigger.set(true);
         }
 
         boolean hwAcc = queryAccStateFromHardware();
         int hwGear;
         boolean accChanged;
         boolean gearChanged;
-        boolean isCharging = false;
         boolean shouldRetryActivation;
         Mode retryMode = null;
+        // Wedge-driven retry: when true, the resync-retry call below must
+        // bypass activateModeWithWarmup's "already active" supplier guard
+        // so the embedded stopRecording+startRecording cycle that unwedges
+        // a stalled encoder / stuck pendingRecordingPrefix actually runs.
         boolean wedgeRetryDriven = false;
 
         // Try to (re)start GearMonitor before reading. If GearMonitor.start()
@@ -553,28 +524,14 @@ public class RecordingModeManager {
                 com.overdrive.app.monitor.GearMonitor gm =
                     com.overdrive.app.monitor.GearMonitor.getInstance();
                 if (gm.isRunning()) {
-                    hwGear = gm.getCurrentGear();
+                    int observedGear = gm.getCurrentGear();
+                    if (com.overdrive.app.monitor.GearMonitor
+                            .isValidGearMode(observedGear)) {
+                        hwGear = observedGear;
+                    }
                 }
             } catch (Exception ignored) {
                 // GearMonitor unavailable — keep our current value
-            }
-
-            // Hardware interlock: check if vehicle is charging
-            isCharging = false;
-            try {
-                isCharging = com.overdrive.app.monitor.ChargingDetector.getInstance().isCharging();
-            } catch (Throwable ignored) {}
-
-            if (isCharging) {
-                hwGear = com.overdrive.app.monitor.GearMonitor.GEAR_P;
-            } else if (hwAcc && (hwGear == com.overdrive.app.monitor.GearMonitor.GEAR_P || hwGear == com.overdrive.app.monitor.GearMonitor.GEAR_N)) {
-                // Fallback: If ACC is ON and GPS speed >= 3 km/h or moving, promote gear to D
-                try {
-                    com.overdrive.app.monitor.GpsMonitor gps = com.overdrive.app.monitor.GpsMonitor.getInstance();
-                    if (gps != null && (gps.getSpeed() * 3.6f >= 3.0f || gps.isMoving())) {
-                        hwGear = com.overdrive.app.monitor.GearMonitor.GEAR_D;
-                    }
-                } catch (Throwable ignored) {}
             }
 
             accChanged = hwAcc != accIsOn;
@@ -608,6 +565,13 @@ public class RecordingModeManager {
             // that produces a 2-5s recording gap.
             long rotateAgeMs = System.currentTimeMillis() - pipeline.getLastSegmentRotateMs();
             boolean inRotationGrace = rotateAgeMs >= 0L && rotateAgeMs < 5000L;
+            boolean sourcePausedForSystemAvm = false;
+            try {
+                sourcePausedForSystemAvm =
+                        pipeline.isCameraSourcePausedForSystemAvm();
+            } catch (Throwable ignored) {
+                // Older/partially initialized pipeline: keep normal watchdog behavior.
+            }
             // FIX (rmm: wedgeDetected blind to stuck pendingRecordingPrefix):
             // a stuck pendingRecordingPrefix (encoder format never available)
             // would otherwise mask a wedge forever — recordingHealthy=true
@@ -641,6 +605,13 @@ public class RecordingModeManager {
                 lastObservedPendingPrefix = null;
                 pendingPrefixStuckTicks = 0;
             }
+            if (sourcePausedForSystemAvm) {
+                // Do not carry intentional reverse-camera silence into the
+                // first post-reverse health tick as a pre-aged pending wedge.
+                pendingPrefixStuck = false;
+                lastObservedPendingPrefix = null;
+                pendingPrefixStuckTicks = 0;
+            }
             // FIX (rmm: Wedge ticker blind to encoder hangs that don't surface
             // in isRunning/isRecording). Probe lastEncodedFrameMs — if the
             // encoder hasn't successfully dequeued an output buffer in 15s
@@ -661,6 +632,7 @@ public class RecordingModeManager {
             }
             boolean encoderStalled = modeActive
                     && currentMode != Mode.PROXIMITY_GUARD
+                    && !sourcePausedForSystemAvm
                     && !inRotationGrace
                     && lastEncodedAgeMs > 15_000L;
             if (encoderStalled) {
@@ -693,6 +665,7 @@ public class RecordingModeManager {
             }
             boolean diskStalled = modeActive
                     && currentMode != Mode.PROXIMITY_GUARD
+                    && !sourcePausedForSystemAvm
                     && !inRotationGrace
                     && pipeline.isRecording()
                     && lastDiskWrittenAgeMs > DISK_WRITE_STALL_THRESHOLD_MS;
@@ -705,6 +678,7 @@ public class RecordingModeManager {
             }
             boolean wedgeDetected = modeActive
                     && (!recordingHealthy || pendingPrefixStuck || encoderStalled || diskStalled)
+                    && !sourcePausedForSystemAvm
                     && !inRotationGrace
                     && currentMode != Mode.PROXIMITY_GUARD;
             // Publish the wedge truth for status surfaces (overlay pill / web
@@ -722,6 +696,10 @@ public class RecordingModeManager {
                 logger.info("Wedge check skipped (" + reason + ") — segment rotated "
                     + rotateAgeMs + "ms ago (within 5s grace window)");
             }
+            if (sourcePausedForSystemAvm) {
+                logger.info("Wedge check skipped (" + reason + ") — DI5 camera "
+                    + "source is intentionally paused for the system AVM");
+            }
 
             // FIX (rmm: Resync wedgeDetected has no backoff or per-cycle cap).
             // Gate wedge-driven retries on backoff schedule + per-cycle cap.
@@ -737,6 +715,15 @@ public class RecordingModeManager {
             // still self-heals during a long drive without an ACC cycle.
             boolean wedgeRetryAllowed = true;
             boolean wedgePostCapAttempt = false;
+            boolean diLink5CaptureSuppressed = false;
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                try {
+                    diLink5CaptureSuppressed =
+                            com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                                    .isCaptureSuppressed();
+                } catch (Throwable ignored) {
+                }
+            }
             if (wedgeDetected) {
                 long nowMs = System.currentTimeMillis();
                 if (wedgeRetryFailures >= WEDGE_RETRY_MAX_PER_CYCLE) {
@@ -766,10 +753,25 @@ public class RecordingModeManager {
                         + "(failures=" + wedgeRetryFailures + ")");
                 }
             }
+            if (diLink5CaptureSuppressed) {
+                // The DI5 safety guard has deliberately denied QCarCam ownership.
+                // Re-running recording activation cannot recover that process and
+                // only leaves a noisy pending-prefix loop. Keep the truthful wedge
+                // state published, but wait for a clean daemon/vehicle lifecycle
+                // instead of spending retry budget.
+                wedgeRetryAllowed = false;
+                if (!diLink5CaptureSuppressionLogged) {
+                    diLink5CaptureSuppressionLogged = true;
+                    logger.warn("Recording recovery deferred (" + reason + ") — "
+                            + "DI5 camera capture is safety-suppressed");
+                }
+            } else {
+                diLink5CaptureSuppressionLogged = false;
+            }
 
             shouldRetryActivation = !accChanged && !gearChanged && accIsOn
+                    && !diLink5CaptureSuppressed
                     && (!modeActive || (wedgeDetected && wedgeRetryAllowed))
-                    && !isCharging
                     && (currentMode == Mode.CONTINUOUS
                         || (currentMode == Mode.DRIVE_MODE && isDrivingGear(currentGear))
                         // PROXIMITY_GUARD is ACC-gated in ALL gears (incl P) — retry
@@ -875,20 +877,6 @@ public class RecordingModeManager {
         // never suppress a genuine future edge.
         probeEdgeHandedOffToDaemon = null;
 
-        // If vehicle is charging, driving recordings must be deactivated
-        if (isCharging) {
-            Mode deactCharging = null;
-            synchronized (this) {
-                if (modeActive && (currentMode == Mode.CONTINUOUS || currentMode == Mode.DRIVE_MODE)) {
-                    logger.info("Re-sync (" + reason + "): vehicle is CHARGING — deactivating driving recording (" + currentMode + ")");
-                    deactCharging = currentMode;
-                }
-            }
-            if (deactCharging != null) {
-                runDeactivateGuarded(deactCharging);
-            }
-        }
-
         // ACC state unchanged but mode might have failed to start at construction.
         // Retry activation if conditions are met and modeActive is false. Use
         // the warmup path so a retried activation that follows a failed
@@ -922,7 +910,8 @@ public class RecordingModeManager {
     }
 
     /**
-     * Force a warmup-routed restart of the current camera-owning mode.
+     * Force the strongest safe recovery for a camera producer that remained
+     * frame-dead through the bounded same-handle and bare-reopen ladders.
      *
      * <p>Unlike {@link #resyncFromHardware}, this does NOT gate on the
      * disk/encoder wedge heuristics — those are blind to a camera that is
@@ -930,14 +919,17 @@ public class RecordingModeManager {
      * ring (getLastEncodedFrameMs() advances even with no live frames). This is
      * the escalation entrypoint for PanoramicCameraGpu's zero-frame-reopen loop
      * (CameraYieldListener.onHalRecoveryNeeded): the camera layer has already
-     * proven the HAL is wedged (N consecutive reopens, no frames), so we
-     * unconditionally route through activateModeWithWarmup(force=true) — full
-     * teardown + com.byd.avc warmup + pipeline rebuild, the only sequence
-     * observed to recover a wedged AVM HAL co-consumer state.
+     * proven the HAL is wedged (N consecutive reopens, no frames). A live
+     * recording mode gets a full pipeline rebuild and reactivation. DI4
+     * mode=NONE/ACC-off is different: there is no recording mode for
+     * activateModeWithWarmup() to rebuild, but the persistent camera,
+     * blind-spot, camera-view or surveillance pipeline can still be the starved
+     * owner. That terminal case requests the existing trip-safe daemon restart
+     * instead of silently returning.
      *
-     * <p>No-op when ACC is off or no camera-owning mode is active (nothing to
-     * restart). The warmup worker's own CAS (warmupInFlight) coalesces this
-     * against any concurrent activation.
+     * <p>On DiLink 4, AvcHalWarmup intentionally skips launching com.byd.avc;
+     * the load-bearing operation is the full camera/GL process rebuild, not an
+     * AVC activity launch.
      */
     public void forceWarmupRestart(String reason) {
         final Mode mode;
@@ -947,30 +939,46 @@ public class RecordingModeManager {
             acc = accIsOn;
         }
         if (!acc || mode == Mode.NONE) {
-            logger.info("forceWarmupRestart(" + reason + ") — no-op (accIsOn=" + acc
-                + ", mode=" + mode + "); nothing to restart");
+            if (pipeline.isRunning()) {
+                logger.error("forceWarmupRestart(" + reason + ") — persistent camera"
+                    + " has no recording mode to reactivate (accIsOn=" + acc
+                    + ", mode=" + mode + "); requesting trip-safe daemon rebuild");
+                CameraDaemon.requestProcessRestartPreservingTrip(
+                    "DI4 zero-frame recovery: " + reason
+                        + " (accIsOn=" + acc + ", mode=" + mode + ")");
+            } else {
+                logger.info("forceWarmupRestart(" + reason + ") — pipeline already"
+                    + " stopped (accIsOn=" + acc + ", mode=" + mode + ")");
+            }
             return;
         }
-        logger.warn("forceWarmupRestart(" + reason + ") — full teardown + com.byd.avc "
-            + "warmup to recover wedged AVM HAL co-consumer state, then re-activate " + mode);
+        logger.warn("forceWarmupRestart(" + reason + ") — full camera/GL pipeline"
+            + " rebuild, then re-activate " + mode);
         // CRITICAL: tear the pipeline DOWN first. The wedged-HAL case has the
         // GL pipeline still running (camera dead, encoder ticking on its
         // pre-record ring), so pipeline.isRunning()==true. activateModeWithWarmup's
-        // worker SKIPS avcWarmup.warmupAndWait() when the pipeline is already
-        // running (RecordingModeManager:1243) — and warmupAndWait (the `am start
-        // com.byd.avc` + settle) is the ONLY thing that recovers the wedged AVM
-        // HAL co-consumer state. So without an explicit stop() here the
-        // "warmup restart" would do a bare recording stop/start on the SAME dead
-        // camera and never recover — exactly the bare-reopen loop we are
-        // escalating away from. The field recovery that worked was setMode(NONE)
-        // -> pipeline.stop() (full GL teardown) -> setMode(CONTINUOUS) (warmup).
+        // worker skips cold-open preparation while the pipeline is already
+        // running. Without an explicit stop() here, the recovery would do a bare
+        // recording stop/start on the SAME dead camera and never rebuild the GL
+        // consumer or AVMCamera handle.
         // pipeline.stop() is synchronized + idempotent (no-op if already stopped).
         try {
             pipeline.stop();
-            logger.info("forceWarmupRestart: pipeline stopped — warmup will now run on cold open");
+            if (pipeline.isRunning()) {
+                logger.error("forceWarmupRestart: pipeline.stop() returned but"
+                    + " the old camera/GL pipeline is still running — requesting"
+                    + " trip-safe process rebuild");
+                CameraDaemon.requestProcessRestartPreservingTrip(
+                    "DI4 full camera/GL teardown did not stop: " + reason);
+                return;
+            }
+            logger.info("forceWarmupRestart: pipeline stopped — cold-open rebuild can begin");
         } catch (Throwable t) {
             logger.warn("forceWarmupRestart: pipeline.stop() failed: " + t.getMessage()
-                + " — proceeding to warmup-activate anyway");
+                + " — requesting trip-safe process rebuild");
+            CameraDaemon.requestProcessRestartPreservingTrip(
+                "DI4 full camera/GL teardown failed: " + reason);
+            return;
         }
         activateModeWithWarmup(mode, "force-warmup-" + reason, true);
     }
@@ -1066,19 +1074,16 @@ public class RecordingModeManager {
      * FIX (rmm medium: stuck warmup pins warmupInFlight=true → all subsequent
      * activations and resync wedge retries coalesce indefinitely).
      *
-     * <p>Set to {@link System#currentTimeMillis()} when warmupInFlight CAS-wins,
+     * <p>Set from {@link android.os.SystemClock#elapsedRealtime()} when
+     * warmupInFlight CAS-wins,
      * cleared (=0) when warmupInFlight is cleared in the worker's finally.
-     * resyncFromHardware uses this to detect a stuck worker (e.g. AvcHalWarmup
-     * blocking forever inside Process.waitFor()) and force-clear the in-flight
-     * flag so future activations can spawn a fresh warmup. Without this
-     * backstop, a single blocked am-start permanently disables every
-     * activate-with-warmup path (gear-change, mode-change, wedge retry, user
-     * setMode) until daemon restart.
+     * resyncFromHardware uses this to detect a worker that exceeded every
+     * bounded camera-start allowance and request safe process retirement
+     * without admitting a concurrent activation over unknown native state.
      */
     private volatile long warmupInFlightSinceMs = 0L;
-    /** ~4s warmup + 2s pipeline init + generous slack. Anything beyond this
-     * is structurally stuck (AvcHalWarmup launchAvc has no waitFor timeout). */
-    private static final long WARMUP_STUCK_THRESHOLD_MS = 30_000L;
+    /** 35s AVC recovery + 45s pipeline init + scheduler/activation slack. */
+    private static final long WARMUP_STUCK_THRESHOLD_MS = 90_000L;
 
     /**
      * Set whenever a {@link #activateModeWithWarmup} call is coalesced
@@ -1266,6 +1271,16 @@ public class RecordingModeManager {
      */
     private void runActivateGuarded(Mode mode, String reason,
                                     java.util.function.Supplier<Boolean> revalidate) {
+        runActivateGuarded(
+                mode, reason, revalidate,
+                CameraDaemon.captureCameraStartEpoch());
+    }
+
+    private void runActivateGuarded(
+            Mode mode,
+            String reason,
+            java.util.function.Supplier<Boolean> revalidate,
+            long cameraStartEpoch) {
         if (shuttingDown) {
             logger.info("Activation aborted (" + reason + ") — manager is shutting down");
             return;
@@ -1303,7 +1318,7 @@ public class RecordingModeManager {
                 reconcileCameraProfile();
                 return;
             }
-            activateMode(mode);
+            activateMode(mode, cameraStartEpoch);
         }
     }
 
@@ -1382,7 +1397,8 @@ public class RecordingModeManager {
         // FIX (rmm medium: stuck-warmup watchdog) — record CAS-win time so
         // resyncFromHardware can detect a permanently-stuck worker and
         // force-clear the in-flight flag.
-        warmupInFlightSinceMs = System.currentTimeMillis();
+        warmupInFlightSinceMs =
+                android.os.SystemClock.elapsedRealtime();
         // Don't clear warmupPendingRetrigger here. A peer trigger arriving
         // between our CAS-win above and any clear here would see
         // inFlight=true, set pending=true, and a clear at this point would
@@ -1392,11 +1408,34 @@ public class RecordingModeManager {
         // (initial value), and on re-entry it's either still cleared or
         // genuinely set by a peer that won the race against the previous
         // finally — in either case we want to leave it alone.
+        final long cameraStartEpoch = CameraDaemon.captureCameraStartEpoch();
         new Thread(() -> {
             try {
+                // Avoid even launching AVC when this queued worker was already
+                // superseded before it reached the warmup lane. The post-warmup
+                // runActivateGuarded check remains authoritative for changes
+                // that occur while the bounded warmup is in progress.
+                if (shuttingDown
+                        || !CameraDaemon.isCameraStartEpochCurrent(
+                                cameraStartEpoch)
+                        || !accIsOn
+                        || currentMode != mode
+                        || (mode == Mode.DRIVE_MODE
+                                && !isDrivingGear(currentGear))) {
+                    logger.info("Skipping stale camera warmup (" + reason
+                            + ") before AVC launch");
+                    return;
+                }
                 // Only warmup if pipeline isn't already running.
                 if (!pipeline.isRunning()) {
-                    if (!avcWarmup.warmupAndWait()) {
+                    if (!avcWarmup.warmupAndWait(
+                            () -> !shuttingDown
+                                && CameraDaemon.isCameraStartEpochCurrent(
+                                    cameraStartEpoch)
+                                && accIsOn
+                                && currentMode == mode
+                                && (mode != Mode.DRIVE_MODE
+                                    || isDrivingGear(currentGear)))) {
                         logger.warn("AVC warmup interrupted (" + reason + ") — skipping mode activation");
                         return;
                     }
@@ -1437,7 +1476,7 @@ public class RecordingModeManager {
                     logger.info("Wedge recovery: forcing activation despite modeActive — reason=" + reason);
                 }
                 return true;
-            });
+            }, cameraStartEpoch);
             } finally {
                 // FIX (rmm Round 6: warmupPendingRetrigger signal can be
                 // silently dropped between getAndSet and warmupInFlight.set(false)).
@@ -1615,7 +1654,9 @@ public class RecordingModeManager {
                             com.overdrive.app.monitor.GearMonitor.getInstance();
                         if (gm.isRunning()) {
                             int actualGear = gm.getCurrentGear();
-                            if (actualGear != currentGear) {
+                            if (com.overdrive.app.monitor.GearMonitor
+                                    .isValidGearMode(actualGear)
+                                    && actualGear != currentGear) {
                                 logger.info("Re-select syncing gear: "
                                     + gearToString(currentGear) + " -> " + gearToString(actualGear));
                                 currentGear = actualGear;
@@ -1662,7 +1703,9 @@ public class RecordingModeManager {
                     com.overdrive.app.monitor.GearMonitor gearMonitor = com.overdrive.app.monitor.GearMonitor.getInstance();
                     if (gearMonitor.isRunning()) {
                         int actualGear = gearMonitor.getCurrentGear();
-                        if (actualGear != currentGear) {
+                        if (com.overdrive.app.monitor.GearMonitor
+                                .isValidGearMode(actualGear)
+                                && actualGear != currentGear) {
                             logger.info("Syncing gear from GearMonitor: " + gearToString(currentGear) + " -> " + gearToString(actualGear));
                             currentGear = actualGear;
                         }
@@ -1843,16 +1886,6 @@ public class RecordingModeManager {
             accIsOn = isOn;
 
             if (isOn) {
-                boolean isChargingNow = false;
-                try {
-                    isChargingNow = com.overdrive.app.monitor.ChargingDetector.getInstance().isCharging();
-                } catch (Throwable ignored) {}
-
-                if (isChargingNow && (currentMode == Mode.CONTINUOUS || currentMode == Mode.DRIVE_MODE)) {
-                    logger.info("ACC ON edge but vehicle is CHARGING — suppressing driving recording (" + currentMode + ")");
-                    return;
-                }
-
                 if (wasOn && modeActive) {
                     logger.debug("ACC already ON and mode active, ignoring duplicate notification");
                     return;
@@ -1888,12 +1921,14 @@ public class RecordingModeManager {
                     // Legacy fleet keeps the original tear-down because the
                     // pipeline is only started on demand and must release
                     // its camera+GL+encoder when no mode is active.
-                    boolean dilink4 = false;
+                    boolean persistentCamera = false;
                     try {
-                        dilink4 = com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic();
+                        persistentCamera =
+                            com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic()
+                            || com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
                     } catch (Throwable ignored) {}
-                    if (dilink4) {
-                        logger.info("ACC ON with mode=NONE — keeping pipeline alive (dilink4 oem-parity)");
+                    if (persistentCamera) {
+                        logger.info("ACC ON with mode=NONE — keeping DiLink camera alive");
                     } else if (bsKeepWarmActive()) {
                         // Blind-spot is enabled and ACC is on: keep the camera
                         // WARM for the BS lane even though no recording mode is
@@ -1967,14 +2002,14 @@ public class RecordingModeManager {
             boolean dilinkKeepAlive = false;
             try {
                 dilinkKeepAlive = com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic()
-                        || com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported();
+                        || com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
             } catch (Throwable t) {
                 logger.warn("dilink mode probe failed: " + t.getMessage());
             }
 
             if (dilinkKeepAlive) {
                 if (pipeline.isRunning()) {
-                    logger.info("ACC OFF (dilink4) — finalize recording, keep camera alive (oem-parity, unconditional)");
+                    logger.info("ACC OFF (DiLink) — finalize recording, keep camera alive (oem-parity, unconditional)");
                     try {
                         pipeline.stopRecording();
                     } catch (Throwable t) {
@@ -2195,7 +2230,7 @@ public class RecordingModeManager {
     
     // ==================== MODE ACTIVATION ====================
     
-    private void activateMode(Mode mode) {
+    private void activateMode(Mode mode, long cameraStartEpoch) {
         // Mark a camera-owning activation in flight so a racing BS turn-signal
         // reconcile (turn-tick thread) doesn't disable the recorder lane / drop
         // fps in the window before modeActive is set true. Cleared in finally.
@@ -2203,13 +2238,13 @@ public class RecordingModeManager {
                 || mode == Mode.DRIVE_MODE || mode == Mode.PROXIMITY_GUARD);
         if (ownerActivation) activatingCameraOwner = true;
         try {
-            activateModeBody(mode);
+            activateModeBody(mode, cameraStartEpoch);
         } finally {
             if (ownerActivation) activatingCameraOwner = false;
         }
     }
 
-    private void activateModeBody(Mode mode) {
+    private void activateModeBody(Mode mode, long cameraStartEpoch) {
         logger.info("Activating mode: " + mode);
 
         // SOTA: Stop any manual recording before activating a mode
@@ -2259,9 +2294,11 @@ public class RecordingModeManager {
                 // OEM-PARITY: dilink4 keeps pipeline alive on user-initiated
                 // mode=NONE; only legacy tears down for resource saving.
                 {
-                    boolean dilink4None = false;
+                    boolean persistentCamera = false;
                     try {
-                        dilink4None = com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic();
+                        persistentCamera =
+                            com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic()
+                            || com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
                     } catch (Throwable ignored) {}
                     // Blind-spot keep-warm is an INDEPENDENT consumer: if BS wants
                     // the camera (enabled/debugPreview + ACC on), switching the
@@ -2271,12 +2308,12 @@ public class RecordingModeManager {
                     // it at the cheap BS-only profile. (Without this, mode→NONE
                     // while BS is on tore the camera down until the next BS arm /
                     // ACC edge cold-restarted the pano — a BS-availability gap.)
-                    if (pipeline.isRunning() && !dilink4None && !bsKeepWarmActive()) {
+                    if (pipeline.isRunning() && !persistentCamera && !bsKeepWarmActive()) {
                         logger.info("Stopping pipeline for NONE mode (resource saving)");
                         pipeline.stop();
                         CameraDaemon.stopAvcKeepAlive();
-                    } else if (dilink4None) {
-                        logger.info("NONE mode requested — keeping pipeline alive (dilink4 oem-parity)");
+                    } else if (persistentCamera) {
+                        logger.info("NONE mode requested — keeping DiLink camera alive");
                     } else if (pipeline.isRunning()) {
                         logger.info("NONE mode requested — keeping pipeline alive for blind-spot keep-warm");
                     }
@@ -2293,7 +2330,7 @@ public class RecordingModeManager {
                 try {
                     if (!pipeline.isRunning()) {
                         logger.info("Starting pipeline for CONTINUOUS mode");
-                        pipeline.start(false);
+                        pipeline.start(false, cameraStartEpoch);
                     }
                     // Re-check isRunning AFTER start(): pipeline.start() can
                     // silently return without starting if it observes stopping=true
@@ -2363,7 +2400,7 @@ public class RecordingModeManager {
                 try {
                     if (!pipeline.isRunning()) {
                         logger.info("Starting pipeline for DRIVE_MODE");
-                        pipeline.start(false);
+                        pipeline.start(false, cameraStartEpoch);
                     }
                     if (!pipeline.isRunning()) {
                         logger.warn("DRIVE_MODE: pipeline.start() returned but pipeline isn't running"
@@ -2418,7 +2455,7 @@ public class RecordingModeManager {
                 try {
                     if (!pipeline.isRunning()) {
                         logger.info("Starting pipeline for PROXIMITY_GUARD mode");
-                        pipeline.start(false);  // Don't auto-start recording
+                        pipeline.start(false, cameraStartEpoch);  // Don't auto-start recording
                     }
                     if (!pipeline.isRunning()) {
                         // Don't start the proximity controller against a
@@ -2471,11 +2508,13 @@ public class RecordingModeManager {
         // OEM-PARITY: dilink4 keeps the pipeline alive across user mode-
         // switch deactivations (CONTINUOUS → other, PROXIMITY_GUARD → other).
         // oem's mode toggles never close the AVMCamera handle.
-        boolean dilink4Persistent = false;
+        boolean persistentCamera = false;
         try {
-            dilink4Persistent = com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic();
+            persistentCamera =
+                com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic()
+                || com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
         } catch (Throwable ignored) {}
-        boolean keepPipelineRunning = !accIsOn || dilink4Persistent;
+        boolean keepPipelineRunning = !accIsOn || persistentCamera;
 
         // MODE-SWITCH NO-CHURN: setMode sets currentMode=NEW before deactivating
         // the OLD mode here. If the NEW mode also owns the camera right now
@@ -2490,8 +2529,8 @@ public class RecordingModeManager {
         boolean nextModeWillOwnCamera = (currentMode != mode) && modeWouldOwnCameraNow(currentMode);
 
         if (keepPipelineRunning) {
-            if (dilink4Persistent && accIsOn) {
-                logger.info("dilink4 + ACC ON — keeping pipeline alive across deactivate (oem-parity)");
+            if (persistentCamera && accIsOn) {
+                logger.info("DiLink + ACC ON — keeping pipeline alive across deactivate");
             } else {
                 logger.info("ACC is OFF — keeping pipeline running for surveillance");
             }
@@ -2971,6 +3010,11 @@ public class RecordingModeManager {
         try {
             if (!pipeline.isRunning()) return;
             CameraIntent want = desiredCameraState();
+            boolean freshFrameDemand = want.laneEnabled
+                    || activeStreamFps() > 0
+                    || bsViewShown()
+                    || camViewKeepWarmActive();
+            pipeline.setCameraFrameDemand(freshFrameDemand, want.why);
             // fps change detection for the proximity stride re-derive (below).
             int prevFps = pipeline.getCameraTargetFps();
             pipeline.setRecorderLaneEnabled(want.laneEnabled);
@@ -3245,7 +3289,7 @@ public class RecordingModeManager {
      * reconnected device on the next tick automatically.
      */
     private boolean queryAccStateFromHardware() {
-        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {
             boolean isAccOff = com.overdrive.app.monitor.AccMonitor.probeAccState(context);
             return !isAccOff;
         }
@@ -3583,21 +3627,67 @@ public class RecordingModeManager {
         // Take lifecycleSerializer so any in-flight setMode/onAcc/onGear
         // call (which holds it) finishes — its already-staged activate
         // will be aborted by the shuttingDown check inside runActivateGuarded.
-        synchronized (lifecycleSerializer) {
-            Mode toDeactivate = currentMode;
-            // Direct activationLock acquisition — runDeactivateGuarded would
-            // also work, but we want to deactivate even if shuttingDown is
-            // set (which it is). The deactivate path doesn't gate on it.
-            synchronized (activationLock) {
-                deactivateMode(toDeactivate);
-                // Stop AVC keep-alive INSIDE the activationLock block so a
-                // peer activate that was queued behind us can't run
-                // startAvcKeepAliveIfNeeded() AFTER our stop and leave the
-                // keep-alive watchdog running post-shutdown. The peer is
-                // already gated by `shuttingDown` and will abort, but
-                // ordering this stop inside the lock makes the invariant
-                // hold even if a future change relaxes that gate.
-                CameraDaemon.stopAvcKeepAlive();
+        //
+        // BOUNDED (field incident log_DG87KWQX): this runs on the JVM shutdown
+        // hook. A gear→P deactivate on the GearPoll thread was wedged inside
+        // the encoder close on a stalled SD card while holding
+        // lifecycleSerializer + activationLock; the hook blocked here forever,
+        // never reached the GPU/monitor/database teardown below it, and the
+        // process had to be SIGKILLed by the urgent camera-release deadline.
+        // The encoder close is bounded now, but a shutdown path must never
+        // depend on a peer's good behaviour: acquire the locks on a helper
+        // thread and wait a bounded time. If the peer is still wedged, log
+        // it, abandon the deactivate (process exit reclaims the pipeline —
+        // the hook's gpuPipeline.stop() runs regardless) and move on.
+        final Thread deactivateWorker = new Thread(() -> {
+            synchronized (lifecycleSerializer) {
+                if (shutdownDeactivateAbandoned) {
+                    logger.warn("Shutdown deactivate acquired the lifecycle lock only after "
+                        + "shutdown() gave up waiting — skipping the late deactivate");
+                    return;
+                }
+                Mode toDeactivate = currentMode;
+                // Direct activationLock acquisition — runDeactivateGuarded would
+                // also work, but we want to deactivate even if shuttingDown is
+                // set (which it is). The deactivate path doesn't gate on it.
+                synchronized (activationLock) {
+                    if (shutdownDeactivateAbandoned) return;
+                    deactivateMode(toDeactivate);
+                    // Stop AVC keep-alive INSIDE the activationLock block so a
+                    // peer activate that was queued behind us can't run
+                    // startAvcKeepAliveIfNeeded() AFTER our stop and leave the
+                    // keep-alive watchdog running post-shutdown. The peer is
+                    // already gated by `shuttingDown` and will abort, but
+                    // ordering this stop inside the lock makes the invariant
+                    // hold even if a future change relaxes that gate.
+                    CameraDaemon.stopAvcKeepAlive();
+                }
+            }
+        }, "RMM-ShutdownDeactivate");
+        deactivateWorker.setDaemon(true);
+        boolean workerStarted = false;
+        try {
+            deactivateWorker.start();
+            workerStarted = true;
+        } catch (Throwable startFailure) {
+            // Thread creation can fail under ulimit/OOM pressure — fall back
+            // to the legacy inline (unbounded) acquisition rather than skip
+            // the deactivate outright.
+            logger.warn("Shutdown deactivate worker could not start ("
+                + startFailure.getMessage() + ") — deactivating inline");
+            deactivateWorker.run();
+        }
+        if (workerStarted) {
+            try {
+                deactivateWorker.join(SHUTDOWN_LOCK_WAIT_MS);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
+            if (deactivateWorker.isAlive()) {
+                shutdownDeactivateAbandoned = true;
+                logger.error("RecordingModeManager shutdown: lifecycle locks still held by a "
+                    + "wedged peer after " + SHUTDOWN_LOCK_WAIT_MS + "ms — proceeding without "
+                    + "the mode deactivate (process exit reclaims the pipeline)");
             }
         }
         if (proximityController != null) {
@@ -3605,4 +3695,20 @@ public class RecordingModeManager {
         }
         logger.info("RecordingModeManager shutdown complete");
     }
+
+    /**
+     * Upper bound on how long {@link #shutdown()} waits for a peer that holds
+     * {@code lifecycleSerializer}/{@code activationLock}. Covers a healthy
+     * in-flight deactivate (the encoder close is itself bounded at ~5 s plus
+     * two 2 s worker joins) while keeping the JVM shutdown hook finite.
+     */
+    private static final long SHUTDOWN_LOCK_WAIT_MS = 8_000L;
+
+    /**
+     * Set by {@link #shutdown()} once it stops waiting for the lifecycle locks.
+     * The deferred deactivate worker re-checks it after acquiring them and
+     * skips a deactivate that would now race the shutdown hook's own
+     * pipeline teardown.
+     */
+    private volatile boolean shutdownDeactivateAbandoned = false;
 }

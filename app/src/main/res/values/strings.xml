@@ -38,6 +38,8 @@
     <string name="action_select_all_short">All</string>
     <string name="action_delete">Delete</string>
     <string name="action_share">Share</string>
+    <string name="action_create_evidence_pack">Create evidence pack</string>
+    <string name="action_share_evidence_pack">Share evidence pack</string>
     <string name="action_done">DONE</string>
     <string name="action_remind_me_later">REMIND ME LATER</string>
     <string name="action_retry">Retry</string>
@@ -102,6 +104,8 @@
     <string name="overlay_mode_continuous_cd">Continuous recording</string>
     <string name="overlay_mode_drive_cd">Drive-mode recording</string>
     <string name="overlay_mode_proximity_cd">Proximity-guard recording</string>
+    <string name="overlay_recording_mode_failed">Recording mode change failed</string>
+    <string name="overlay_recording_mode_failed_fmt">Recording mode change failed: %1$s</string>
 
     <!-- item_log_entry placeholders (timestamp/tag/message are runtime, but these are
          placeholder/preview text used at design time and visible in some empty states) -->
@@ -133,11 +137,11 @@
     <string name="tailscale_qr_waiting">Waiting for login URL…</string>
     <string name="tailscale_enable_proxy">Enable Tailscale Proxy</string>
     <string name="tailscale_proxy_explainer">Routes MQTT through Tailscale so you can reach a private broker on your tailnet without port forwarding.</string>
-    <string name="tailscale_enable_https">Serve over HTTPS on Tailscale</string>
-    <string name="tailscale_https_explainer">Publishes this head unit at https://&lt;name&gt;.ts.net with a real certificate, so browsers treat it as a secure origin. Push notifications, cabin audio, installing as an app and the faster camera decoder all need one. Requires MagicDNS and HTTPS Certificates to be enabled for your tailnet.</string>
-    <string name="toast_tailscale_https_enabled">Serving over HTTPS on tailnet</string>
-    <string name="toast_tailscale_https_disabled">HTTPS serving disabled</string>
-    <string name="toast_tailscale_https_save_failed">Failed to change HTTPS setting — check that HTTPS Certificates are enabled for your tailnet</string>
+    <string name="tailscale_enable_https">Serve web UI over HTTPS</string>
+    <string name="tailscale_https_explainer">Publishes the dashboard only to your tailnet at a trusted https://…ts.net address. MagicDNS and HTTPS certificates must already be enabled in the Tailscale admin console.</string>
+    <string name="toast_tailscale_https_enabled">Tailnet HTTPS enabled</string>
+    <string name="toast_tailscale_https_disabled">Tailnet HTTPS disabled</string>
+    <string name="toast_tailscale_https_save_failed">Could not change HTTPS. Start and log in to Tailscale, enable MagicDNS and HTTPS certificates, and make sure port 443 has no other Serve rule.</string>
     <string name="tailscale_enable_adb">Allow remote ADB over Tailscale</string>
     <string name="tailscale_adb_explainer">Adds tailnet reach for ADB (not the public internet). Any tailnet device with an authorised ADB key gets full shell access to this head unit. Note ADB already accepts connections from the local network — turning this off does not close that.</string>
     <string name="tailscale_adb_endpoint">adb connect %1$s</string>
@@ -147,15 +151,29 @@
     <string name="toast_tailscale_adb_save_failed">Failed to change remote ADB setting</string>
     <string name="tailscale_proxy_warning">While enabled, MQTT to public brokers (HiveMQ, AWS IoT, etc.) will fail — Tailscale only routes to your tailnet. Saving will restart the daemon.</string>
 
-    <!-- Camera ingestion mode selector (Default vs DiLink 4) -->
+    <!-- Camera ingestion mode selector -->
     <string name="camera_mode_title">Ingestion Mode</string>
-    <string name="camera_mode_subtitle">Pick the path that matches your head unit. Default fits legacy panoramic cameras; DiLink 4 consumes the AVM HAL\'s native SurfaceTexture output.</string>
+    <string name="camera_mode_subtitle">Pick the path that matches your head unit. Default fits legacy panoramic cameras; DiLink 4 uses the AVM SurfaceTexture path; DiLink 5 uses the SA8155P qcarcam_test bridge.</string>
     <string name="camera_mode_option_default">Default — works on Seal, Atto, Dolphin (most cars)</string>
     <string name="camera_mode_option_dilink4">DiLink 4 — newer Han / Tang variants</string>
+    <string name="camera_mode_option_dilink5">DiLink 5 — Sealion 7 / SA8155P</string>
     <string name="camera_mode_current_default">Current: Default</string>
     <string name="camera_mode_current_dilink4">Current: DiLink 4</string>
+    <string name="camera_mode_current_dilink5">Current: DiLink 5</string>
     <string name="camera_mode_save">Apply &amp; restart</string>
     <string name="camera_mode_hint">Changing the mode restarts the camera daemon. If video looks wrong (squished, missing quadrants, red overlay), try the other mode.</string>
+
+    <!-- DiLink 5 native camera order (only visible in DiLink 5 mode) -->
+    <string name="camera_dilink5_mapping_title">DiLink 5 Camera Order</string>
+    <string name="camera_dilink5_mapping_subtitle">Physical camera IDs are listed as front, right, rear, left. Keep Auto unless the raw previews prove this vehicle uses another order.</string>
+    <string name="camera_dilink5_mapping_current_auto">Current: Auto / model default</string>
+    <string name="camera_dilink5_mapping_current_format">Current: %1$s</string>
+    <string name="camera_dilink5_mapping_auto">Auto — model default</string>
+    <string name="camera_dilink5_mapping_standard">Standard — 0,1,2,3</string>
+    <string name="camera_dilink5_mapping_opposite">Swap front/rear + left/right — 2,3,0,1</string>
+    <string name="camera_dilink5_mapping_shark">Shark / DMO — 8,9,5,4</string>
+    <string name="camera_dilink5_mapping_hint">The opposite-pairs option is only a candidate for the reported symptom; verify all four previews before applying. Saving restarts the camera daemon.</string>
+    <string name="camera_dilink5_mapping_unchanged">Camera order is already selected.</string>
 
     <!-- DiLink 4 compatibility options (only effective in DiLink 4 mode) -->
     <string name="camera_dilink4_tweaks_title">DiLink 4 Compatibility</string>
@@ -188,6 +206,8 @@
     <string name="camera_oem_dashcam_save">Save</string>
     <string name="camera_concurrent_probe_label">Test dual-camera support on next boot</string>
     <string name="camera_concurrent_probe_subtitle">One-time check that opens both cameras at once to confirm this vehicle can run pano + dashcam concurrently. Runs once on the next restart while parked. Leave OFF unless recordings look wrong — it is not required and may briefly interrupt a recording if one is active when it runs.</string>
+    <string name="camera_decoupled_lane_label">Decoupled encoder pipeline (reverse-camera fix)</string>
+    <string name="camera_decoupled_lane_subtitle">Copies each camera frame before encoding so a recording stall can never starve the car\'s own reverse-camera view. Legacy camera mode only; costs ~60 MB GPU memory and one extra GPU pass per frame. Takes effect on the next camera restart (ACC cycle or daemon restart).</string>
 
     <!-- Dashcam-side camera labels — REVERSE of the pano labels above. The
          OEM dashcam id is the opposite of the pano id, so the helpful
@@ -343,7 +363,7 @@
 
     <!-- Vehicle profile chapter -->
     <string name="onboarding_vehicle_title">Tell Overdrive your battery</string>
-    <string name="onboarding_vehicle_body">Pick your model and we fill in the kWh, or type it yourself (15–120). This makes range and charging estimates accurate. You can skip and set it later.</string>
+    <string name="onboarding_vehicle_body">Pick your model and we fill in the kWh, or type it yourself (5–120). This makes range and charging estimates accurate. You can skip and set it later.</string>
     <string name="onboarding_vehicle_primary">Set battery</string>
 
     <!-- Dashboard orientation chapter -->
@@ -493,6 +513,9 @@
     <string name="recording_lib_filter_sheet_title">Filter recordings</string>
     <string name="recording_lib_filter_apply">Apply</string>
     <string name="recording_lib_filter_reset">Reset</string>
+    <!-- Parking Intelligence: chip shown when the list is narrowed to one park's clips -->
+    <string name="recording_lib_chip_parking_session">This park</string>
+    <string name="recording_lib_chip_parking_session_at">Park %1$s</string>
     <string name="recording_lib_filter_section_what">What</string>
     <string name="recording_lib_filter_section_severity">Severity</string>
     <string name="recording_lib_filter_section_type">Type</string>
@@ -558,7 +581,6 @@
     <string name="recording_lib_storage_internal">INT</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
     <string name="toast_share_recordings">Sharing %1$d recordings</string>
-    <string name="toast_share_failed">Share failed</string>
 
     <!-- fragment_sentry_config -->
 
@@ -573,9 +595,9 @@
     <string name="daemons_count_pending">Loading services…</string>
     <!-- Subtitle on the Daemons hero header. %1$d running, %2$d total. -->
     <string name="daemons_count_fmt">%1$d of %2$d running</string>
-    <string name="daemons_wifi_auto_enable_title">Automatically enable Wi&#8209;Fi</string>
-    <string name="daemons_wifi_auto_enable_subtitle">OverDrive restores Wi&#8209;Fi while parked and when background services start. Turn this off to leave the current Wi&#8209;Fi state under vehicle control.</string>
-    <string name="daemons_wifi_auto_enable_save_failed">Could not save the Wi&#8209;Fi auto-enable setting.</string>
+    <string name="daemons_wifi_auto_enable_title">Wi&#8209;Fi</string>
+    <string name="daemons_wifi_auto_enable_subtitle">Turns Wi&#8209;Fi on or off now. When off, OverDrive’s sentry daemons will not turn it back on.</string>
+    <string name="daemons_wifi_auto_enable_save_failed">Could not change the Wi&#8209;Fi state.</string>
 
     <!-- dialog_time_window -->
 
@@ -795,6 +817,23 @@
     <string name="daemon_name_zrok">Zrok Tunnel</string>
     <string name="daemon_name_tailscale">Tailscale Tunnel</string>
     <string name="daemon_name_telegram">Telegram Bot</string>
+    <string name="daemon_status_running">Running</string>
+    <string name="daemon_status_proxy_on">%1$s • Proxy: ON</string>
+    <string name="daemon_status_running_uptime">Running • Uptime: %1$s</string>
+    <string name="daemon_status_stopped">Stopped</string>
+    <string name="daemon_status_starting">Starting…</string>
+    <string name="daemon_status_stopping">Stopping…</string>
+    <string name="daemon_status_error">Error</string>
+    <string name="daemon_status_needs_config">Configuration required</string>
+    <string name="daemon_config_no_token">No token configured. Tap to set up.</string>
+    <string name="daemon_config_paid_token">Paid version requires a token. Tap to set up.</string>
+    <string name="daemon_config_not_logged_in">Not logged in. Tap to set up.</string>
+    <string name="daemon_status_stop_failed">Stop failed: %1$s</string>
+    <string name="daemon_uptime_fmt">Uptime: %1$s</string>
+    <string name="daemon_subprocess_pid">%1$s (PID: %2$d)</string>
+    <string name="toast_cloudflared_encrypt_failed">Could not secure Cloudflared token.</string>
+    <string name="toast_cloudflared_save_failed">Could not save Cloudflared settings. Check if Camera Daemon is running.</string>
+    <string name="projection_temporarily_unavailable">Projection is temporarily unavailable. Please reopen the app.</string>
     <string name="clip_label_access_code">Access Code</string>
     <string name="clip_label_url">URL</string>
 
@@ -869,6 +908,13 @@
     <string name="toast_cannot_play_video">Cannot play video: %1$s</string>
     <string name="dialog_delete_recording_title">Delete Recording</string>
     <string name="dialog_delete_recording_message">Delete %1$s?\nThis cannot be undone.</string>
+    <string name="dialog_create_evidence_pack_title">Create evidence pack?</string>
+    <string name="dialog_create_evidence_pack_message">OverDrive sends only filtered event metadata to your configured AI provider. The video stays local and is added only to the downloaded evidence pack.</string>
+    <string name="toast_evidence_pack_creating">Creating evidence pack…</string>
+    <string name="toast_evidence_pack_ready">Evidence pack ready</string>
+    <string name="toast_evidence_pack_unavailable">This recording is not indexed yet</string>
+    <string name="toast_evidence_pack_failed">Could not create evidence pack: %1$s</string>
+    <string name="error_unknown">Unknown error</string>
     <string name="toast_recording_deleted">Recording deleted</string>
     <string name="toast_recording_delete_failed">Failed to delete recording</string>
     <string name="toast_batch_delete_partial">%1$d deleted, %2$d failed</string>
@@ -937,6 +983,7 @@
     <string name="rail_vehicle">Vehicle</string>
     <string name="rail_projection">Projection</string>
     <string name="rail_trips">Trips</string>
+    <string name="rail_parking">Parking</string>
     <string name="rail_charging">Charging</string>
     <string name="rail_automations">Automations</string>
     <string name="rail_key_mapping">Key Mapping</string>
@@ -946,14 +993,6 @@
     <string name="rail_settings">Settings</string>
     <string name="rail_expand">Show navigation labels</string>
     <string name="rail_collapse">Hide navigation labels</string>
-    <string name="rail_collapse_label">Collapse</string>
-
-    <!-- Rail category headers -->
-    <string name="rail_section_cameras">Cameras</string>
-    <string name="rail_section_controls">Controls</string>
-    <string name="rail_section_driving">Driving</string>
-    <string name="rail_section_automation">Automation</string>
-    <string name="rail_section_system">System</string>
 
     <!-- Settings sub-rail -->
     <string name="settings_section_appearance">Appearance</string>
@@ -1284,19 +1323,15 @@
     <string name="vehicle_dialog_title">Set battery capacity</string>
     <string name="vehicle_dialog_capacity_label">Capacity</string>
     <string name="vehicle_dialog_capacity_suffix">kWh</string>
-    <string name="vehicle_dialog_capacity_helper">15 to 120 kWh. Leave to use the model default.</string>
+    <string name="vehicle_dialog_capacity_helper">5 to 120 kWh. Values below 15 require a PHEV.</string>
     <string name="vehicle_dialog_model_label">Model</string>
     <string name="vehicle_model_seagull">BYD Seagull</string>
     <string name="vehicle_dialog_save">Save</string>
     <string name="vehicle_dialog_reset">Reset to auto-detect</string>
-    <string name="vehicle_dialog_detection">Detection: %1$s</string>
-    <string name="vehicle_dialog_detection_auto">Automatic</string>
-    <string name="vehicle_dialog_detection_manual">Manual</string>
-    <string name="vehicle_dialog_invalid_capacity">Capacity must be 15 - 120 kWh</string>
+    <string name="vehicle_dialog_invalid_capacity">Capacity must be 5 - 120 kWh</string>
     <string name="vehicle_dialog_summary_effective">Effective: %1$.1f kWh</string>
     <string name="vehicle_dialog_summary_calibration">Last calibrated: %1$.1f%% on %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">unavailable</string>
-    <string name="vehicle_dialog_value_pending">—</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
     <string name="dashboard_metric_storage_chip">%1$s used · %2$s free</string>
     <string name="dashboard_metric_storage_chip_pending">Storage —</string>
@@ -1772,6 +1807,7 @@
     <string name="projection_cast">Cast to cluster</string>
     <string name="projection_stop">Stop</string>
     <string name="projection_cast_failed">Couldn\'t cast that app to the cluster.</string>
+    <string name="projection_dilink5_mode_required">Set Vehicle Mode to DiLink 5 in Diagnostics, then restart the camera service.</string>
     <string name="projection_status_idle">Not projecting.</string>
     <string name="projection_status_live">Live mirror — tap and swipe to control.</string>
     <string name="projection_status_preview">Preview mode (reduced frame rate on this vehicle).</string>
@@ -1874,4 +1910,18 @@
     <string name="network_warn_continue">Turn on hotspot</string>
     <string name="network_warn_cancel">Cancel</string>
 
+    <string name="toast_share_failed">Share failed</string>
+    <string name="rail_collapse_label">Collapse</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Cameras</string>
+    <string name="rail_section_controls">Controls</string>
+    <string name="rail_section_driving">Driving</string>
+    <string name="rail_section_automation">Automation</string>
+    <string name="rail_section_system">System</string>
+    <string name="vehicle_dialog_detection">Detection: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automatic</string>
+    <string name="vehicle_dialog_detection_manual">Manual</string>
+    <string name="vehicle_dialog_value_pending">—</string>
+
+    <string name="roi_tap_to_add_points">Tap to add points (%1$d-%2$d)</string>
 </resources>

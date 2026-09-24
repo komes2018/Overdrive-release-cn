@@ -619,6 +619,7 @@
     <string name="rail_vehicle">차량</string>
     <string name="rail_projection">프로젝션</string>
     <string name="rail_trips">주행 기록</string>
+    <string name="rail_parking">주차</string>
     <string name="rail_integrations">통합</string>
     <string name="rail_diagnostics">진단</string>
     <string name="rail_settings">설정</string>
@@ -757,7 +758,6 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">감시 중</string>
-    <string name="dashboard_modern_vehicle_status">차량 상태</string>
     <string name="dashboard_subtitle_all_systems">모든 시스템 온라인</string>
     <string name="dashboard_subtitle_some_offline">%1$d의 %2$d 온라인 서비스</string>
     <string name="dashboard_subtitle_no_tunnel">오프라인에서 원격 액세스</string>
@@ -777,14 +777,11 @@
     <string name="vehicle_dialog_title">배터리 용량을 설정</string>
     <string name="vehicle_dialog_capacity_label">용량 (kWh)</string>
     <string name="vehicle_dialog_capacity_suffix">kWh</string>
-    <string name="vehicle_dialog_capacity_helper">15 ~ 120kWh. 모델 기본값을 사용하려면 그대로 둡니다.</string>
+    <string name="vehicle_dialog_capacity_helper">5 ~ 120kWh. 모델 기본값을 사용하려면 그대로 둡니다.</string>
     <string name="vehicle_dialog_model_label">모델</string>
     <string name="vehicle_dialog_save">저장</string>
     <string name="vehicle_dialog_reset">자동 탐지 설정</string>
-    <string name="vehicle_dialog_detection">감지: %1$s</string>
-    <string name="vehicle_dialog_detection_auto">자동</string>
-    <string name="vehicle_dialog_detection_manual">수동</string>
-    <string name="vehicle_dialog_invalid_capacity">용량은 15 ~ 120 kWh</string>
+    <string name="vehicle_dialog_invalid_capacity">용량은 5 ~ 120 kWh</string>
     <string name="vehicle_dialog_summary_effective">유효성: %1$.1f kWh</string>
     <string name="vehicle_dialog_summary_calibration">마지막 캘리브레이션: %1$.1f%% %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">사용할 수 없습니다</string>
@@ -1217,7 +1214,7 @@
     <string name="settings_backup_restore_confirm_title">설정을 복원하시겠습니까?</string>
     <string name="settings_backup_exporting">백업을 만드는 중…</string>
     <string name="settings_backup_export_failed">백업 내보내기에 실패했습니다</string>
-    <string name="onboarding_vehicle_body">모델을 선택하면 kWh가 자동으로 채워지며, 직접 입력할 수도 있습니다(15–120). 이렇게 하면 주행거리와 충전 추정이 정확해집니다. 건너뛰고 나중에 설정할 수 있습니다.</string>
+    <string name="onboarding_vehicle_body">모델을 선택하면 kWh가 자동으로 채워지며, 직접 입력할 수도 있습니다(5–120). 이렇게 하면 주행거리와 충전 추정이 정확해집니다. 건너뛰고 나중에 설정할 수 있습니다.</string>
     <string name="onboarding_expert_vehicle_title">차량 프로필</string>
     <string name="onboarding_done_primary">완료</string>
     <string name="settings_backup_export_title">설정 내보내기</string>
@@ -1331,6 +1328,10 @@
     <string name="projection_autostart_conflict_confirm">이 앱 사용</string>
     <string name="projection_app_uninstalled">해당 앱이 더 이상 설치되어 있지 않습니다.</string>
     <string name="projection_status_service_down">미러 서비스가 준비되지 않았습니다 — 앱(또는 카메라 데몬)을 다시 시작한 후 다시 시도하세요.</string>
+    <string name="dashboard_modern_vehicle_status">차량 상태</string>
+    <string name="vehicle_dialog_detection">감지: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">자동</string>
+    <string name="vehicle_dialog_detection_manual">수동</string>
     <!-- Rail category headers -->
     <string name="rail_section_cameras">카메라</string>
     <string name="rail_section_controls">제어</string>

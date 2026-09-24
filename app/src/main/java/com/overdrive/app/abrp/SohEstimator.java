@@ -212,14 +212,10 @@ public class SohEstimator {
     // remainKwh happens to be numerically close to SOC% by coincidence.
     private boolean fuelSignalsLookBev = false;
 
-    // Plausible BYD pack range. Smallest BEV-side is Sealion 6 DM-i PHEV at
-    // 18.3 kWh; largest is Tang at 108.8 kWh. PHEV packs whose users want to
-    // enter a usable-frame value (e.g. Tang DM-i ~12.9 kWh out of 21.5 nominal)
-    // need a lower floor — the BMS-reported remainKwh + display SOC live in
-    // the usable frame on those models, and the live SOH formula only matches
-    // when nominalCapacityKwh is in the same frame.
+    // Plausible BYD pack range. Values below 15 kWh are accepted only when
+    // live telemetry or the selected manifest model confirms a PHEV.
     private static final double MIN_PLAUSIBLE_KWH = 15.0;
-    private static final double MIN_PLAUSIBLE_KWH_PHEV = 8.0;
+    private static final double MIN_PLAUSIBLE_KWH_PHEV = 5.0;
     private static final double MAX_PLAUSIBLE_KWH = 120.0;
 
     // PHEV-only peak-charge frame anchor. Tracks max remainKwh observed at
@@ -392,10 +388,9 @@ public class SohEstimator {
         try {
             com.overdrive.app.byd.BydDataCollector col =
                 com.overdrive.app.byd.BydDataCollector.getInstance();
-            return col != null && col.isInitialized() && col.isPhevPublic();
-        } catch (Throwable ignored) {
-            return false;
-        }
+            if (col != null && col.isInitialized() && col.isPhevPublic()) return true;
+        } catch (Throwable ignored) { /* fall through to selected-model hint */ }
+        return com.overdrive.app.server.ModelsApiHandler.isSelectedModelPhev();
     }
 
     /**
@@ -404,26 +399,20 @@ public class SohEstimator {
      * clearUserNominal() can demote this back to "auto" / "unset".
      *
      * <p>The plausible floor is drivetrain-aware: BEV uses {@link #MIN_PLAUSIBLE_KWH}
-     * (15 kWh), PHEV uses {@link #MIN_PLAUSIBLE_KWH_PHEV} (8 kWh) so users on
-     * small Blade DM-i packs can enter usable-frame values like ~12.9 kWh.
-     * The drivetrain hint is read from {@code BydDataCollector.isPhevPublic()};
-     * if that probe fails the conservative BEV floor wins.
+     * (15 kWh), PHEV uses {@link #MIN_PLAUSIBLE_KWH_PHEV} (5 kWh).
+     * Live telemetry is preferred; a user-selected manifest PHEV is the
+     * offline fallback. Unknown drivetrains keep the conservative BEV floor.
      */
-    public void setNominalCapacityKwhFromUser(double capacityKwh) {
-        boolean isPhev = false;
-        try {
-            com.overdrive.app.byd.BydDataCollector col =
-                com.overdrive.app.byd.BydDataCollector.getInstance();
-            if (col != null && col.isInitialized()) {
-                isPhev = col.isPhevPublic();
-            }
-        } catch (Throwable ignored) { /* default isPhev=false -> BEV floor */ }
+    public boolean setNominalCapacityKwhFromUser(double capacityKwh) {
+        boolean isPhev = isPhevForCapacityFloor();
         double floor = isPhev ? MIN_PLAUSIBLE_KWH_PHEV : MIN_PLAUSIBLE_KWH;
-        if (capacityKwh < floor || capacityKwh > MAX_PLAUSIBLE_KWH) {
+        if (!Double.isFinite(capacityKwh)
+                || capacityKwh < floor
+                || capacityKwh > MAX_PLAUSIBLE_KWH) {
             logger.warn("Rejecting user nominal " + capacityKwh + " kWh — outside "
                 + floor + "-" + MAX_PLAUSIBLE_KWH + " range (drivetrain="
                 + (isPhev ? "PHEV" : "BEV") + ")");
-            return;
+            return false;
         }
 
         final boolean[] shouldSeed = {false};
@@ -514,6 +503,7 @@ public class SohEstimator {
                 logger.debug("seedInitialEstimate after user override failed: " + t.getMessage());
             }
         }
+        return true;
     }
 
     /**

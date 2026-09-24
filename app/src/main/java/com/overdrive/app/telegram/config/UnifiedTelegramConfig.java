@@ -78,6 +78,9 @@ public final class UnifiedTelegramConfig {
     // turning off criticalAlerts, which also killed charging faults, proximity
     // and battery-health alerts.
     public static final String K_TYRE_ALERTS      = "tyreAlerts";
+    // Parking Intelligence "Parked" / "Back at car" messages (INFO tier, with
+    // the four-camera still). Own toggle so they never ride criticalAlerts.
+    public static final String K_PARKING_MESSAGES = "parkingMessages";
     public static final String K_CONNECTIVITY     = "connectivity";
     public static final String K_MOTION_TEXT      = "motionText";
     // Per-severity tier toggles. Sit alongside the category toggles above so
@@ -260,6 +263,16 @@ public final class UnifiedTelegramConfig {
      */
     public static boolean isTyreAlerts() {
         return load().optBoolean(K_TYRE_ALERTS, true);
+    }
+
+    /**
+     * Parking Intelligence session messages ("Parked · place", "Back at car").
+     * Default ON: the feature itself is opt-in (parking.enabled), and a user
+     * who turned it on almost certainly wants the two messages it exists for.
+     * Off ⇒ Web Push / Notification Log only.
+     */
+    public static boolean isParkingMessages() {
+        return load().optBoolean(K_PARKING_MESSAGES, true);
     }
 
     public static boolean isConnectivity() {

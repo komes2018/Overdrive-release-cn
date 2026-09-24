@@ -141,11 +141,39 @@ public class ChargingPowerEstimatorTest {
                 Double.NaN, Double.NaN, false, false, GUN_DISCONNECTED);
     }
 
+    @Test
+    public void smallPhevDitherToleranceScalesWithPack() throws Exception {
+        ChargingPowerEstimator estimator = newEstimator();
+        long start = System.currentTimeMillis();
+
+        estimator.sample(start, Double.NaN, Double.NaN,
+                50.0, 5.0, true, true, GUN_DC);
+        estimator.sample(start + 60_000L, Double.NaN, Double.NaN,
+                51.0, 5.0, true, true, GUN_DC);
+        assertEquals(2, socRing(estimator).size());
+
+        // One 1%-SOC wobble is dither; a four-point drop on a 5 kWh pack is a reset.
+        estimator.sample(start + 120_000L, Double.NaN, Double.NaN,
+                50.0, 5.0, true, true, GUN_DC);
+        assertEquals(2, socRing(estimator).size());
+        estimator.sample(start + 180_000L, Double.NaN, Double.NaN,
+                47.0, 5.0, true, true, GUN_DC);
+        assertEquals(1, socRing(estimator).size());
+    }
+
     @SuppressWarnings("unchecked")
     private static ArrayDeque<long[]> remainRing(
             ChargingPowerEstimator estimator) throws Exception {
         Field field =
                 ChargingPowerEstimator.class.getDeclaredField("remainRing");
+        field.setAccessible(true);
+        return (ArrayDeque<long[]>) field.get(estimator);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ArrayDeque<long[]> socRing(
+            ChargingPowerEstimator estimator) throws Exception {
+        Field field = ChargingPowerEstimator.class.getDeclaredField("socRing");
         field.setAccessible(true);
         return (ArrayDeque<long[]>) field.get(estimator);
     }

@@ -474,6 +474,22 @@
         "saved_with_detection": "🎬 录制已保存 ({0} ) - {1}s",
         "saved": "🎬 录制已保存 - {0}s"
       }
+    },
+    "parking": {
+      "where": {
+        "unavailable": "⚠️ 无法连接摄像头守护进程。可尝试执行 。",
+        "disabled": "🅿️ 停车智能服务已关闭。可在“监控设置”→“停车”中开启。",
+        "none": "🅿️ 暂无停车记录。",
+        "title_open": "🅿️ *车辆已停车*",
+        "title_last": "🅿️ *上次停车记录*",
+        "parked_for": "已停车 {0}",
+        "was_away": "离开时长 {0}",
+        "counts": "{0} 起哨兵事件 · 周围进出 {1} 辆车",
+        "gps_fresh": "GPS 信号良好",
+        "gps_recent": "GPS 为近期定位",
+        "gps_stale": "GPS 信号陈旧 — 可能在地下车库；显示位置为地库入口",
+        "gps_unknown": "无 GPS 定位"
+      }
     }
   },
   "vehicle_control": {
@@ -1260,7 +1276,15 @@
     "wireless_charging_right": "手机无线充电板 (右侧)",
     "wireless_charging_right_description": "开启或关闭副驾侧无线充电板 (适用于配备双无线充的车型)。",
     "apply_seat_position": "一键调节座椅与后视镜位置",
-    "apply_seat_position_description": "将主驾座椅和两侧外后视镜调节至 OverDrive 中保存的位置记忆。可通过长按车内物理记忆按键或在“座椅记忆”页面一键保存。车辆必须处于上电状态。"
+    "apply_seat_position_description": "将主驾座椅和两侧外后视镜调节至 OverDrive 中保存的位置记忆。可通过长按车内物理记忆按键或在“座椅记忆”页面一键保存。车辆必须处于上电状态。",
+    "steering_heat": "方向盘加热",
+    "steering_heat_description": "方向盘加热处于开启还是关闭状态。不上报该状态的车型不可用。",
+    "open_apps_split": "分屏启动两个应用",
+    "open_apps_split_description": "此自动化触发时，将选定的两个应用以分屏方式并排打开。",
+    "primary_app": "主应用",
+    "secondary_app": "副应用",
+    "ivi_reboot": "重启车机系统",
+    "ivi_reboot_description": "重启 Android 车机中控系统。仅在驻车时允许执行，且在开机或上次重启后的前 5 分钟内受阻断保护，防止出现死循环重启。"
   },
   "messages": {
     "logged_out": "已成功退出登录",
@@ -1294,5 +1318,29 @@
     "bar": "bar",
     "kpa": "kPa",
     "psi": "磅/平方英寸 (PSI)"
+  },
+  "parking": {
+    "notify": {
+      "started_title": "已停车",
+      "ended_title": "已返回车旁",
+      "ended_body": "离开 {0} · {1} 起事件 · 周围进出 {2} 辆车",
+      "ended_body_short": "周围进出 {0} 辆车",
+      "ended_body_unwatched": "离开 {0} · 驻车哨兵未设防 ({1})",
+      "ended_events": "{0} 起事件",
+      "nothing_critical": "无高危风险",
+      "no_place": "位置信息不可用",
+      "gps_fresh": "GPS 信号良好",
+      "gps_recent": "GPS 为近期定位",
+      "gps_stale": "GPS 信号陈旧 — 地下车库？",
+      "gps_unknown": "无 GPS 定位",
+      "sentry_off": "驻车哨兵未设防 ({0})",
+      "sentry_safe_zone": "安全区域",
+      "sentry_schedule": "不在布防时间段内",
+      "sentry_disabled": "监控总开关关闭",
+      "sentry_vehicle_on_only": "仅上电运行模式",
+      "sentry_pipeline_down": "摄像头未运行",
+      "sentry_unknown": "未知原因",
+      "btn_walk": "步行导航找车"
+    }
   }
 }

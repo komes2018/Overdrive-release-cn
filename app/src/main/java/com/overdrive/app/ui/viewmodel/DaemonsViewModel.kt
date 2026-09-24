@@ -10,8 +10,10 @@ import com.overdrive.app.ui.daemon.*
 import com.overdrive.app.ui.model.DaemonState
 import com.overdrive.app.ui.model.DaemonStatus
 import com.overdrive.app.ui.model.DaemonType
+import com.overdrive.app.ui.model.ParkedShutdown
 import com.overdrive.app.ui.model.SubprocessInfo
 import com.overdrive.app.ui.model.parseUptimeToMillis
+import com.overdrive.app.R
 
 /**
  * ViewModel for managing daemon states.
@@ -31,6 +33,10 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
     // (an ERROR posted between two poll callbacks would silently vanish).
     private val authoritativeStates =
         java.util.concurrent.ConcurrentHashMap<DaemonType, DaemonState>()
+
+    private fun appStr(id: Int, vararg args: Any): String {
+        return getApplication<Application>().getString(id, *args)
+    }
 
     private fun publishState(type: DaemonType, state: DaemonState) {
         authoritativeStates[type] = state
@@ -161,14 +167,6 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             // Clear user-stopped flag so health check can manage this daemon
             DaemonStartupManager.clearUserStopped(type)
 
-            // Clear the durable disable sentinel — the user is explicitly
-            // (re)starting this daemon, so the watchdog + health-check should
-            // be free to keep it alive again. Centralized here so EVERY UI
-            // start path clears it uniformly, regardless of whether the
-            // per-daemon controller's start flow also does its own sentinel
-            // rm. See DaemonType.sentinelPath for the cross-UID rationale.
-            clearDisableSentinel(type)
-
             // Cloudflared and Zrok are mutually exclusive - stop the other one
             // first. ONLY on a user start: a health-check revival must not
             // silently kill the sibling tunnel.
@@ -197,6 +195,33 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             if (type in DaemonStartupManager.OPTIONAL_DAEMONS) {
                 startupManager?.onDaemonToggled(type, true)
             }
+
+            // A user start is also an authoritative "the vehicle/app session is
+            // active" signal. Clear BOTH durable blockers, and do not launch
+            // until that shell command has completed:
+            //  - this daemon's manual-stop sentinel; and
+            //  - the global Vehicle-ON-only parked marker.
+            //
+            // Previously only the per-daemon sentinel was cleared, fire-and-
+            // forget. If an ACC-on marker clear had failed during app startup,
+            // every watchdog immediately gate-exited on PARKED even though the
+            // UI said it was starting. The marker then made the 30s health
+            // check refuse every relaunch, so only a process restart (which
+            // happened to retry the marker clear) recovered the stack.
+            updateState(type, DaemonStatus.STARTING, "Preparing daemon start...")
+            clearStartBlockers(type) {
+                // Blocker cleanup is asynchronous. A Stop pressed while it
+                // was in flight is newer user intent and must win over this
+                // delayed continuation.
+                if (type in DaemonStartupManager.userStoppedDaemons) {
+                    LogManager.getInstance().info("Daemons",
+                        "Start cancelled for ${type.displayName} — user stopped it while preparing")
+                    updateState(type, DaemonStatus.STOPPED, "Stopped")
+                } else {
+                    launchController(type, controller)
+                }
+            }
+            return
         } else {
             // Health-check revival. Same-process race backstop: if the user
             // tapped Stop after this tick's probe was queued but before this
@@ -212,8 +237,12 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
-        updateState(type, DaemonStatus.STARTING, "Starting...")
-        
+        launchController(type, controller)
+    }
+
+    private fun launchController(type: DaemonType, controller: DaemonController) {
+        updateState(type, DaemonStatus.STARTING, appStr(R.string.daemon_status_starting))
+
         controller.start(object : DaemonCallback {
             override fun onStatusChanged(status: DaemonStatus, message: String) {
                 updateState(type, status, message)
@@ -248,29 +277,31 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Remove [type]'s disable sentinel so the watchdog + health-check are
-     * free to keep it alive again. Called on every UI start.
+     * Remove every durable blocker that can suppress an explicit UI start,
+     * then invoke [onCleared]. Launch is deliberately sequenced from the
+     * command's success callback rather than submitted beside it.
      *
-     * If this rm fails (transient ADB transport hiccup) the daemon still
-     * starts, but a STALE .disabled file is now left on disk — and for
-     * daemons whose launch path does NOT rm their own sentinel (sentry,
-     * singbox, tailscale, cloudflared, unlike camera/acc which re-rm it in
-     * their watchdog deploy) that stale file will make the health-check
-     * relaunchDaemon gate refuse to revive a LATER crash, wedging the daemon
-     * dead for the rest of the session. We can't block the start on this
-     * fire-and-forget rm, so at minimum WARN-log the failure so the wedge is
-     * diagnosable rather than silent.
+     * A bare `rm -f` normally exits zero even when nothing existed. The
+     * explicit post-check catches permission/transport oddities where either
+     * marker survived, so the UI reports a real failure instead of launching
+     * a watchdog that is guaranteed to exit immediately.
      */
-    private fun clearDisableSentinel(type: DaemonType) {
+    private fun clearStartBlockers(type: DaemonType, onCleared: () -> Unit) {
+        val parkedMarker = ParkedShutdown.MARKER_PATH
         adbLauncher.executeShellCommand(
-            "rm -f ${type.sentinelPath} 2>/dev/null; echo done",
+            "rm -f ${type.sentinelPath} $parkedMarker 2>/dev/null; " +
+                "if [ -f ${type.sentinelPath} ] || [ -f $parkedMarker ]; then " +
+                "echo blockers_remain; exit 1; fi; echo done",
             object : AdbDaemonLauncher.LaunchCallback {
                 override fun onLog(message: String) {}
-                override fun onLaunched() {}
+                override fun onLaunched() {
+                    onCleared()
+                }
                 override fun onError(error: String) {
                     LogManager.getInstance().warn("Daemons",
-                        "Failed to clear disable sentinel for ${type.displayName}: $error" +
-                            " — a later crash of this daemon may not auto-restart until next app launch")
+                        "Failed to clear start blockers for ${type.displayName}: $error")
+                    updateState(type, DaemonStatus.ERROR,
+                        "Could not prepare daemon start: $error")
                 }
             }
         )
@@ -325,7 +356,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             
             override fun onError(error: String) {
                 // Stop failed - refresh actual status
-                updateState(type, DaemonStatus.ERROR, "Stop failed: $error")
+                updateState(type, DaemonStatus.ERROR, appStr(R.string.daemon_status_stop_failed, error))
                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                     refreshDaemonStatus(type)
                 }, 1000)
@@ -341,7 +372,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             zrokController.hasEnableToken { hasToken ->
                 if (!hasToken) {
                     // No token configured - show needs config state
-                    updateZrokNeedsConfig("No token configured. Tap to set up.")
+                    updateZrokNeedsConfig(appStr(R.string.daemon_config_no_token))
                     if (logResult) {
                         LogManager.getInstance().debug("Daemons", "${type.name}: No token configured")
                     }
@@ -354,7 +385,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             return
         } else if (type == DaemonType.CLOUDFLARED_TUNNEL) {
             if (!com.overdrive.app.config.CloudflaredPaidConfig.isConfigured()) {
-                updateCloudflaredNeedsConfig("Paid version requires a token. Tap to set up.")
+                updateCloudflaredNeedsConfig(appStr(R.string.daemon_config_paid_token))
                 if (logResult) {
                     LogManager.getInstance().debug("Daemons", "${type.name}: Paid version requires a token")
                 }
@@ -364,7 +395,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             tailscaleController.needsLogin { needsLogin ->
                 if (needsLogin) {
                     // No token configured - show needs config state
-                    updateTailscaleNeedsLogin("Not logged in. Tap to set up.")
+                    updateTailscaleNeedsLogin(appStr(R.string.daemon_config_not_logged_in))
                     if (logResult) {
                         LogManager.getInstance().debug("Daemons", "${type.name}: Not logged in")
                     }
@@ -402,7 +433,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
                         // For cloudflared, also fetch the tunnel URL
                         if (type == DaemonType.CLOUDFLARED_TUNNEL) {
                             cloudflaredController.refreshTunnelUrl { url ->
-                                val statusText = url ?: "Running"
+                                val statusText = url ?: appStr(R.string.daemon_status_running)
                                 updateStateWithSubprocesses(type, DaemonStatus.RUNNING, statusText, uptime, subprocesses)
                                 if (logResult) {
                                     val uptimeStr = uptime?.let { " (uptime: $it)" } ?: ""
@@ -415,7 +446,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
                         } else if (type == DaemonType.ZROK_TUNNEL) {
                             // For zrok, also fetch the tunnel URL
                             zrokController.refreshTunnelUrl { url ->
-                                val statusText = url ?: "Running"
+                                val statusText = url ?: appStr(R.string.daemon_status_running)
                                 updateStateWithSubprocesses(type, DaemonStatus.RUNNING, statusText, uptime, subprocesses)
                                 if (logResult) {
                                     val uptimeStr = uptime?.let { " (uptime: $it)" } ?: ""
@@ -429,8 +460,10 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
                             // For tailscale, also fetch the tunnel URL and proxy state
                             tailscaleController.refreshTunnelUrl { url ->
                                 tailscaleController.isProxyEnabled { proxyOn ->
-                                    val base = url ?: "Running"
-                                    val statusText = if (proxyOn) "$base • Proxy: ON" else base
+                                    val base = url ?: appStr(R.string.daemon_status_running)
+                                    val statusText = if (proxyOn) {
+                                        appStr(R.string.daemon_status_proxy_on, base)
+                                    } else base
                                     updateStateWithSubprocesses(type, DaemonStatus.RUNNING, statusText, uptime, subprocesses)
                                     if (logResult) {
                                         val uptimeStr = uptime?.let { " (uptime: $it)" } ?: ""

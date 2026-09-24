@@ -106,11 +106,12 @@ public final class AutomationCategories {
         put(DISPLAYS, "screenBrightness", "clusterBrightness", "hudBrightness",
                 "hudPower", "screenPower");
         // ── System / apps / notification ──
-        put(SYSTEM, "notification", "showToast", "showDialog", "openApp", "openAppSplit", "shell", "radio",
+        put(SYSTEM, "notification", "showToast", "showDialog", "openApp", "openAppSplit",
+                "openAppsSplit", "shell", "radio",
                 "mqttPublish", "mqttTrigger",
                 "wifiState", "wifiSsid", "btState", "btDeviceName", "locationZone",
                 "boot", "power", "time", "day", "dayOfMonth", "month", "sunPhase",
-                "uiNav", "screenshot", "moveAppToDisplay", "stopClusterCast");
+                "uiNav", "screenshot", "iviReboot", "moveAppToDisplay", "stopClusterCast");
         // ── Surveillance / recording / camera ──
         put(SURVEILLANCE, "surveillance", "operatingMode", "recording", "manualClip",
                 "showCameraFeed", "setCameraViewSize", "setBlindSpotOverlaySize", "hideCameraView",

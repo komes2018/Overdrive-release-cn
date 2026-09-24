@@ -54,7 +54,13 @@ public class CloudFallbackContractTest {
         assertFalse(fullOpen.hasCloudPath());
         assertTrue(fullOpen.hasSdkPath());
         assertTrue(vent.hasCloudPath());
-        assertFalse(vent.hasSdkPath());
+        assertTrue(vent.hasSdkPath());
+        assertEquals(VehicleCommandRouter.Capability.AVAILABLE, vent.cloudCapability());
+        assertEquals(VehicleCommandRouter.Capability.AVAILABLE, vent.sdkCapability());
+        assertEquals(VehicleCommandRouter.RoutePreference.CLOUD_FIRST,
+                vent.defaultPreference());
+        assertTrue(vent.preferLocalWhenOccupiedOrAwake());
+        assertEquals(15, VehicleCommandRouter.VentAllWindowsCommand.LOCAL_VENT_PERCENT);
         assertEquals(CloudCapabilities.Feature.WINDOWS_OPEN_VENT, vent.cloudFeature());
         assertTrue(vent.requiresKnownCloudFeature());
     }

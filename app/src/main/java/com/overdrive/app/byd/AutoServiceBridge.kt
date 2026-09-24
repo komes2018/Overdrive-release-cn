@@ -2,6 +2,7 @@ package com.overdrive.app.byd
 
 import android.os.IBinder
 import android.os.Parcel
+import com.overdrive.app.camera.dilink5.DiLink5Platform
 import com.overdrive.app.shell.HiddenApiBypass
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -56,9 +57,15 @@ object AutoServiceBridge {
     @Volatile private var binder: IBinder? = null
     @Volatile private var useShellCall: Boolean = false
     @Volatile private var initialized: Boolean = false
+    @Volatile private var diLink5InterfaceToken: String? = null
 
     private val parcelInt32Pattern: Pattern = Pattern.compile("0x([0-9a-fA-F]{8})")
     private val parcelByteHexPattern: Pattern = Pattern.compile("0x([0-9a-fA-F]{2})")
+
+    data class DiLink5Read(
+        @JvmField val status: Int,
+        @JvmField val valueBits: Int
+    )
 
     /** Resolves the binder and detects whether shell-fallback is needed. Idempotent. */
     @Synchronized
@@ -126,6 +133,40 @@ object AutoServiceBridge {
         }
     }
 
+    /**
+     * DI5 read-side wire format: tx 5 returns an int and tx 7 returns IEEE-754
+     * float bits. The service writes status first and value second.
+     */
+    fun readDiLink5(tx: Int, device: Int, featureId: Int): DiLink5Read? {
+        if (!DiLink5Platform.isSelected() || (tx != 5 && tx != 7)) return null
+        val b = liveDiLink5Binder() ?: return null
+        val token = diLink5InterfaceToken ?: try {
+            b.interfaceDescriptor?.also { diLink5InterfaceToken = it }
+        } catch (_: Throwable) {
+            null
+        }
+        if (token.isNullOrEmpty()) return null
+
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeInterfaceToken(token)
+            data.writeInt(device)
+            data.writeInt(featureId)
+            if (!b.transact(tx, data, reply, 0)) return null
+            reply.setDataPosition(0)
+            if (reply.dataAvail() < 8) return null
+            DiLink5Read(reply.readInt(), reply.readInt())
+        } catch (t: Throwable) {
+            log("readDiLink5(tx=$tx,dev=$device,fid=$featureId): "
+                    + "${t.javaClass.simpleName}: ${t.message}")
+            null
+        } finally {
+            data.recycle()
+            reply.recycle()
+        }
+    }
+
     // ────────────────────────────────────────────────────────────────────
     // Remote control (lock/unlock/trunk/etc.)
     // ────────────────────────────────────────────────────────────────────
@@ -179,6 +220,33 @@ object AutoServiceBridge {
     // ────────────────────────────────────────────────────────────────────
     // Internals
     // ────────────────────────────────────────────────────────────────────
+
+    @Synchronized
+    private fun liveDiLink5Binder(): IBinder? {
+        binder?.let {
+            try {
+                if (it.pingBinder()) return it
+            } catch (_: Throwable) {
+            }
+        }
+        binder = null
+        diLink5InterfaceToken = null
+        if (!HiddenApiBypass.isBypassed()) HiddenApiBypass.bypass()
+        return try {
+            val sm = Class.forName("android.os.ServiceManager")
+            val resolved = sm.getMethod("getService", String::class.java)
+                .invoke(null, SERVICE_NAME) as? IBinder
+            if (resolved != null && resolved.pingBinder()) {
+                binder = resolved
+                resolved
+            } else {
+                null
+            }
+        } catch (t: Throwable) {
+            log("DI5 binder resolve failed: ${t.javaClass.simpleName}: ${t.message}")
+            null
+        }
+    }
 
     private fun detectCallMode() {
         val b = binder ?: return

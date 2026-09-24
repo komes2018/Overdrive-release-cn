@@ -91,7 +91,10 @@ public final class RemoteDevViewApiHandler {
             response.put("activity", ready.metadata.opt("activity"));
             response.put("captureBackend", ready.metadata.opt("captureBackend"));
             response.put("displayId", ready.metadata.optInt("displayId", -1));
-            response.put("physicalDisplayChanged", false);
+            boolean compatibilityMode =
+                ready.metadata.optBoolean("compatibilityMode", false);
+            response.put("compatibilityMode", compatibilityMode);
+            response.put("physicalDisplayChanged", compatibilityMode);
             HttpResponse.sendJson(out, response.toString());
             return true;
         }

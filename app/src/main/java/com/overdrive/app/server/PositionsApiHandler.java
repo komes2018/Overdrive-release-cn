@@ -193,9 +193,13 @@ public final class PositionsApiHandler {
         try { target.put("acc", com.overdrive.app.monitor.AccMonitor.isAccOn()); }
         catch (Throwable ignore) { }
         try {
-            boolean movementBlocked =
-                    com.overdrive.app.byd.routing.DrivingSafetyGuard.isMovementBlocked();
+            String reason =
+                    com.overdrive.app.byd.routing.DrivingSafetyGuard.getMovementBlockReason();
+            boolean movementBlocked = reason != null;
             target.put("movementBlocked", movementBlocked);
+            if (reason != null) {
+                target.put("movementBlockReason", reason);
+            }
             target.put("positioningBlocked",
                     com.overdrive.app.byd.routing.DrivingSafetyGuard.isGuardEnabled(
                             com.overdrive.app.byd.routing.DrivingSafetyGuard.GUARD_POSITIONING)
@@ -673,14 +677,17 @@ public final class PositionsApiHandler {
         // Ambient, when the position carries it. Independent of the geometry write: a
         // different device, no batching, and no gear gate — so an ambient-only position is
         // free to apply while driving, which is exactly what makes one worth having.
+        JSONObject ambientResult = null;
         if (hasAmbient) {
             try {
-                res.put("ambient", com.overdrive.app.byd.AmbientProbe.apply(ctx, pos.optJSONObject("ambient")));
+                ambientResult = com.overdrive.app.byd.AmbientProbe.apply(
+                        ctx, pos.optJSONObject("ambient"));
             } catch (Throwable t) {
-                res.put("ambient", new JSONObject()
+                ambientResult = new JSONObject()
                         .put("applied", false)
-                        .put("reason", t.getClass().getSimpleName() + ": " + t.getMessage()));
+                        .put("reason", t.getClass().getSimpleName() + ": " + t.getMessage());
             }
+            res.put("ambient", ambientResult);
         }
 
         res.put("appliedId", id);
@@ -688,15 +695,25 @@ public final class PositionsApiHandler {
         // are silently re-prompted on every future apply.
         if (!ackPersisted) res.put("ackNotPersisted", true);
         JSONArray applied = new JSONArray();
-        boolean geometryOk = !hasGeometry || res.optBoolean("accepted", false);
+        boolean diLink5 =
+                com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
+        boolean geometryOk = !hasGeometry
+                || (res.optBoolean("accepted", false)
+                    && (!diLink5 || !res.optBoolean("inert", false)));
+        boolean ambientOk = !hasAmbient
+                || !diLink5
+                || (ambientResult != null && ambientResult.optBoolean("applied", false));
         if (hasGeometry && geometryOk) applied.put("geometry");
-        if (hasAmbient) applied.put("ambient");
+        if (hasAmbient && ambientOk) applied.put("ambient");
         res.put("appliedParts", applied);
+        if (diLink5) res.put("success", geometryOk && ambientOk);
         // Report the honest outcome: the HAL refusing the write, and the HAL accepting a write
         // the unpowered motors cannot act on, are both "the seat did not move".
         if (hasGeometry && !geometryOk && !res.has("error") && !res.has("skipped")) {
             res.put("error", "the car did not confirm the seat write"
                     + (res.has("exception") ? " (" + res.optString("exception") + ")" : ""));
+        } else if (hasAmbient && !ambientOk && !res.has("error")) {
+            res.put("error", "the car did not confirm the ambient-light write");
         } else if (res.optBoolean("inert", false)) {
             res.put("warning", res.optString("reason", "vehicle off: nothing moved"));
         }

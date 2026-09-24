@@ -1,7 +1,7 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <resources>
     <string name="settings_navigation_title">ניווט</string>
-    <string name="settings_navigation_subtitle">בחר אילו יעדים אופציונליים יישארו נעוצים בסרגל הניווט.</string>
+    <string name="settings_navigation_subtitle">בחר אילו יעדים אופציונליים יישארו נעוצים בסרגל הניווט השמאלי.</string>
     <string name="settings_navigation_fixed_hint">לוח בקרה, הגדרות ואודות תמיד זמינים.</string>
     <string name="settings_navigation_reset">איפוס לברירת מחדל</string>
     <string name="settings_navigation_reset_done">הניווט שוחזר</string>

@@ -9,20 +9,8 @@ import android.hardware.bydauto.bodywork.BYDAutoBodyworkDevice;
  * failure sentinel; the real implementation lives in the on-device framework and is reached
  * reflectively (see {@code BydDeviceHelper}).
  *
- * <p><b>Why this surface was widened.</b> The stub previously declared only {@code getInstance} and
- * {@code setInt}, which made the manager-level READ and ACTIVATION channels invisible to us. Two
- * independently-built reference apps use them and we did not:
- *
- * <ul>
- *   <li><b>reference app A</b> (its telemetry bridge) calls
- *       {@code enableDevice(...)} on this manager for every telemetry device it polls — speed,
- *       statistic, tyre, gearbox, ac, bodywork, doorlock… — and reads values through the
- *       manager's own {@code getDouble(deviceType, featureId)} / {@code getInt}.</li>
- *   <li><b>reference app B</b> (its device-init layer)
- *       acquires devices via {@code getInstance(ctx).getDevice(type)} as its FIRST tier, before
- *       falling back to the per-device {@code getInstance} we use, and then to a raw constructor.
- *       It also resolves {@code getDouble} alongside {@code get} at init.</li>
- * </ul>
+ * <p>The stub includes the platform's manager-level acquisition, activation, read and write
+ * signatures so production code can probe those capabilities without bundling an implementation.
  *
  * <p>That difference is a candidate root cause for a real device symptom: on a BEV capture
  * (log_F2ZQH7CC) {@code getChargePower}, {@code getExternalChargingPower},
@@ -30,10 +18,9 @@ import android.hardware.bydauto.bodywork.BYDAutoBodyworkDevice;
  * more consistent with an un-activated / unresolved device handle than with four independently
  * broken getters. See {@code CHARGING-POWER-INVARIANTS.md}.
  *
- * <p><b>Signatures are copied from the reference apps' own bundled stubs, not guessed.</b>
  * {@code enableDevice}/{@code disableDevice} take an {@code IBYDAutoDevice}; a separate
- * {@code BYDAutoManager.enableDevice(int deviceType)} int-form also exists, and a reference app calls
- * BOTH. Callers must therefore probe both shapes reflectively rather than assume either.
+ * {@code BYDAutoManager.enableDevice(int deviceType)} int-form also exists. Callers must probe
+ * both shapes reflectively rather than assume either.
  */
 public abstract class BYDAutoDeviceManager implements BYDAutoManager.OnBYDAutoListener {
     public static synchronized BYDAutoDeviceManager getInstance(Context context) {
@@ -55,8 +42,7 @@ public abstract class BYDAutoDeviceManager implements BYDAutoManager.OnBYDAutoLi
     }
 
     /**
-     * Resolve a device handle by numeric device type — a reference app's FIRST acquisition tier,
-     * absent from our path entirely until now.
+     * Resolve a device handle by numeric device type.
      */
     public Object getDevice(int deviceType) { return null; }
 

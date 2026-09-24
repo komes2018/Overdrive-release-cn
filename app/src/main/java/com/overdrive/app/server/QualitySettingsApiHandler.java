@@ -2342,12 +2342,40 @@ public class QualitySettingsApiHandler {
         surOut.put("allowOnline", sur != null && sur.optBoolean("allowOnline", false));
         response.put("surveillance", surOut);
 
+        response.put("parking", parkingGeocodingView(geo));
+
         JSONObject advOut = new JSONObject();
         advOut.put("customNominatimBase",
                 adv != null ? adv.optString("customNominatimBase", "") : "");
         response.put("advanced", advOut);
 
         HttpResponse.sendJson(out, response.toString());
+    }
+
+    /**
+     * Parking Intelligence flow view: {@code {enabled, allowOnline, inherited}}.
+     * Until the user sets it explicitly the flow INHERITS the surveillance or
+     * recording choice (whichever is on) — exactly what the daemon does in
+     * {@code DaemonParkingEnvironment.resolvePlaceAsync} — so adding the
+     * dedicated toggle changed nothing for existing installs.
+     */
+    static JSONObject parkingGeocodingView(JSONObject geo) throws Exception {
+        JSONObject out = new JSONObject();
+        JSONObject park = geo == null ? null : geo.optJSONObject("parking");
+        if (park != null) {
+            out.put("enabled", park.optBoolean("enabled", false));
+            out.put("allowOnline", park.optBoolean("allowOnline", false));
+            out.put("inherited", false);
+            return out;
+        }
+        JSONObject sur = geo == null ? null : geo.optJSONObject("surveillance");
+        JSONObject rec = geo == null ? null : geo.optJSONObject("recording");
+        JSONObject src = sur != null && sur.optBoolean("enabled", false) ? sur
+                : (rec != null && rec.optBoolean("enabled", false) ? rec : null);
+        out.put("enabled", src != null);
+        out.put("allowOnline", src != null && src.optBoolean("allowOnline", false));
+        out.put("inherited", true);
+        return out;
     }
 
     /**
@@ -2438,6 +2466,26 @@ public class QualitySettingsApiHandler {
                     merged.put("surveillance", outSur);
                 }
 
+                // Parking Intelligence flow. Written only once the user has set
+                // it (a save from the dashcam / sentry pages must neither create
+                // nor drop it — dropping it would silently revert the parking
+                // page's choice to "inherit").
+                if (delta.has("parking") || current.has("parking")) {
+                    JSONObject curPark = current.optJSONObject("parking");
+                    if (curPark == null) curPark = new JSONObject();
+                    JSONObject inPark = delta.optJSONObject("parking");
+                    JSONObject outPark = new JSONObject();
+                    outPark.put("enabled",
+                            inPark != null && inPark.has("enabled")
+                                    ? inPark.optBoolean("enabled", false)
+                                    : curPark.optBoolean("enabled", false));
+                    outPark.put("allowOnline",
+                            inPark != null && inPark.has("allowOnline")
+                                    ? inPark.optBoolean("allowOnline", false)
+                                    : curPark.optBoolean("allowOnline", false));
+                    merged.put("parking", outPark);
+                }
+
                 // Advanced sub-object — preserve cooldown when the caller
                 // writes a new customNominatimBase. Cooldown is set
                 // internally by NominatimRateLimiter; the web caller has
@@ -2481,6 +2529,7 @@ public class QualitySettingsApiHandler {
                     readAdv != null ? readAdv.optString("customNominatimBase", "") : "");
             response.put("recording", echoRec);
             response.put("surveillance", echoSur);
+            response.put("parking", parkingGeocodingView(readBack));
             response.put("advanced", echoAdv);
             HttpResponse.sendJson(out, response.toString());
         } catch (Exception e) {

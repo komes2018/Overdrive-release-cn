@@ -9,7 +9,7 @@
  */
 @import url("design-tokens.css");
 @import url("app-shell.css");
-@import url("app-tabs.css");
+@import url("app-tabs.css?v=4");
 @import url("app-collapse.css");
 
 :root {
@@ -39,6 +39,12 @@
     /* Borders & glow */
     --border-subtle: rgba(255, 255, 255, 0.06);
     --border-default: rgba(255, 255, 255, 0.1);
+    /* Backward-compatible names still used by a few page-local styles. */
+    --border-color: var(--border-default);
+    --card-border: var(--border-subtle);
+    --bg-secondary: var(--bg-elevated);
+    --accent: var(--brand-primary);
+    --accent-hover: var(--primary);
     --shadow-glow: 0 0 20px rgba(0, 212, 170, 0.15);
 
     /* Translucent overlay surfaces (toasts, modals, cards over maps). */
@@ -679,7 +685,7 @@ textarea:focus,
 .page-body {
     flex: 1;
     padding: var(--page-pad-y) var(--page-pad-x);
-    padding-bottom: calc(var(--page-pad-y) + 80px); /* Account for fixed footer */
+    padding-bottom: var(--page-pad-y);
     overflow-y: auto;
     overflow-x: hidden;
 }
@@ -714,6 +720,7 @@ textarea:focus,
 .text-input {
     width: 100%;
     min-width: 200px;
+    min-height: 48px;
     box-sizing: border-box;
     padding: 11px 14px;
     font-size: 14px;
@@ -922,6 +929,20 @@ select.text-input option {
     margin-left: 4px;
 }
 
+.btn-group-vertical {
+    flex-direction: column;
+    width: 100%;
+}
+
+.btn-group-vertical > * + * {
+    margin-left: 0;
+    margin-top: 4px;
+}
+
+.btn-group-vertical .btn-toggle {
+    width: 100%;
+}
+
 .btn-toggle {
     padding: 8px 12px;
     min-height: 48px;
@@ -953,8 +974,20 @@ select.text-input option {
     min-height: 48px;
     font-size: 14px;
     font-weight: 500;
+    font-family: inherit;
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
     border-radius: var(--radius-md);
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
     transition: all 0.2s;
+}
+
+.btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--brand-primary);
 }
 
 /* Icon/label spacing inside buttons. The BYD head-unit WebView (Chrome 58 /
@@ -981,9 +1014,14 @@ select.text-input option {
 .btn-primary {
     background: var(--brand-primary);
     color: var(--on-primary);
+    border-color: transparent;
 }
 
-.btn-primary:hover { filter: brightness(1.1); }
+.btn-primary:hover {
+    background: var(--brand-primary);
+    border-color: transparent;
+    filter: brightness(1.1);
+}
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .btn-danger {
@@ -995,11 +1033,31 @@ select.text-input option {
 .btn-danger:hover { background: rgba(239, 68, 68, 0.25); }
 .btn-danger.on { background: var(--danger); color: white; }
 
+.btn-ghost {
+    color: var(--text-secondary);
+    background: transparent;
+    border-color: transparent;
+}
+
+.btn-ghost:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+    border-color: var(--border-default);
+}
+
 /* === SLIDERS === */
 .slider-control {
     display: flex;
     align-items: center;
-    gap: 12px;
+}
+
+.slider-control > * + * {
+    margin-left: 12px;
+}
+
+[dir="rtl"] .slider-control > * + * {
+    margin-left: 0;
+    margin-right: 12px;
 }
 
 .slider-track-control {
@@ -1028,12 +1086,18 @@ select.text-input option {
 
 .slider {
     width: 120px;
-    height: 6px;
+    height: 44px;
+    box-sizing: border-box;
     -webkit-appearance: none;
     appearance: none;
+    background: transparent;
+    outline: none;
+}
+
+.slider::-webkit-slider-runnable-track {
+    height: 6px;
     background: var(--bg-hover);
     border-radius: var(--radius-full);
-    outline: none;
 }
 
 .slider::-webkit-slider-thumb {
@@ -1041,10 +1105,32 @@ select.text-input option {
     appearance: none;
     width: 18px;
     height: 18px;
+    margin-top: -6px;
     background: var(--brand-primary);
     border-radius: 50%;
     cursor: pointer;
     box-shadow: var(--shadow-sm);
+}
+
+.slider::-moz-range-track {
+    height: 6px;
+    background: var(--bg-hover);
+    border: 0;
+    border-radius: var(--radius-full);
+}
+
+.slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    background: var(--brand-primary);
+    border: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+}
+
+.slider:focus::-webkit-slider-thumb {
+    box-shadow: 0 0 0 3px var(--bg-surface), 0 0 0 5px var(--brand-primary);
 }
 
 /* === CHECKBOXES === */
@@ -1058,6 +1144,7 @@ select.text-input option {
 /* === SELECT DROPDOWNS === */
 .select-control {
     padding: 8px 32px 8px 12px;
+    min-height: 44px;
     font-size: 13px;
     font-weight: 500;
     color: var(--text-primary);
@@ -1323,8 +1410,8 @@ select.md-input ~ .md-label {
     /* Center vertically inside the 56px box (height 40px → 8px margin). */
     top: 50%;
     transform: translateY(-50%);
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1531,6 +1618,11 @@ select.md-input ~ .md-label {
     padding: 4px 0 0;
     background: transparent;
     border: 0;
+}
+
+.info-box-framed {
+    padding: 12px 14px;
+    border-radius: var(--radius-md);
 }
 .info-box-warning {
     padding: 12px 14px;
@@ -3309,10 +3401,14 @@ select.md-input ~ .md-label {
         background: var(--bg-surface);
         border-bottom: 1px solid var(--border-subtle);
     }
+
+    .mobile-title-source {
+        display: none;
+    }
     
     .menu-toggle {
-        width: 40px;
-        height: 40px;
+        width: 48px;
+        height: 48px;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -3329,7 +3425,18 @@ select.md-input ~ .md-label {
     
     .page-body { 
         padding: 16px;
-        padding-bottom: calc(16px + 120px + var(--safe-bottom)); /* Account for fixed footer + mobile nav */
+        padding-bottom: calc(16px + var(--safe-bottom));
+    }
+
+    .slider-control {
+        width: 100%;
+    }
+
+    .slider-control .slider,
+    .slider-control .slider-track-control {
+        flex: 1 1 auto;
+        min-width: 0;
+        width: auto;
     }
     
     .card-body { padding: 16px; }

@@ -18,11 +18,15 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
     
     private static final String TAG = "DaemonCmd";
     private static final String STATE_FILE = "/data/local/tmp/daemon_telegram_state.properties";
+    private static final String TAILSCALE_DASHBOARD_GUARD_SCRIPT =
+            "/data/local/tmp/.tailscale/secure_dashboard_serve.sh";
     
     // Debounce duplicate commands
     private long lastCommandTime = 0;
     private String lastCommandKey = "";
     private static final long DEBOUNCE_MS = 3000;
+    private static final long ZROK_HEALTH_TIMEOUT_NANOS = 30_000_000_000L;
+    private static final long ZROK_HEALTH_POLL_MS = 1_000L;
     
     // Daemon definitions: name -> [processName, className, displayNameKey, startable]
     // startable: "yes" if can be started via app_process or shell, "no" if can't be started remotely
@@ -113,6 +117,22 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                     }
 
                     if (isRunning) {
+                        if ("tailscale".equals(name)
+                                && !startTailscaleDashboardGuard(ctx)) {
+                            // An already-running userspace daemon without the
+                            // secure Serve guard recreates issue #285. Do not
+                            // leave it reachable through raw localhost
+                            // forwarding when the guard itself cannot start.
+                            stopDaemon(processName, ctx);
+                            ctx.sendMessage(
+                                    chatId,
+                                    ctx.tr("daemon.start_failed", displayName));
+                            break;
+                        }
+                        if ("zrok".equals(name) && !waitForHealthyZrok(null, ctx)) {
+                            ctx.sendMessage(chatId, ctx.tr("daemon.start_failed", displayName));
+                            break;
+                        }
                         saveDaemonState(name, true, ctx);
                         ctx.sendMessage(chatId, ctx.tr("daemon.already_running", displayName));
                         break;
@@ -200,8 +220,13 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 connection = com.overdrive.app.util.DaemonHttpClient.open(
                         "/api/surveillance/prepare-restart", "POST", 3000, 10000);
                 connection.setDoOutput(true);
+                connection.setRequestProperty(
+                        "Content-Type", "application/json");
                 try (java.io.OutputStream body = connection.getOutputStream()) {
-                    body.write(new byte[0]);
+                    body.write(new org.json.JSONObject()
+                            .put("reason", "telegram_daemon_stop")
+                            .toString()
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 }
                 int code = connection.getResponseCode();
                 if (code >= 200 && code < 300) {
@@ -234,9 +259,23 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
      * Same approach as AccSentryDaemonController.
      */
     private boolean isDaemonRunning(String processName, CommandContext ctx) {
+        if ("zrok".equals(processName)) return isZrokShareRunning(ctx);
         // Use grep -F for fixed string matching (handles hyphens in process names like sing-box)
         String output = ctx.execShell("ps -A | " + processMatcher(processName));
         return output != null && !output.trim().isEmpty();
+    }
+
+    private boolean isZrokShareRunning(CommandContext ctx) {
+        String output = ctx.execShell(
+                "ps -A -o ARGS 2>/dev/null | grep -F 'zrok share' | grep -v grep | head -1");
+        return output != null && output.contains("zrok share");
+    }
+
+    private boolean isZrokWatchdogRunning(CommandContext ctx) {
+        String output = ctx.execShell(
+                "ps -A -o ARGS 2>/dev/null | "
+                        + "grep -F 'sh /data/local/tmp/start_zrok.sh' | grep -v grep | head -1");
+        return output != null && output.contains("start_zrok.sh");
     }
 
     static String processMatcher(String processName) {
@@ -244,6 +283,20 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         return "sentry_daemon".equals(processName)
                 ? matcher + " | grep -v acc_sentry_daemon"
                 : matcher;
+    }
+
+    static boolean isLatestZrokAttemptRateLimited(String output) {
+        if (output == null) return false;
+        boolean rateLimited = false;
+        for (String line : output.split("\\r?\\n")) {
+            if (line.contains("Starting zrok share...")) rateLimited = false;
+            if (line.contains("SERVER_TOO_MANY_REQUESTS")
+                    || line.toLowerCase(Locale.ROOT)
+                            .contains("too many requests to alter state")) {
+                rateLimited = true;
+            }
+        }
+        return rateLimited;
     }
     
     /**
@@ -294,6 +347,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
             ctx.execShell("rm -f /data/local/tmp/cam_watchdog.pid 2>/dev/null");
             // Wait for watchdog to fully die before killing daemon
             try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+            ctx.execShell("rm -rf /data/local/tmp/cam_watchdog.lock 2>/dev/null");
             ctx.execShell("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null");
         }
 
@@ -308,6 +362,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 + "if [ \"$pid\" != \"$MY_PID\" ]; then kill -9 $pid 2>/dev/null; fi; done"
             );
             ctx.execShell("rm -f /data/local/tmp/start_acc_sentry.sh 2>/dev/null");
+            ctx.execShell("rm -rf /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null");
             ctx.execShell("rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null");
         }
 
@@ -355,6 +410,11 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 || "zrok".equals(processName)
                 || "tailscaled".equals(processName)) {
             ctx.execShell("rm -f /data/local/tmp/.tunnel_last_notified 2>/dev/null");
+        }
+        if ("tailscaled".equals(processName)) {
+            ctx.execShell(
+                    "rm -f " + TAILSCALE_DASHBOARD_GUARD_SCRIPT
+                            + " 2>/dev/null");
         }
         
         // Kill via ps+awk+kill rather than pkill -f. pkill -f matches the
@@ -497,7 +557,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
             "#!/system/bin/sh\n" +
             "# Telegram-side cam_daemon stop sequence\n" +
             "rm -f /data/local/tmp/camera_daemon.disabled 2>/dev/null\n" +
-            "rm -f " + scriptPath + " /data/local/tmp/cam_watchdog.pid 2>/dev/null\n" +
+            "rm -f " + scriptPath + " 2>/dev/null\n" +
             "if [ -f /data/local/tmp/cam_watchdog.pid ]; then kill -9 $(cat /data/local/tmp/cam_watchdog.pid) 2>/dev/null; fi\n" +
             "MY_PID=$$; ps -A -o PID,ARGS | grep -F 'cam_daemon' | grep -v grep "
                 + "| awk '{print $1}' | while read pid; do "
@@ -514,7 +574,9 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 + "if [ \"$pid\" != \"$MY_PID\" ]; then kill -9 $pid 2>/dev/null; fi; done\n" +
             "done\n" +
             // Now safe to rm the lock — daemon is gone.
-            "rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null\n" +
+            "rm -f /data/local/tmp/camera_daemon.lock " +
+                "/data/local/tmp/cam_watchdog.pid 2>/dev/null\n" +
+            "rm -rf /data/local/tmp/cam_watchdog.lock 2>/dev/null\n" +
             "echo done\n";
         // Write via heredoc — body comes from stdin not argv, no
         // self-match. Then exec the file (argv = `sh <path>` only).
@@ -605,7 +667,9 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 + "| awk '{print $1}' | while read pid; do "
                 + "if [ \"$pid\" != \"$MY_PID\" ]; then kill -9 $pid 2>/dev/null; fi; done\n" +
             "done\n" +
-            "rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n" +
+            "rm -f /data/local/tmp/acc_sentry_daemon.lock " +
+                "/data/local/tmp/acc_sentry_watchdog.pid 2>/dev/null\n" +
+            "rm -rf /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null\n" +
             "echo done\n";
         String accCleanupTmpPath = "/data/local/tmp/.tg_acc_kill_" + System.nanoTime() + ".sh";
         ctx.execShell(
@@ -645,7 +709,110 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         ctx.log("AccSentryDaemon " + (running ? "started with watchdog ✓" : "FAILED to start"));
         return running;
     }
+
+    private String getReservedZrokUrl(CommandContext ctx) {
+        String reserved = ctx.execShell(
+                "if ps -A -o ARGS 2>/dev/null | grep -F 'zrok share reserved' | "
+                        + "grep -v grep >/dev/null || "
+                        + "grep -q 'zrok share reserved' /data/local/tmp/start_zrok.sh 2>/dev/null; "
+                        + "then echo yes; else echo no; fi");
+        if (reserved == null || !"yes".equals(reserved.trim())) return null;
+
+        String name = ctx.execShell("cat /data/local/tmp/.zrok/unique_name 2>/dev/null");
+        if (name == null || !name.trim().matches("[a-z0-9-]+")) return null;
+        return "https://" + name.trim() + ".share.zrok.io";
+    }
+
+    private boolean waitForHealthyZrok(String expectedUrl, CommandContext ctx) {
+        long deadline = System.nanoTime() + ZROK_HEALTH_TIMEOUT_NANOS;
+        String url = expectedUrl == null ? getReservedZrokUrl(ctx) : expectedUrl;
+        ctx.log("Waiting for a healthy Zrok share...");
+
+        while (System.nanoTime() < deadline) {
+            String logTail = ctx.execShell("tail -200 /data/local/tmp/zrok.log 2>/dev/null");
+            if (url == null) {
+                String name = com.overdrive.app.launcher.ZrokRuntimeProbe
+                        .extractLastShareName(logTail);
+                if (!name.isEmpty()) {
+                    url = "https://" + name + ".share.zrok.io";
+                }
+            }
+
+            if (url != null && isZrokShareRunning(ctx)) {
+                Integer status = com.overdrive.app.launcher.ZrokRuntimeProbe.probeStatus(url);
+                if (com.overdrive.app.launcher.ZrokRuntimeProbe.isHealthyStatus(status)) {
+                    ctx.log("Zrok share healthy (HTTP " + status + "): " + url);
+                    saveTunnelUrl(url, ctx);
+                    return true;
+                }
+            }
+
+            if (isLatestZrokAttemptRateLimited(logTail)) {
+                String error = com.overdrive.app.launcher.ZrokRuntimeProbe
+                        .extractErrorMessage(logTail);
+                ctx.log("Zrok start failed: "
+                        + (error.isEmpty() ? "service rate limit; watchdog is cooling down" : error));
+                return false;
+            }
+
+            long remainingNanos = deadline - System.nanoTime();
+            if (remainingNanos <= 0) break;
+            try {
+                Thread.sleep(Math.min(
+                        ZROK_HEALTH_POLL_MS,
+                        Math.max(1L, remainingNanos / 1_000_000L)));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                ctx.log("Interrupted while waiting for Zrok health");
+                return false;
+            }
+        }
+
+        ctx.log("Zrok watchdog is running, but no healthy share was confirmed");
+        return false;
+    }
     
+    /**
+     * Launch the shared fail-closed dashboard guard for a tailscaled instance
+     * started directly by the Telegram daemon.
+     *
+     * <p>The app/UI path secures port 8080 in {@code TailscaleLauncher}, but
+     * this process is a separate app_process and historically bypassed that
+     * launcher entirely. The script source comes from TailscaleLauncher so the
+     * PROXY-protocol flags, retry count, and deny route cannot drift.
+     */
+    private boolean startTailscaleDashboardGuard(CommandContext ctx) {
+        java.util.List<String> lines =
+                com.overdrive.app.launcher.TailscaleLauncher
+                        .buildDashboardServeGuardScript();
+        StringBuilder body = new StringBuilder();
+        for (String line : lines) {
+            body.append(line).append('\n');
+        }
+
+        String writeResult = ctx.execShell(
+                "mkdir -p /data/local/tmp/.tailscale && "
+                        + "cat > " + TAILSCALE_DASHBOARD_GUARD_SCRIPT
+                        + " <<'__TAILSCALE_DASHBOARD_GUARD_EOF__'\n"
+                        + body
+                        + "__TAILSCALE_DASHBOARD_GUARD_EOF__\n"
+                        + "chmod 700 " + TAILSCALE_DASHBOARD_GUARD_SCRIPT
+                        + " && echo ready");
+        if (writeResult == null || !writeResult.trim().endsWith("ready")) {
+            ctx.log("Failed to write the Tailscale dashboard security guard");
+            return false;
+        }
+
+        boolean spawned = ctx.spawnDetached(
+                "sh " + TAILSCALE_DASHBOARD_GUARD_SCRIPT);
+        if (!spawned) {
+            ctx.log("Failed to launch the Tailscale dashboard security guard");
+            return false;
+        }
+        ctx.log("Tailscale dashboard security guard started");
+        return true;
+    }
+
     /**
      * Start external binary daemon via shell command.
      */
@@ -654,6 +821,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         
         String cmd;
         String processName;
+        String expectedZrokUrl = null;
 
         boolean useProxy = com.overdrive.app.mqtt.ProxyHelper.probePort(8119);
         switch (name) {
@@ -684,6 +852,11 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 break;
                 
             case "zrok":
+                if (isZrokWatchdogRunning(ctx)) {
+                    ctx.log("Zrok watchdog is already recovering; not launching a duplicate");
+                    return waitForHealthyZrok(null, ctx);
+                }
+
                 // Clear the disable sentinel — user is explicitly starting
                 // the tunnel via Telegram. Without this, /daemon zrok stop
                 // followed by /daemon zrok start would silently no-op
@@ -778,8 +951,9 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 String tokenForScript = reservedMode ? reservedToken : "";
                 if (reservedMode) {
                     ctx.log("Using saved reserved zrok share.");
-                    if (savedName != null) {
-                        ctx.log("Permanent URL: https://" + savedName + ".share.zrok.io");
+                    if (savedName != null && savedName.matches("[a-z0-9-]+")) {
+                        expectedZrokUrl = "https://" + savedName + ".share.zrok.io";
+                        ctx.log("Permanent URL: " + expectedZrokUrl);
                     }
                 } else {
                     ctx.log("⚠️ No reserved token found — using public mode (random URL)");
@@ -808,6 +982,19 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
 
             case "tailscale":
                 // Tailscale tunnel - match UI version (TailscaleLauncher.kt)
+                // Never launch a payload left behind by an older APK. The app
+                // launcher owns installation because it can resolve the current
+                // nativeLibraryDir; this daemon-side path fails closed until
+                // that shared deployment gate reports the binary as current.
+                String tailscaleDeployment = ctx.execShell(
+                        com.overdrive.app.launcher.TailscaleLauncher
+                                .deploymentStatusCommand());
+                if (tailscaleDeployment == null
+                        || !"current".equals(tailscaleDeployment.trim())) {
+                    ctx.log("Tailscale binary is stale; waiting for app-side redeployment");
+                    return false;
+                }
+
                 // Check if tailscale proxy should be enabled
                 String proxyEnabledCheck = ctx.execShell("cat /data/local/tmp/.tailscale/proxy_enabled");
                 boolean enableProxy = proxyEnabledCheck != null && proxyEnabledCheck.trim().equals("true");
@@ -861,12 +1048,32 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         // wrapper handles SIGHUP, so dropping `nohup` is safe.
         String inner = cmd.startsWith("nohup ") ? cmd.substring(6) : cmd;
         if (inner.endsWith(" &")) inner = inner.substring(0, inner.length() - 2);
+
+        boolean tailscaleGuardStarted = true;
+        if ("tailscale".equals(name)) {
+            tailscaleGuardStarted = startTailscaleDashboardGuard(ctx);
+            if (!tailscaleGuardStarted) {
+                ctx.log("Refusing to launch Tailscale without its dashboard security guard");
+                return false;
+            }
+        }
         ctx.spawnDetached(inner);
+
+        if ("zrok".equals(name)) {
+            boolean healthy = waitForHealthyZrok(expectedZrokUrl, ctx);
+            ctx.log("Shell daemon " + (healthy ? "healthy" : "FAILED health check") + ": zrok");
+            return healthy;
+        }
 
         // Wait and verify
         try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
         
         boolean started = isDaemonRunning(processName, ctx);
+        if (started && !tailscaleGuardStarted) {
+            ctx.log("Stopping unguarded Tailscale daemon");
+            stopDaemon(processName, ctx);
+            started = false;
+        }
         ctx.log("Shell daemon " + (started ? "started" : "FAILED") + ": " + name);
         
         // For cloudflared, wait longer and try to get the URL
@@ -917,38 +1124,6 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                     return false;
                 }
                 ctx.log("Tunnel started but URL not yet available");
-            }
-        }
-        
-        // For zrok, wait and try to get the URL (similar to cloudflared)
-        if (started && "zrok".equals(name)) {
-            ctx.log("Waiting for Zrok URL...");
-            String zrokUrl = null;
-            for (int i = 0; i < 15; i++) { // Wait up to 15 seconds
-                try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
-                // SOTA FIX: Use grep instead of cat to avoid loading entire log into memory
-                String grepResult = ctx.execShell("grep -o 'https://[a-z0-9-]*\\.share\\.zrok\\.io' /data/local/tmp/zrok.log 2>/dev/null | tail -1");
-                if (grepResult != null && grepResult.startsWith("https://")) {
-                    zrokUrl = grepResult.trim();
-                    ctx.log("Zrok URL: " + zrokUrl);
-                    // Save URL to file for /url command and send notification
-                    saveTunnelUrl(zrokUrl, ctx);
-                    break;
-                }
-                // Check for errors (only read last few lines)
-                String tailLog = ctx.execShell("tail -5 /data/local/tmp/zrok.log 2>/dev/null");
-                if (tailLog != null && (tailLog.contains("error") || tailLog.contains("failed"))) {
-                    ctx.log("Zrok error detected in log");
-                    // Don't return false - zrok might still be starting
-                }
-            }
-            if (zrokUrl == null) {
-                // Check if process is still running
-                if (!isDaemonRunning("zrok", ctx)) {
-                    ctx.log("Zrok exited - check /data/local/tmp/zrok.log");
-                    return false;
-                }
-                ctx.log("Zrok started but URL not yet available");
             }
         }
 

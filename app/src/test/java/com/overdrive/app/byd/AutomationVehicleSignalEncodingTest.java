@@ -54,8 +54,12 @@ public class AutomationVehicleSignalEncodingTest {
         assertEquals(1, BydDataCollector.normalizeWiperActivity(9, 1));
         assertEquals(1, BydDataCollector.normalizeWiperActivity(0, 2));
         assertEquals(0, BydDataCollector.normalizeWiperActivity(0, 1));
-        assertEquals(0, BydDataCollector.normalizeWiperActivity(
+        assertEquals(BydVehicleData.UNAVAILABLE, BydDataCollector.normalizeWiperActivity(
                 BydVehicleData.UNAVAILABLE, 0));
+        assertEquals(BydVehicleData.UNAVAILABLE, BydDataCollector.normalizeWiperActivity(
+                BydVehicleData.UNAVAILABLE, 4));
+        assertEquals(BydVehicleData.UNAVAILABLE, BydDataCollector.normalizeWiperActivity(
+                BydVehicleData.UNAVAILABLE, 255));
         assertEquals(BydVehicleData.UNAVAILABLE,
                 BydDataCollector.normalizeWiperActivity(-10011, -10011));
     }
@@ -69,10 +73,20 @@ public class AutomationVehicleSignalEncodingTest {
         assertEquals(5, BydDataCollector.sunWindowVoiceCommand(5));
         assertEquals(-1, BydDataCollector.sunWindowVoiceCommand(0));
         assertEquals(-1, BydDataCollector.sunWindowVoiceCommand(6));
+        assertEquals(1, BydDataCollector.diLink5HazardCommand(true));
+        assertEquals(2, BydDataCollector.diLink5HazardCommand(false));
     }
 
     @Test
-    public void speedFactorPrefersDetectedHardwareUnit() throws Exception {
+    public void headlightSelectorUsesTheSdkDomain() {
+        assertEquals(1, BydDataCollector.HEADLIGHT_MODE_OFF);
+        assertEquals(2, BydDataCollector.HEADLIGHT_MODE_AUTO);
+        assertEquals(3, BydDataCollector.HEADLIGHT_MODE_PARKING);
+        assertEquals(4, BydDataCollector.HEADLIGHT_MODE_LOW_BEAM);
+    }
+
+    @Test
+    public void speedFactorNeverUsesDistanceDisplayPreference() throws Exception {
         BydDataCollector collector = BydDataCollector.getInstance();
         java.lang.reflect.Field detected =
                 BydDataCollector.class.getDeclaredField("hwUnitDetected");
@@ -94,11 +108,91 @@ public class AutomationVehicleSignalEncodingTest {
             assertEquals(1.0, collector.getSpeedToKmhFactor(), 0.000001);
 
             detected.setBoolean(collector, false);
-            assertEquals(1.60934, collector.getSpeedToKmhFactor(), 0.000001);
+            assertEquals(1.0, collector.getSpeedToKmhFactor(), 0.000001);
         } finally {
             detected.setBoolean(collector, previousDetected);
             hardware.setDouble(collector, previousHardware);
             display.setDouble(collector, previousDisplay);
+        }
+    }
+
+    @Test
+    public void mileageUnitMappingsPreserveLegacyAndSeparateUnitTwoSpeed() {
+        assertEquals(1.60934,
+                BydDataCollector.distanceToKmFactorForMileageUnit(0), 0.000001);
+        assertEquals(1.60934,
+                BydDataCollector.speedToKmhFactorForMileageUnit(0), 0.000001);
+        assertEquals(1.0,
+                BydDataCollector.distanceToKmFactorForMileageUnit(1), 0.000001);
+        assertEquals(1.0,
+                BydDataCollector.speedToKmhFactorForMileageUnit(1), 0.000001);
+        assertEquals(1.60934,
+                BydDataCollector.distanceToKmFactorForMileageUnit(2), 0.000001);
+        assertEquals(1.0,
+                BydDataCollector.speedToKmhFactorForMileageUnit(2), 0.000001);
+        org.junit.Assert.assertTrue(Double.isNaN(
+                BydDataCollector.distanceToKmFactorForMileageUnit(99)));
+        org.junit.Assert.assertTrue(Double.isNaN(
+                BydDataCollector.speedToKmhFactorForMileageUnit(99)));
+    }
+
+    @Test
+    public void distanceDisplayIsIndependentWithHardwareAndFallbackWithoutIt()
+            throws Exception {
+        BydDataCollector collector = BydDataCollector.getInstance();
+        java.lang.reflect.Field detected =
+                BydDataCollector.class.getDeclaredField("distanceHwUnitDetected");
+        java.lang.reflect.Field hardware =
+                BydDataCollector.class.getDeclaredField("distanceHwFactor");
+        java.lang.reflect.Field effective =
+                BydDataCollector.class.getDeclaredField("distanceToKmFactor");
+        java.lang.reflect.Field display =
+                BydDataCollector.class.getDeclaredField("milesDisplayMode");
+        java.lang.reflect.Field unitDetected =
+                BydDataCollector.class.getDeclaredField("unitDetected");
+        detected.setAccessible(true);
+        hardware.setAccessible(true);
+        effective.setAccessible(true);
+        display.setAccessible(true);
+        unitDetected.setAccessible(true);
+
+        boolean previousDetected = detected.getBoolean(collector);
+        double previousHardware = hardware.getDouble(collector);
+        double previousEffective = effective.getDouble(collector);
+        boolean previousDisplay = display.getBoolean(collector);
+        boolean previousUnitDetected = unitDetected.getBoolean(collector);
+        try {
+            double speedFactor = collector.getSpeedToKmhFactor();
+            detected.setBoolean(collector, true);
+            hardware.setDouble(collector, 1.60934);
+            effective.setDouble(collector, 1.60934);
+            collector.setDistanceUnitOverride("km");
+            assertFalse(collector.isMilesMode());
+            assertEquals(1.60934, collector.getDistanceToKmFactor(), 0.000001);
+            assertEquals(1.60934, collector.getRawDistanceToKmFactor(), 0.000001);
+            assertEquals(speedFactor, collector.getSpeedToKmhFactor(), 0.000001);
+
+            collector.setDistanceUnitOverride("mi");
+            assertTrue(collector.isMilesMode());
+            assertEquals(1.60934, collector.getDistanceToKmFactor(), 0.000001);
+            assertEquals(speedFactor, collector.getSpeedToKmhFactor(), 0.000001);
+
+            detected.setBoolean(collector, false);
+            collector.setDistanceUnitOverride("km");
+            assertFalse(collector.isMilesMode());
+            assertEquals(1.0, collector.getRawDistanceToKmFactor(), 0.000001);
+            assertEquals(speedFactor, collector.getSpeedToKmhFactor(), 0.000001);
+
+            collector.setDistanceUnitOverride("mi");
+            assertTrue(collector.isMilesMode());
+            assertEquals(1.60934, collector.getRawDistanceToKmFactor(), 0.000001);
+            assertEquals(speedFactor, collector.getSpeedToKmhFactor(), 0.000001);
+        } finally {
+            detected.setBoolean(collector, previousDetected);
+            hardware.setDouble(collector, previousHardware);
+            effective.setDouble(collector, previousEffective);
+            display.setBoolean(collector, previousDisplay);
+            unitDetected.setBoolean(collector, previousUnitDetected);
         }
     }
 
@@ -113,5 +207,19 @@ public class AutomationVehicleSignalEncodingTest {
                 BydDataCollector.convertRawSpeedToKmh(-1.0, 1.0)));
         org.junit.Assert.assertTrue(Double.isNaN(
                 BydDataCollector.convertRawSpeedToKmh(Double.NaN, 1.0)));
+        org.junit.Assert.assertTrue(Double.isNaN(
+                BydDataCollector.convertRawSpeedToKmh(65535.0, 1.0)));
+    }
+
+    @Test
+    public void pedalNormalizationRejectsSdkRails() {
+        assertEquals(0, BydDataCollector.normalizePedalPercent(0));
+        assertEquals(100, BydDataCollector.normalizePedalPercent(100));
+        assertEquals(BydVehicleData.UNAVAILABLE,
+                BydDataCollector.normalizePedalPercent(101));
+        assertEquals(BydVehicleData.UNAVAILABLE,
+                BydDataCollector.normalizePedalPercent(65535));
+        assertEquals(BydVehicleData.UNAVAILABLE,
+                BydDataCollector.normalizePedalPercent(-10011));
     }
 }

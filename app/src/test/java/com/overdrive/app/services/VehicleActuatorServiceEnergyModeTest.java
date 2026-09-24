@@ -56,8 +56,18 @@ public class VehicleActuatorServiceEnergyModeTest {
                 "BydDeviceHelper.withBydPermissionBypass(task.appContext)"));
         assertTrue(energyWrite.contains("ENERGY_DEVICE, bydContext"));
         assertTrue(energyWrite.contains("enableDevice(\n                    bydContext"));
-        assertTrue(service.contains(".readMandatoryElectricState(device)"));
-        assertTrue(service.contains(".writeMandatoryElectricState(target, value)"));
+        assertTrue(service.contains(
+                ".writeEnergyModeRaw(target, value)"));
+        assertTrue(service.contains(
+                ".writeMandatoryElectricState(target, value)"));
+        assertTrue(service.contains(
+                "readEnergyModeDirect(\n"
+                        + "            Object device, boolean preferenceAxis)"));
+        assertTrue(service.contains(
+                "if (DiLink5Platform.isSelected()) {"));
+        assertTrue(service.contains(
+                "setter = device.getClass().getMethod(\n"
+                        + "                                \"setEnergyMode\", int.class);"));
 
         String standalone = new String(
                 Files.readAllBytes(Paths.get(
@@ -68,8 +78,14 @@ public class VehicleActuatorServiceEnergyModeTest {
         assertTrue(standalone.contains("if (energyCommand) prepareEnergyDevice(energy);"));
         assertTrue(standalone.contains("readInt(energy, \"getEnergyMode\")"));
         assertTrue(standalone.contains("readInt(energy, \"getOperationMode\")"));
-        assertTrue(standalone.contains("readMandatoryElectricState(energy)"));
-        assertTrue(standalone.contains("writeMandatoryElectricState("));
+        assertTrue(standalone.contains(
+                "VehicleActuatorBridge.writeEnergyModeRaw(energy, mode)"));
+        assertTrue(standalone.contains(
+                "VehicleActuatorBridge.writeMandatoryElectricState("));
+        assertTrue(standalone.contains(
+                "readSelectedEnergyMode(energy, preferenceAxis)"));
+        assertTrue(standalone.contains(
+                "DiLink5Platform.isSelected()"));
         assertTrue(standalone.contains("BydDeviceHelper.registerListener(energy"));
     }
 

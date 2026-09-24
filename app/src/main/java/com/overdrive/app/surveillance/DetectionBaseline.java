@@ -117,6 +117,13 @@ public class DetectionBaseline {
      * it as authoritative).
      */
     public static class Entry {
+        /**
+         * Process-wide monotonic identity. Entries are otherwise identified by
+         * object reference only; observers (Parking Intelligence's neighbour
+         * timeline) need a stable key that survives the copy they receive.
+         * Purely additive — no baseline logic reads it.
+         */
+        public final long entryId = ENTRY_IDS.incrementAndGet();
         public final int classId;
         public float cx, cy, w, h;  // Normalized to quadrant dimensions
         public long addedAtMs;
@@ -155,6 +162,116 @@ public class DetectionBaseline {
         /** Bottom-centre Y in normalized coords — the foot-point anchor. */
         public float footY() { return cy + h / 2.0f; }
         public float footX() { return cx; }
+    }
+
+    private static final java.util.concurrent.atomic.AtomicLong ENTRY_IDS =
+            new java.util.concurrent.atomic.AtomicLong();
+
+    // ==================== READ-ONLY OBSERVER (Parking Intelligence) ====================
+    //
+    // Purely additive. The baseline's own behaviour is byte-identical whether
+    // or not a listener is installed: every fire site is a volatile null check
+    // inside the existing monitor, and the observer only ever receives
+    // immutable COPIES of entries. Because the mutators are synchronized (and
+    // updateFromEventEnd already runs under the engine's recordingLifecycleLock),
+    // a listener MUST hand off to its own executor and return immediately —
+    // it is never allowed to block, take locks, or call back into this class.
+    // Every dispatch is wrapped in catch(Throwable) so an observer defect can
+    // never disturb suppression (DETECTION-INVARIANTS prime directive: this
+    // path stays FP-neutral).
+
+    /** Immutable copy of an {@link Entry} at the moment of the callback. */
+    public static final class EntrySnapshot {
+        public final long entryId;
+        public final int quadrant;
+        public final int classId;
+        /** Coarse group of {@link #classId} (Actor.ClassGroup name). */
+        public final String classGroup;
+        public final float cx, cy, w, h;
+        public final long addedAtMs;
+        public final long lastSeenMs;
+        public final int hitCount;
+        public final boolean confirmed;
+        public final boolean fromLiveEvent;
+
+        EntrySnapshot(Entry e) {
+            this.entryId = e.entryId;
+            this.quadrant = e.quadrant;
+            this.classId = e.classId;
+            this.classGroup = Actor.groupOf(e.classId).name();
+            this.cx = e.cx; this.cy = e.cy; this.w = e.w; this.h = e.h;
+            this.addedAtMs = e.addedAtMs;
+            this.lastSeenMs = e.lastSeenMs;
+            this.hitCount = e.hitCount;
+            this.confirmed = e.isConfirmed();
+            this.fromLiveEvent = e.fromLiveEvent;
+        }
+
+        /** Synthetic snapshot (JVM tests / replay tools). No baseline logic uses this. */
+        public EntrySnapshot(long entryId, int quadrant, int classId, String classGroup,
+                             float cx, float cy, float w, float h,
+                             long addedAtMs, long lastSeenMs, int hitCount,
+                             boolean confirmed, boolean fromLiveEvent) {
+            this.entryId = entryId;
+            this.quadrant = quadrant;
+            this.classId = classId;
+            this.classGroup = classGroup;
+            this.cx = cx; this.cy = cy; this.w = w; this.h = h;
+            this.addedAtMs = addedAtMs;
+            this.lastSeenMs = lastSeenMs;
+            this.hitCount = hitCount;
+            this.confirmed = confirmed;
+            this.fromLiveEvent = fromLiveEvent;
+        }
+    }
+
+    /** Non-blocking observer contract (see class comment above). */
+    public interface Listener {
+        /** A quadrant was (re)seeded at sentry start; {@code entries} are the new confirmed set. */
+        void onEntrySeeded(int quadrant, List<EntrySnapshot> entries);
+        /** {@code source}: "event_end" | "promote" | "lighting". Seeded entries use onEntrySeeded. */
+        void onEntryAdded(EntrySnapshot entry, String source);
+        /** An unconfirmed live-event entry just crossed the confirmation threshold. */
+        void onEntryConfirmed(EntrySnapshot entry);
+        /** {@code reason}: "expired" | "reseed" | "reset". */
+        void onEntryRetired(EntrySnapshot entry, String reason);
+    }
+
+    private static volatile Listener globalListener;
+
+    /** Install (or clear with null) the process-wide observer. */
+    public static void setGlobalListener(Listener listener) {
+        globalListener = listener;
+    }
+
+    private static void fireAdded(Entry e, String source) {
+        Listener l = globalListener;
+        if (l == null) return;
+        try { l.onEntryAdded(new EntrySnapshot(e), source); } catch (Throwable ignored) {}
+    }
+
+    private static void fireConfirmed(Entry e) {
+        Listener l = globalListener;
+        if (l == null) return;
+        try { l.onEntryConfirmed(new EntrySnapshot(e)); } catch (Throwable ignored) {}
+    }
+
+    private static void fireRetired(List<Entry> entries, String reason) {
+        Listener l = globalListener;
+        if (l == null || entries == null || entries.isEmpty()) return;
+        for (Entry e : entries) {
+            try { l.onEntryRetired(new EntrySnapshot(e), reason); } catch (Throwable ignored) {}
+        }
+    }
+
+    private static void fireSeeded(int quadrant, List<Entry> entries) {
+        Listener l = globalListener;
+        if (l == null) return;
+        try {
+            List<EntrySnapshot> copies = new ArrayList<>(entries.size());
+            for (Entry e : entries) copies.add(new EntrySnapshot(e));
+            l.onEntrySeeded(quadrant, copies);
+        } catch (Throwable ignored) {}
     }
 
     // Per-quadrant baseline lists
@@ -196,8 +313,16 @@ public class DetectionBaseline {
     public synchronized void seedFromDetections(int quadrant, List<Detection> detections, int quadW, int quadH) {
         if (quadrant < 0 || quadrant >= NUM_QUADRANTS) return;
 
+        // Observer: everything previously known in this quadrant is retired by
+        // the reseed. Copy-then-fire so the list mutation below is unchanged.
+        if (globalListener != null && !baselines[quadrant].isEmpty()) {
+            fireRetired(new ArrayList<>(baselines[quadrant]), "reseed");
+        }
         baselines[quadrant].clear();
-        if (detections == null) return;
+        if (detections == null) {
+            fireSeeded(quadrant, baselines[quadrant]);
+            return;
+        }
 
         for (Detection det : detections) {
             if (det.getConfidence() < MIN_BASELINE_CONFIDENCE) continue;
@@ -242,6 +367,7 @@ public class DetectionBaseline {
         }
 
         logger.info("Baseline seeded for Q" + quadrant + ": " + baselines[quadrant].size() + " entries (confirmed)");
+        fireSeeded(quadrant, baselines[quadrant]);
     }
 
     // ==================== FILTERING ====================
@@ -282,6 +408,9 @@ public class DetectionBaseline {
             // refreshed parked car never times out while present.
             if (now - entry.lastSeenMs > BASELINE_ENTRY_MAX_AGE_MS) {
                 iter.remove();
+                if (globalListener != null) {
+                    fireRetired(java.util.Collections.singletonList(entry), "expired");
+                }
                 continue;
             }
             // Unconfirmed entries don't suppress yet — they need to accrue
@@ -584,6 +713,7 @@ public class DetectionBaseline {
                 e.fromLiveEvent = true;  // arrived while sentry was watching
                 baselines[quadrant].add(e);
                 added++;
+                fireAdded(e, "event_end");
             }
         }
 
@@ -628,6 +758,7 @@ public class DetectionBaseline {
             Entry e = new Entry(classId, cx, cy, w, h, quadrant);
             e.fromLiveEvent = true;  // arrived while sentry was watching
             baselines[quadrant].add(e);
+            fireAdded(e, "promote");
         }
     }
 
@@ -722,7 +853,9 @@ public class DetectionBaseline {
             if (isMatch) {
                 entry.cx = cx; entry.cy = cy; entry.w = w; entry.h = h;
                 entry.lastSeenMs = now;
+                boolean wasConfirmed = entry.isConfirmed();
                 if (entry.hitCount < Integer.MAX_VALUE - 1) entry.hitCount++;
+                if (!wasConfirmed && entry.isConfirmed()) fireConfirmed(entry);
                 return true;
             }
         }
@@ -794,6 +927,7 @@ public class DetectionBaseline {
                 e.hitCount = CONFIRMED_HIT_COUNT;
                 baselines[quadrant].add(e);
                 added++;
+                fireAdded(e, "lighting");
             }
         }
 
@@ -808,6 +942,9 @@ public class DetectionBaseline {
      */
     public synchronized void reset() {
         for (int q = 0; q < NUM_QUADRANTS; q++) {
+            if (globalListener != null && !baselines[q].isEmpty()) {
+                fireRetired(new ArrayList<>(baselines[q]), "reset");
+            }
             baselines[q].clear();
             recentPersons[q].clear();
         }

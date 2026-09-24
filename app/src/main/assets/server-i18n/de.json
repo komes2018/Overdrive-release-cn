@@ -1088,12 +1088,7 @@
     "mqtt_channel": "Kanal",
     "mqtt_value": "Wert",
     "wait_until_description": "Pausieren Sie die verbleibenden Aktionen, bis ein ausgewähltes Signal einen Vergleich trifft, oder das Timeout verläuft. Beispiel: Warten Sie bis Speed = 0, bevor Sie die Fenster schließen.",
-    "wait_until_state_description": "Pausiert die verbleibenden Aktionen, bis ein ausgewähltes Ein-/Ausschaltungssignal einen Zustand erreicht, oder das Timeout abläuft. Beispiel: Warte bis Indikatoren = Aus bevor du fortfährst.",
-      "wait_timeout": "Timeout (Sekunden)",
-      "save_seat_position": "Sitzposition speichern",
-      "save_seat_position_description": "Speichern Sie die aktuelle Fahrersitzposition in einem Speicherplatz.",
-      "set_seat_position": "Sitzposition steuern",
-      "set_seat_position_description": "Laden Sie eine Sitzplatzposition. Stellen Sie sicher, dass der Speicher zuerst vom Fahrzeug gespeichert wurde. Diese Steuerung funktioniert nicht, während das Fahrzeug ausgeschaltet ist."
+    "wait_until_state_description": "Pausiert die verbleibenden Aktionen, bis ein ausgewähltes Ein-/Ausschaltungssignal einen Zustand erreicht, oder das Timeout abläuft. Beispiel: Warte bis Indikatoren = Aus bevor du fortfährst."
   },
   "messages": {
     "logged_out": "Sie sind ausgerufen .",

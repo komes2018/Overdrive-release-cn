@@ -257,22 +257,27 @@ public class VehicleActuatorBridgeEnergyModeTest {
     }
 
     @Test
-    public void evAndHevMapToTheOemMandatoryElectricSelector() {
-        assertEquals(2, VehicleActuatorBridge.mandatoryElectricStateForEnergyMode(1));
-        assertEquals(1, VehicleActuatorBridge.mandatoryElectricStateForEnergyMode(3));
-        assertEquals(1, VehicleActuatorBridge.energyModeForMandatoryElectricState(2));
-        assertEquals(3, VehicleActuatorBridge.energyModeForMandatoryElectricState(1));
-        assertEquals(-1, VehicleActuatorBridge.mandatoryElectricStateForEnergyMode(2));
-        assertEquals(-1, VehicleActuatorBridge.energyModeForMandatoryElectricState(0));
+    public void evAndHevMapToTheSdkRawEnergyCommand() {
+        assertEquals(1, VehicleActuatorBridge.rawEnergyModeValue(1));
+        assertEquals(2, VehicleActuatorBridge.rawEnergyModeValue(3));
+        assertEquals(-1, VehicleActuatorBridge.rawEnergyModeValue(0));
+        assertEquals(-1, VehicleActuatorBridge.rawEnergyModeValue(2));
     }
 
     @Test
-    public void genericEnergyFeaturesProvideTheMissingRuntimeSelectorMethods() {
+    public void rawEnergyWriteUsesTheConfirmedFeatureAndEncoding() {
         GenericEnergyDevice energy = new GenericEnergyDevice();
 
-        assertEquals(1, VehicleActuatorBridge.readMandatoryElectricState(energy));
-        assertEquals(0, VehicleActuatorBridge.writeMandatoryElectricState(energy, 2));
-        assertEquals(2, VehicleActuatorBridge.readMandatoryElectricState(energy));
+        assertEquals(0, VehicleActuatorBridge.writeEnergyModeRaw(energy, 3));
+        assertEquals(BydFeatureIds.ENERGY_MODE_SET, energy.featureId);
+        assertEquals(2, energy.value);
+
+        assertEquals(0, VehicleActuatorBridge.writeEnergyModeRaw(energy, 1));
+        assertEquals(BydFeatureIds.ENERGY_MODE_SET, energy.featureId);
+        assertEquals(1, energy.value);
+
+        assertEquals(Integer.MIN_VALUE,
+                VehicleActuatorBridge.writeEnergyModeRaw(energy, 2));
     }
 
     @Test
@@ -382,22 +387,15 @@ public class VehicleActuatorBridgeEnergyModeTest {
     }
 
     public static final class GenericEnergyDevice {
-        private int state = 1;
-
-        public android.hardware.bydauto.BYDAutoEventValue get(
-                int[] featureIds, Class<?> type) {
-            android.hardware.bydauto.BYDAutoEventValue value =
-                    new android.hardware.bydauto.BYDAutoEventValue();
-            value.intValue = featureIds.length == 1 && featureIds[0] == 2665
-                    ? state : Integer.MIN_VALUE;
-            return value;
-        }
+        int featureId;
+        int value;
 
         public int set(
                 int[] featureIds,
                 android.hardware.bydauto.BYDAutoEventValue value) {
-            if (featureIds.length != 1 || featureIds[0] != 2667) return -1;
-            state = value.intValue;
+            if (featureIds.length != 1) return -1;
+            featureId = featureIds[0];
+            this.value = value.intValue;
             return 0;
         }
     }

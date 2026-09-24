@@ -1,8 +1,12 @@
 package com.overdrive.app.launcher
 
 import android.content.Context
+import com.overdrive.app.BuildConfig
 import com.overdrive.app.logging.LogManager
 import com.overdrive.app.mqtt.ProxyHelper
+import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Launches Tailscale tunnel processes via ADB shell for remote access.
@@ -22,18 +26,33 @@ class TailscaleLauncher(
         private const val TAILSCALE_LOG = "$TAILSCALE_HOME/tailscale.log"
         private const val TAILSCALE_PATH = "$TAILSCALE_HOME/tailscale"
         private const val TAILSCALED_PATH = "$TAILSCALE_HOME/tailscaled"
-
-        // Records the app versionCode the deployed binary was copied from, so an app
-        // update that ships a new libtailscale.so actually redeploys it. Without this,
-        // checkAndInstallTailscale only ever reinstalled when the binary was missing —
-        // so an existing install kept its old binary forever, and shipped fixes (e.g.
-        // the ACME-enabled rebuild) silently never reached updating users.
         private const val TAILSCALE_VERSION_FILE = "$TAILSCALE_HOME/installed_version"
+        private const val DEPLOYMENT_CURRENT = "current"
+        private const val DEPLOYMENT_STALE = "stale"
 
         private const val TAILSCALE_COMMUNICATION_PORT = "8532"
 
         private const val TAILSCALE_PROXY_FILE = "$TAILSCALE_HOME/proxy_enabled"
         private const val TAILSCALE_PROXY_PORT = "8539"
+
+        // Dashboard ingress. Tailscale userspace networking forwards an
+        // unconfigured tailnet port to the same localhost port, which makes a
+        // remote peer look identical to a trusted in-device caller. Publishing
+        // 8080 through TCP Serve with PROXY v1 gives HttpServer a trustworthy
+        // tunnel marker while preserving the existing http://100.x:8080 URL.
+        private const val DASHBOARD_PORT = "8080"
+        private const val DASHBOARD_BACKEND = "tcp://127.0.0.1:$DASHBOARD_PORT"
+        private const val DASHBOARD_DENY_BACKEND = "tcp://127.0.0.1:1"
+
+        // Retry through a short tailscaled startup race before failing closed.
+        private const val DASHBOARD_SERVE_REPLAY_ATTEMPTS = 3
+        private const val DASHBOARD_SERVE_REPLAY_DELAY_MS = 1000L
+
+        // A login URL returns before the user approves the node. Poll briefly
+        // so the secure Serve route is installed immediately after approval,
+        // rather than waiting for the 30-second UI refresh.
+        private const val DASHBOARD_SERVE_WATCH_ATTEMPTS = 300
+        private const val DASHBOARD_SERVE_WATCH_DELAY_MS = 1000L
 
         // Proxy settings for sing-box (socks5 for tailscale)
         private const val PROXY_HOST = "127.0.0.1"
@@ -45,10 +64,14 @@ class TailscaleLauncher(
         private const val TAILSCALE_ADB_FILE = "$TAILSCALE_HOME/adb_enabled"
         private const val ADB_PORT = "5555"
 
-        // HTTPS opt-in sentinel and the local port the web server listens on.
-        // Same sentinel-file pattern as the two flags above.
+        // Tailnet HTTPS is opt-in. Standard HTTPS Serve terminates TLS and
+        // injects X-Forwarded-* identity before proxying to HttpServer. The
+        // server treats those headers as tunnel markers, so a remote request
+        // cannot regain the direct-loopback authentication fallback.
         private const val TAILSCALE_HTTPS_FILE = "$TAILSCALE_HOME/https_enabled"
-        private const val HTTP_PORT = "8080"
+        private const val HTTPS_PORT = "443"
+        private const val HTTPS_BACKEND = "http://127.0.0.1:$DASHBOARD_PORT"
+        private const val LEGACY_HTTPS_BACKEND = "127.0.0.1:$DASHBOARD_PORT"
 
         // Retries after the initial replay attempt, ~2s apart — covers a slow
         // tailscaled cold start without spinning if serve is genuinely broken.
@@ -60,19 +83,275 @@ class TailscaleLauncher(
         private const val ADB_SERVE_WITHDRAW_SWEEP_MS =
             ADB_SERVE_REPLAY_DELAY_MS * (ADB_SERVE_REPLAY_ATTEMPTS + 1) + 2000L
 
-        // Daemon thread: only ever holds short retry tasks, and must not keep the
-        // JVM alive. Shared across instances — replays are idempotent.
-        // First https:// host in `serve status`, e.g. https://od.tail1234.ts.net.
-        // The optional port matters: without it a share on a non-default port
-        // would be reported as a bare host and point at 443, which is not what
-        // is listening.
-        private val SERVED_HTTPS_URL = Regex("https://[A-Za-z0-9._-]+(?::\\d+)?")
-
+        // Daemon thread: only ever holds short retry/watch tasks, and must not
+        // keep the JVM alive. Shared across instances — replays are idempotent.
         private val replayScheduler: java.util.concurrent.ScheduledExecutorService =
             java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
-                Thread(r, "TailscaleAdbReplay").apply { isDaemon = true }
+                Thread(r, "TailscaleServeReplay").apply { isDaemon = true }
             }
+
+        // Shared across launcher instances so a stale retry from a boot-time
+        // launcher cannot mutate or stop a newer daemon started by the UI.
+        private val dashboardLifecycleGeneration = AtomicLong(0)
+
+        internal fun invalidateDashboardLifecycle() {
+            dashboardLifecycleGeneration.incrementAndGet()
+        }
+
+        /**
+         * Shared command text for every tailscaled launch path. Keep the
+         * Telegram daemon path on the same security contract as the UI/boot
+         * launcher instead of duplicating Serve flags in two processes.
+         */
+        @JvmStatic
+        fun secureDashboardServeArgs(): String =
+            "serve --bg --proxy-protocol=1 --tcp=$DASHBOARD_PORT $DASHBOARD_BACKEND"
+
+        @JvmStatic
+        fun denyDashboardServeArgs(): String =
+            "serve --bg --tcp=$DASHBOARD_PORT $DASHBOARD_DENY_BACKEND"
+
+        @JvmStatic
+        fun secureHttpsServeArgs(): String =
+            "serve --bg --https=$HTTPS_PORT $HTTPS_BACKEND"
+
+        @JvmStatic
+        fun disableHttpsServeArgs(): String =
+            "serve --https=$HTTPS_PORT off"
+
+        internal fun disableLegacyHttpsServeArgs(): String =
+            "serve --tls-terminated-tcp=$HTTPS_PORT off"
+
+        private fun jsonObjectFromOutput(output: String): JSONObject? {
+            val start = output.indexOf('{')
+            val end = output.lastIndexOf('}')
+            if (start < 0 || end < start) return null
+            return try {
+                JSONObject(output.substring(start, end + 1))
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        private fun configUsesWebPort(config: JSONObject, port: String): Boolean {
+            val web = config.optJSONObject("Web") ?: return false
+            val keys = web.keys()
+            while (keys.hasNext()) {
+                if (keys.next().endsWith(":$port")) return true
+            }
+            return false
+        }
+
+        private fun configUsesTcpPort(config: JSONObject, port: String): Boolean {
+            return config.optJSONObject("TCP")?.optJSONObject(port) != null
+        }
+
+        private fun ownedHttpsWebDomain(config: JSONObject): String? {
+            val web = config.optJSONObject("Web") ?: return null
+            var ownedDomain: String? = null
+            val keys = web.keys()
+            while (keys.hasNext()) {
+                val hostPort = keys.next()
+                if (!hostPort.endsWith(":$HTTPS_PORT")) continue
+                if (ownedDomain != null) return null
+
+                val domain = hostPort
+                    .removeSuffix(":$HTTPS_PORT")
+                    .trim()
+                    .removePrefix("[")
+                    .removeSuffix("]")
+                    .trimEnd('.')
+                if (domain.isEmpty()) return null
+
+                val rootHandler = web.optJSONObject(hostPort)
+                    ?.optJSONObject("Handlers")
+                    ?.optJSONObject("/")
+                    ?: return null
+                val proxy = rootHandler.optString("Proxy", "").trim().trimEnd('/')
+                if (proxy != HTTPS_BACKEND.trimEnd('/')) return null
+                if (rootHandler.optString("Path", "").isNotEmpty()
+                    || rootHandler.optString("Text", "").isNotEmpty()
+                    || rootHandler.optString("Redirect", "").isNotEmpty()
+                ) {
+                    return null
+                }
+                ownedDomain = domain
+            }
+            return ownedDomain
+        }
+
+        internal fun parseHttpsServeSnapshot(output: String): HttpsServeSnapshot {
+            if (output.trim() == "null") {
+                return HttpsServeSnapshot(HttpsServeOwnership.FREE)
+            }
+            val config = jsonObjectFromOutput(output)
+                ?: return HttpsServeSnapshot(HttpsServeOwnership.UNKNOWN)
+            val handler = config.optJSONObject("TCP")?.optJSONObject(HTTPS_PORT)
+            if (handler != null) {
+                val forward = handler.optString("TCPForward", "")
+                val domain = handler.optString("TerminateTLS", "").trim().trimEnd('.')
+                val proxyProtocol = handler.optInt("ProxyProtocol", 0)
+                val isLegacyOwned =
+                    forward == LEGACY_HTTPS_BACKEND &&
+                        domain.isNotEmpty() &&
+                        proxyProtocol == 1 &&
+                        !handler.optBoolean("HTTPS", false) &&
+                        !handler.optBoolean("HTTP", false) &&
+                        !configUsesWebPort(config, HTTPS_PORT)
+                if (isLegacyOwned) {
+                    return HttpsServeSnapshot(
+                        HttpsServeOwnership.LEGACY_OWNED,
+                        domain
+                    )
+                }
+
+                val webDomain = ownedHttpsWebDomain(config)
+                val isCurrentOwned =
+                    handler.optBoolean("HTTPS", false) &&
+                        !handler.optBoolean("HTTP", false) &&
+                        forward.isEmpty() &&
+                        domain.isEmpty() &&
+                        proxyProtocol == 0 &&
+                        webDomain != null
+                return if (isCurrentOwned) {
+                    HttpsServeSnapshot(HttpsServeOwnership.OWNED, webDomain)
+                } else {
+                    HttpsServeSnapshot(HttpsServeOwnership.CONFLICT)
+                }
+            }
+            if (configUsesWebPort(config, HTTPS_PORT)) {
+                return HttpsServeSnapshot(HttpsServeOwnership.CONFLICT)
+            }
+
+            // A foreground rule is owned by another live CLI session. Never overwrite or
+            // withdraw it, even if it happens to point at the same local backend.
+            val foreground = config.optJSONObject("Foreground")
+            if (foreground != null) {
+                val sessions = foreground.keys()
+                while (sessions.hasNext()) {
+                    val session = foreground.optJSONObject(sessions.next()) ?: continue
+                    if (configUsesTcpPort(session, HTTPS_PORT)
+                        || configUsesWebPort(session, HTTPS_PORT)
+                    ) {
+                        return HttpsServeSnapshot(HttpsServeOwnership.CONFLICT)
+                    }
+                }
+            }
+            return HttpsServeSnapshot(HttpsServeOwnership.FREE)
+        }
+
+        /**
+         * Shell-side deployment probe shared by every tailscaled launch path.
+         *
+         * The version stamp is written only after a successful copy. Existing
+         * installs without a stamp therefore self-heal once, while a partial
+         * redeploy remains stale and is retried.
+         */
+        @JvmStatic
+        fun deploymentStatusCommand(): String {
+            val expected = BuildConfig.VERSION_CODE.toLong()
+            return "if test -x $TAILSCALE_PATH && test -x $TAILSCALED_PATH && " +
+                "[ \"\$(cat $TAILSCALE_VERSION_FILE 2>/dev/null)\" = \"$expected\" ]; then " +
+                "printf '$DEPLOYMENT_CURRENT\\n'; else printf '$DEPLOYMENT_STALE\\n'; fi"
+        }
+
+        /**
+         * Detached guard used by the Telegram-side direct tailscaled launcher.
+         *
+         * It waits through daemon startup/login, installs the same persistent
+         * PROXY-v1 route as [applyDashboardServe], and fails closed if that
+         * route cannot be installed. The process exits as soon as the route is
+         * secured; it is not a permanent watchdog.
+         */
+        @JvmStatic
+        fun buildDashboardServeGuardScript(): List<String> {
+            val totalSecureAttempts = DASHBOARD_SERVE_REPLAY_ATTEMPTS + 1
+            return listOf(
+                "#!/system/bin/sh",
+                "TAILSCALE='$TAILSCALE_PATH'",
+                "SOCKET='127.0.0.1:$TAILSCALE_COMMUNICATION_PORT'",
+                "HTTPS_FILE='$TAILSCALE_HTTPS_FILE'",
+                "START_TRIES=0",
+                "PIDS=''",
+                "while [ \"\$START_TRIES\" -lt 30 ]; do",
+                "  PIDS=\"\$(pidof tailscaled 2>/dev/null)\"",
+                "  [ -n \"\$PIDS\" ] && break",
+                "  START_TRIES=\$((START_TRIES + 1))",
+                "  sleep 1",
+                "done",
+                "[ -n \"\$PIDS\" ] || exit 1",
+                "if ! \"\$TAILSCALE\" serve --help 2>&1 | grep -q -- '--proxy-protocol'; then",
+                "  for PID in \$PIDS; do",
+                "    case \"\$PID\" in ''|*[!0-9]*) continue;; esac",
+                "    kill -9 \"\$PID\" 2>/dev/null",
+                "  done",
+                "  exit 1",
+                "fi",
+                "WAIT_TRIES=0",
+                "while :; do",
+                "  CURRENT_PIDS=\"\$(pidof tailscaled 2>/dev/null)\"",
+                "  [ -n \"\$CURRENT_PIDS\" ] || exit 0",
+                "  STATUS=\"\$(\"\$TAILSCALE\" --socket \"\$SOCKET\" status --json 2>/dev/null)\"",
+                "  if printf '%s' \"\$STATUS\" | grep -Eq '\"BackendState\"[[:space:]]*:[[:space:]]*\"Running\"'; then",
+                "    ATTEMPT=0",
+                "    while [ \"\$ATTEMPT\" -lt $totalSecureAttempts ]; do",
+                "      if \"\$TAILSCALE\" --socket \"\$SOCKET\" ${secureDashboardServeArgs()} >/dev/null 2>&1; then",
+                "        if [ \"\$(cat \"\$HTTPS_FILE\" 2>/dev/null)\" = true ] && " +
+                    "printf '%s' \"\$STATUS\" | grep -q '\\.ts\\.net'; then",
+                "          \"\$TAILSCALE\" --socket \"\$SOCKET\" ${secureHttpsServeArgs()} >/dev/null 2>&1 || true",
+                "        fi",
+                "        exit 0",
+                "      fi",
+                "      ATTEMPT=\$((ATTEMPT + 1))",
+                "      [ \"\$ATTEMPT\" -ge $totalSecureAttempts ] || sleep 1",
+                "    done",
+                "    \"\$TAILSCALE\" --socket \"\$SOCKET\" ${denyDashboardServeArgs()} >/dev/null 2>&1 && exit 1",
+                "    LATEST_PIDS=\"\$(pidof tailscaled 2>/dev/null)\"",
+                "    if [ \"\$LATEST_PIDS\" != \"\$CURRENT_PIDS\" ]; then",
+                "      WAIT_TRIES=0",
+                "      continue",
+                "    fi",
+                "    for PID in \$LATEST_PIDS; do",
+                "      case \"\$PID\" in ''|*[!0-9]*) continue;; esac",
+                "      kill -9 \"\$PID\" 2>/dev/null",
+                "    done",
+                "    exit 1",
+                "  fi",
+                "  WAIT_TRIES=\$((WAIT_TRIES + 1))",
+                "  if [ \"\$WAIT_TRIES\" -lt $DASHBOARD_SERVE_WATCH_ATTEMPTS ]; then",
+                "    sleep 1",
+                "  else",
+                "    sleep 5",
+                "  fi",
+                "done"
+            )
+        }
     }
+
+    private enum class BackendState {
+        RUNNING,
+        NOT_READY,
+        UNKNOWN
+    }
+
+    internal enum class HttpsServeOwnership {
+        OWNED,
+        LEGACY_OWNED,
+        FREE,
+        CONFLICT,
+        UNKNOWN
+    }
+
+    internal data class HttpsServeSnapshot(
+        val ownership: HttpsServeOwnership,
+        val domain: String? = null
+    )
+
+    @Volatile
+    private var securedDashboardDaemon: String? = null
+
+    private val dashboardServeWatchActive = AtomicBoolean(false)
+    private val dashboardServeWatchGeneration = AtomicLong(-1L)
 
     interface TailscaleCallback {
         fun onLog(message: String)
@@ -81,31 +360,131 @@ class TailscaleLauncher(
     }
 
     fun launchTailscale(callback: TailscaleCallback) {
-        isTunnelRunning { isRunning ->
-            if (isRunning) {
-                getTunnelUrl { url ->
-                    if (url != null) {
-                        logManager.info(TAG, "Tailscale already running at $url")
-                        callback.onLog("Tailscale already running at $url")
-                        callback.onTunnelUrl(url)
-                    } else {
-                        logManager.error(TAG, "Failed to get tailscale url. Are you logged in?")
-                        callback.onError("Failed to get tailscale url. Are you logged in?")
-                        callback.onTunnelUrl(null)
-                    }
-                }
-            } else {
-                checkAndInstallTailscale(callback) {
-                    val useProxy = ProxyHelper.probePort(PROXY_PORT)
-                    isProxyEnabled { enableProxy ->
-                        launchTailscaleDaemon(useProxy, enableProxy, callback)
-                    }
+        // Check the deployed payload BEFORE the running-daemon fast path. A
+        // package update does not stop the UID-2000 tailscaled process, so the
+        // old ordering skipped redeployment forever on always-on installs.
+        isDeploymentCurrent { deploymentCurrent ->
+            getTailscaledFingerprint { fingerprint ->
+                when {
+                    fingerprint != null && deploymentCurrent ->
+                        reportRunningTunnel(callback)
+
+                    fingerprint != null ->
+                        redeployRunningTailscale(fingerprint, callback)
+
+                    deploymentCurrent ->
+                        launchInstalledTailscale(callback)
+
+                    else ->
+                        installTailscale(callback) {
+                            launchInstalledTailscale(callback)
+                        }
                 }
             }
         }
     }
 
+    private fun reportRunningTunnel(callback: TailscaleCallback) {
+        getTunnelUrl { url ->
+            if (url != null) {
+                logManager.info(TAG, "Tailscale already running at $url")
+                callback.onLog("Tailscale already running at $url")
+                callback.onTunnelUrl(url)
+            } else {
+                startDashboardServeWatch()
+                logManager.error(TAG, "Failed to get tailscale url. Are you logged in?")
+                callback.onError("Failed to get tailscale url. Are you logged in?")
+                callback.onTunnelUrl(null)
+            }
+        }
+    }
+
+    private fun launchInstalledTailscale(callback: TailscaleCallback) {
+        val useProxy = ProxyHelper.probePort(PROXY_PORT)
+        isProxyEnabled { enableProxy ->
+            launchTailscaleDaemon(useProxy, enableProxy, callback)
+        }
+    }
+
+    private fun isDeploymentCurrent(callback: (Boolean) -> Unit) {
+        adbShellExecutor.execute(
+            command = deploymentStatusCommand(),
+            callback = object : AdbShellExecutor.ShellCallback {
+                override fun onSuccess(output: String) {
+                    callback(output.trim().lineSequence().lastOrNull() == DEPLOYMENT_CURRENT)
+                }
+
+                override fun onError(error: String) {
+                    // Fail toward redeployment. A probe failure must never bless
+                    // an unknown payload as current.
+                    callback(false)
+                }
+            }
+        )
+    }
+
+    /**
+     * Upgrade an app-independent tailscaled process without touching its state
+     * directory or persisted proxy/ADB/HTTPS opt-ins.
+     */
+    private fun redeployRunningTailscale(
+        daemonFingerprint: String,
+        callback: TailscaleCallback,
+        attempt: Int = 0
+    ) {
+        if (attempt >= 3) {
+            val error = "Could not stop the stale tailscale daemon for update"
+            logManager.error(TAG, error)
+            callback.onError(error)
+            return
+        }
+
+        invalidateDashboardLifecycle()
+        cancelDashboardServeWatch()
+        securedDashboardDaemon = null
+        callback.onLog("Updating tailscale for this app version...")
+
+        adbShellExecutor.execute(
+            command = buildKillFingerprintCommand(daemonFingerprint) + "; sleep 1",
+            callback = object : AdbShellExecutor.ShellCallback {
+                override fun onSuccess(output: String) {
+                    // A Telegram or watchdog start can race the stop. Re-check
+                    // both deployment and PID identity before overwriting.
+                    isDeploymentCurrent { deploymentCurrent ->
+                        getTailscaledFingerprint { currentFingerprint ->
+                            when {
+                                currentFingerprint == null ->
+                                    installTailscale(callback) {
+                                        launchInstalledTailscale(callback)
+                                    }
+
+                                deploymentCurrent ->
+                                    reportRunningTunnel(callback)
+
+                                else ->
+                                    redeployRunningTailscale(
+                                        currentFingerprint,
+                                        callback,
+                                        attempt + 1
+                                    )
+                            }
+                        }
+                    }
+                }
+
+                override fun onError(error: String) {
+                    logManager.error(TAG, "Failed to stop stale tailscale daemon: $error")
+                    callback.onError("Failed to update tailscale: $error")
+                }
+            }
+        )
+    }
+
     fun launchTailscaleDaemon(useProxy: Boolean, enableProxy: Boolean, callback: TailscaleCallback) {
+        invalidateDashboardLifecycle()
+        val launchGeneration = dashboardLifecycleGeneration.get()
+        securedDashboardDaemon = null
+        cancelDashboardServeWatch()
         val cmd = buildString {
             append("nohup sh -c '")
 
@@ -131,62 +510,33 @@ class TailscaleLauncher(
 
             append("' > $TAILSCALE_LOG 2>&1 &")
         }
+        // Arm the watcher before starting the child. It now tolerates the PID
+        // not existing on its first probes, which minimizes the one-time
+        // migration window before a persistent secure Serve config exists.
+        startDashboardServeWatch()
         adbShellExecutor.execute(
             command = cmd,
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     logManager.info(TAG, "Tailscale daemon started")
                     callback.onLog("Tailscale daemon started")
-                    // serve config lives in tailscaled, so a restart drops it —
-                    // replay the persisted opt-ins or remote ADB and the HTTPS
-                    // share both die silently. The URL is read last, so it
-                    // reflects the share this start has just re-published.
-                    isAdbEnabled { adbOn ->
-                        if (adbOn) replayAdbServe(0)
-                        isHttpsEnabled { httpsOn ->
-                            if (httpsOn) replayHttpsServe(0)
-                            getTunnelUrl { url ->
-                                callback.onLog("Connect to tailscale to access $url")
-                                callback.onTunnelUrl(url)
-                            }
+                    // Protect the dashboard before replaying optional remote
+                    // ADB. A freshly authenticated userspace daemon otherwise
+                    // exposes raw localhost:8080 during this startup window.
+                    getTunnelUrl { url ->
+                        if (url == null) startDashboardServeWatch()
+                        isAdbEnabled { adbOn ->
+                            if (adbOn) replayAdbServe(0)
+                            callback.onLog("Connect to tailscale to access $url")
+                            callback.onTunnelUrl(url)
                         }
                     }
                 }
 
                 override fun onError(error: String) {
+                    finishDashboardServeWatch(launchGeneration)
                     logManager.error(TAG, "Failed to start tailscale daemon: $error")
                     callback.onError("Failed to start tailscale daemon: $error")
-                }
-            }
-        )
-    }
-
-    /** App versionCode the currently-shipped libtailscale.so belongs to, or -1 if unknown. */
-    private fun appVersionCode(): Long =
-        try {
-            context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode
-        } catch (e: Exception) {
-            -1L
-        }
-
-    private fun checkAndInstallTailscale(callback: TailscaleCallback, onComplete: () -> Unit) {
-        // Reinstall when the binary is missing/non-executable OR when the deployed copy
-        // predates the current app version. The version stamp is the load-bearing part:
-        // without it this only checked existence, so an app update that ships a new
-        // libtailscale.so never redeployed for users who already had it set up — the old
-        // binary passed the exec test and was kept. That is exactly how the ACME-enabled
-        // rebuild failed to reach updating cars: the pre-update no-ACME binary stayed.
-        val want = appVersionCode()
-        adbShellExecutor.execute(
-            command = "test -x $TAILSCALE_PATH && test -x $TAILSCALED_PATH && " +
-                "[ \"\$(cat $TAILSCALE_VERSION_FILE 2>/dev/null)\" = \"$want\" ]",
-            callback = object : AdbShellExecutor.ShellCallback {
-                override fun onSuccess(output: String) {
-                    onComplete()
-                }
-
-                override fun onError(error: String) {
-                    installTailscale(callback, onComplete)
                 }
             }
         )
@@ -195,18 +545,16 @@ class TailscaleLauncher(
     private fun installTailscale(callback: TailscaleCallback, onComplete: () -> Unit) {
         val nativeLibDir = context.applicationInfo.nativeLibraryDir
         val srcPath = "$nativeLibDir/libtailscale.so"
-        val want = appVersionCode()
+        val expectedVersion = BuildConfig.VERSION_CODE.toLong()
 
         callback.onLog("Installing tailscale...")
 
-        // cp -f / ln -sf so a redeploy over an older install succeeds (plain `ln -s`
-        // fails when tailscaled already exists). This path only runs while the tunnel is
-        // stopped, so overwriting the binary is safe. The version stamp is written LAST,
-        // so a partial copy is never recorded as installed and is retried next launch.
         adbShellExecutor.execute(
-            command = "test -f $srcPath && mkdir -p $TAILSCALE_HOME && cp -f $srcPath $TAILSCALE_PATH && " +
-                "ln -sf $TAILSCALE_PATH $TAILSCALED_PATH && chmod +x $TAILSCALE_PATH && " +
-                "echo $want > $TAILSCALE_VERSION_FILE",
+            command = "test -f $srcPath && mkdir -p $TAILSCALE_HOME && " +
+                "cp -f $srcPath $TAILSCALE_PATH && " +
+                "ln -sf $TAILSCALE_PATH $TAILSCALED_PATH && " +
+                "chmod +x $TAILSCALE_PATH && " +
+                "printf '$expectedVersion\\n' > $TAILSCALE_VERSION_FILE",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     callback.onLog("Tailscale installed")
@@ -260,6 +608,7 @@ class TailscaleLauncher(
                         val url = match.groupValues[1]
                         logManager.info(TAG, "Fetched login URL: $url")
                         loginUrl(url)
+                        startDashboardServeWatch()
                     } else {
                         waitForLoginUrl(attempt + 1, loginUrl)
                     }
@@ -290,13 +639,10 @@ class TailscaleLauncher(
                         override fun onError(error: String) {
                             // MUST complete the chain (issue #209). This used to be a
                             // no-op: when the status command failed (e.g. shell/socket
-                            // still stale right after ACC-on), the getTunnelUrl chain
-                            // died here, the tunnelUrl LiveData was never posted, and
-                            // the UI wedged on "Waiting for tunnel URL" until a full
-                            // app restart. Answer "no login needed" so getTunnelUrl
-                            // proceeds to `tailscale ip` — which has its own error
-                            // path — and every refresh cycle terminates; the periodic
-                            // status refresh then recovers once the shell responds.
+                            // still stale right after ACC-on), callers wedged until a
+                            // full app restart. Preserve the legacy fail-open answer
+                            // for UI/ADB callers; getTunnelUrl uses the stricter JSON
+                            // backend-state probe before exposing the dashboard.
                             logManager.warn(TAG, "needsLogin: status check failed ($error), assuming logged in")
                             callback(false)
                         }
@@ -313,6 +659,396 @@ class TailscaleLauncher(
             command = "$TAILSCALE_PATH --socket 127.0.0.1:$TAILSCALE_COMMUNICATION_PORT $cmd",
             callback = callback
         )
+    }
+
+    /**
+     * Publish the dashboard through Tailscale's TCP Serve listener.
+     *
+     * PROXY v1 is the security boundary: HttpServer consumes the preamble and
+     * disables its localhost auth fallback for that connection. A plain
+     * `serve --tcp` forwarder would preserve the vulnerability because the
+     * backend socket would still appear to originate from 127.0.0.1.
+     */
+    private fun applyDashboardServe(
+        daemonFingerprint: String,
+        attempt: Int,
+        generation: Long = dashboardLifecycleGeneration.get(),
+        callback: (Boolean) -> Unit
+    ) {
+        if (generation != dashboardLifecycleGeneration.get()) {
+            callback(false)
+            return
+        }
+        if (securedDashboardDaemon == daemonFingerprint) {
+            callback(true)
+            return
+        }
+
+        runTailscaleCommand(
+            cmd = secureDashboardServeArgs(),
+            callback = object : AdbShellExecutor.ShellCallback {
+                override fun onSuccess(output: String) {
+                    if (generation != dashboardLifecycleGeneration.get()) {
+                        callback(false)
+                        return
+                    }
+                    securedDashboardDaemon = daemonFingerprint
+                    logManager.info(
+                        TAG,
+                        "Tailscale dashboard secured on tailnet :$DASHBOARD_PORT"
+                    )
+                    callback(true)
+                }
+
+                override fun onError(error: String) {
+                    if (generation != dashboardLifecycleGeneration.get()) {
+                        callback(false)
+                        return
+                    }
+                    if (attempt < DASHBOARD_SERVE_REPLAY_ATTEMPTS) {
+                        replayScheduler.schedule(
+                            {
+                                applyDashboardServe(
+                                    daemonFingerprint,
+                                    attempt + 1,
+                                    generation,
+                                    callback
+                                )
+                            },
+                            DASHBOARD_SERVE_REPLAY_DELAY_MS,
+                            java.util.concurrent.TimeUnit.MILLISECONDS
+                        )
+                        return
+                    }
+
+                    logManager.error(
+                        TAG,
+                        "Secure dashboard Serve failed after ${attempt + 1} attempts: $error"
+                    )
+                    // A direct Telegram/update restart happens in another
+                    // process and cannot bump our in-memory generation. Do not
+                    // let an error callback from the old PID disable or kill
+                    // the replacement daemon; secure the replacement instead.
+                    getTailscaledFingerprint { currentFingerprint ->
+                        if (generation != dashboardLifecycleGeneration.get()) {
+                            callback(false)
+                        } else if (currentFingerprint == null) {
+                            callback(false)
+                        } else if (currentFingerprint != daemonFingerprint) {
+                            applyDashboardServe(
+                                currentFingerprint,
+                                0,
+                                generation,
+                                callback
+                            )
+                        } else {
+                            failCloseDashboardServe(
+                                daemonFingerprint,
+                                generation,
+                                callback
+                            )
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    /**
+     * Keep the tailnet port intercepted if secure Serve cannot be installed.
+     *
+     * Removing the Serve rule would restore userspace networking's raw
+     * localhost forward and reopen the auth bypass. Pointing the listener at a
+     * closed privileged port preserves Tailscale proxy/ADB functionality while
+     * making the dashboard unavailable. If even that rule cannot be applied,
+     * stop tailscaled rather than leave port 8080 exposed.
+     */
+    private fun failCloseDashboardServe(
+        daemonFingerprint: String,
+        generation: Long,
+        callback: (Boolean) -> Unit
+    ) {
+        if (generation != dashboardLifecycleGeneration.get()) {
+            callback(false)
+            return
+        }
+        securedDashboardDaemon = null
+        runTailscaleCommand(
+            cmd = denyDashboardServeArgs(),
+            callback = object : AdbShellExecutor.ShellCallback {
+                override fun onSuccess(output: String) {
+                    if (generation != dashboardLifecycleGeneration.get()) {
+                        callback(false)
+                        return
+                    }
+                    logManager.error(
+                        TAG,
+                        "Tailscale dashboard disabled because secure Serve is unavailable"
+                    )
+                    callback(false)
+                }
+
+                override fun onError(error: String) {
+                    if (generation != dashboardLifecycleGeneration.get()) {
+                        callback(false)
+                        return
+                    }
+                    logManager.error(
+                        TAG,
+                        "Could not install dashboard deny route; stopping tailscaled: $error"
+                    )
+                    // Kill only the PID(s) whose secure configuration failed.
+                    // A blanket pkill here can race a Telegram/update restart
+                    // and terminate the fresh, correctly guarded daemon.
+                    adbShellExecutor.execute(
+                        command = buildKillFingerprintCommand(daemonFingerprint),
+                        callback = object : AdbShellExecutor.ShellCallback {
+                            override fun onSuccess(output: String) {
+                                finishDashboardServeWatch(generation)
+                                callback(false)
+                            }
+
+                            override fun onError(stopError: String) {
+                                finishDashboardServeWatch(generation)
+                                logManager.error(
+                                    TAG,
+                                    "Failed to stop unsafe tailscaled instance: $stopError"
+                                )
+                                callback(false)
+                            }
+                        }
+                    )
+                }
+            }
+        )
+    }
+
+    private fun buildKillFingerprintCommand(daemonFingerprint: String): String {
+        // getTailscaledFingerprint returns only normalized decimal PIDs.
+        // Keep a defensive empty fallback so no untrusted shell text can ever
+        // reach this command if process enumeration behaves unexpectedly.
+        val safePids = daemonFingerprint
+            .split(' ')
+            .filter { it.isNotEmpty() && it.all(Char::isDigit) }
+        if (safePids.isEmpty()) return "echo no-safe-tailscaled-pid"
+
+        return buildString {
+            append("for pid in ")
+            append(safePids.joinToString(" "))
+            append("; do ")
+            append("if [ -r /proc/\$pid/cmdline ] && ")
+            append("tr '\\000' ' ' < /proc/\$pid/cmdline | grep -q '/tailscaled'; ")
+            append("then kill -9 \$pid 2>/dev/null; fi; ")
+            append("done; echo stopped")
+        }
+    }
+
+    private fun getBackendState(callback: (BackendState) -> Unit) {
+        runTailscaleCommand(
+            cmd = "status --json",
+            callback = object : AdbShellExecutor.ShellCallback {
+                override fun onSuccess(output: String) {
+                    callback(parseBackendState(output))
+                }
+
+                override fun onError(error: String) {
+                    callback(BackendState.UNKNOWN)
+                }
+            }
+        )
+    }
+
+    private fun parseBackendState(output: String): BackendState {
+        return try {
+            when (jsonObjectFromOutput(output)?.optString("BackendState")?.lowercase()) {
+                "running" -> BackendState.RUNNING
+                "needslogin", "needsmachineauth", "stopped" -> BackendState.NOT_READY
+                else -> BackendState.UNKNOWN
+            }
+        } catch (_: Exception) {
+            BackendState.UNKNOWN
+        }
+    }
+
+    private fun parseHttpsCertDomain(output: String): String? {
+        val status = jsonObjectFromOutput(output) ?: return null
+        val domains = status.optJSONArray("CertDomains")
+            ?: status.optJSONObject("Self")?.optJSONArray("CertDomains")
+            ?: return null
+        val selfDomain = status.optJSONObject("Self")
+            ?.optString("DNSName", "")
+            ?.trim()
+            ?.trimEnd('.')
+            .orEmpty()
+
+        // The Serve CLI terminates TLS for Self.DNSName, not an arbitrary first entry in
+        // CertDomains. Prefer that exact name when it is provisionable so read-back
+        // verification remains correct on tailnets that expose more than one certificate name.
+        if (selfDomain.isNotEmpty()) {
+            for (i in 0 until domains.length()) {
+                val domain = domains.optString(i, "").trim().trimEnd('.')
+                if (domain.equals(selfDomain, ignoreCase = true)) return selfDomain
+            }
+        }
+        for (i in 0 until domains.length()) {
+            val domain = domains.optString(i, "").trim().trimEnd('.')
+            if (domain.isNotEmpty()) return domain
+        }
+        return null
+    }
+
+    private fun getHttpsCertDomain(callback: (String?) -> Unit) {
+        runTailscaleCommand(
+            cmd = "status --json",
+            callback = object : AdbShellExecutor.ShellCallback {
+                override fun onSuccess(output: String) {
+                    callback(parseHttpsCertDomain(output))
+                }
+
+                override fun onError(error: String) {
+                    callback(null)
+                }
+            }
+        )
+    }
+
+    private fun getHttpsServeSnapshot(callback: (HttpsServeSnapshot) -> Unit) {
+        runTailscaleCommand(
+            cmd = "serve status --json",
+            callback = object : AdbShellExecutor.ShellCallback {
+                override fun onSuccess(output: String) {
+                    callback(parseHttpsServeSnapshot(output))
+                }
+
+                override fun onError(error: String) {
+                    callback(HttpsServeSnapshot(HttpsServeOwnership.UNKNOWN))
+                }
+            }
+        )
+    }
+
+    private fun getTailscaledFingerprint(callback: (String?) -> Unit) {
+        adbShellExecutor.execute(
+            command = "pidof tailscaled 2>/dev/null || " +
+                "ps -A | grep tailscaled | grep -v grep | awk '{print \$2}'",
+            callback = object : AdbShellExecutor.ShellCallback {
+                override fun onSuccess(output: String) {
+                    val pids = output
+                        .trim()
+                        .split(Regex("\\s+"))
+                        .filter { it.isNotEmpty() && it.all(Char::isDigit) }
+                        .distinct()
+                        .sortedBy { it.toLongOrNull() ?: Long.MAX_VALUE }
+                    callback(pids.joinToString(" ").takeIf { it.isNotEmpty() })
+                }
+
+                override fun onError(error: String) {
+                    callback(null)
+                }
+            }
+        )
+    }
+
+    private fun cancelDashboardServeWatch() {
+        dashboardServeWatchGeneration.set(-1L)
+        dashboardServeWatchActive.set(false)
+    }
+
+    private fun finishDashboardServeWatch(generation: Long) {
+        if (dashboardServeWatchGeneration.compareAndSet(generation, -1L)) {
+            dashboardServeWatchActive.set(false)
+        }
+    }
+
+    private fun isDashboardServeWatchCurrent(generation: Long): Boolean {
+        return dashboardServeWatchActive.get() &&
+            dashboardServeWatchGeneration.get() == generation
+    }
+
+    private fun startDashboardServeWatch() {
+        val generation = dashboardLifecycleGeneration.get()
+        if (!dashboardServeWatchActive.compareAndSet(false, true)) return
+        dashboardServeWatchGeneration.set(generation)
+        watchForDashboardServe(
+            attempt = 0,
+            generation = generation,
+            sawDaemon = false
+        )
+    }
+
+    private fun watchForDashboardServe(
+        attempt: Int,
+        generation: Long,
+        sawDaemon: Boolean
+    ) {
+        if (!isDashboardServeWatchCurrent(generation)) return
+        if (generation != dashboardLifecycleGeneration.get()) {
+            finishDashboardServeWatch(generation)
+            return
+        }
+
+        getTailscaledFingerprint { fingerprint ->
+            if (generation != dashboardLifecycleGeneration.get()) {
+                finishDashboardServeWatch(generation)
+                return@getTailscaledFingerprint
+            }
+            if (fingerprint == null) {
+                // Right after `nohup ... &` succeeds, process enumeration can
+                // beat the child becoming visible. Retry that startup race,
+                // but stop watching if a daemon we already observed exits.
+                if (sawDaemon || attempt >= DASHBOARD_SERVE_WATCH_ATTEMPTS) {
+                    finishDashboardServeWatch(generation)
+                    return@getTailscaledFingerprint
+                }
+                replayScheduler.schedule(
+                    {
+                        watchForDashboardServe(
+                            attempt + 1,
+                            generation,
+                            sawDaemon = false
+                        )
+                    },
+                    DASHBOARD_SERVE_WATCH_DELAY_MS,
+                    java.util.concurrent.TimeUnit.MILLISECONDS
+                )
+                return@getTailscaledFingerprint
+            }
+
+            getBackendState { state ->
+                if (generation != dashboardLifecycleGeneration.get()) {
+                    finishDashboardServeWatch(generation)
+                    return@getBackendState
+                }
+                if (state == BackendState.RUNNING) {
+                    applyDashboardServe(fingerprint, 0, generation) { secured ->
+                        if (secured) replayHttpsServe(0)
+                        finishDashboardServeWatch(generation)
+                    }
+                    return@getBackendState
+                }
+
+                if (attempt >= DASHBOARD_SERVE_WATCH_ATTEMPTS) {
+                    finishDashboardServeWatch(generation)
+                    logManager.warn(
+                        TAG,
+                        "Dashboard Serve watch expired before Tailscale login completed"
+                    )
+                    return@getBackendState
+                }
+
+                replayScheduler.schedule(
+                    {
+                        watchForDashboardServe(
+                            attempt + 1,
+                            generation,
+                            sawDaemon = true
+                        )
+                    },
+                    DASHBOARD_SERVE_WATCH_DELAY_MS,
+                    java.util.concurrent.TimeUnit.MILLISECONDS
+                )
+            }
+        }
     }
 
     fun saveProxySettings(enabled: Boolean, callback: ((Boolean?) -> Unit)? = null) {
@@ -383,84 +1119,203 @@ class TailscaleLauncher(
         )
     }
 
+    private fun HttpsServeOwnership.isOverdriveOwned(): Boolean {
+        return this == HttpsServeOwnership.OWNED ||
+            this == HttpsServeOwnership.LEGACY_OWNED
+    }
+
     /**
-     * Publish the web server over HTTPS on the tailnet via `tailscale serve`.
+     * Withdraw only an HTTPS rule that the read-back parser proved belongs to Overdrive.
      *
-     * tailscaled terminates TLS with a real Let's Encrypt certificate for the
-     * node's MagicDNS name and proxies into the local HTTP port, so clients get
-     * a genuinely trusted `https://<host>.<tailnet>.ts.net` with no certificate
-     * to install and no port forwarding.
-     *
-     * That matters beyond neatness: a browser treats the plain-HTTP endpoint as
-     * an insecure context, which switches off APIs this app's own web UI uses.
-     * notifications.html already disables its controls on an insecure origin;
-     * pwa-init.js cannot register /sw.js, so there is no install and no push;
-     * communicate.js and genai.js lose getUserMedia for cabin audio and voice;
-     * and stream.js falls back off the WebCodecs decode path. Served over this
-     * URL, all of them work as they do on 127.0.0.1.
-     *
-     * Requires MagicDNS and HTTPS Certificates to be enabled for the tailnet;
-     * without them tailscaled refuses and the error is surfaced to the caller
-     * rather than swallowed, since there is nothing the head unit can do about
-     * it and the user has to change it in the admin console.
+     * The legacy command is kept solely for upgrading installations that already persisted
+     * the old TLS-terminated TCP rule. Unrelated port-443 rules are never changed.
      */
-    fun applyHttpsServe(enabled: Boolean, callback: ((Boolean) -> Unit)? = null) {
-        if (enabled) {
-            runTailscaleCommand(
-                cmd = "serve --bg $HTTP_PORT",
-                callback = object : AdbShellExecutor.ShellCallback {
-                    override fun onSuccess(output: String) {
-                        logManager.info(TAG, "web UI published over HTTPS on tailnet")
-                        callback?.invoke(true)
-                    }
-                    override fun onError(error: String) {
-                        // Nearly always "HTTPS must be enabled in the admin console".
-                        logManager.warn(TAG, "serve --bg $HTTP_PORT failed: $error")
-                        callback?.invoke(false)
-                    }
-                }
-            )
-            return
+    private fun withdrawOwnedHttpsServe(
+        current: HttpsServeSnapshot,
+        callback: (HttpsServeSnapshot) -> Unit
+    ) {
+        val command = when (current.ownership) {
+            HttpsServeOwnership.OWNED -> disableHttpsServeArgs()
+            HttpsServeOwnership.LEGACY_OWNED -> disableLegacyHttpsServeArgs()
+            HttpsServeOwnership.FREE,
+            HttpsServeOwnership.CONFLICT,
+            HttpsServeOwnership.UNKNOWN -> {
+                callback(current)
+                return
+            }
         }
-        // Withdraw only the HTTPS share, and only the handler we created.
-        //
-        // Never `serve reset`: that drops the whole serve config including the
-        // --tcp forwarder remote ADB depends on.
-        //
-        // Scoped to --set-path=/ as well as the port, because `serve --bg $PORT`
-        // publishes at 443 on path / — so / is precisely what we own. Turning off
-        // 443 alone is a broader statement than we are entitled to make: anything
-        // else mounted under another path on 443 would go with it, and this runs
-        // on a head unit whose serve config we do not exclusively control.
+
         runTailscaleCommand(
-            cmd = "serve --https=443 --set-path=/ off",
+            cmd = command,
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
-                    logManager.info(TAG, "web UI withdrawn from tailnet HTTPS")
-                    callback?.invoke(true)
+                    getHttpsServeSnapshot(callback)
                 }
+
                 override fun onError(error: String) {
-                    logManager.warn(TAG, "serve --https=443 --set-path=/ off failed: $error")
-                    callback?.invoke(false)
+                    // A concurrent caller may already have removed or replaced the rule.
+                    // Read back before reporting failure and never broaden the cleanup.
+                    getHttpsServeSnapshot { after ->
+                        if (after.ownership.isOverdriveOwned()) {
+                            logManager.warn(TAG, "HTTPS withdrawal failed: $error")
+                        }
+                        callback(after)
+                    }
                 }
             }
         )
     }
 
-    /**
-     * Replay the HTTPS share after a daemon start, on the same ladder as remote
-     * ADB: serve config lives in tailscaled, so a restart drops it, and the
-     * launch shell returns as soon as `nohup ... &` forks — the first attempt
-     * can beat the daemon binding its socket.
-     */
-    private fun replayHttpsServe(attempt: Int) {
-        // Re-read the opt-in before EVERY attempt, so a user who switches it off
-        // inside the retry window is not re-published by a later attempt.
-        isHttpsEnabled { stillEnabled ->
-            if (!stillEnabled) {
-                logManager.info(TAG, "HTTPS replay aborted — opt-in withdrawn")
-                return@isHttpsEnabled
+    private fun installHttpsServe(
+        certDomain: String,
+        callback: (Boolean) -> Unit
+    ) {
+        runTailscaleCommand(
+            cmd = secureHttpsServeArgs(),
+            callback = object : AdbShellExecutor.ShellCallback {
+                override fun onSuccess(output: String) {
+                    // Exit status is not authoritative. Verify the HTTPS listener, root
+                    // handler, exact loopback backend and certificate domain from Serve JSON.
+                    getHttpsServeSnapshot { after ->
+                        val verified =
+                            after.ownership == HttpsServeOwnership.OWNED &&
+                                after.domain.equals(certDomain, ignoreCase = true)
+                        if (verified) {
+                            logManager.info(TAG, "web UI published at https://$certDomain")
+                            callback(true)
+                            return@getHttpsServeSnapshot
+                        }
+
+                        logManager.warn(
+                            TAG,
+                            "HTTPS command returned success without the expected Serve rule"
+                        )
+                        if (!after.ownership.isOverdriveOwned()) {
+                            callback(false)
+                            return@getHttpsServeSnapshot
+                        }
+
+                        // Keep enable transactional. If the CLI installed an app-shaped rule
+                        // under an unexpected identity, remove only that exact owned rule.
+                        withdrawOwnedHttpsServe(after) { cleanup ->
+                            if (cleanup.ownership.isOverdriveOwned()
+                                || cleanup.ownership == HttpsServeOwnership.UNKNOWN
+                            ) {
+                                logManager.warn(
+                                    TAG,
+                                    "Could not withdraw unexpected HTTPS Serve rule"
+                                )
+                            }
+                            callback(false)
+                        }
+                    }
+                }
+
+                override fun onError(error: String) {
+                    logManager.warn(TAG, "HTTPS Serve failed: $error")
+                    callback(false)
+                }
             }
+        )
+    }
+
+    private fun replaceOwnedHttpsServe(
+        certDomain: String,
+        current: HttpsServeSnapshot,
+        callback: (Boolean) -> Unit
+    ) {
+        withdrawOwnedHttpsServe(current) { after ->
+            when {
+                after.ownership == HttpsServeOwnership.OWNED &&
+                    after.domain.equals(certDomain, ignoreCase = true) -> callback(true)
+                after.ownership == HttpsServeOwnership.FREE ->
+                    installHttpsServe(certDomain, callback)
+                else -> {
+                    logManager.warn(
+                        TAG,
+                        "HTTPS migration stopped because port $HTTPS_PORT is no longer free"
+                    )
+                    callback(false)
+                }
+            }
+        }
+    }
+
+    /**
+     * Publish the dashboard on trusted tailnet HTTPS without weakening HttpServer authentication.
+     *
+     * Standard HTTPS Serve terminates TLS and supplies forwarding metadata to the loopback
+     * backend. HttpServer treats that metadata as tunnel-originated, disabling only its local
+     * no-token fallback while preserving normal JWT authentication and WebSocket behavior.
+     */
+    fun applyHttpsServe(enabled: Boolean, callback: ((Boolean) -> Unit)? = null) {
+        if (!enabled) {
+            getHttpsServeSnapshot { current ->
+                withdrawOwnedHttpsServe(current) { after ->
+                    val removed =
+                        !after.ownership.isOverdriveOwned() &&
+                            after.ownership != HttpsServeOwnership.UNKNOWN
+                    if (removed && current.ownership.isOverdriveOwned()) {
+                        logManager.info(TAG, "web UI withdrawn from tailnet HTTPS")
+                    }
+                    callback?.invoke(removed)
+                }
+            }
+            return
+        }
+
+        // Non-interactive capability preflight. `serve --https` can exit 0 before applying
+        // anything when HTTPS needs admin approval; requiring a real CertDomains entry avoids
+        // both that false success and an interactive CLI wait on the single shell executor.
+        getHttpsCertDomain { certDomain ->
+            if (certDomain == null) {
+                logManager.warn(
+                    TAG,
+                    "HTTPS unavailable: tailnet has no provisionable certificate domain"
+                )
+                callback?.invoke(false)
+                return@getHttpsCertDomain
+            }
+            getHttpsServeSnapshot { current ->
+                when (current.ownership) {
+                    HttpsServeOwnership.CONFLICT -> {
+                        logManager.warn(
+                            TAG,
+                            "HTTPS not enabled: tailnet port $HTTPS_PORT already has another Serve rule"
+                        )
+                        callback?.invoke(false)
+                    }
+                    HttpsServeOwnership.UNKNOWN -> callback?.invoke(false)
+                    HttpsServeOwnership.OWNED -> {
+                        if (current.domain.equals(certDomain, ignoreCase = true)) {
+                            callback?.invoke(true)
+                        } else {
+                            replaceOwnedHttpsServe(
+                                certDomain,
+                                current
+                            ) { callback?.invoke(it) }
+                        }
+                    }
+                    HttpsServeOwnership.LEGACY_OWNED -> {
+                        logManager.info(
+                            TAG,
+                            "migrating legacy Tailscale HTTPS Serve rule"
+                        )
+                        replaceOwnedHttpsServe(
+                            certDomain,
+                            current
+                        ) { callback?.invoke(it) }
+                    }
+                    HttpsServeOwnership.FREE ->
+                        installHttpsServe(certDomain) { callback?.invoke(it) }
+                }
+            }
+        }
+    }
+
+    private fun replayHttpsServe(attempt: Int) {
+        isHttpsEnabled { stillEnabled ->
+            if (!stillEnabled) return@isHttpsEnabled
             applyHttpsServe(true) { ok ->
                 if (ok) return@applyHttpsServe
                 if (attempt >= ADB_SERVE_REPLAY_ATTEMPTS) {
@@ -476,53 +1331,36 @@ class TailscaleLauncher(
         }
     }
 
-    /**
-     * Confirmation withdrawal for the HTTPS share, run once the replay ladder can
-     * no longer fire. Re-reads the opt-in first: the user may have re-enabled it
-     * meanwhile, and an unconditional withdrawal would kill that fresh enable.
-     */
     private fun sweepWithdrawHttpsIfStillDisabled() {
         isHttpsEnabled { enabledNow ->
             if (!enabledNow) applyHttpsServe(false)
         }
     }
 
-    /**
-     * Persist the HTTPS opt-in and apply it when the tunnel is already up.
-     *
-     * Ordering mirrors saveAdbSettings and fails toward "not published": an
-     * enable is applied before it is persisted, a disable is persisted before it
-     * is applied.
-     */
     fun saveHttpsSettings(enabled: Boolean, callback: ((Boolean) -> Unit)? = null) {
         isTunnelRunning { running ->
             if (!enabled) {
                 writeHttpsSentinel(false) { persisted ->
-                    if (!running) {
+                    if (!persisted || !running) {
                         callback?.invoke(persisted)
-                    } else {
-                        applyHttpsServe(false) { applied ->
-                            callback?.invoke(persisted && applied)
-                            // A replay attempt that read the sentinel just before
-                            // it flipped can still land after this withdrawal and
-                            // re-publish the share, leaving the switch reading OFF
-                            // with the URL live. Sweep once past the retry window
-                            // so it cannot outlive the toggle — same guard the ADB
-                            // path uses, and the same reason.
-                            replayScheduler.schedule(
-                                { sweepWithdrawHttpsIfStillDisabled() },
-                                ADB_SERVE_WITHDRAW_SWEEP_MS,
-                                java.util.concurrent.TimeUnit.MILLISECONDS
-                            )
-                        }
+                        return@writeHttpsSentinel
+                    }
+                    applyHttpsServe(false) { applied ->
+                        callback?.invoke(applied)
+                        replayScheduler.schedule(
+                            { sweepWithdrawHttpsIfStillDisabled() },
+                            ADB_SERVE_WITHDRAW_SWEEP_MS,
+                            java.util.concurrent.TimeUnit.MILLISECONDS
+                        )
                     }
                 }
                 return@isTunnelRunning
             }
+
+            // Do not store a speculative opt-in while logged out/stopped: the setting would read
+            // ON even though no capability or concrete Serve rule had ever been verified.
             if (!running) {
-                // Nothing live to apply to — the sentinel is the whole state and
-                // launchTailscaleDaemon replays it on next start.
-                writeHttpsSentinel(true, callback)
+                callback?.invoke(false)
                 return@isTunnelRunning
             }
             applyHttpsServe(true) { applied ->
@@ -534,9 +1372,6 @@ class TailscaleLauncher(
                     if (persisted) {
                         callback?.invoke(true)
                     } else {
-                        // Couldn't record the opt-in, so withdraw what was just
-                        // published: the UI reads the sentinel and would show OFF
-                        // with the share actually live.
                         applyHttpsServe(false) { callback?.invoke(false) }
                     }
                 }
@@ -551,6 +1386,7 @@ class TailscaleLauncher(
                 override fun onSuccess(output: String) {
                     callback?.invoke(true)
                 }
+
                 override fun onError(error: String) {
                     logManager.warn(TAG, "Failed to persist HTTPS setting: $error")
                     callback?.invoke(false)
@@ -559,18 +1395,40 @@ class TailscaleLauncher(
         )
     }
 
-    fun isHttpsEnabled(callback: ((Boolean) -> Unit)) {
+    fun isHttpsEnabled(callback: (Boolean) -> Unit) {
         adbShellExecutor.execute(
             command = "cat $TAILSCALE_HTTPS_FILE 2>/dev/null",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     callback(output.trim() == "true")
                 }
+
                 override fun onError(error: String) {
                     callback(false)
                 }
             }
         )
+    }
+
+    private fun resolveServedHttpsUrl(callback: (String?) -> Unit) {
+        isHttpsEnabled { enabled ->
+            if (!enabled) {
+                callback(null)
+                return@isHttpsEnabled
+            }
+            getHttpsCertDomain { certDomain ->
+                if (certDomain == null) {
+                    callback(null)
+                    return@getHttpsCertDomain
+                }
+                getHttpsServeSnapshot { current ->
+                    val active =
+                        current.ownership == HttpsServeOwnership.OWNED &&
+                            current.domain.equals(certDomain, ignoreCase = true)
+                    callback(if (active) "https://$certDomain" else null)
+                }
+            }
+        }
     }
 
     /**
@@ -787,21 +1645,13 @@ class TailscaleLauncher(
     }
 
     fun isTunnelRunning(callback: (Boolean) -> Unit) {
-        adbShellExecutor.execute(
-            command = "ps -A | grep tailscaled | grep -v grep",
-            callback = object : AdbShellExecutor.ShellCallback {
-                override fun onSuccess(output: String) {
-                    callback(output.trim().isNotEmpty())
-                }
-
-                override fun onError(error: String) {
-                    callback(false)
-                }
-            }
-        )
+        getTailscaledFingerprint { callback(it != null) }
     }
 
     fun stopTunnel(callback: TailscaleCallback) {
+        invalidateDashboardLifecycle()
+        cancelDashboardServeWatch()
+        securedDashboardDaemon = null
         logManager.info(TAG, "Stopping tailscale tunnel...")
         callback.onLog("Stopping tailscale tunnel...")
 
@@ -824,70 +1674,59 @@ class TailscaleLauncher(
         )
     }
 
-    /**
-     * The `https://<host>.<tailnet>.ts.net` URL currently serving the web port,
-     * or null when nothing is published.
-     *
-     * Read back from `serve status` rather than assembled from the MagicDNS
-     * name: that reports what tailscaled is ACTUALLY serving, so a stale
-     * sentinel, a share that failed to apply, or a tailnet without HTTPS
-     * certificates all resolve to null and fall back to the plain address
-     * instead of advertising a URL that answers nothing.
-     */
-    private fun resolveServedHttpsUrl(callback: (String?) -> Unit) {
-        isHttpsEnabled { httpsOn ->
-            if (!httpsOn) {
+    fun getTunnelUrl(callback: (String?) -> Unit) {
+        getTailscaledFingerprint { fingerprint ->
+            if (fingerprint == null) {
                 callback(null)
-                return@isHttpsEnabled
+                return@getTailscaledFingerprint
             }
-            runTailscaleCommand(
-                cmd = "serve status",
-                callback = object : AdbShellExecutor.ShellCallback {
-                    override fun onSuccess(output: String) {
-                        // Only accept a share that proxies OUR port; the same
-                        // status output also lists the ADB --tcp forwarder.
-                        val servesHttpPort = output.contains(":$HTTP_PORT")
-                        val url = SERVED_HTTPS_URL.find(output)?.value
-                        callback(if (servesHttpPort) url else null)
-                    }
-                    override fun onError(error: String) = callback(null)
+
+            getBackendState { state ->
+                if (state != BackendState.RUNNING) {
+                    callback(null)
+                    return@getBackendState
                 }
-            )
+
+                applyDashboardServe(fingerprint, 0) { secured ->
+                    if (!secured) {
+                        callback(null)
+                        return@applyDashboardServe
+                    }
+                    isHttpsEnabled { httpsEnabled ->
+                        if (!httpsEnabled) {
+                            resolvePlainTunnelUrl(callback)
+                            return@isHttpsEnabled
+                        }
+                        applyHttpsServe(true) { applied ->
+                            if (!applied) {
+                                resolvePlainTunnelUrl(callback)
+                                return@applyHttpsServe
+                            }
+                            resolveServedHttpsUrl { httpsUrl ->
+                                if (httpsUrl != null) callback(httpsUrl)
+                                else resolvePlainTunnelUrl(callback)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
-    fun getTunnelUrl(callback: (String?) -> Unit) {
-        isTunnelRunning { isRunning ->
-            needsLogin { needsLogin ->
-                if (isRunning && !needsLogin) {
-                    // Prefer the HTTPS share when it is published: same server,
-                    // but a secure context, which is what the web UI's camera, QR
-                    // pairing and service worker all require. Falls back to the
-                    // raw tailnet address whenever the share is not up, so the
-                    // URL never points at something that is not listening.
-                    resolveServedHttpsUrl { httpsUrl ->
-                        if (httpsUrl != null) {
-                            callback(httpsUrl)
-                            return@resolveServedHttpsUrl
-                        }
-                        runTailscaleCommand(
-                            cmd = "ip --1",
-                            callback = object : AdbShellExecutor.ShellCallback {
-                                override fun onSuccess(output: String) {
-                                    callback("http://${output.trim()}:$HTTP_PORT")
-                                }
+    private fun resolvePlainTunnelUrl(callback: (String?) -> Unit) {
+        runTailscaleCommand(
+            cmd = "ip --1",
+            callback = object : AdbShellExecutor.ShellCallback {
+                override fun onSuccess(output: String) {
+                    val ip = output.trim()
+                    callback(if (ip.isEmpty()) null else "http://$ip:$DASHBOARD_PORT")
+                }
 
-                                override fun onError(error: String) {
-                                    callback(null)
-                                }
-                            }
-                        )
-                    }
-                } else {
+                override fun onError(error: String) {
                     callback(null)
                 }
             }
-        }
+        )
     }
 
     /**
@@ -895,6 +1734,9 @@ class TailscaleLauncher(
      * WARNING: This will not remove the device from the tailscale console but will disconnect
      */
     fun disableEnvironment(callback: TailscaleCallback? = null) {
+        invalidateDashboardLifecycle()
+        cancelDashboardServeWatch()
+        securedDashboardDaemon = null
         logManager.warn(TAG, "⚠️ Disabling tailscale environment - will need to login again!")
         callback?.onLog("⚠️ Disabling environment (will need login again)...")
 

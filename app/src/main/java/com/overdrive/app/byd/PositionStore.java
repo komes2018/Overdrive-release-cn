@@ -495,7 +495,8 @@ public final class PositionStore {
 
     /**
      * Vehicle models the bodywork axis map in {@link BodyworkSeatProbe#fullAxes()} has actually
-     * been confirmed against. The ids were read off a BYD Seal; no other model has been tested.
+     * been confirmed against. Seal uses the legacy map; Sealion 7 is confirmed only for the
+     * explicitly selected DiLink 5 platform.
      *
      * <p>Reading and capturing is safe everywhere and is how this list grows: capture a position,
      * move the seat, capture another, and compare. If the seat axes track the seat and the mirror
@@ -503,14 +504,20 @@ public final class PositionStore {
      * after an explicit acknowledgement rather than blocked, because a feature that refuses to run
      * anywhere it has not already been proven can never be proven anywhere new.
      */
-    private static final String[] CONFIRMED_MODELS = { "seal", "sealion7" };
+    private static final String[] CONFIRMED_MODELS = { "seal" };
 
     /** Whether the axis map is confirmed for this model id. Null/unknown is NOT confirmed. */
     public static boolean isModelConfirmed(String modelId) {
+        return isModelConfirmed(
+                modelId,
+                com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected());
+    }
+
+    static boolean isModelConfirmed(String modelId, boolean diLink5) {
         if (modelId == null) return false;
         String m = modelId.trim().toLowerCase(java.util.Locale.US);
         for (String c : CONFIRMED_MODELS) if (c.equals(m)) return true;
-        return false;
+        return diLink5 && "sealion7".equals(m);
     }
 
     /**

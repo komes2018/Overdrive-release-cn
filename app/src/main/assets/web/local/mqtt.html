@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title data-i18n="app.mqtt_title">MQTT - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
-    <script src="../shared/theme.js?v=6"></script>
-    <script src="../shared/app-shell.js?v=5"></script>
+    <script src="../shared/theme.js?v=8"></script>
+    <script src="../shared/app-shell.js?v=7"></script>
     <!--
       Bottom-tab manifest for MQTT — three task-based tabs:
         Connections — broker list (or empty-state with a CTA that switches to Add)
@@ -33,7 +33,7 @@
         };
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=24">
+    <link rel="stylesheet" href="../shared/styles.css?v=34">
     <style>
         .conn-card { margin-bottom: 12px; }
         .conn-header { display: flex; align-items: center; gap: 12px; padding: 14px 16px; cursor: pointer; }
@@ -115,11 +115,10 @@
            rule omits so the brand-coloured thumb shows there too. */
         .form-group input.slider {
             width: 100%;
-            height: 6px;
+            height: 44px;
             padding: 0;
             border: none;
-            background: var(--bg-hover);
-            border-radius: var(--radius-full);
+            background: transparent;
         }
         .form-group input.slider:focus { border: none; }
         .form-group input.slider::-moz-range-thumb {

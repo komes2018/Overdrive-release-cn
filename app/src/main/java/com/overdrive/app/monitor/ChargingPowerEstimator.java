@@ -83,13 +83,11 @@ public final class ChargingPowerEstimator {
      */
     private static final int SOC_MIN_RING_POINTS = 4;
     /**
-     * Largest downward counter step a COARSE ring absorbs as gauge dither rather than treating as
-     * a session reset. Sized at just over one 1%-SOC quantum on the smallest PHEV pack we see
-     * (~0.21 kWh on 21.5 kWh), so a single-quantum wobble is tolerated and a genuine multi-quantum
-     * drop still clears the ring. Applied only when {@code minPoints >= 2} — never to the
-     * fine-grained BEV counters (I1).
+     * Largest downward COARSE-ring step treated as gauge dither, expressed as a fraction of the
+     * frozen pack scale. 1.2% absorbs one 1%-SOC quantum plus rounding without making a 0.25 kWh
+     * fixed tolerance swallow a multi-percent drop on a 5 kWh pack.
      */
-    private static final double DITHER_TOLERANCE_KWH = 0.25;
+    private static final double SOC_DITHER_TOLERANCE_FRACTION = 0.012;
     /**
      * Hard staleness bound for the coarse SOC ring. Sized off {@link #SOC_MIN_RING_POINTS}: that
      * floor needs N-1 = 3 quanta inside this span (the baseline consumes one interval), and at
@@ -444,7 +442,9 @@ public final class ChargingPowerEstimator {
             ring.addLast(new long[]{ nowMs, milli, 0 });
             appendedLastCall = true;   // genuine counter movement
         } else if (minPoints >= 2 && milli < last[1]
-                && milli >= last[1] - Math.round(DITHER_TOLERANCE_KWH * 1000.0)) {
+                && Double.isFinite(frozenSocScaleKwh)
+                && milli >= last[1] - Math.round(
+                    frozenSocScaleKwh * SOC_DITHER_TOLERANCE_FRACTION * 1000.0)) {
             // COARSE-RING DITHER TOLERANCE. A 1%-quantised SOC gauge dithers across a boundary
             // near top-of-charge (97→98→97→98), and a single down-step used to wipe the ring —
             // which now costs 3 quanta (~129 min at 0.3 kW) to rebuild, so dithering more often

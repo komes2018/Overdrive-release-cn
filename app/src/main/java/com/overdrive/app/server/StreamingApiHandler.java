@@ -179,6 +179,28 @@ public class StreamingApiHandler {
     private static final java.util.concurrent.atomic.AtomicBoolean panoStartInFlight =
         new java.util.concurrent.atomic.AtomicBoolean(false);
 
+    // A Live View request can cold-start the pano pipeline, then disappear before
+    // the follow-up poll enables streaming (for example, an auth redirect closes
+    // the page). In that state no WebSocket server exists, so its normal 30-second
+    // idle timer has no teardown owner and RMM parks the otherwise-unowned camera
+    // at the ~1fps fallback indefinitely. Arm one watchdog per cold-start window:
+    // wait for the async camera start, then give the browser the same 30-second
+    // connection grace as WebSocketStreamServer. The pipeline performs the final
+    // generation and ownership checks before stopping.
+    // PanoramicCameraGpu gives legacy AVC warmup + AVMCamera/EGL initialization
+    // a bounded 45-second aggregate window. Outlast that window so a successful
+    // late start can still be ownership-checked and retired when its requester
+    // disappeared.
+    private static final long LIVE_VIEW_ORPHAN_START_WAIT_MS = 60_000L;
+    private static final long LIVE_VIEW_ORPHAN_IDLE_MS = 30_000L;
+    private static final long LIVE_VIEW_ORPHAN_POLL_MS = 250L;
+    private static final Object liveViewOrphanWatchdogLock = new Object();
+    private static long liveViewOrphanWatchdogRequestSequence;
+    private static GpuSurveillancePipeline liveViewOrphanWatchdogPipeline;
+    private static boolean liveViewOrphanWatchdogWorkerRunning;
+    private static long liveViewOrphanWatchdogRelinquishedSequence =
+        Long.MIN_VALUE;
+
     /**
      * Kick a pano cold-start asynchronously if the pipeline isn't running
      * yet and no warmup is currently in flight. Returns true iff the
@@ -200,9 +222,9 @@ public class StreamingApiHandler {
     // loops are harmless now: a stale loop exits on its first session check
     // without driving the pano cold start, and ensurePanoStartedNonBlocking is
     // deduped anyway.
-    // 30s, matching BlindSpotControl.REARM_DEADLINE_MS: the retry has to outlast a full
+    // 60s, matching BlindSpotControl.REARM_DEADLINE_MS: the retry has to outlast a full
     // pano cold start (AvcHalWarmup + camera open), not just a brief in-flight lane build.
-    private static final long CAMVIEW_ARM_DEADLINE_MS = 30_000L;
+    private static final long CAMVIEW_ARM_DEADLINE_MS = 60_000L;
     private static final long CAMVIEW_ARM_BACKOFF_MAX_MS = 1_500L;
 
     // Serializes a show's WHOLE mutation transaction: session mint + geometry
@@ -373,11 +395,12 @@ public class StreamingApiHandler {
         // Spawn a single warm-up worker. Re-entrant clicks see the flag
         // and short-circuit without enqueueing duplicate work.
         if (panoStartInFlight.compareAndSet(false, true)) {
-            new Thread(() -> {
+            Thread coldStart = new Thread(() -> {
                 try {
-                    com.overdrive.app.camera.AvcHalWarmup warmup =
-                        new com.overdrive.app.camera.AvcHalWarmup();
-                    warmup.warmupAndWait();
+                    // PanoramicCameraGpu.start() owns the authoritative
+                    // cold-open warmup boundary. A second high-level warmup here
+                    // only extends stale work and can launch AVC before the
+                    // pipeline's lifecycle admission checks run.
                     pano.start();
                     // This cold-start ran OUTSIDE RecordingModeManager (it's the
                     // blind-spot arm path), so the camera is now up at the
@@ -412,9 +435,205 @@ public class StreamingApiHandler {
                 } finally {
                     panoStartInFlight.set(false);
                 }
-            }, "PanoColdStart").start();
+            }, "PanoColdStart");
+            coldStart.setDaemon(true);
+            coldStart.start();
+
+            // Every external cold start gets the same eventual ownership
+            // audit. Blind-spot/camera-view/recording owners are all checked by
+            // stopIfLiveViewStartupOrphaned(), so this remains a no-op for a
+            // legitimately adopted camera and closes the cancellation hole
+            // where a BS/camera-view request disappears during warmup.
+            armLiveViewOrphanWatchdog(pano);
         }
         return false;
+    }
+
+    /**
+     * Tear down a pano cold-start that was never adopted by any camera owner.
+     * The pipeline's final check includes live streaming, recording,
+     * surveillance, blind-spot, camera-view, RMM keep-warm intent, and
+     * persistent-platform policy, so this watchdog is safe for every external
+     * cold-start route.
+     */
+    // Package-visible so HttpServer's authenticated /ws relay can use the
+    // identical owner-safe cleanup when it performs a direct cold start.
+    static void armLiveViewOrphanWatchdog(GpuSurveillancePipeline pipeline) {
+        if (pipeline == null) return;
+        synchronized (liveViewOrphanWatchdogLock) {
+            liveViewOrphanWatchdogPipeline = pipeline;
+            liveViewOrphanWatchdogRequestSequence++;
+            if (liveViewOrphanWatchdogWorkerRunning) return;
+            liveViewOrphanWatchdogWorkerRunning = true;
+
+            Thread watchdog = new Thread(
+                    StreamingApiHandler::runLiveViewOrphanWatchdogLoop,
+                    "LiveViewOrphanWatchdog");
+            watchdog.setDaemon(true);
+            try {
+                watchdog.start();
+            } catch (Throwable startFailure) {
+                liveViewOrphanWatchdogWorkerRunning = false;
+                CameraDaemon.log("Live View orphan watchdog could not start: "
+                        + startFailure.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Drain the newest watchdog request before exiting. A boolean single-flight
+     * gate loses a request when lifecycle B arms while lifecycle A's worker is
+     * returning; the sequence handoff makes that race explicit and lossless.
+     */
+    private static void runLiveViewOrphanWatchdogLoop() {
+        while (true) {
+            final long requestSequence;
+            final GpuSurveillancePipeline pipeline;
+            synchronized (liveViewOrphanWatchdogLock) {
+                requestSequence = liveViewOrphanWatchdogRequestSequence;
+                pipeline = liveViewOrphanWatchdogPipeline;
+            }
+            try {
+                runLiveViewOrphanWatchdog(pipeline, requestSequence);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } catch (Throwable t) {
+                CameraDaemon.log("Live View orphan watchdog failed: "
+                        + t.getMessage());
+            }
+
+            GpuSurveillancePipeline releasedPipeline = null;
+            synchronized (liveViewOrphanWatchdogLock) {
+                if (requestSequence
+                        == liveViewOrphanWatchdogRequestSequence) {
+                    liveViewOrphanWatchdogWorkerRunning = false;
+                    releasedPipeline = liveViewOrphanWatchdogPipeline;
+                    liveViewOrphanWatchdogPipeline = null;
+                } else {
+                    continue;
+                }
+            }
+            try {
+                if (releasedPipeline != null) {
+                    releasedPipeline.auditOwnerlessPipelineAfterExternalRelease(
+                        "live-view startup lease ended");
+                }
+            } catch (Throwable t) {
+                CameraDaemon.log("Live View lease-end owner audit failed: "
+                    + t.getMessage());
+            }
+            return;
+        }
+    }
+
+    private static boolean isLiveViewOrphanWatchdogRequestCurrent(
+            GpuSurveillancePipeline pipeline, long requestSequence) {
+        synchronized (liveViewOrphanWatchdogLock) {
+            return liveViewOrphanWatchdogWorkerRunning
+                    && pipeline == liveViewOrphanWatchdogPipeline
+                    && requestSequence
+                        == liveViewOrphanWatchdogRequestSequence;
+        }
+    }
+
+    /**
+     * Transient owner exposed to the pipeline's centralized final verdict.
+     * This protects the browser's pre-stream startup grace from an unrelated
+     * stream/BS/OEM release audit.
+     */
+    public static boolean hasPendingLiveViewStartupOwner(
+            GpuSurveillancePipeline pipeline) {
+        synchronized (liveViewOrphanWatchdogLock) {
+            return liveViewOrphanWatchdogWorkerRunning
+                    && pipeline != null
+                    && pipeline == liveViewOrphanWatchdogPipeline
+                    && liveViewOrphanWatchdogRelinquishedSequence
+                        != liveViewOrphanWatchdogRequestSequence;
+        }
+    }
+
+    private static boolean relinquishLiveViewStartupOwner(
+            GpuSurveillancePipeline pipeline, long requestSequence) {
+        synchronized (liveViewOrphanWatchdogLock) {
+            if (!liveViewOrphanWatchdogWorkerRunning
+                    || pipeline != liveViewOrphanWatchdogPipeline
+                    || requestSequence
+                        != liveViewOrphanWatchdogRequestSequence) {
+                return false;
+            }
+            liveViewOrphanWatchdogRelinquishedSequence = requestSequence;
+            return true;
+        }
+    }
+
+    private static void runLiveViewOrphanWatchdog(
+            GpuSurveillancePipeline pipeline, long requestSequence)
+            throws InterruptedException {
+        if (pipeline == null) return;
+        CameraDaemon.log("Live View orphan watchdog armed");
+        long startDeadline = android.os.SystemClock.elapsedRealtime()
+                + LIVE_VIEW_ORPHAN_START_WAIT_MS;
+        while (isLiveViewOrphanWatchdogRequestCurrent(
+                    pipeline, requestSequence)
+                && !pipeline.isRunning()
+                && android.os.SystemClock.elapsedRealtime() < startDeadline) {
+            Thread.sleep(LIVE_VIEW_ORPHAN_POLL_MS);
+        }
+        if (!isLiveViewOrphanWatchdogRequestCurrent(
+                    pipeline, requestSequence)) {
+            return;
+        }
+        if (!pipeline.isRunning()) {
+            CameraDaemon.log("Live View orphan watchdog: pipeline did not start"
+                    + " within the bounded wait - disarmed");
+            return;
+        }
+
+        // Capture only after start publishes running=true. start() bumps
+        // the generation at admission, so capturing before warmup would
+        // pin the watchdog to the previous lifecycle.
+        long generation = pipeline.getLifecycleGeneration();
+        long idleDeadline = android.os.SystemClock.elapsedRealtime()
+                + LIVE_VIEW_ORPHAN_IDLE_MS;
+        while (isLiveViewOrphanWatchdogRequestCurrent(
+                    pipeline, requestSequence)
+                && android.os.SystemClock.elapsedRealtime() < idleDeadline) {
+            if (!pipeline.isRunning()
+                    || pipeline.getLifecycleGeneration() != generation) {
+                return;
+            }
+            // Once streaming owns the startup, its WebSocket server's
+            // existing idle timer becomes the sole cleanup authority.
+            if (pipeline.isStreamingEnabled()) {
+                CameraDaemon.log("Live View orphan watchdog: streaming adopted"
+                        + " startup - disarmed");
+                return;
+            }
+            long remaining = idleDeadline
+                    - android.os.SystemClock.elapsedRealtime();
+            if (remaining > 0L) {
+                Thread.sleep(Math.min(LIVE_VIEW_ORPHAN_POLL_MS, remaining));
+            }
+        }
+
+        if (!isLiveViewOrphanWatchdogRequestCurrent(
+                    pipeline, requestSequence)
+                || !pipeline.isRunning()
+                || pipeline.getLifecycleGeneration() != generation
+                || pipeline.isStreamingEnabled()) {
+            return;
+        }
+
+        // ACC state is deliberately not an ownership shortcut. An abandoned
+        // view can occur while driving or before the first authoritative ACC
+        // sample, and retaining it there strands the legacy camera/GPU
+        // indefinitely. The pipeline's final verdict already checks every
+        // actual owner, including RMM activation/keep-warm, recording,
+        // surveillance, native lanes, explicit commands, OEM, and persistent
+        // DiLink policy, under the lifecycle admission locks.
+        if (relinquishLiveViewStartupOwner(pipeline, requestSequence)) {
+            pipeline.stopIfLiveViewStartupOrphaned(generation);
+        }
     }
     
     /**
@@ -422,8 +641,11 @@ public class StreamingApiHandler {
      * @return true if handled
      */
     public static boolean handle(String method, String path, String body, OutputStream out) throws Exception {
-        if (path.equals("/api/stream/enable") && method.equals("POST")) {
-            handleEnableStreaming(out);
+        if ((path.equals("/api/stream/enable")
+                || path.startsWith("/api/stream/enable?"))
+                && method.equals("POST")) {
+            handleEnableStreaming(out, "broadway".equalsIgnoreCase(
+                    GenAiApiHandler.queryParam(path, "decoder")));
             return true;
         }
         if (path.equals("/api/stream/disable") && method.equals("POST")) {
@@ -458,7 +680,12 @@ public class StreamingApiHandler {
             int queryStart = viewPath.indexOf('?');
             String modeString = queryStart >= 0 ? viewPath.substring(0, queryStart) : viewPath;
             int viewMode = Integer.parseInt(modeString);
-            handleStreamViewMode(out, viewMode, parseViewRequest(path));
+            handleStreamViewMode(
+                    out,
+                    viewMode,
+                    parseViewRequest(path),
+                    "broadway".equalsIgnoreCase(
+                            GenAiApiHandler.queryParam(path, "decoder")));
             return true;
         }
         // Blind-spot (view 7/8) LIVE stitch tuning, used by the RoadSense Blind
@@ -1723,8 +1950,30 @@ public class StreamingApiHandler {
         HttpResponse.sendJson(out, response.toString());
     }
     
-    private static void handleEnableStreaming(OutputStream out) throws Exception {
+    static GpuPipelineConfig.StreamingQuality capBroadwayQuality(
+            GpuPipelineConfig.StreamingQuality requested,
+            boolean diLink5,
+            boolean broadwayDecoder) {
+        if (diLink5 && broadwayDecoder
+                && requested.fps > GpuPipelineConfig.StreamingQuality.ULTRA_HIGH.fps) {
+            return GpuPipelineConfig.StreamingQuality.ULTRA_HIGH;
+        }
+        return requested;
+    }
+
+    static GpuPipelineConfig.StreamingQuality effectiveStreamingQuality(
+            boolean broadwayDecoder) {
+        return capBroadwayQuality(
+                GpuPipelineConfig.StreamingQuality.fromString(streamingQuality),
+                com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled(),
+                broadwayDecoder);
+    }
+
+    private static void handleEnableStreaming(
+            OutputStream out, boolean broadwayDecoder) throws Exception {
         GpuSurveillancePipeline pipeline = CameraDaemon.getGpuPipeline();
+        boolean diLink5 =
+                com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
         
         CameraDaemon.log("handleEnableStreaming: pipeline=" + (pipeline != null) + 
                         ", running=" + (pipeline != null && pipeline.isRunning()));
@@ -1739,11 +1988,13 @@ public class StreamingApiHandler {
         // starting=true so the HTTP worker thread isn't blocked. Client
         // re-polls until pipelineRunning flips true.
         if (!ensurePanoStartedNonBlocking(pipeline)) {
+            armLiveViewOrphanWatchdog(pipeline);
             JSONObject pending = new JSONObject();
             pending.put("success", false);
             pending.put("starting", true);
             pending.put("error", "Pipeline starting — try again in a few seconds");
             pending.put("errorCode", "pano_starting");
+            pending.put("dilink5", diLink5);
             HttpResponse.sendJson(out, pending.toString());
             return;
         }
@@ -1754,12 +2005,20 @@ public class StreamingApiHandler {
             response.put("success", true);
             response.put("message", Messages.get("messages.streaming_already_enabled"));
             response.put("wsPort", 8887);
+            response.put("dilink5", diLink5);
             HttpResponse.sendJson(out, response.toString());
             return;
         }
         
         try {
-            GpuPipelineConfig.StreamingQuality q = GpuPipelineConfig.StreamingQuality.fromString(streamingQuality);
+            GpuPipelineConfig.StreamingQuality requested =
+                    GpuPipelineConfig.StreamingQuality.fromString(streamingQuality);
+            GpuPipelineConfig.StreamingQuality q =
+                    capBroadwayQuality(requested, diLink5, broadwayDecoder);
+            if (q != requested) {
+                CameraDaemon.log("DiLink 5 Broadway profile: "
+                        + requested.displayName + " -> " + q.displayName);
+            }
             CameraDaemon.log("handleEnableStreaming: quality=" + q.displayName);
             // enableStreaming fires the pipeline's streamStateListener →
             // RMM.reconcileCameraProfile, which floors the global camera fps at
@@ -1775,6 +2034,7 @@ public class StreamingApiHandler {
             response.put("resolution", q.width + "x" + q.height);
             response.put("fps", q.fps);
             response.put("bitrate", q.bitrate);
+            response.put("dilink5", diLink5);
             HttpResponse.sendJson(out, response.toString());
             
         } catch (Exception e) {
@@ -1928,7 +2188,10 @@ public class StreamingApiHandler {
     }
 
     private static void handleStreamViewMode(
-            OutputStream out, int viewMode, ViewRequest request) throws Exception {
+            OutputStream out,
+            int viewMode,
+            ViewRequest request,
+            boolean broadwayDecoder) throws Exception {
         // Live-view stream accepts only modes 0-6. Blind-spot views 7/8 are
         // NOT valid here — they belong to the dedicated BS pipeline on port
         // 8889 and must route through /api/bs/view/{mode} (validated at
@@ -1988,6 +2251,7 @@ public class StreamingApiHandler {
         // 4-9s warmup runs on a dedup'd worker thread and we report
         // starting=true so the JS poll loop just waits.
         if (!ensurePanoStartedNonBlocking(pipeline)) {
+            armLiveViewOrphanWatchdog(pipeline);
             JSONObject pending = new JSONObject();
             pending.put("success", false);
             pending.put("viewMode", viewMode);
@@ -2005,7 +2269,8 @@ public class StreamingApiHandler {
         if (!pipeline.isStreamingEnabled()) {
             try {
                 CameraDaemon.log("Enabling streaming before setting view mode");
-                GpuPipelineConfig.StreamingQuality q = GpuPipelineConfig.StreamingQuality.fromString(streamingQuality);
+                GpuPipelineConfig.StreamingQuality q =
+                        effectiveStreamingQuality(broadwayDecoder);
                 pipeline.enableStreaming(q.width, q.height, q.fps, q.bitrate);
             } catch (Exception e) {
                 HttpResponse.sendJsonError(out, Messages.get("errors.streaming_enable_failed_with_detail", e.getMessage()));
@@ -2158,6 +2423,7 @@ public class StreamingApiHandler {
         GpuSurveillancePipeline pano = CameraDaemon.getGpuPipeline();
         // Async-warm pano if needed; return starting=true while it's coming up.
         if (!ensurePanoStartedNonBlocking(pano)) {
+            armLiveViewOrphanWatchdog(pano);
             JSONObject pending = new JSONObject();
             pending.put("success", false);
             pending.put("viewMode", 6);

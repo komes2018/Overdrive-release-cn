@@ -5,7 +5,7 @@ package android.hardware;
  *
  * <p>Added so {@link android.hardware.bydauto.BYDAutoDeviceManager}'s
  * {@code enableDevice}/{@code disableDevice}/{@code addDevice} signatures can be declared with
- * their REAL parameter type (taken from a reference app's bundled SDK stub) rather than a guessed
+ * their real platform parameter type rather than a guessed
  * {@code Object} or {@code int}. Getting the parameter type right matters: the BYD HAL dispatches
  * reflective calls on the EXACT declared type, so a wrapper/`Object` mismatch silently resolves to
  * no method at all — the same class of bug that kept the cluster charge-power read dead when it was

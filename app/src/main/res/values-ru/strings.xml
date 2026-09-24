@@ -239,7 +239,7 @@
     <string name="onboarding_camera_windshield_skip">Нет благодарности</string>
     <!-- Vehicle profile chapter -->
     <string name="onboarding_vehicle_title">Укажите Overdrive вашу батарею</string>
-    <string name="onboarding_vehicle_body">Выберите свою модель и мы заполним кВт или напечатаем ее самостоятельно (15–120). Это повышает точность оценок диапазона и зарядки. Вы можете пропустить и установить их позже.</string>
+    <string name="onboarding_vehicle_body">Выберите свою модель и мы заполним кВт или напечатаем ее самостоятельно (5–120). Это повышает точность оценок диапазона и зарядки. Вы можете пропустить и установить их позже.</string>
     <string name="onboarding_vehicle_primary">Установить батарею</string>
     <!-- Dashboard orientation chapter -->
     <string name="onboarding_dash_tiles_title">Ваш коктейль на взгляд</string>
@@ -744,6 +744,7 @@
     <string name="rail_vehicle">Автомобиль</string>
     <string name="rail_projection">Проекция</string>
     <string name="rail_trips">Поездки</string>
+    <string name="rail_parking">Парковка</string>
     <string name="rail_charging">Зарядка</string>
     <string name="rail_automations">Автоматизации</string>
     <string name="rail_key_mapping">Сопоставление клавиш</string>
@@ -912,7 +913,6 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">На страже</string>
-    <string name="dashboard_modern_vehicle_status">Состояние автомобиля</string>
     <string name="dashboard_subtitle_all_systems">Все системы онлайн</string>
     <string name="dashboard_subtitle_some_offline">%1$d услуг %2$d онлайн</string>
     <string name="dashboard_subtitle_no_tunnel">Дистанционный доступ в автономном режиме</string>
@@ -932,14 +932,11 @@
     <string name="vehicle_dialog_title">Установка емкости батареи</string>
     <string name="vehicle_dialog_capacity_label">Пропускная способность (kWh)</string>
     <string name="vehicle_dialog_capacity_suffix">kWh</string>
-    <string name="vehicle_dialog_capacity_helper">от 15 до 120 kWh. Оставьте, чтобы использовать модель по умолчанию.</string>
+    <string name="vehicle_dialog_capacity_helper">от 5 до 120 kWh. Оставьте, чтобы использовать модель по умолчанию.</string>
     <string name="vehicle_dialog_model_label">Модель</string>
     <string name="vehicle_dialog_save">Сохранить</string>
     <string name="vehicle_dialog_reset">Перезагрузка на автоматическое обнаружение</string>
-    <string name="vehicle_dialog_detection">Определение: %1$s</string>
-    <string name="vehicle_dialog_detection_auto">Автоматически</string>
-    <string name="vehicle_dialog_detection_manual">Вручную</string>
-    <string name="vehicle_dialog_invalid_capacity">Пропускная способность должна быть 15 - 120 kWh</string>
+    <string name="vehicle_dialog_invalid_capacity">Пропускная способность должна быть 5 - 120 kWh</string>
     <string name="vehicle_dialog_summary_effective">Эффективность: %1$.1f kWh</string>
     <string name="vehicle_dialog_summary_calibration">Последняя калибровка: %1$.1f%% на %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">недоступна</string>
@@ -1390,6 +1387,10 @@
     <string name="projection_preset_right">Правая половина</string>
     <string name="projection_preset_center">По центру</string>
     <string name="projection_lock_aspect">Сохранять аспект кластера</string>
+    <string name="dashboard_modern_vehicle_status">Состояние автомобиля</string>
+    <string name="vehicle_dialog_detection">Определение: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Автоматически</string>
+    <string name="vehicle_dialog_detection_manual">Вручную</string>
     <!-- Rail category headers -->
     <string name="rail_section_cameras">Камеры</string>
     <string name="rail_section_controls">Управление</string>
@@ -1397,8 +1398,6 @@
     <string name="rail_section_automation">Автоматизация</string>
     <string name="rail_section_system">Система</string>
     <string name="rail_collapse_label">Свернуть</string>
-
-    <!-- Newly translated strings synced from English sources -->
     <string name="tailscale_enable_adb">Разрешить удалённый ADB через Tailscale</string>
     <string name="tailscale_adb_explainer">Открывает доступ к ADB из tailnet, но не из общедоступного интернета. Любое устройство в tailnet с авторизованным ключом ADB получает полный доступ к командной строке головного устройства. ADB уже принимает подключения из локальной сети, поэтому отключение этой настройки не закрывает его полностью.</string>
     <string name="tailscale_adb_endpoint">adb connect %1$s</string>
@@ -1435,9 +1434,9 @@
     <string name="recording_lib_index_down_title">Индекс записей недоступен</string>
     <string name="recording_lib_index_down_body">Записи сохранены на диске, но индекс библиотеки недоступен. Повторная попытка выполняется автоматически…</string>
     <string name="toast_share_failed">Не удалось поделиться</string>
-    <string name="daemons_wifi_auto_enable_title">Автоматическое включение Wi-Fi</string>
-    <string name="daemons_wifi_auto_enable_subtitle">OverDrive восстанавливает Wi-Fi при парковке и при запуске фоновых сервисов. Выключите это, чтобы оставить текущее состояние Wi-Fi под контролем автомобиля.</string>
-    <string name="daemons_wifi_auto_enable_save_failed">Не удалось сохранить настройки автоматического Wi-Fi.</string>
+    <string name="daemons_wifi_auto_enable_title">Wi&#8209;Fi</string>
+    <string name="daemons_wifi_auto_enable_subtitle">Включает или выключает Wi&#8209;Fi сейчас. Если Wi&#8209;Fi выключен, службы наблюдения OverDrive не включат его снова.</string>
+    <string name="daemons_wifi_auto_enable_save_failed">Не удалось изменить состояние Wi&#8209;Fi.</string>
     <string name="toast_traffic_monitor_persist_failed">Применяется, но предпочтение не удалось сохранить — оно не переживет обновление прошивки.</string>
     <string name="dashboard_tunnel_failed">Туннельная ошибка</string>
     <string name="dashboard_tunnel_stopping">Остановка туннеля..</string>
@@ -1661,52 +1660,4 @@
     <string name="settings_navigation_shown">показано</string>
     <string name="settings_navigation_hidden">скрыто</string>
     <string name="settings_navigation_option_state">%1$s, %2$s в навигации</string>
-    <plurals name="recording_actor_animal">
-        <item quantity="one">%1$d животное</item>
-        <item quantity="few">%1$d животных</item>
-        <item quantity="many">%1$d животных</item>
-        <item quantity="other">%1$d животного</item>
-    </plurals>
-    <plurals name="recording_actor_bike">
-        <item quantity="one">%1$d велосипед</item>
-        <item quantity="few">%1$d велосипеда</item>
-        <item quantity="many">%1$d велосипедов</item>
-        <item quantity="other">%1$d велосипеда</item>
-    </plurals>
-    <plurals name="recording_actor_person">
-        <item quantity="one">%1$d человек</item>
-        <item quantity="few">%1$d человека</item>
-        <item quantity="many">%1$d человек</item>
-        <item quantity="other">%1$d человека</item>
-    </plurals>
-    <plurals name="recording_actor_vehicle">
-        <item quantity="one">%1$d автомобиль</item>
-        <item quantity="few">%1$d автомобиля</item>
-        <item quantity="many">%1$d автомобилей</item>
-        <item quantity="other">%1$d автомобиля</item>
-    </plurals>
-    <plurals name="recording_headline_animal">
-        <item quantity="one">Обнаружено животное</item>
-        <item quantity="few">Обнаружены животные</item>
-        <item quantity="many">Обнаружены животные</item>
-        <item quantity="other">Обнаружены животные</item>
-    </plurals>
-    <plurals name="recording_headline_bike">
-        <item quantity="one">Обнаружен велосипед</item>
-        <item quantity="few">Обнаружены велосипеды</item>
-        <item quantity="many">Обнаружены велосипеды</item>
-        <item quantity="other">Обнаружены велосипеды</item>
-    </plurals>
-    <plurals name="recording_headline_person">
-        <item quantity="one">Обнаружен человек</item>
-        <item quantity="few">Обнаружены люди</item>
-        <item quantity="many">Обнаружены люди</item>
-        <item quantity="other">Обнаружены люди</item>
-    </plurals>
-    <plurals name="recording_headline_vehicle">
-        <item quantity="one">Обнаружен автомобиль</item>
-        <item quantity="few">Обнаружены автомобили</item>
-        <item quantity="many">Обнаружены автомобили</item>
-        <item quantity="other">Обнаружены автомобили</item>
-    </plurals>
 </resources>

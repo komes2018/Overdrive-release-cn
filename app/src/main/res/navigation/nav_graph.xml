@@ -44,6 +44,18 @@
         android:label="@string/rail_recordings"
         tools:layout="@layout/fragment_recordings" />
 
+    <!-- Parking Intelligence (web canonical): sessions, neighbour timeline, stills -->
+    <fragment
+        android:id="@+id/parkingFragment"
+        android:name="com.overdrive.app.ui.fragment.WebViewFragment"
+        android:label="@string/rail_parking"
+        tools:layout="@layout/fragment_webview">
+        <argument
+            android:name="page_path"
+            app:argType="string"
+            android:defaultValue="/parking" />
+    </fragment>
+
     <!-- Surveillance settings (web) — kept reachable from Recordings → Settings ↗ button -->
     <fragment
         android:id="@+id/surveillanceSettingsWebFragment"

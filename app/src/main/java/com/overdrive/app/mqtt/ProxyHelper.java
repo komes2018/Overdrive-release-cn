@@ -208,6 +208,66 @@ public class ProxyHelper {
     }
 
     /**
+     * Proxy route CHAIN for clients whose destinations are PUBLIC internet
+     * (BYD Cloud, GitHub release metadata): the selected local proxy first,
+     * then a DIRECT fallback — or just DIRECT when no proxy is up.
+     *
+     * <p>Why a chain: {@link #isProxyAvailable()} is a blind loopback TCP
+     * probe. It cannot distinguish a general-egress proxy (sing-box, or
+     * Tailscale fronting an exit node) from the tailnet-only Tailscale SOCKS
+     * listener that the Daemons screen exposes for private MQTT brokers —
+     * and it prefers the Tailscale port. A tailnet-only listener stays
+     * healthy under the probe while every public destination sent through it
+     * fails, so a single frozen proxy wedges the caller for as long as the
+     * listener is up ({@link #invalidateCache()} just re-selects it). OkHttp
+     * consumers install the chain via a per-call ProxySelector: proxy-first
+     * behavior is preserved where the proxy IS the egress (sing-box /
+     * exit-node cars), and everything else falls through to direct within
+     * the same call. Do NOT use this for privacy-sensitive traffic — that's
+     * {@link #getFailClosedHttpProxy()}'s job, which intentionally has no
+     * direct fallback.
+     */
+    public static java.util.List<Proxy> proxyRouteChain(Proxy selected) {
+        if (selected == null || Proxy.NO_PROXY.equals(selected)) {
+            return java.util.Collections.singletonList(Proxy.NO_PROXY);
+        }
+        java.util.List<Proxy> chain = new java.util.ArrayList<>(2);
+        chain.add(selected);
+        chain.add(Proxy.NO_PROXY);
+        return chain;
+    }
+
+    /**
+     * Ready-made per-call OkHttp {@link java.net.ProxySelector} for simple
+     * PUBLIC-internet clients (weather, analytics ping, RoadSense sync, map
+     * routing/tiles): re-evaluates {@link #getHttpProxy()} on every request
+     * and returns {@link #proxyRouteChain}, so the proxy is picked up when it
+     * appears and a tailnet-only listener can't wedge the feature. Clients
+     * with bespoke logging or resolution cadence (BYD cloud transport,
+     * AppUpdater, Telegram daemon) keep their own selectors built on
+     * {@link #proxyRouteChain}.
+     */
+    public static java.net.ProxySelector chainProxySelector() {
+        return CHAIN_PROXY_SELECTOR;
+    }
+
+    private static final java.net.ProxySelector CHAIN_PROXY_SELECTOR =
+            new java.net.ProxySelector() {
+                @Override
+                public java.util.List<Proxy> select(java.net.URI uri) {
+                    return proxyRouteChain(getHttpProxy());
+                }
+
+                @Override
+                public void connectFailed(
+                        java.net.URI uri,
+                        SocketAddress address,
+                        java.io.IOException failure) {
+                    // Only proxy legs are reported here (OkHttp never calls
+                    // connectFailed for DIRECT routes) — re-probe next call.
+                    invalidateCache();
+                }
+            };
      * HTTP proxy selection for privacy-sensitive traffic. When the user has
      * enabled proxy-only routing but the listener is still unavailable, return
      * the expected local SOCKS endpoint so clients fail closed instead of

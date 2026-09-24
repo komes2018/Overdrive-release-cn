@@ -26,8 +26,12 @@ object VehicleArt {
         "atto2" -> R.drawable.vehicle_atto2
         "han" -> R.drawable.vehicle_han
         "tang" -> R.drawable.vehicle_tang
+        "m6" -> R.drawable.vehicle_m6
         "seagull" -> R.drawable.vehicle_seagull
         "destroyer", "destroyer05" -> R.drawable.vehicle_destroyer05
+        // Shark currently reuses seal.glb in the manifest; keep its still in
+        // lockstep with the actual 3D asset until a dedicated model ships.
+        "shark" -> R.drawable.vehicle_seal
         else -> R.drawable.vehicle_fallback
     }
 

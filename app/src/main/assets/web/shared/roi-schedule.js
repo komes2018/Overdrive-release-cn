@@ -39,7 +39,9 @@ var RoiEditor = (function() {
         canvas.addEventListener('touchend', function(e) { e.preventDefault(); painting = false; });
         canvas.addEventListener('touchcancel', function() { painting = false; });
 
-        loadConfig(); loadSnapshot(currentQuadrant);
+        var loaded = loadConfig();
+        loadSnapshot(currentQuadrant);
+        return loaded;
     }
 
     function getBlock(cx, cy) {
@@ -149,7 +151,7 @@ var RoiEditor = (function() {
 
     function updateStatus() {
         var el = document.getElementById('roiStatus'); if (!el) return;
-        if (!roiEnabledFlags[currentQuadrant]) { el.textContent = BYD.i18n.t('roi.full_frame', {cam: qName(currentQuadrant)}); return; }
+        if (!roiEnabledFlags[currentQuadrant]) { el.textContent = BYD.i18n.t('roi.full_frame_off', {cam: qName(currentQuadrant)}); return; }
         var ac = activeCount();
         el.textContent = BYD.i18n.t('roi.blocks_active', {cam: qName(currentQuadrant), active: ac, total: TOTAL});
     }
@@ -216,7 +218,7 @@ var RoiEditor = (function() {
     function msg(m, t) { if (typeof window.showToast === 'function') window.showToast(m, t); }
 
     function loadConfig() {
-        fetch('/api/surveillance/config').then(function(r) { return r.json(); }).then(function(d) {
+        return fetch('/api/surveillance/config').then(function(r) { return r.json(); }).then(function(d) {
             var cfg = (d && d.config) ? d.config : d;  // Unwrap {config: ...} envelope
             var qk = ['Q0', 'Q1', 'Q2', 'Q3'];
             for (var q = 0; q < 4; q++) {
@@ -257,7 +259,7 @@ var ScheduleEditor = (function() {
         }
         return out;
     })();
-    function init() { loadConfig(); }
+    function init() { return loadConfig(); }
     function pad(n) { return n < 10 ? '0'+n : ''+n; }
     function msg(m,t) { if (typeof window.showToast === 'function') window.showToast(m,t); }
 
@@ -367,7 +369,7 @@ var ScheduleEditor = (function() {
             .then(function(){ if (saveBtn) saveBtn.disabled = false; updateSaveBtn(); });
     }
     function loadConfig() {
-        fetch('/api/surveillance/config').then(function(r){return r.json();}).then(function(d) {
+        return fetch('/api/surveillance/config').then(function(r){return r.json();}).then(function(d) {
             var cfg = d.config || d;
             var en = cfg.scheduleEnabled || false; rules = [];
             var arr = cfg.scheduleRules;

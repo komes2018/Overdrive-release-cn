@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material Symbols Rounded: local_parking (24px, weight 400, fill 0) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/colorOnSurfaceVariant">
+    <group
+        android:scaleX="0.025"
+        android:scaleY="0.025"
+        android:translateY="24">
+        <path
+            android:fillColor="@android:color/white"
+            android:pathData="M360-160q-33 0-56.5-23.5T280-240v-480q0-33 23.5-56.5T360-800h180q83 0 141.5 58.5T740-600q0 83-58.5 141.5T540-400H440v160q0 33-23.5 56.5T360-160Zm80-400h100q25 0 42.5-17.5T600-620q0-25-17.5-42.5T540-680H440v120Z"/>
+    </group>
+</vector>

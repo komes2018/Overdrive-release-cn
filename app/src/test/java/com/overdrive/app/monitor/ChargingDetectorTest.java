@@ -50,6 +50,51 @@ public class ChargingDetectorTest {
     }
 
     @Test
+    public void onlyAnObservedParkGearPassesTheParkGuard() {
+        assertTrue(ChargingDetector.isObservedParkGear(
+                GearMonitor.GEAR_P, GearMonitor.GEAR_P));
+        assertFalse(ChargingDetector.isObservedParkGear(
+                BydVehicleData.UNAVAILABLE, GearMonitor.GEAR_P));
+        assertFalse(ChargingDetector.isObservedParkGear(
+                GearMonitor.GEAR_D, GearMonitor.GEAR_P));
+    }
+
+    @Test
+    public void freshExternalVerdictSurvivesLocalRecomputeThenExpires() throws Exception {
+        ChargingDetector detector = newDetector();
+
+        detector.acceptExternalVerdict(true, "vehicle-telemetry", 40L);
+        detector.updateAccState(false);
+        assertTrue(detector.isCharging());
+
+        awaitStopped(detector);
+    }
+
+    @Test
+    public void refreshedExternalVerdictRenewsItsLease() throws Exception {
+        ChargingDetector detector = newDetector();
+
+        detector.acceptExternalVerdict(true, "vehicle-telemetry", 50L);
+        Thread.sleep(30L);
+        detector.acceptExternalVerdict(true, "vehicle-telemetry", 50L);
+        Thread.sleep(30L);
+        detector.updateAccState(true);
+        assertTrue(detector.isCharging());
+
+        awaitStopped(detector);
+    }
+
+    @Test
+    public void clearingExternalVerdictReleasesTheLease() throws Exception {
+        ChargingDetector detector = newDetector();
+
+        detector.acceptExternalVerdict(true, "vehicle-telemetry", 5_000L);
+        detector.clearExternalVerdict();
+
+        awaitStopped(detector);
+    }
+
+    @Test
     public void explicitTerminalBmsStateStopsImmediately() throws Exception {
         ChargingDetector detector = newDetector();
 
@@ -394,7 +439,7 @@ public class ChargingDetectorTest {
         detector.observeRawChargingSignal(
                 com.overdrive.app.byd.ChargeSourceClassifier.SRC_CLUSTER, 2.7);
         detector.observeRawChargingSignal(
-                com.overdrive.app.byd.ChargeSourceClassifier.SRC_CLUSTER, 2.8);
+                com.overdrive.app.byd.ChargeSourceClassifier.SRC_CLUSTER, 3.0);
 
         BydVehicleData restart = new BydVehicleData.Builder()
                 .chargingState(ChargingStateData.CHARGING_BATTERY_STATE_CHARGING)

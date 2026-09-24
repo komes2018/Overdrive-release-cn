@@ -157,13 +157,14 @@ class SettingsAppearanceFragment : Fragment() {
     private fun currentLocaleDisplay(): String {
         val locales = AppCompatDelegate.getApplicationLocales()
         val tag = if (!locales.isEmpty) locales[0]?.toLanguageTag() else null
+        val displayLocale = resources.configuration.locales[0]
         return if (tag.isNullOrEmpty()) {
             getString(R.string.settings_theme_auto).substringBefore('(').trim()
-                .ifEmpty { Locale.getDefault().displayLanguage }
+                .ifEmpty { displayLocale.displayLanguage }
         } else {
-            Locale.forLanguageTag(tag).getDisplayName(Locale.getDefault())
+            Locale.forLanguageTag(tag).getDisplayName(displayLocale)
                 .replaceFirstChar {
-                    if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString()
+                    if (it.isLowerCase()) it.titlecase(displayLocale) else it.toString()
                 }
         }
     }

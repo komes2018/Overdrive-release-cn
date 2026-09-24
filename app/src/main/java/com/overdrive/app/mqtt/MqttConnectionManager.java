@@ -88,6 +88,13 @@ public class MqttConnectionManager {
 
     private volatile boolean initialized = false;
 
+    // Widest odometer regression treated as source jitter rather than a real change: one coarse
+    // count on a miles cluster (1 mi = 1.609 km) plus the snapshot tier's 0.5 rounding.
+    private static final double ODOMETER_JITTER_TOLERANCE_KM = 2.2;
+    // High-water mark of the odometer handed to MQTT. Only touched from collectTelemetry(),
+    // which is synchronized(this), so it needs no separate guard.
+    private double lastOdometerKm = -1;
+
     // One-way shutdown latch + lifecycle mutex. stopAll() is only ever called on
     // daemon shutdown (never followed by a restart of the same instance), but it
     // runs on the shutdown thread while add/update tasks queued on controlExecutor
@@ -585,6 +592,34 @@ public class MqttConnectionManager {
     }
 
     /**
+     * Quantize the odometer to one decimal and hold it monotonic.
+     *
+     * <p>The odometer is advertised to Home Assistant as {@code total_increasing}, where a
+     * DECREASE is read as a counter reset and corrupts the long-term statistic. The reading can
+     * decrease without the car moving: OdometerReader returns the 0.1 km fine register while it
+     * is readable and the whole-unit coarse register when it is not, so one failed reflection
+     * call turns 12345.6 into 12345.0. The snapshot fallback rounds, so it can overshoot to
+     * 12346 and drop from there.
+     *
+     * <p>Small regressions are that jitter and are suppressed. A LARGE drop is not jitter — it
+     * means the distance unit was switched (km/miles is a ~38% change, via
+     * setDistanceUnitOverride) or the register truly reset. Clamping those would freeze the
+     * odometer at a stale high value for the life of the process, so the guard is deliberately
+     * bounded instead of absolute.
+     */
+    private double publishableOdometerKm(double odoKm) {
+        // One decimal: 0.1 km is the finest the register offers, so further digits are
+        // conversion noise (a miles cluster's 0.1 mi quantum already lands on 0.16 km).
+        double value = Math.round(odoKm * 10.0) / 10.0;
+        double drop = lastOdometerKm - value;
+        if (lastOdometerKm > 0 && drop > 0 && drop <= ODOMETER_JITTER_TOLERANCE_KM) {
+            return lastOdometerKm;
+        }
+        lastOdometerKm = value;
+        return value;
+    }
+
+    /**
      * Collect telemetry from all data sources.
      * Same fields as ABRP Gold Standard payload for consistency.
      */
@@ -630,6 +665,40 @@ public class MqttConnectionManager {
             ChargingStateData chargingState = chargingSnapshot != null
                     ? chargingSnapshot.getChargingState() : null;
             SocHistoryDatabase chargingDb = SocHistoryDatabase.getInstance();
+            boolean diLink5 =
+                    com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
+            if (diLink5) putDiLink5UnknownStateTelemetry(payload);
+            double diLink5Speed = Double.NaN;
+            int diLink5Gear = BydVehicleData.UNAVAILABLE;
+            Boolean diLink5Parked = null;
+            if (diLink5) {
+                try {
+                    diLink5Speed = collector.readCurrentSpeedKmh();
+                } catch (Throwable ignored) {
+                }
+                try {
+                    diLink5Gear = collector.readGearNow();
+                    if (!isValidGearMode(diLink5Gear)) {
+                        diLink5Gear = gearMonitor.getCurrentGearIfFresh();
+                    }
+                } catch (Throwable ignored) {
+                    diLink5Gear = BydVehicleData.UNAVAILABLE;
+                }
+                boolean accOn = false;
+                boolean accAuthoritative = false;
+                boolean accFresh = false;
+                try {
+                    accOn = com.overdrive.app.monitor.AccMonitor.isAccOn();
+                    accAuthoritative = com.overdrive.app.monitor.AccMonitor
+                            .isAccStateAuthoritative();
+                    accFresh = com.overdrive.app.monitor.AccMonitor
+                            .isAccStateFreshForSafety();
+                } catch (Throwable ignored) {
+                }
+                diLink5Parked = resolveDiLink5Parked(
+                        accOn, accAuthoritative, accFresh,
+                        diLink5Speed, diLink5Gear);
+            }
 
             // utc
             payload.put("utc", now / 1000);
@@ -660,6 +729,9 @@ public class MqttConnectionManager {
             try {
                 boolean accOn = false;
                 try { accOn = com.overdrive.app.monitor.AccMonitor.isAccOn(); } catch (Throwable ignored) {}
+                if (diLink5 && Boolean.FALSE.equals(diLink5Parked)) {
+                    accOn = true;
+                }
                 double motorKw = 0;
                 if (accOn && vd != null && !Double.isNaN(vd.enginePowerKw)
                         && Math.abs(vd.enginePowerKw) <= 300) {
@@ -675,14 +747,26 @@ public class MqttConnectionManager {
             // stale non-zero value would keep publishing after parking and HA would think the car
             // is still moving. The car is parked when ACC is off, so force 0 — same handling as
             // power above. GPS stays a driving-only fallback for a momentary NaN bus speed.
-            boolean accOnSpeed = false;
-            try { accOnSpeed = com.overdrive.app.monitor.AccMonitor.isAccOn(); } catch (Throwable ignored) {}
-            if (!accOnSpeed) {
-                payload.put("speed", 0);
-            } else if (vd != null && !Double.isNaN(vd.speedKmh)) {
-                payload.put("speed", vd.speedKmh);
-            } else if (gpsMonitor.hasLocation()) {
-                payload.put("speed", gpsMonitor.getSpeed() * 3.6);
+            if (diLink5) {
+                if (Double.isFinite(diLink5Speed) && diLink5Speed >= 0.0) {
+                    payload.put("speed", diLink5Speed);
+                } else if (Boolean.TRUE.equals(diLink5Parked)) {
+                    payload.put("speed", 0);
+                } else if (gpsMonitor.hasLocation()) {
+                    payload.put("speed", gpsMonitor.getSpeed() * 3.6);
+                } else {
+                    payload.put("speed", JSONObject.NULL);
+                }
+            } else {
+                boolean accOnSpeed = false;
+                try { accOnSpeed = com.overdrive.app.monitor.AccMonitor.isAccOn(); } catch (Throwable ignored) {}
+                if (!accOnSpeed) {
+                    payload.put("speed", 0);
+                } else if (vd != null && !Double.isNaN(vd.speedKmh)) {
+                    payload.put("speed", vd.speedKmh);
+                } else if (gpsMonitor.hasLocation()) {
+                    payload.put("speed", gpsMonitor.getSpeed() * 3.6);
+                }
             }
 
             // lat, lon
@@ -845,19 +929,24 @@ public class MqttConnectionManager {
             // Gear source preference: the 5Hz GearMonitor poller (fresh within ~200ms) over the
             // 5s/90s collector snapshot — via the snapshot a P→D shift took 10-14s to reach
             // consumers. Snapshot stays as the fallback when the monitor isn't running.
-            boolean isParked = false;
-            if (gearMonitor.isActive()) {
-                isParked = gearMonitor.getCurrentGear() == GearMonitor.GEAR_P;
-            } else if (vd != null && vd.gearMode != BydVehicleData.UNAVAILABLE) {
-                isParked = vd.gearMode == GearMonitor.GEAR_P;
+            if (diLink5) {
+                payload.put("is_parked", diLink5Parked == null
+                        ? JSONObject.NULL : (diLink5Parked ? 1 : 0));
             } else {
-                isParked = gearMonitor.getCurrentGear() == GearMonitor.GEAR_P;
+                boolean isParked = false;
+                if (gearMonitor.isActive()) {
+                    isParked = gearMonitor.getCurrentGear() == GearMonitor.GEAR_P;
+                } else if (vd != null && vd.gearMode != BydVehicleData.UNAVAILABLE) {
+                    isParked = vd.gearMode == GearMonitor.GEAR_P;
+                } else {
+                    isParked = gearMonitor.getCurrentGear() == GearMonitor.GEAR_P;
+                }
+                if (!isParked) {
+                    try { if (!com.overdrive.app.monitor.AccMonitor.isAccOn()) isParked = true; }
+                    catch (Throwable ignored) {}
+                }
+                payload.put("is_parked", isParked ? 1 : 0);
             }
-            if (!isParked) {
-                try { if (!com.overdrive.app.monitor.AccMonitor.isAccOn()) isParked = true; }
-                catch (Throwable ignored) {}
-            }
-            payload.put("is_parked", isParked ? 1 : 0);
 
             // elevation, heading
             if (gpsMonitor.hasLocation()) {
@@ -878,10 +967,20 @@ public class MqttConnectionManager {
                 if (battTemp >= -40 && battTemp <= 80) payload.put("batt_temp", battTemp);
             }
 
-            // odometer
-            if (vd != null && vd.totalMileageKm != BydVehicleData.UNAVAILABLE) {
-                int raw = vd.totalMileageKm;
-                payload.put("odometer", raw > 1_000_000 ? raw / 10.0 : (double) raw);
+            // odometer — 0.1 km resolution when the hardware offers it. Sourced from
+            // OdometerReader rather than vd.totalMileageKm because that snapshot field is an
+            // int and cannot carry a decimal at all. OdometerReader lives in this process
+            // (CameraDaemon inits both) and already falls back to the same snapshot value when
+            // its reflection fails, so this only ever adds precision, never removes a reading.
+            double odoKm = -1;
+            try {
+                odoKm = com.overdrive.app.trips.OdometerReader.getInstance().readOdometerKm();
+            } catch (Throwable ignored) {}
+            if (odoKm <= 0 && vd != null && vd.totalMileageKm != BydVehicleData.UNAVAILABLE) {
+                odoKm = vd.totalMileageKm;
+            }
+            if (odoKm > 0) {
+                payload.put("odometer", publishableOdometerKm(odoKm));
             }
 
             // soh — use the DISPLAYED (capped, anchored) value so MQTT agrees with
@@ -923,16 +1022,26 @@ public class MqttConnectionManager {
             // 10-14s to reach HA, and the gearbox SDK listener can't be used (crashes
             // as uid 2000). The snapshot stays as the fallback when the monitor isn't
             // running.
-            boolean accOnGear = false;
-            try { accOnGear = com.overdrive.app.monitor.AccMonitor.isAccOn(); } catch (Throwable ignored) {}
-            if (!accOnGear) {
-                payload.put("gear", GearMonitor.gearToString(GearMonitor.GEAR_P));
-            } else if (gearMonitor.isActive()) {
-                payload.put("gear", GearMonitor.gearToString(gearMonitor.getCurrentGear()));
-            } else if (vd != null && vd.gearMode != BydVehicleData.UNAVAILABLE) {
-                payload.put("gear", GearMonitor.gearToString(vd.gearMode));
+            if (diLink5) {
+                if (isValidGearMode(diLink5Gear)) {
+                    payload.put("gear", GearMonitor.gearToString(diLink5Gear));
+                } else if (Boolean.TRUE.equals(diLink5Parked)) {
+                    payload.put("gear", GearMonitor.gearToString(GearMonitor.GEAR_P));
+                } else {
+                    payload.put("gear", JSONObject.NULL);
+                }
             } else {
-                payload.put("gear", GearMonitor.gearToString(gearMonitor.getCurrentGear()));
+                boolean accOnGear = false;
+                try { accOnGear = com.overdrive.app.monitor.AccMonitor.isAccOn(); } catch (Throwable ignored) {}
+                if (!accOnGear) {
+                    payload.put("gear", GearMonitor.gearToString(GearMonitor.GEAR_P));
+                } else if (gearMonitor.isActive()) {
+                    payload.put("gear", GearMonitor.gearToString(gearMonitor.getCurrentGear()));
+                } else if (vd != null && vd.gearMode != BydVehicleData.UNAVAILABLE) {
+                    payload.put("gear", GearMonitor.gearToString(vd.gearMode));
+                } else {
+                    payload.put("gear", GearMonitor.gearToString(gearMonitor.getCurrentGear()));
+                }
             }
 
             // ==================== EXTENDED TELEMETRY (BYD API overhaul) ====================
@@ -1067,11 +1176,10 @@ public class MqttConnectionManager {
                 if (vd.chargerWorkState != BydVehicleData.UNAVAILABLE) payload.put("charger_state", vd.chargerWorkState);
                 if (vd.chargingMode != BydVehicleData.UNAVAILABLE) payload.put("charging_mode", vd.chargingMode);
                 if (vd.chargingGunState != BydVehicleData.UNAVAILABLE) payload.put("charging_gun", vd.chargingGunState);
-                if (vd.chargingType != BydVehicleData.UNAVAILABLE) payload.put("charging_type", vd.chargingType);
+                putChargingTypeTelemetry(payload, vd, diLink5);
                 if (vd.chargingPercent != BydVehicleData.UNAVAILABLE
                         && vd.chargingPercent >= 0 && vd.chargingPercent <= 100)
                     payload.put("charging_pct", vd.chargingPercent);
-                payload.put("charging_v2l", vd.vtolCharging ? 1 : 0);
                 if (vd.wirelessChargingLeftState != BydVehicleData.UNAVAILABLE) payload.put("wireless_charging_left", vd.wirelessChargingLeftState);
                 if (vd.wirelessChargingRightState != BydVehicleData.UNAVAILABLE) payload.put("wireless_charging_right", vd.wirelessChargingRightState);
                 if (vd.wirelessChargingStatus != BydVehicleData.UNAVAILABLE) payload.put("wireless_charging_status", vd.wirelessChargingStatus);
@@ -1085,24 +1193,30 @@ public class MqttConnectionManager {
                         if (p > 0 && p <= 600) payload.put(corners[i], p);
                     }
                 }
-                if (vd.tyrePressureState != null && vd.tyrePressureState.length >= 4) {
-                    payload.put("tyre_p_state_fl", vd.tyrePressureState[0]);
-                    payload.put("tyre_p_state_fr", vd.tyrePressureState[1]);
-                    payload.put("tyre_p_state_rl", vd.tyrePressureState[2]);
-                    payload.put("tyre_p_state_rr", vd.tyrePressureState[3]);
-                }
-                if (vd.tyreAirLeakState != null && vd.tyreAirLeakState.length >= 4) {
-                    payload.put("tyre_leak_fl", vd.tyreAirLeakState[0]);
-                    payload.put("tyre_leak_fr", vd.tyreAirLeakState[1]);
-                    payload.put("tyre_leak_rl", vd.tyreAirLeakState[2]);
-                    payload.put("tyre_leak_rr", vd.tyreAirLeakState[3]);
-                }
-                if (vd.tyreSignalState != null && vd.tyreSignalState.length >= 4) {
-                    payload.put("tyre_signal_fl", vd.tyreSignalState[0]);
-                    payload.put("tyre_signal_fr", vd.tyreSignalState[1]);
-                    payload.put("tyre_signal_rl", vd.tyreSignalState[2]);
-                    payload.put("tyre_signal_rr", vd.tyreSignalState[3]);
-                }
+                putTyreStateTelemetry(
+                        payload,
+                        new String[]{
+                                "tyre_p_state_fl", "tyre_p_state_fr",
+                                "tyre_p_state_rl", "tyre_p_state_rr"
+                        },
+                        vd.tyrePressureState,
+                        diLink5);
+                putTyreStateTelemetry(
+                        payload,
+                        new String[]{
+                                "tyre_leak_fl", "tyre_leak_fr",
+                                "tyre_leak_rl", "tyre_leak_rr"
+                        },
+                        vd.tyreAirLeakState,
+                        diLink5);
+                putTyreStateTelemetry(
+                        payload,
+                        new String[]{
+                                "tyre_signal_fl", "tyre_signal_fr",
+                                "tyre_signal_rl", "tyre_signal_rr"
+                        },
+                        vd.tyreSignalState,
+                        diLink5);
                 // Per-tyre temperature: emit only corners with plausible readings.
                 // Most BYD firmwares leave these UNAVAILABLE; some return 0 when stale.
                 if (vd.tyreTemperature != null && vd.tyreTemperature.length >= 4) {
@@ -1130,15 +1244,8 @@ public class MqttConnectionManager {
                 }
 
                 // Lights
-                if (vd.leftTurnState != BydVehicleData.UNAVAILABLE) payload.put("light_left_turn", vd.leftTurnState);
-                if (vd.rightTurnState != BydVehicleData.UNAVAILABLE) payload.put("light_right_turn", vd.rightTurnState);
-                payload.put("light_low_beam", vd.lowBeam ? 1 : 0);
-                payload.put("light_high_beam", vd.highBeam ? 1 : 0);
-                payload.put("light_rear_fog", vd.rearFog ? 1 : 0);
-                payload.put("light_front_fog", vd.frontFog ? 1 : 0);
-                payload.put("light_hazard", vd.hazard ? 1 : 0);
-                payload.put("light_drl", vd.dayTimeLight ? 1 : 0);
-                payload.put("ambient_colour", vd.ambientColour);
+                putLightTelemetry(payload, vd, diLink5);
+                putPrimitiveValidityTelemetry(payload, vd, diLink5);
                 // Ambient main switch: only published when actually readable, so a trim that
                 // cannot report it leaves the entity unavailable instead of showing a wrong "off".
                 if (vd.ambientEnabled != BydVehicleData.UNAVAILABLE) {
@@ -1184,12 +1291,18 @@ public class MqttConnectionManager {
                 }
                 if (vd.seatHeat != null) {
                     JSONArray a = new JSONArray();
-                    for (int s : vd.seatHeat) a.put(s);
+                    for (int s : vd.seatHeat) {
+                        a.put(s == BydVehicleData.UNAVAILABLE
+                                ? JSONObject.NULL : (Object) s);
+                    }
                     payload.put("seat_heat", a);
                 }
                 if (vd.seatCool != null) {
                     JSONArray a = new JSONArray();
-                    for (int s : vd.seatCool) a.put(s);
+                    for (int s : vd.seatCool) {
+                        a.put(s == BydVehicleData.UNAVAILABLE
+                                ? JSONObject.NULL : (Object) s);
+                    }
                     payload.put("seat_cool", a);
                 }
                 // Steering-wheel heater readback (raw setting-HAL 2=on / 1=off) normalized to
@@ -1202,12 +1315,10 @@ public class MqttConnectionManager {
                     payload.put("steering_wheel_heat", vd.steeringWheelHeat == 2 ? 1 : 0);
 
                 // Bodywork
-                if (vd.wiperState != BydVehicleData.UNAVAILABLE) payload.put("wiper_state", vd.wiperState);
+                putWiperTelemetry(payload, vd, diLink5);
                 if (vd.sunroofState != BydVehicleData.UNAVAILABLE) payload.put("sunroof_state", vd.sunroofState);
                 if (vd.sunroofPosition != BydVehicleData.UNAVAILABLE) payload.put("sunroof_pos", vd.sunroofPosition);
                 if (vd.sunshadePercent != BydVehicleData.UNAVAILABLE) payload.put("sunshade_pct", vd.sunshadePercent);
-                payload.put("drift_mode", vd.driftModeEnabled ? 1 : 0);
-
                 // Engine (PHEV)
                 if (vd.engineCoolantLevel != BydVehicleData.UNAVAILABLE) payload.put("engine_coolant_level", vd.engineCoolantLevel);
                 if (vd.oilLevel != BydVehicleData.UNAVAILABLE) payload.put("oil_level", vd.oilLevel);
@@ -1227,7 +1338,6 @@ public class MqttConnectionManager {
                     for (int d : vd.radarDistances) a.put(d);
                     payload.put("radar_distances", a);
                 }
-                payload.put("speed_limit_warning", vd.speedLimitWarning ? 1 : 0);
                 // Child Presence Detection: SDK reports 1=on, 2=off, 3=delay. Publish 1/0 for the
                 // adas_cpd switch state_topic, treating delay(3) as on to match the REST read-back
                 // (VehicleControlApiHandler: childPresenceDetection != 2). Only publish a known state
@@ -1274,6 +1384,163 @@ public class MqttConnectionManager {
         lastCachedCabinExpiresAtMs = cabinExpiresAtMs;
 
         return new CollectedTelemetry(payload, cabinExpiresAtMs);
+    }
+
+    static void putLightTelemetry(
+            JSONObject payload, BydVehicleData data, boolean diLink5)
+            throws org.json.JSONException {
+        if (!diLink5) {
+            if (data.leftTurnState != BydVehicleData.UNAVAILABLE) {
+                payload.put("light_left_turn", data.leftTurnState);
+            }
+            if (data.rightTurnState != BydVehicleData.UNAVAILABLE) {
+                payload.put("light_right_turn", data.rightTurnState);
+            }
+            payload.put("light_low_beam", data.lowBeam ? 1 : 0);
+            payload.put("light_high_beam", data.highBeam ? 1 : 0);
+            payload.put("light_rear_fog", data.rearFog ? 1 : 0);
+            payload.put("light_front_fog", data.frontFog ? 1 : 0);
+            payload.put("light_hazard", data.hazard ? 1 : 0);
+            payload.put("light_drl", data.dayTimeLight ? 1 : 0);
+            return;
+        }
+
+        boolean turnKnown = data.isLightKnown(
+                BydVehicleData.LIGHT_KNOWN_TURN_HAZARD);
+        payload.put("light_left_turn",
+                turnKnown && data.leftTurnState != BydVehicleData.UNAVAILABLE
+                        ? data.leftTurnState : JSONObject.NULL);
+        payload.put("light_right_turn",
+                turnKnown && data.rightTurnState != BydVehicleData.UNAVAILABLE
+                        ? data.rightTurnState : JSONObject.NULL);
+        payload.put("light_low_beam",
+                data.isLightKnown(BydVehicleData.LIGHT_KNOWN_LOW_BEAM)
+                        ? (data.lowBeam ? 1 : 0) : JSONObject.NULL);
+        payload.put("light_high_beam",
+                data.isLightKnown(BydVehicleData.LIGHT_KNOWN_HIGH_BEAM)
+                        ? (data.highBeam ? 1 : 0) : JSONObject.NULL);
+        payload.put("light_rear_fog",
+                data.isLightKnown(BydVehicleData.LIGHT_KNOWN_REAR_FOG)
+                        ? (data.rearFog ? 1 : 0) : JSONObject.NULL);
+        payload.put("light_front_fog",
+                data.isLightKnown(BydVehicleData.LIGHT_KNOWN_FRONT_FOG)
+                        ? (data.frontFog ? 1 : 0) : JSONObject.NULL);
+        payload.put("light_hazard",
+                turnKnown ? (data.hazard ? 1 : 0) : JSONObject.NULL);
+        payload.put("light_drl",
+                data.isLightKnown(BydVehicleData.LIGHT_KNOWN_DRL)
+                        ? (data.dayTimeLight ? 1 : 0) : JSONObject.NULL);
+    }
+
+    static void putWiperTelemetry(
+            JSONObject payload, BydVehicleData data, boolean diLink5)
+            throws org.json.JSONException {
+        if (data.wiperState != BydVehicleData.UNAVAILABLE) {
+            payload.put("wiper_state", data.wiperState);
+        } else if (diLink5) {
+            payload.put("wiper_state", JSONObject.NULL);
+        }
+    }
+
+    static void putTyreStateTelemetry(
+            JSONObject payload, String[] keys, int[] values, boolean diLink5)
+            throws org.json.JSONException {
+        if (values == null || values.length < keys.length) return;
+        for (int i = 0; i < keys.length; i++) {
+            if (!diLink5 || values[i] != BydVehicleData.UNAVAILABLE) {
+                payload.put(keys[i], values[i]);
+            }
+        }
+    }
+
+    static void putDiLink5UnknownStateTelemetry(JSONObject payload)
+            throws org.json.JSONException {
+        String[] keys = {
+                "charging_state", "charger_state", "charging_mode",
+                "charging_gun", "charging_type", "charging_v2l",
+                "charging_pct", "wireless_charging_left",
+                "wireless_charging_right", "wireless_charging_status",
+                "tyre_p_fl", "tyre_p_fr", "tyre_p_rl", "tyre_p_rr",
+                "tyre_p_state_fl", "tyre_p_state_fr",
+                "tyre_p_state_rl", "tyre_p_state_rr",
+                "tyre_leak_fl", "tyre_leak_fr",
+                "tyre_leak_rl", "tyre_leak_rr",
+                "tyre_signal_fl", "tyre_signal_fr",
+                "tyre_signal_rl", "tyre_signal_rr",
+                "tyre_t_fl", "tyre_t_fr", "tyre_t_rl", "tyre_t_rr",
+                "tyre_system_state", "tyre_temp_state",
+                "ambient_colour", "ambient_enabled",
+                "ac_on", "ac_cycle", "ac_wind", "ac_fan", "temp_unit",
+                "climate_setpoint", "climate_setpoint_passenger",
+                "drift_mode", "speed_limit_warning",
+                "light_left_turn", "light_right_turn",
+                "light_low_beam", "light_high_beam",
+                "light_rear_fog", "light_front_fog",
+                "light_hazard", "light_drl", "wiper_state"
+        };
+        for (String key : keys) payload.put(key, JSONObject.NULL);
+    }
+
+    static void putPrimitiveValidityTelemetry(
+            JSONObject payload, BydVehicleData data, boolean diLink5)
+            throws org.json.JSONException {
+        if (!diLink5 || data.ambientColourKnown) {
+            payload.put("ambient_colour", data.ambientColour);
+        } else {
+            payload.put("ambient_colour", JSONObject.NULL);
+        }
+        if (!diLink5 || data.driftModeKnown) {
+            payload.put("drift_mode", data.driftModeEnabled ? 1 : 0);
+        } else {
+            payload.put("drift_mode", JSONObject.NULL);
+        }
+        if (!diLink5 || data.speedLimitWarningKnown) {
+            payload.put("speed_limit_warning",
+                    data.speedLimitWarning ? 1 : 0);
+        } else {
+            payload.put("speed_limit_warning", JSONObject.NULL);
+        }
+    }
+
+    static void putChargingTypeTelemetry(
+            JSONObject payload, BydVehicleData data, boolean diLink5)
+            throws org.json.JSONException {
+        if (!diLink5) {
+            if (data.chargingType != BydVehicleData.UNAVAILABLE) {
+                payload.put("charging_type", data.chargingType);
+            }
+            payload.put("charging_v2l", data.vtolCharging ? 1 : 0);
+            return;
+        }
+        boolean typeKnown =
+                BydDataCollector.isValidChargingType(
+                        data.chargingType, true);
+        payload.put("charging_type",
+                typeKnown ? data.chargingType : JSONObject.NULL);
+        boolean v2lKnown = typeKnown || data.chargingGunState == 5;
+        payload.put("charging_v2l",
+                v2lKnown ? (data.vtolCharging ? 1 : 0) : JSONObject.NULL);
+    }
+
+    static Boolean resolveDiLink5Parked(
+            boolean accOn,
+            boolean accAuthoritative,
+            boolean accFresh,
+            double speedKmh,
+            int gear) {
+        if ((Double.isFinite(speedKmh) && speedKmh > 0.0)
+                || (gear > GearMonitor.GEAR_P && gear <= GearMonitor.GEAR_S)) {
+            return Boolean.FALSE;
+        }
+        if (isValidGearMode(gear)) {
+            return Boolean.valueOf(gear == GearMonitor.GEAR_P);
+        }
+        return !accOn && accAuthoritative && accFresh
+                ? Boolean.TRUE : null;
+    }
+
+    private static boolean isValidGearMode(int gear) {
+        return gear >= GearMonitor.GEAR_P && gear <= GearMonitor.GEAR_S;
     }
 
     /**

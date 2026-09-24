@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title data-i18n="app.parking_title">Parking - OverDrive</title>
+    <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="../shared/app-icon-dark.webp">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#00876C">
+    <script src="../shared/theme.js?v=8"></script>
+    <script src="../shared/app-shell.js?v=7"></script>
+    <!--
+      Bottom-tab manifest (same idiom as trips.html). Tabs apply to the LIST
+      VIEW only; the session DETAIL view (#pkDetailView) is a drill-in that
+      ignores data-tab so its full content stays scrollable.
+        Sessions — "parked now" hero + range filter + session grid
+        Settings — the Parking Intelligence switches (shared with Surveillance)
+    -->
+    <script>
+        window.OT_TABS = [
+            { id: 'sessions', label: 'Sessions', i18n: 'parking.tab_sessions', svg: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/>' },
+            { id: 'settings', label: 'Settings', i18n: 'parking.tab_settings', svg: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>' }
+        ];
+    </script>
+    <script src="../shared/app-tabs.js"></script>
+    <link rel="stylesheet" href="../shared/styles.css?v=34">
+    <style>
+        /* ===== OLD WEBVIEW COMPAT (Chrome 58, Android 7.1 head unit) =====
+           Flex `gap` is unsupported (grid gap is fine) — children use margins;
+           no aspect-ratio (fixed heights instead); no `inset` shorthand. */
+        .pk-top-bar > * + * { margin-left: 12px; }
+        .filter-tabs > * + * { margin-left: 6px; }
+        .park-capsules > * + * { margin-top: 6px; }
+        .detail-actions > * + * { margin-left: 8px; }
+        .pk-tiles > * + * { margin-left: 6px; }
+        .pk-frames > * + * { margin-left: 6px; }
+
+        /* ===== HERO: parked now (trips.html summary-card idiom) ===== */
+        .summary-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 14px 18px;
+        }
+        .summary-card + .summary-card { margin-top: 16px; }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .summary-stat { text-align: center; }
+        .summary-stat-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1;
+        }
+        .summary-stat-label { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+        .pk-hero { margin-bottom: 16px; position: relative; overflow: hidden; }
+        .pk-hero-place {
+            font-size: 18px; font-weight: 600; color: var(--text-primary);
+            margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .pk-hero-place .pk-level { color: var(--brand-primary); }
+        .pk-hero-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+        .pk-hero-thumb {
+            width: 100%; height: 150px; border-radius: var(--radius-md); overflow: hidden;
+            background: var(--bg-elevated); margin-top: 12px; cursor: zoom-in;
+        }
+        .pk-hero-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        @media (min-width: 720px) {
+            .pk-hero { display: flex; align-items: stretch; }
+            .pk-hero > * + * { margin-left: 18px; }
+            .pk-hero-main { flex: 1; min-width: 0; }
+            .pk-hero-thumb { width: 260px; height: auto; margin-top: 0; flex: 0 0 260px; }
+        }
+
+        /* ===== TOP BAR: quick range filters (trips idiom) ===== */
+        .pk-top-bar { display: flex; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+        .filter-tabs { display: flex; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex: 1; }
+        .filter-tabs::-webkit-scrollbar { display: none; }
+        .filter-tab {
+            flex: 0 0 auto; padding: 8px 14px; font-size: 12px; font-weight: 600;
+            color: var(--text-muted); background: var(--bg-surface);
+            border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+            cursor: pointer; transition: all 0.2s;
+        }
+        @media (min-width: 480px) { .filter-tab { flex: 1; text-align: center; } }
+        .filter-tab:hover { color: var(--text-primary); }
+        .filter-tab.active { background: var(--bg-elevated); color: var(--text-primary); border-color: var(--border-default); }
+
+        /* ===== SQUARE SESSION CARDS (trips.html .trip-card idiom) ===== */
+        .day-header {
+            font-size: 13px; font-weight: 600; color: var(--text-secondary);
+            padding: 12px 0 8px; text-transform: uppercase; letter-spacing: 0.5px;
+            grid-column: 1 / -1;
+        }
+        #pkSessions {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 16px;
+        }
+        @media (max-width: 480px) {
+            #pkSessions { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+            .park-card { padding: 14px; }
+            .park-capsule { font-size: 10px; }
+        }
+        .park-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 20px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 160px;
+            position: relative;
+            overflow: hidden;
+        }
+        .park-card:hover {
+            background: var(--bg-elevated);
+            border-color: rgba(0,212,170,0.4);
+            transform: translateY(-4px);
+            box-shadow: 0 10px 30px var(--panel-overlay-bg-soft);
+        }
+        .park-card.current { border-color: rgba(0,212,170,0.5); box-shadow: 0 0 0 1px rgba(0,212,170,0.25) inset; }
+        .park-card-top { display: flex; justify-content: space-between; align-items: flex-start; }
+        .park-time { font-size: 18px; font-weight: 600; color: var(--text-primary); white-space: nowrap; }
+        /* Place name: up to two lines, then ellipsis (-webkit-line-clamp is
+           supported on the Chrome 58 head-unit WebView). */
+        .park-place {
+            font-size: 12px; color: var(--text-secondary); margin-top: 6px; line-height: 1.35;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+        }
+        .park-place .pk-level { color: var(--brand-primary); font-weight: 600; }
+        /* Round badge top-right: sentry events during the stay (trip score idiom). */
+        .park-badge {
+            position: absolute; top: 16px; right: 16px; width: 40px; height: 40px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700;
+            color: var(--brand-primary); background: rgba(0,212,170,0.1);
+            box-shadow: 0 0 0 1px rgba(0,212,170,0.3) inset;
+        }
+        .park-badge.mid  { color: var(--warning); background: rgba(245,158,11,0.1); box-shadow: 0 0 0 1px rgba(245,158,11,0.3) inset; }
+        .park-badge.high { color: var(--danger);  background: rgba(239,68,68,0.1);  box-shadow: 0 0 0 1px rgba(239,68,68,0.3) inset; }
+        .park-badge.none { color: var(--text-muted); background: var(--panel-overlay-bg-soft, rgba(148,163,184,0.12)); box-shadow: 0 0 0 1px rgba(148,163,184,0.28) inset; }
+        .park-badge svg { width: 18px; height: 18px; }
+        .park-capsules { display: flex; flex-direction: column; margin-top: auto; padding-top: 10px; }
+        .park-capsule { display: inline-flex; align-items: center; font-size: 11px; color: var(--text-secondary); }
+        .park-capsule svg { width: 14px; height: 14px; color: var(--brand-primary); flex-shrink: 0; margin-right: 6px; }
+        .park-capsule.warn { color: var(--warning); }
+        .park-capsule.warn svg { color: var(--warning); }
+        .park-capsule.muted { color: var(--text-muted); }
+        .park-capsule.muted svg { color: var(--text-muted); }
+        .park-capsule.good { color: var(--success, #22c55e); }
+        .park-capsule.good svg { color: var(--success, #22c55e); }
+        .park-live-tag {
+            font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+            color: var(--brand-primary); background: rgba(0,212,170,0.12);
+            border: 1px solid rgba(0,212,170,0.3); border-radius: 999px; padding: 2px 8px; line-height: 1.4;
+            margin-left: 8px; white-space: nowrap;
+        }
+
+        /* ===== LOAD MORE / EMPTY / SKELETON (trips idiom) ===== */
+        .load-more-btn {
+            display: block; width: 100%; margin-top: 16px; padding: 12px;
+            background: var(--bg-surface); border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md); color: var(--text-secondary);
+            font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s;
+        }
+        .load-more-btn:hover { background: var(--bg-elevated); color: var(--text-primary); }
+        .empty-state {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 60px 20px; text-align: center;
+        }
+        .empty-state svg { width: 64px; height: 64px; color: var(--text-muted); opacity: 0.4; margin-bottom: 16px; }
+        .empty-title { font-size: 16px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
+        .empty-text { font-size: 13px; color: var(--text-muted); max-width: 46ch; }
+        .skeleton {
+            background: linear-gradient(90deg, var(--bg-elevated) 25%, var(--bg-hover) 50%, var(--bg-elevated) 75%);
+            background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: var(--radius-md);
+        }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .skeleton-card { height: 160px; border-radius: 20px; }
+
+        /* ===== DETAIL (trips.html .trip-detail idiom) ===== */
+        .pk-list-view.hidden { display: none; }
+        .pk-detail { display: none; }
+        .pk-detail.active { display: block; }
+        .detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .detail-actions { display: flex; align-items: center; }
+        .detail-back-btn {
+            display: flex; align-items: center; padding: 8px 14px;
+            background: var(--bg-surface); border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md); color: var(--text-secondary);
+            font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; text-decoration: none;
+        }
+        .detail-back-btn:hover { background: var(--bg-elevated); color: var(--text-primary); }
+        .detail-back-btn svg { width: 16px; height: 16px; margin-right: 6px; }
+        .detail-summary {
+            background: var(--bg-surface); border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg); padding: 20px 24px; margin-bottom: 16px;
+        }
+        .detail-title { font-size: 20px; font-weight: 600; color: var(--text-primary); }
+        .detail-title .pk-level { color: var(--brand-primary); }
+        .detail-subtitle { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+        .detail-summary-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 16px; margin-top: 12px;
+        }
+        .detail-stat { text-align: center; }
+        .detail-stat-value { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: var(--text-primary); }
+        .detail-stat-value.small { font-size: 14px; font-family: inherit; }
+        .detail-stat-label { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+        .detail-delete-btn {
+            display: flex; align-items: center; justify-content: center; width: 100%; padding: 12px;
+            background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3);
+            border-radius: var(--radius-md); color: var(--danger); font-size: 14px; font-weight: 500;
+            cursor: pointer; transition: all 0.2s; margin-top: 16px;
+        }
+        .detail-delete-btn:hover { background: rgba(239,68,68,0.2); }
+        .detail-delete-btn svg { width: 16px; height: 16px; margin-right: 8px; }
+        .pk-card-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+        .pk-card-title .card-title { font-size: 14px; }
+        .pk-card-title .card-title svg { width: 18px; height: 18px; color: var(--brand-primary); margin-right: 8px; }
+        .pk-muted { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+
+        /* Stills: arrived / returned composites + the four tiles under each. */
+        .pk-stills { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        @media (max-width: 640px) { .pk-stills { grid-template-columns: 1fr; } }
+        .pk-still { position: relative; border-radius: var(--radius-md); overflow: hidden; background: var(--bg-elevated); min-height: 120px; cursor: zoom-in; }
+        .pk-still img { width: 100%; display: block; }
+        .pk-still .pk-still-label {
+            position: absolute; left: 10px; top: 10px; font-size: 11px; font-weight: 600;
+            padding: 3px 9px; border-radius: 999px; background: rgba(0,0,0,0.6); color: #fff;
+        }
+        .pk-tiles { display: flex; margin-top: 6px; }
+        .pk-tile { flex: 1; height: 56px; border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-elevated); cursor: zoom-in; }
+        .pk-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+        /* Signage */
+        .pk-signage-value { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700; color: var(--brand-primary); }
+        .pk-signage-evidence { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+
+        /* Neighbour lanes: one column per camera side. */
+        .pk-lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+        .pk-lane { background: var(--bg-elevated); border-radius: var(--radius-md); padding: 12px; }
+        .pk-lane-title { display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 6px; }
+        .pk-lane-title .n { color: var(--text-muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+        .pk-neigh { border-top: 1px solid var(--border-subtle); padding: 10px 0; }
+        .pk-neigh:first-of-type { border-top: none; padding-top: 4px; }
+        .pk-neigh-head { display: flex; justify-content: space-between; align-items: center; }
+        .pk-neigh-kind { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+        .pk-neigh-times { font-size: 12px; color: var(--text-secondary); margin-top: 4px; line-height: 1.5; }
+        .pk-neigh-times a { color: var(--brand-primary); text-decoration: none; }
+        .pk-frames { display: flex; margin-top: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .pk-frame { flex: 0 0 96px; height: 72px; border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-surface); cursor: zoom-in; }
+        .pk-frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .pk-tag {
+            font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+            border-radius: 999px; padding: 2px 8px; line-height: 1.4; white-space: nowrap;
+            color: var(--text-muted); background: rgba(148,163,184,0.14); border: 1px solid rgba(148,163,184,0.28);
+        }
+        .pk-tag.good { color: var(--brand-primary); background: rgba(0,212,170,0.12); border-color: rgba(0,212,170,0.3); }
+        .pk-tag.warn { color: var(--warning); background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.3); }
+        .pk-tag.bad  { color: var(--danger);  background: rgba(239,68,68,0.12);  border-color: rgba(239,68,68,0.3); }
+
+        /* Events during the stay (recordings-row idiom). */
+        .pk-event {
+            display: flex; align-items: center; padding: 8px; border-radius: var(--radius-md);
+            background: var(--bg-elevated); text-decoration: none; color: inherit;
+            border: 1px solid transparent; transition: border-color 0.2s;
+        }
+        .pk-event + .pk-event { margin-top: 8px; }
+        .pk-event:hover { border-color: rgba(0,212,170,0.4); }
+        .pk-ev-thumb { width: 88px; height: 62px; border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-surface); flex: 0 0 auto; margin-right: 12px; }
+        .pk-ev-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .pk-ev-main { flex: 1; min-width: 0; }
+        .pk-ev-title { font-size: 14px; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; }
+        .pk-ev-title .pk-tag { margin-left: 8px; }
+        .pk-ev-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+        /* Lightbox for stills / frames */
+        .pk-lightbox {
+            position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,0.88);
+            display: none; align-items: center; justify-content: center; z-index: 9999; cursor: zoom-out;
+        }
+        .pk-lightbox.open { display: flex; }
+        .pk-lightbox img { max-width: 96vw; max-height: 92vh; border-radius: var(--radius-md); }
+    </style>
+</head>
+<body>
+    <div class="app-layout">
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js) -->
+        <div id="app-shell-mount"></div>
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="mobile-header">
+                <button class="menu-toggle" onclick="toggleSidebar()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
+                </button>
+                <span style="font-weight:600;" data-i18n="nav.parking">Parking</span>
+                <div style="width:40px;"></div>
+            </div>
+
+            <header class="page-header">
+                <h1 class="page-title" data-i18n="parking.page_title">Parking</h1>
+                <div class="header-actions">
+                    <div class="header-badge" id="pkHeaderBadge">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/></svg>
+                        <span id="pkHeaderStatus" data-i18n="status.off">OFF</span>
+                    </div>
+                </div>
+            </header>
+
+            <div class="page-body">
+                <!-- ========== LIST VIEW ========== -->
+                <div class="pk-list-view" id="pkListView">
+
+                    <!-- Hero: parked now -->
+                    <div class="summary-card pk-hero" data-tab="sessions" id="pkHero" style="display:none;">
+                        <div class="pk-hero-main">
+                            <div class="card-title" style="font-size:14px;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;color:var(--brand-primary)"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/></svg>
+                                <span data-i18n="parking.now_parked">Parked now</span>
+                                <span class="park-live-tag" id="pkHeroTag"></span>
+                            </div>
+                            <div class="pk-hero-place" id="pkHeroPlace"></div>
+                            <div class="pk-hero-sub" id="pkHeroSub"></div>
+                            <div class="summary-grid">
+                                <div class="summary-stat"><div class="summary-stat-value" id="pkHeroDuration">--</div><div class="summary-stat-label" data-i18n="parking.stat_parked_for">Parked for</div></div>
+                                <div class="summary-stat"><div class="summary-stat-value" id="pkHeroEvents">--</div><div class="summary-stat-label" data-i18n="parking.events">Sentry events</div></div>
+                                <div class="summary-stat"><div class="summary-stat-value" id="pkHeroNeighbours">--</div><div class="summary-stat-label" data-i18n="parking.neighbours">Neighbours</div></div>
+                            </div>
+                        </div>
+                        <div class="pk-hero-thumb" id="pkHeroThumb" style="display:none;"></div>
+                    </div>
+
+                    <!-- Top Bar: quick range filters -->
+                    <div class="pk-top-bar" data-tab="sessions">
+                        <div class="filter-tabs">
+                            <button class="filter-tab" data-days="7" onclick="Parking.quickFilter(7, this)" data-i18n="trip.filter.days_7">7 Days</button>
+                            <button class="filter-tab active" data-days="30" onclick="Parking.quickFilter(30, this)" data-i18n="trip.filter.days_30">30 Days</button>
+                            <button class="filter-tab" data-days="90" onclick="Parking.quickFilter(90, this)" data-i18n="parking.filter_days_90">90 Days</button>
+                            <button class="filter-tab" data-days="0" onclick="Parking.quickFilter(0, this)" data-i18n="parking.filter_all">All</button>
+                        </div>
+                    </div>
+
+                    <!-- Session grid -->
+                    <div data-tab="sessions" id="pkSessions">
+                        <div class="skeleton skeleton-card"></div>
+                        <div class="skeleton skeleton-card"></div>
+                        <div class="skeleton skeleton-card"></div>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div class="empty-state" data-tab="sessions" id="pkEmptyState" style="display:none;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/></svg>
+                        <div class="empty-title" id="pkEmptyTitle" data-i18n="parking.no_sessions_title">No parking sessions yet</div>
+                        <div class="empty-text" id="pkEmptyText" data-i18n="parking.no_sessions">The first one is created the next time the car is switched off.</div>
+                        <!-- Shown only while the feature is OFF (mirrors trips' enable-from-empty). -->
+                        <button class="btn btn-primary" id="pkEnableFromEmpty" style="display:none;margin-top:16px;" onclick="Parking.enableFromEmptyState()" data-i18n="parking.enable">Turn on Parking Intelligence</button>
+                    </div>
+
+                    <button class="load-more-btn" data-tab="sessions" id="pkMoreBtn" style="display:none;" onclick="Parking.loadMore()" data-i18n="parking.load_more">Load more sessions</button>
+
+                    <!-- ========== SETTINGS TAB ========== -->
+                    <div class="card" data-tab="settings" id="pkSettingsCard">
+                        <div class="card-header">
+                            <div class="card-title">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/></svg>
+                                <span data-i18n="parking.settings_title">Parking Intelligence</span>
+                                <span class="status-badge inactive" id="parkingBadge" data-i18n="status.off">OFF</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="parking.settings_enabled">Enable Parking Intelligence</div>
+                                    <div class="setting-desc" data-i18n="parking.settings_desc">Opens a session at every switch-off: location and GPS freshness, four-camera stills when you walk away and when you return, the vehicles that arrived or left next to you while sentry watched, and two notifications ("Parked", "Back at car"). Off = no threads, no store, no compute.</div>
+                                </div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="parkingEnabled" onchange="ParkingSettings.save('enabled', this.checked)">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="parkingSubSettings">
+                                <div class="setting-row">
+                                    <div class="setting-info">
+                                        <div class="setting-name" data-i18n="parking.settings_end_trigger">Session ends</div>
+                                        <div class="setting-desc" data-i18n="parking.settings_end_trigger_desc">When a parking session closes. "When I return": first door open or unlock (or power-on). "When the car powers on": door and unlock only refresh the returned stills. "When I drive away": waits until the gear leaves P; without a usable gear reading it closes ~2 minutes after power-on.</div>
+                                    </div>
+                                    <div class="setting-control">
+                                        <select class="text-input" id="parkingEndTrigger" style="width:170px;min-width:170px;" onchange="ParkingSettings.save('endTrigger', this.value)">
+                                            <option value="return" data-i18n="parking.end_trigger_return">When I return</option>
+                                            <option value="power_on" data-i18n="parking.end_trigger_power_on">When the car powers on</option>
+                                            <option value="drive_away" data-i18n="parking.end_trigger_drive_away">When I drive away</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="setting-row">
+                                    <div class="setting-info">
+                                        <div class="setting-name" data-i18n="parking.settings_snapshots">Arrived / returned stills</div>
+                                        <div class="setting-desc" data-i18n="parking.settings_snapshots_desc">Four-camera stills ~90 s after switch-off and at the first door open or unlock. Also the image on the notifications.</div>
+                                    </div>
+                                    <div class="setting-control">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="parkingSnapshots" onchange="ParkingSettings.save('snapshots', this.checked)">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="setting-row">
+                                    <div class="setting-info">
+                                        <div class="setting-name" data-i18n="parking.settings_neighbours">Neighbour timeline</div>
+                                        <div class="setting-desc" data-i18n="parking.settings_neighbours_desc">Track vehicles that arrive or leave next to you from the sentry baseline and finalized events, and keep the sharpest frames of each. Needs sentry armed.</div>
+                                    </div>
+                                    <div class="setting-control">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="parkingNeighbours" onchange="ParkingSettings.save('neighbours', this.checked)">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="setting-row">
+                                    <div class="setting-info">
+                                        <div class="setting-name" data-i18n="parking.settings_signage">Read garage signage (v2)</div>
+                                        <div class="setting-desc" data-i18n="parking.settings_signage_desc">Read level / zone / bay text from the stills and the last minute of the approach clip with the bundled on-device OCR (PP-OCRv3, ~5.5 MB). Runs once right after the arrival stills so the Parked message carries the level; a read deferred by a recording sentry clip is retried later. Language-specific models can be side-loaded to Overdrive/models/.</div>
+                                    </div>
+                                    <div class="setting-control">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="parkingSignage" onchange="ParkingSettings.save('signage', this.checked)">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="setting-hint" id="parkingModelsNote" style="display:none;"></div>
+                                <div class="setting-row">
+                                    <div class="setting-info">
+                                        <div class="setting-name" data-i18n="parking.settings_geocoding">Address lookup</div>
+                                        <div class="setting-desc" data-i18n="parking.settings_geocoding_desc">Turn the parking GPS fix into a district / street label for the Parked message and the session list. Until you set it here, parking follows your sentry or dashcam place-tagging choice.</div>
+                                    </div>
+                                    <div class="setting-control">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="parkingGeocodingEnabled" onchange="ParkingSettings.saveGeocoding('enabled', this.checked)">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="setting-hint" id="parkingGeocodingNote" style="display:none;"></div>
+                                <div class="setting-row">
+                                    <div class="setting-info">
+                                        <div class="setting-name" data-i18n="parking.settings_geocoding_online">Use online resolver</div>
+                                        <div class="setting-desc" data-i18n="parking.settings_geocoding_online_desc">Falls back to OpenStreetMap Nominatim when on-device geocoding cannot name the place. Sends only the parking coordinates and your device language.</div>
+                                    </div>
+                                    <div class="setting-control">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="parkingGeocodingOnline" onchange="ParkingSettings.saveGeocoding('allowOnline', this.checked)">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="setting-row">
+                                    <div class="setting-info">
+                                        <div class="setting-name" data-i18n="parking.settings_retention">Keep sessions (days)</div>
+                                    </div>
+                                    <div class="setting-control">
+                                        <input type="number" class="text-input" id="parkingRetentionDays" min="7" max="730" step="1" style="width:96px;min-width:96px;" onchange="ParkingSettings.save('retentionDays', parseInt(this.value, 10))">
+                                    </div>
+                                </div>
+                                <div class="setting-row">
+                                    <div class="setting-info">
+                                        <div class="setting-name" data-i18n="parking.settings_cap">Stills &amp; frames cap (MB)</div>
+                                    </div>
+                                    <div class="setting-control">
+                                        <input type="number" class="text-input" id="parkingStorageCapMb" min="50" max="4096" step="50" style="width:96px;min-width:96px;" onchange="ParkingSettings.save('storageCapMb', parseInt(this.value, 10))">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ========== SESSION DETAIL VIEW (drill-in, ignores tabs) ========== -->
+                <div class="pk-detail" id="pkDetailView"></div>
+            </div>
+        </main>
+    </div>
+
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <div id="toastContainer" class="toast-container"></div>
+
+    <div class="pk-lightbox" id="pkLightbox" onclick="Parking.closeLightbox()">
+        <img id="pkLightboxImg" alt="">
+    </div>
+
+    <script src="../shared/auth.js"></script>
+    <script src="../shared/pwa-init.js?v=index1"></script>
+    <script src="../shared/core.js?v=20"></script>
+    <script src="../shared/parking-settings.js?v=4"></script>
+    <script src="../shared/parking.js?v=7"></script>
+    <script>
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('sidebarOverlay').classList.toggle('show');
+        }
+        document.addEventListener('DOMContentLoaded', function () {
+            BYD.i18n.init().then(function () {
+                BYD.core.init();
+                Parking.init();
+            });
+        });
+    </script>
+</body>
+</html>

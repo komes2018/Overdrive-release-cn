@@ -20,6 +20,7 @@ const SeatPositions = {
     current: null,
     acc: false,
     movementBlocked: false,
+    movementBlockReason: null,
     positioningBlocked: true,
     modelId: null,
     modelConfirmed: false,
@@ -124,6 +125,8 @@ const SeatPositions = {
             this.acc = !!j.acc;
             this.movementBlocked = typeof j.movementBlocked === 'boolean'
                 ? j.movementBlocked : true;
+            this.movementBlockReason = j.movementBlockReason
+                || (this.movementBlocked ? 'not_park' : null);
             this.positioningBlocked = typeof j.positioningBlocked === 'boolean'
                 ? j.positioningBlocked : this.movementBlocked;
             this.modelId = j.modelId || null;
@@ -133,6 +136,7 @@ const SeatPositions = {
             this.positions = [];
             this.acc = false;
             this.movementBlocked = true;
+            this.movementBlockReason = 'state_unknown';
             this.positioningBlocked = true;
         }
         await this.loadAutomations();
@@ -171,6 +175,8 @@ const SeatPositions = {
             } else {
                 this.movementBlocked = true;
             }
+            this.movementBlockReason = j.movementBlockReason
+                || (this.movementBlocked ? 'not_park' : null);
             this.positioningBlocked = typeof j.positioningBlocked === 'boolean'
                 ? j.positioningBlocked : true;
             // The swatch list is static but the BOUND is a HAL read and differs by trim, so
@@ -181,6 +187,7 @@ const SeatPositions = {
             this.current = null;
             this.currentAmbient = null;
             this.movementBlocked = true;
+            this.movementBlockReason = 'state_unknown';
             this.positioningBlocked = true;
         }
         this.renderCurrent();
@@ -360,8 +367,11 @@ const SeatPositions = {
                 'The car is off, so the seat motors have no power. Apply and save will do nothing until you turn it on.') };
         }
         if (this.movementBlocked) {
-            return { state: 'warn', text: this.t('seatpos.gate_moving',
-                'Not in Park — apply is off until the gear is in P. Saving and renaming still work.') };
+            return { state: 'warn', text: this.movementBlockReason === 'not_park'
+                ? this.t('seatpos.gate_moving',
+                    'Not in Park — apply is off until the gear is in P. Saving and renaming still work.')
+                : this.t('seatpos.gate_state_unavailable',
+                    'The current gear or speed could not be confirmed, so seat movement is blocked for safety. Saving and renaming still work.') };
         }
         if (!this.modelConfirmed) {
             return { state: 'info', text: this.modelId
@@ -783,8 +793,13 @@ const SeatPositions = {
         const current = this.ambientColourOf(p) || 1;
         const html =
             '<div class="sp-colour-pick">' +
-                '<input type="range" id="spColour" class="sp-colour-range" min="1" max="' + max +
-                    '" value="' + current + '" style="background:' + this.esc(this.paletteGradient()) + '">' +
+                // The ramp lives on the wrapper so the input can be a 44px
+                // transparent hit box without the border growing with it.
+                '<div class="sp-colour-ramp" style="background-image:' +
+                    this.esc(this.paletteGradient()) + '">' +
+                    '<input type="range" id="spColour" class="sp-colour-range" min="1" max="' + max +
+                        '" value="' + current + '">' +
+                '</div>' +
                 '<div class="sp-colour-meta">' +
                     '<span id="spColourNum">' + current + '</span>' +
                     '<span class="sp-colour-of">/ ' + max + '</span>' +

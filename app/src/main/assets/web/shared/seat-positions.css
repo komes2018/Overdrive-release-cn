@@ -442,13 +442,23 @@
 
 .sp-colour-pick { display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; margin-top: 4px; }
 .sp-colour-pick > * + * { margin-top: 10px; }
-.sp-colour-range {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 100%;
+.sp-colour-ramp {
+    position: relative;
     height: 28px;
     border-radius: var(--radius-md);
     border: 1px solid var(--outline-variant);
+}
+.sp-colour-range {
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+    width: 100%;
+    /* 28px of visible ramp on the wrapper, 44px of touch here. The negative
+       margin hands the row back the 28px it used to occupy. */
+    height: 44px;
+    margin: -8px 0;
+    border: 0;
+    background: transparent;
     cursor: pointer;
 }
 .sp-colour-range::-webkit-slider-thumb {

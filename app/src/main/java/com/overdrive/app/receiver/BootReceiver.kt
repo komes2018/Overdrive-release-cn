@@ -29,12 +29,31 @@ class BootReceiver : BroadcastReceiver() {
         @Volatile
         private var lastStartTime = 0L
         private const val MIN_RESTART_INTERVAL = 5000L // 5 seconds debounce
+
+        // How long a no-marker ACC_MODE_CHANGED waits before acting. Covers the OFF
+        // edge on DiLink 5, where the ACC judge needs two power-mode confirmations
+        // (≥3 s apart, 5 s poll) before the reaper plants the marker (~7-12 s).
+        private const val ACC_MODE_CHANGED_SETTLE_MS = 20_000L
     }
     
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action ?: return
 
         Log.d(TAG, "Received broadcast: $action")
+
+        // Unambiguous ignition edge → publish the cross-process ignition hint FIRST,
+        // before the debounce and the parked-marker recovery path below (both can
+        // return early). acc_sentry_daemon cannot receive broadcasts; on DiLink 5 its
+        // power-mode probe reads "DisPlay on" for a running car, which alone is a
+        // weak signal it refuses to exit sentry on — so the panel it darkened at
+        // park stays dark until the driver shifts out of P. This hint is the
+        // independent second source that lets it exit sentry (and relight) while
+        // still in P. Deliberately NOT on ACC_MODE_CHANGED, which fires on both
+        // edges and carries no direction.
+        if (action == "com.byd.action.ACC_ON" || action == "com.byd.action.IGN_ON") {
+            com.overdrive.app.power.IgnitionBroadcastHint.publishAsync(
+                context.applicationContext)
+        }
 
         // NOTE: plug edges are deliberately NOT forwarded to ChargingDetector here.
         // ChargingDetector is a plain per-process `static final INSTANCE`
@@ -56,7 +75,8 @@ class BootReceiver : BroadcastReceiver() {
         // a subsequent ACC_ON within 5s would be debounced away and the stack would stay
         // dead for the whole drive. So: if a recovery trigger arrives with the parked
         // marker present, recover NOW, before the debounce. This runs BEFORE lastStartTime
-        // is bumped, and startDaemons itself will set lastStartTime on the launch path.
+        // is bumped, and the launch path itself sets lastStartTime once the verified
+        // marker erase has completed.
         // Guarded to the marker-present case so onAndOff (no marker) is completely unaffected.
         if (isRecoveryTrigger(action)) {
             try {
@@ -70,6 +90,28 @@ class BootReceiver : BroadcastReceiver() {
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Pre-debounce recovery check failed (${e.message}) — falling through")
+            }
+        }
+
+        // ACC_MODE_CHANGED while parked. This vendor broadcast fires on BOTH the on and
+        // the off edge and carries no readable direction, so it can never be treated as
+        // "the car is on" (doing so restarted the whole stack — and armed the hotspot and
+        // blind-spot pipeline — the moment the driver switched the car OFF). While the
+        // parked marker exists it is only a hint that the ACC state may have changed:
+        // the decision belongs to the ACC judge, acc_sentry_daemon, which has the
+        // hardware view and erases the marker itself on a real ACC-on. All the app does
+        // is make sure the judge is alive. Runs before the debounce (cheap, idempotent)
+        // so a passive broadcast in the same burst cannot swallow it.
+        if (action == "com.byd.accmode.ACC_MODE_CHANGED") {
+            try {
+                if (java.io.File(com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).exists()) {
+                    Log.i(TAG, "ACC_MODE_CHANGED with parked marker — leaving the decision to acc_sentry_daemon")
+                    DaemonStartupManager.noteParkObserved()
+                    DaemonStartupManager.ensureAccSentryJudgeRunning(context.applicationContext)
+                    return
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "ACC_MODE_CHANGED parked check failed (${e.message}) — falling through")
             }
         }
 
@@ -170,10 +212,10 @@ class BootReceiver : BroadcastReceiver() {
                 // intentionally no-op here
             }
             
-            // BYD ACC ON events - start daemons
+            // BYD ACC ON events - start daemons. Only the two direction-unambiguous
+            // actions live here (see isRecoveryTrigger).
             "com.byd.action.ACC_ON",
-            "com.byd.action.IGN_ON",
-            "com.byd.accmode.ACC_MODE_CHANGED" -> {
+            "com.byd.action.IGN_ON" -> {
                 startDaemons(context, action)
                 // Arm the blind-spot overlay ON ACC-ON, app-independently. Without
                 // this the overlay only started via MainActivity.syncBlindSpotOverlay()
@@ -182,6 +224,36 @@ class BootReceiver : BroadcastReceiver() {
                 // Gated on the same blindspot.enabled flag the activity uses, so a
                 // disabled feature stays off.
                 armBlindSpotIfEnabled(context)
+            }
+
+            // ACC_MODE_CHANGED with NO parked marker (the marker-present case returned
+            // above): a passive broadcast. In onAndOff this keeps today's behaviour — an
+            // idempotent stack start (startOnBoot no-ops when already started) plus the
+            // daemon-arbitrated blind-spot sync. It is NOT a recovery trigger, so it can
+            // neither erase a parked marker nor arm the hotspot.
+            //
+            // Deferred, because on the OFF edge this broadcast usually lands BEFORE the
+            // park reaper has planted the marker (the ACC judge needs a few seconds to
+            // confirm OFF, then the reaper plants it); acting immediately restarted the
+            // keepalive service that the ACC_OFF standdown had just stopped. Let the
+            // park settle, then decide on the marker as it stands. The ON-edge case in
+            // onAndOff only gains a short delay on an idempotent start.
+            "com.byd.accmode.ACC_MODE_CHANGED" -> {
+                val appCtx = context.applicationContext
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    try {
+                        if (java.io.File(com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).exists()) {
+                            Log.i(TAG, "ACC_MODE_CHANGED settled into a park — not starting; acc_sentry_daemon decides")
+                            DaemonStartupManager.noteParkObserved()
+                            DaemonStartupManager.ensureAccSentryJudgeRunning(appCtx)
+                        } else {
+                            startDaemons(appCtx, action)
+                            armBlindSpotIfEnabled(appCtx)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Deferred ACC_MODE_CHANGED handling failed: ${e.message}")
+                    }
+                }, ACC_MODE_CHANGED_SETTLE_MS)
             }
             
             // BYD ACC OFF - AccSentryDaemon handles sentry mode via bodywork listener
@@ -213,11 +285,15 @@ class BootReceiver : BroadcastReceiver() {
     }
 
     // Triggers that mean "the car is being used again" — these CLEAR the parked-shutdown
-    // marker and recover the full stack. HAL-backed ACC/IGN edges + head-unit boot.
+    // marker (verified) and recover the full stack: the direction-unambiguous BYD ACC/IGN
+    // ON edges + head-unit boot. com.byd.accmode.ACC_MODE_CHANGED is deliberately NOT here:
+    // it fires on both edges (see OnboardingGate / PinLockActivity), so it is handled as a
+    // passive hint in onReceive and the ACC judge decides. A boot is treated as recovery
+    // on purpose: a wrong recovery is cheap (acc_sentry_daemon's ACC-off detection re-parks
+    // the stack within seconds), whereas staying parked wrongly costs the whole drive.
     private fun isRecoveryTrigger(trigger: String): Boolean = when (trigger) {
         "com.byd.action.ACC_ON",
         "com.byd.action.IGN_ON",
-        "com.byd.accmode.ACC_MODE_CHANGED",
         Intent.ACTION_BOOT_COMPLETED,
         "android.intent.action.LOCKED_BOOT_COMPLETED",
         "android.intent.action.QUICKBOOT_POWERON",
@@ -236,56 +312,66 @@ class BootReceiver : BroadcastReceiver() {
         //    connectivity) fires while parked and must NOT resurrect the stack — return
         //    early so parked compute stays zero. (These are the exact triggers that would
         //    otherwise defeat the terminate.)
+        val appCtx = context.applicationContext
         try {
             val markerPresent = java.io.File(
                 com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).exists()
             if (markerPresent) {
                 if (isRecoveryTrigger(trigger)) {
-                    Log.i(TAG, "Recovery trigger '$trigger' with parked marker present — recovering (clear marker + reset boot guard)")
-                    // recoverFromPark clears the marker AND resets bootStarted so the
-                    // startOnBoot below actually redeploys the watchdogs (the app process
-                    // survives the park via the accessibility keep-alive, so bootStarted
-                    // would otherwise still be true and startOnBoot would no-op).
-                    DaemonStartupManager.recoverFromPark(context.applicationContext)
-                    // fall through to relaunch
+                    Log.i(TAG, "Recovery trigger '$trigger' with parked marker present — recovering (verified marker erase, then relaunch)")
+                    // recoverFromPark erases the marker, VERIFIES it is gone, resets the
+                    // bootStarted guard (the app process survives the park via the
+                    // accessibility keep-alive, so the process-lifetime guard is still
+                    // true), and only then calls back so the stack is launched into a
+                    // marker-free state. If the erase fails, nothing is launched: the
+                    // stack stays parked and the next ACC-on / boot edge retries.
+                    DaemonStartupManager.recoverFromPark(appCtx) { launchStack(appCtx, trigger) }
                 } else {
                     Log.i(TAG, "Parked-shutdown marker present + passive trigger '$trigger' — suppressing rebuild (stay asleep)")
+                    DaemonStartupManager.noteParkObserved()
                     // Return WITHOUT bumping lastStartTime: a suppressed passive trigger
                     // must not consume the debounce slot, or a real recovery trigger
                     // arriving within 5s could be debounced away (the pre-debounce recovery
                     // path in onReceive covers the primary case; this keeps the slot free
                     // as defense-in-depth).
-                    return
                 }
+                return
             }
         } catch (e: Exception) {
             Log.w(TAG, "Parked-marker gate check failed (${e.message}) — proceeding with normal start")
         }
 
+        launchStack(appCtx, trigger)
+    }
+
+    /**
+     * The actual launch. Reached only with the parked marker absent — either it never
+     * existed (onAndOff, or the ACC judge already erased it on a real ACC-on) or a
+     * recovery trigger just completed a verified erase. startOnBoot carries its own
+     * absolute marker gate and rebuilds after an observed park, so a passive trigger
+     * arriving after the judge erased the marker also brings the stack back.
+     */
+    private fun launchStack(appCtx: Context, trigger: String) {
         // Only reached on an actual launch path — bump the debounce timer here (not at the
-        // top) so suppressed passive returns above never shadow a subsequent recovery.
+        // top) so suppressed passive returns never shadow a subsequent recovery.
         lastStartTime = System.currentTimeMillis()
 
         try {
-            // Enforce persistent global ADB settings on boot/wakeup
-            com.overdrive.app.launcher.AdbShellExecutor.enforceGlobalAdbSettings(context.applicationContext)
-
             // Start DaemonKeepaliveService (foreground + sticky + wakelock)
-            DaemonKeepaliveService.start(context.applicationContext)
+            DaemonKeepaliveService.start(appCtx)
 
             // Also start daemons directly via DaemonStartupManager
-            DaemonStartupManager.startOnBoot(context.applicationContext)
+            DaemonStartupManager.startOnBoot(appCtx)
 
             // (Re-)seed out-of-process revival watchdog. Self-heals the alarm
             // chain if it was ever broken (force-stop, reboot, app data clear).
-            ProcessRevivalReceiver.schedule(context.applicationContext)
+            ProcessRevivalReceiver.schedule(appCtx)
 
             // Hotspot "start at power-up": one-shot per process, and only from a
             // recovery trigger — a passive broadcast must never bring the AP up
             // (it would drop the station link the user is currently on).
             if (isRecoveryTrigger(trigger)) {
-                com.overdrive.app.network.HotspotManager.armBootAutoStart(
-                    context.applicationContext)
+                com.overdrive.app.network.HotspotManager.armBootAutoStart(appCtx)
             }
 
             Log.d(TAG, "Daemon startup initiated successfully")

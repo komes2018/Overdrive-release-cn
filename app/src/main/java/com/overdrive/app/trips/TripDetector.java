@@ -293,21 +293,46 @@ public class TripDetector {
             startOdometerKm = -1;
         }
 
-        // Read external temperature
+        // Read external temperature. NORMALIZED TELEMETRY FIRST: the collector
+        // snapshot (BydVehicleData.outsideTempC) is populated by the
+        // per-generation source selection (DI5 AC/instrument selector, legacy
+        // instrument feature IDs, cloud fallback) and is process-correct on
+        // DI5, where daemon-side SDK device access is unavailable. The legacy
+        // direct read stays as a fallback ONLY when the snapshot has no
+        // reading, so pre-DI5 behavior is unchanged. Default stays 0.
         activeTrip.extTempC = 0;
+        boolean extTempFromSnapshot = false;
         try {
-            Class<?> instrumentClass = Class.forName("android.hardware.bydauto.instrument.BYDAutoInstrumentDevice");
-            java.lang.reflect.Method getInst = instrumentClass.getMethod("getInstance", android.content.Context.class);
-            Object instrumentDevice = getInst.invoke(null, (android.content.Context) null);
-            if (instrumentDevice != null) {
-                java.lang.reflect.Method getTemp = instrumentClass.getMethod("getOutCarTemperature");
-                int rawTemp = (Integer) getTemp.invoke(instrumentDevice);
-                if (rawTemp >= -50 && rawTemp <= 60) {
-                    activeTrip.extTempC = rawTemp;
+            com.overdrive.app.byd.BydDataCollector collector =
+                    com.overdrive.app.byd.BydDataCollector.getInstance();
+            if (collector.isInitialized()) {
+                com.overdrive.app.byd.BydVehicleData data = collector.getData();
+                if (data != null && !Double.isNaN(data.outsideTempC)) {
+                    int rawTemp = (int) Math.round(data.outsideTempC);
+                    if (rawTemp >= -50 && rawTemp <= 60) {
+                        activeTrip.extTempC = rawTemp;
+                        extTempFromSnapshot = true;
+                    }
                 }
             }
-        } catch (Exception e) {
-            // Temperature unavailable — leave as 0
+        } catch (Throwable t) {
+            // Snapshot unavailable — fall through to the legacy read.
+        }
+        if (!extTempFromSnapshot) {
+            try {
+                Class<?> instrumentClass = Class.forName("android.hardware.bydauto.instrument.BYDAutoInstrumentDevice");
+                java.lang.reflect.Method getInst = instrumentClass.getMethod("getInstance", android.content.Context.class);
+                Object instrumentDevice = getInst.invoke(null, (android.content.Context) null);
+                if (instrumentDevice != null) {
+                    java.lang.reflect.Method getTemp = instrumentClass.getMethod("getOutCarTemperature");
+                    int rawTemp = (Integer) getTemp.invoke(instrumentDevice);
+                    if (rawTemp >= -50 && rawTemp <= 60) {
+                        activeTrip.extTempC = rawTemp;
+                    }
+                }
+            } catch (Throwable t) {
+                // Temperature unavailable — leave as 0
+            }
         }
 
         state = State.ACTIVE;
@@ -446,19 +471,11 @@ public class TripDetector {
             // which is self-consistent and therefore invisible to any internal check.
             double maxPlausibleKm = 1.0 + (200.0 * activeTrip.durationSeconds / 3600.0);
 
-            // NOT cross-checked against the recorder's distance, in either direction.
-            // It looks like an independent witness but it is not: its primary source
-            // is CAN wheel speed scaled by the SAME unit factor this odometer uses
-            // (BydDataCollector.getSpeedToKmhFactor), so a wrong unit factor skews
-            // both by the identical ratio and the comparison silently always passes.
-            // Where the two DO diverge — the recorder's GPS-haversine fallback, used
-            // when the speed channel is stale — the recorder is the less trustworthy
-            // one (parked jitter accretes phantom distance), so acting on a
-            // disagreement would discard the good reading for the bad one.
-            //
-            // A wrong unit factor therefore cannot be detected here at all, and is
-            // deliberately left to be fixed at its source rather than papered over
-            // with a check that cannot see it.
+            // NOT cross-checked against the recorder's distance. Speed and distance
+            // now have independent hardware factors, but the recorder may fall back
+            // to GPS haversine when wheel speed is stale; parked GPS jitter can then
+            // make it a worse witness than the odometer. Keep the physical plausibility
+            // gate here and resolve unit interpretation at the data-source boundary.
             if (odoDelta > maxPlausibleKm) {
                 logger.warn("Odometer delta implausible (" + String.format("%.2f", odoDelta)
                         + " km in " + activeTrip.durationSeconds + "s, max "
@@ -597,6 +614,16 @@ public class TripDetector {
      * When it fires, the trip is finalized.
      */
     private void startParkDebounceTimer() {
+        startParkDebounceTimer(PARK_DEBOUNCE_MS);
+    }
+
+    /**
+     * Park debounce with an explicit delay — used by {@link #resumeTrip} to
+     * honour the portion of the 120 s window that already elapsed before a
+     * daemon restart, so a resumed trip finalizes on the same schedule the
+     * original process would have.
+     */
+    private void startParkDebounceTimer(long delayMs) {
         cancelParkDebounceTimer();
         parkDebounceTask = scheduler.schedule(() -> {
             synchronized (TripDetector.this) {
@@ -605,7 +632,62 @@ public class TripDetector {
                     finalizeActiveTrip();
                 }
             }
-        }, PARK_DEBOUNCE_MS, TimeUnit.MILLISECONDS);
+        }, Math.max(0L, delayMs), TimeUnit.MILLISECONDS);
+    }
+
+    // ==================== SAME-SESSION RESUME ====================
+
+    /**
+     * Minimum debounce granted to a resumed PARK_PENDING trip, so the vehicle
+     * monitors that came up with this process have published a fresh SoC /
+     * kWh / odometer snapshot before the live finalize reads them.
+     */
+    static final long RESUME_MIN_DEBOUNCE_MS = 15_000;
+
+    /**
+     * Re-adopt a trip whose DB row (end_time=0) and telemetry journal survived
+     * a daemon process restart, instead of letting next-boot recovery close it
+     * from telemetry alone. The row carries the live start-side snapshots
+     * (SoC, kWh, accumulators, odometer, PHEV flags); the normal live finalize
+     * — {@link #finalizeActiveTrip} via the park debounce or ACC OFF — then
+     * reads the end-side data and the manager scores the trip exactly as if
+     * the process had never died. Field incident: log_DG87KWQX, where the
+     * restart landed 6 s into the park debounce and the trip lost its scores,
+     * end SoC, energy and cost to a telemetry-only reconstruction.
+     *
+     * @param trip        the half-open row, as read from the database
+     * @param parked      true when the journal tail (or the live gear) says the
+     *                    car is stopped in P → PARK_PENDING; false → ACTIVE
+     * @param parkStartMs wall-clock time the car first stopped (end time of the
+     *                    trip if it finalizes from PARK_PENDING); 0 = now
+     * @param debounceMs  remaining park debounce to schedule when parked
+     */
+    synchronized void resumeTrip(TripRecord trip, boolean parked, long parkStartMs, long debounceMs) {
+        if (trip == null) return;
+        if (state != State.IDLE || activeTrip != null) {
+            logger.warn("resumeTrip ignored — detector already " + state
+                    + " with an active trip");
+            return;
+        }
+        activeTrip = trip;
+        startOdometerKm = trip.odometerStartKm > 0 ? trip.odometerStartKm : -1;
+        if (trip.isPhev) {
+            startIceSampler();
+        }
+        if (parked) {
+            state = State.PARK_PENDING;
+            parkStartTime = parkStartMs > 0 ? parkStartMs : System.currentTimeMillis();
+            long delay = Math.max(RESUME_MIN_DEBOUNCE_MS, Math.min(PARK_DEBOUNCE_MS, debounceMs));
+            startParkDebounceTimer(delay);
+            logger.info("Resumed trip id=" + trip.id + " (started " + trip.startTime
+                    + ") in PARK_PENDING — parked since " + parkStartTime
+                    + ", finalizing in " + (delay / 1000) + "s unless a driving gear arrives");
+        } else {
+            state = State.ACTIVE;
+            parkStartTime = 0;
+            logger.info("Resumed trip id=" + trip.id + " (started " + trip.startTime
+                    + ") in ACTIVE — still driving across the restart");
+        }
     }
 
     /**

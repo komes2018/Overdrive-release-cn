@@ -495,7 +495,7 @@
     <string name="daemon_name_camera">Dimoni de la càmera</string>
     <string name="daemon_name_surveillance">Dimoni de vigilància</string>
     <string name="daemon_name_acc_surveillance">Vigilància ACC</string>
-    <string name="daemon_name_singbox">Proxy de la caixa de cançons</string>
+    <string name="daemon_name_singbox">Proxy de Sing-box</string>
     <string name="daemon_name_cloudflared">Túnel Cloudflared</string>
     <string name="daemon_name_zrok">Túnel Zrok</string>
     <string name="daemon_name_tailscale">Túnel de Tailscale</string>
@@ -621,6 +621,7 @@
     <string name="rail_recordings">Enregistraments</string>
     <string name="rail_vehicle">Vehicle</string>
     <string name="rail_trips">Viatges</string>
+    <string name="rail_parking">Aparcament</string>
     <string name="rail_integrations">Integracions</string>
     <string name="rail_diagnostics">Diagnòstic</string>
     <string name="rail_settings">Configuració</string>
@@ -759,7 +760,6 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Durant la vigilància</string>
-    <string name="dashboard_modern_vehicle_status">Estat del vehicle</string>
     <string name="dashboard_subtitle_all_systems">Tots els sistemes en línia</string>
     <string name="dashboard_subtitle_some_offline">%1$d de %2$d serveis en línia</string>
     <string name="dashboard_subtitle_no_tunnel">Accés remot fora de línia</string>
@@ -779,14 +779,11 @@
     <string name="vehicle_dialog_title">Estableix la capacitat de la bateria</string>
     <string name="vehicle_dialog_capacity_label">Capacitat</string>
     <string name="vehicle_dialog_capacity_suffix">kWh</string>
-    <string name="vehicle_dialog_capacity_helper">De 15 a 120 kWh. Deixa-ho en blanc per a usar el valor predeterminat del.</string>
+    <string name="vehicle_dialog_capacity_helper">De 5 a 120 kWh. Deixa-ho en blanc per a usar el valor predeterminat del.</string>
     <string name="vehicle_dialog_model_label">Model</string>
     <string name="vehicle_dialog_save">Desa</string>
     <string name="vehicle_dialog_reset">Restableix a detecció automàtica</string>
-    <string name="vehicle_dialog_detection">Detecció: %1$s</string>
-    <string name="vehicle_dialog_detection_auto">Automàtica</string>
-    <string name="vehicle_dialog_detection_manual">Manual</string>
-    <string name="vehicle_dialog_invalid_capacity">La capacitat ha de ser de 15 a 120 kWh</string>
+    <string name="vehicle_dialog_invalid_capacity">La capacitat ha de ser de 5 a 120 kWh</string>
     <string name="vehicle_dialog_summary_effective">Efectiu: %1$.1f kWh</string>
     <string name="vehicle_dialog_summary_calibration">Darrer calibratge: %1$.1f%% el %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">no disponible</string>
@@ -1242,7 +1239,7 @@
     <string name="recording_lib_storage_sd">SD</string>
     <string name="recording_lib_storage_usb">USB</string>
     <string name="recording_lib_storage_internal">INT</string>
-    <string name="daemons_wifi_auto_enable_title">Habilita automàticament la Wi-Fi</string>
+    <string name="daemons_wifi_auto_enable_title">Wi-Fi</string>
     <string name="dashboard_tunnel_failed">Error del túnel</string>
     <string name="dashboard_tunnel_stopping">S\'està aturant el túnel...</string>
     <string name="dialog_tailscale_adb_enable_title">Voleu permetre l\'ADB remot?</string>
@@ -1252,13 +1249,6 @@
     <string name="rail_seat_positions">Posicions del seient</string>
     <string name="rail_expand">Mostra les etiquetes de navegació</string>
     <string name="rail_collapse">Amaga les etiquetes de navegació</string>
-    <string name="rail_collapse_label">Replega</string>
-    <!-- Rail category headers -->
-    <string name="rail_section_cameras">Càmeres</string>
-    <string name="rail_section_controls">Controls</string>
-    <string name="rail_section_driving">Conducció</string>
-    <string name="rail_section_automation">Automatització</string>
-    <string name="rail_section_system">Sistema</string>
     <string name="settings_overlay_replay_title">Indicador de repetició instantània</string>
     <string name="settings_overlay_roadsense_title">Superposició de RoadSense</string>
     <string name="remote_voice_overlay_title">Veu remota</string>
@@ -1405,7 +1395,7 @@
     <string name="onboarding_expert_reset_body">Això esborra els enregistraments, els esdeveniments i la configuració i no es pot desfer. És aquí si mai vens el cotxe — no és part de l\'ús normal.</string>
     <string name="onboarding_expert_done_title">Això és la visita guiada</string>
     <string name="onboarding_expert_done_body">Heu vist la configuració més profunda. Obriu aquesta guia de nou en qualsevol moment des del botó d\'ajuda.</string>
-    <string name="daemons_wifi_auto_enable_subtitle">OverDrive restaura Wi-Fi mentre està aparcat i quan comencen els serveis de fons. Desactiveu-ho per a deixar l\'estat actual de Wi-Fi sota control del vehicle.</string>
+    <string name="daemons_wifi_auto_enable_subtitle">Activa o desactiva la Wi-Fi ara. Quan està desactivada, els dimonis de vigilància d\'OverDrive no la tornaran a activar.</string>
     <string name="rail_charging">Recàrrega</string>
     <string name="settings_overlay_replay_subtitle">Mostra la insígnia del CLIP: verd mentre es reprodueix un registre, blau per a 5s un cop desat, vermell quan falla. Només apareix quan existeix una unió de reproducció o una automatització.</string>
     <string name="settings_overlay_roadsense_subtitle">Mostra la píndola flotant de RoadSense i la targeta de perill mentre RoadSense està activada.</string>
@@ -1465,7 +1455,7 @@
     <string name="onboarding_camera_verify_body">La vista de 360 mostra la imatge collage i la càmera de davantal mostra el camí que hi ha per davant? Si un canal es veu malament, toqueu «Torna a seleccionar» — no hi ha res trencat.</string>
     <string name="onboarding_camera_windshield_title">Bandes avançades en els enregistraments? (opcional)</string>
     <string name="onboarding_camera_windshield_body">Per a la disposició de la càmera de davantal OEM — la càmera de parabrisa com una tira a la part superior de l\'enregistrament — trieu Parabrisa al menú de rols, trieu la càmera frontal i Deseu. La majoria dels propietaris poden ometre això.</string>
-    <string name="onboarding_vehicle_body">Trieu el vostre model i emplenem els kWh, o teclegeu-los vós mateix (15-120). Això fa que l\'autonomia i les estimacions de recàrrega siguin precises. Podeu ometre-ho i configurar-ho més tard.</string>
+    <string name="onboarding_vehicle_body">Trieu el vostre model i emplenem els kWh, o teclegeu-los vós mateix (5-120). Això fa que l\'autonomia i les estimacions de recàrrega siguin precises. Podeu ometre-ho i configurar-ho més tard.</string>
     <string name="onboarding_dash_chips_body">Els xips de dalt mostren l\'enregistrament, els serveis i el vostre enllaç remot. S\'actualitzen pel seu compte — no són botons.</string>
     <string name="onboarding_dash_chips_body_land">El vostre estat en directe — enregistrament, serveis i enllaç remot — apareix aquí. S\'actualitza pel seu compte.</string>
     <string name="onboarding_done_title">Cabina llesta</string>
@@ -1482,7 +1472,7 @@
     <string name="onboarding_expert_traffic_body">El Monitor de Trànsit integrat de BYD bloqueja a altres aplicacions l\'ús de la SIM integrada del cotxe. Si voleu arribar al vostre cotxe remotament per la SIM BYD, heu de desactivar-ho aquí. La unitat principal es reinicia per a aplicar el canvi.</string>
     <string name="onboarding_expert_daemons_body">Aquests interruptors inicien i aturen els serveis en segon pla. Apagar la càmera, la vigilància o el sentinella ACC deixa d\'enregistrar i els manté apagats fins que els torneu a activar — fins i tot després d\'un reinici.</string>
     <string name="onboarding_expert_security_body">Establiu un PIN per a obrir l\'aplicació per a vehicles compartits. La vigilància i l\'enregistrament segueixen funcionant mentre l\'aplicació està bloquejada. Un PIN oblidat només es pot netejar des d\'un ordinador a través d\'USB.</string>
-    <string name="daemons_wifi_auto_enable_save_failed">No s\'ha pogut desar la configuració d\'activació automàtica de la Wi-Fi.</string>
+    <string name="daemons_wifi_auto_enable_save_failed">No s\'ha pogut canviar l\'estat de la Wi-Fi.</string>
     <string name="dialog_tailscale_adb_enable_message">Això afegeix l\'abast de la tailnet per a ADB (port 5555) perquè pugueu depurar aquesta unitat principal remotament.\n\nAbans d\'activar-lo:\n• ADB concedeix accés COMPLET a l\'intèrpret d\'ordres — un dispositiu tailnet amb una clau autoritzada pot llegir dades, instal·lar aplicacions i canviar la configuració del sistema\n• Això afegeix la vostra xarxa tailnet com a ruta; no exposa ADB a internet públic\n• ADB ja accepta connexions de la xarxa local, de manera que desactivar-ho no tanca completament ADB\n• L\'ordinador de connexió encara necessita una clau ADB autoritzada\n• L\'activació el punt d\'accés Wi-Fi desactiva l\'enllaç Wi-Fi, de manera que l\'accés remot depèn de les dades mòbils\n\nActiveu-ho només en una xarxa tailnet que controleu. Podeu apagar-lo en qualsevol moment.</string>
     <string name="remote_voice_notification_text">Recepció d\'àudio en directe d\'una sessió OverDrive autenticada</string>
     <string name="settings_remote_communication_subtitle">Habilita la veu i els missatges de la consola web. Si el permís de superposició diu Permís requerit, toqueu-lo i permeteu «Mostra sobre altres aplicacions».</string>
@@ -1544,7 +1534,7 @@
     <string name="camera_dilink4_passive_apa_label">Usa el port APA passiu 0</string>
     <string name="camera_dilink4_passive_apa_subtitle">Deixa la sortida del panorama OEM intacta i registra el port de vista prèvia 0 tal com s\'ha subministrat. Useu quan el control de panorama forçat obre la pantalla vermella de calibratge. Alguns models exposen dues vistes en lloc de quatre.</string>
     <string name="setup_autostart_enabling">S\'està activant l\'inici automàtic...</string>
-    <string name="setup_autostart_enabled">Inici automàtic activat</string>
+    <string name="setup_autostart_enabled">Inici automàtic activat ✓</string>
     <string name="setup_autostart_failed">No s\'ha pogut habilitar automàticament l\'inici automàtic — s\'obre l\'inici automàtic de BYD perquè pugueu fer-ho a mà.</string>
     <string name="toast_traffic_monitor_persist_failed">Aplicat, però la preferència no s\'ha pogut desar — no sobreviurà a una actualització de microprogramari.</string>
     <string name="nav_page_assistant">Assistent</string>
@@ -1552,11 +1542,11 @@
     <string name="settings_remote_listener_title" tools:ignore="MissingTranslation">Habilita l\'escolta de cabina</string>
     <string name="settings_remote_listener_subtitle" tools:ignore="MissingTranslation">Permet sessions autenticades de vista en directe i comunicacions per a escoltar el micròfon de cabina mentre el cotxe està activat.</string>
     <string name="settings_remote_audio_channel_title" tools:ignore="MissingTranslation">Compatibilitat amb la veu</string>
-    <string name="settings_remote_audio_channel_subtitle" tools:ignore="MissingTranslation">El mitjà manté els camins existents de l\'altaveu i del micròfon. La navegació coincideix amb l\'encaminament Di+ i la captura del micròfon de 8 kHz.</string>
+    <string name="settings_remote_audio_channel_subtitle" tools:ignore="MissingTranslation">Multimèdia manté els camins existents de l\'altaveu i del micròfon. La navegació coincideix amb l\'encaminament Di+ i la captura del micròfon de 8 kHz.</string>
     <string name="settings_remote_audio_channel_media" tools:ignore="MissingTranslation">Multimèdia</string>
     <string name="settings_remote_audio_channel_navigation" tools:ignore="MissingTranslation">Navegació</string>
     <string name="cabin_audio_notification_channel" tools:ignore="MissingTranslation">Escolta de cabina</string>
-    <string name="cabin_audio_notification_title" tools:ignore="MissingTranslation">Escolta de cabina actiu</string>
+    <string name="cabin_audio_notification_title" tools:ignore="MissingTranslation">Escolta de cabina activa</string>
     <string name="cabin_audio_notification_text" tools:ignore="MissingTranslation">La consola web està rebent àudio del micròfon de cabina.</string>
     <string name="recordings_segment_all">Tots</string>
     <string name="recordings_segment_all_count">Tots · %d</string>
@@ -1610,10 +1600,72 @@
         <item quantity="other">%1$d animals</item>
     </plurals>
     <string name="recording_distance_very_close">Molt a prop</string>
-    <string name="recording_distance_close">Tanca</string>
+    <string name="recording_distance_close">A prop</string>
     <string name="recording_distance_mid">Interval mitjà</string>
     <string name="recording_distance_far">Lluny</string>
     <string name="cd_recording_more_actions">Més accions d\'enregistrament</string>
+    <string name="dashboard_modern_vehicle_status">Estat del vehicle</string>
+    <string name="vehicle_dialog_detection">Detecció: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automàtica</string>
+    <string name="vehicle_dialog_detection_manual">Manual</string>
+    <string name="rail_collapse_label">Replega</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Càmeres</string>
+    <string name="rail_section_controls">Controls</string>
+    <string name="rail_section_driving">Conducció</string>
+    <string name="rail_section_automation">Automatització</string>
+    <string name="rail_section_system">Sistema</string>
     <string name="toast_share_failed">Ha fallat la compartició</string>
     <string name="vehicle_dialog_value_pending">—</string>
+    <string name="overlay_recording_mode_failed">Ha fallat el canvi del mode d\'enregistrament</string>
+    <string name="overlay_recording_mode_failed_fmt">Ha fallat el canvi del mode d\'enregistrament: %1$s</string>
+    <string name="tailscale_enable_https">Serveix la interfície web per HTTPS</string>
+    <string name="tailscale_https_explainer">Publica el tauler només a la vostra tailnet en una adreça https://…ts.net de confiança. MagicDNS i els certificats HTTPS ja han d\'estar habilitats a la consola d\'administració de Tailscale.</string>
+    <string name="toast_tailscale_https_enabled">HTTPS de la tailnet activat</string>
+    <string name="toast_tailscale_https_disabled">HTTPS de la tailnet desactivat</string>
+    <string name="toast_tailscale_https_save_failed">No s\'ha pogut canviar l\'HTTPS. Inicieu Tailscale i inicieu-hi la sessió, habiliteu MagicDNS i els certificats HTTPS, i assegureu-vos que el port 443 no tingui cap altra regla de Serve.</string>
+    <string name="daemon_status_running">En execució</string>
+    <string name="daemon_status_proxy_on">%1$s : Servidor intermediari: ACTIVAT</string>
+    <string name="daemon_status_running_uptime">S\'està executant : Temps en funcionament: %1$s</string>
+    <string name="daemon_status_stopped">Aturat</string>
+    <string name="daemon_status_starting">S\'està iniciant...</string>
+    <string name="daemon_status_stopping">S\'està aturant...</string>
+    <string name="daemon_status_error">Error</string>
+    <string name="daemon_status_needs_config">Cal configuració</string>
+    <string name="daemon_config_no_token">No s\'ha configurat cap testimoni. Toqueu per a configurar-ho.</string>
+    <string name="daemon_config_paid_token">La versió de pagament requereix un testimoni. Toqueu per a configurar.</string>
+    <string name="daemon_config_not_logged_in">No heu iniciat sessió. Toqueu per a configurar-ho.</string>
+    <string name="daemon_status_stop_failed">Ha fallat l\'aturada: %1$s</string>
+    <string name="daemon_uptime_fmt">Temps en funcionament: %1$s</string>
+    <string name="daemon_subprocess_pid">%1$s (PID: %2$d)</string>
+    <string name="toast_cloudflared_encrypt_failed">No s\'ha pogut assegurar el testimoni Cloudflared.</string>
+    <string name="toast_cloudflared_save_failed">No s\'ha pogut desar la configuració Cloudflared. Comproveu si el dimoni de la càmera s\'està executant.</string>
+    <string name="projection_temporarily_unavailable">La projecció no està disponible temporalment. Torneu a obrir l\'aplicació.</string>
+    <string name="roi_tap_to_add_points">Toqueu per a afegir punts (%1$d-%2$d)</string>
+    <string name="action_create_evidence_pack">Crea un paquet de proves</string>
+    <string name="action_share_evidence_pack">Comparteix el paquet de proves</string>
+    <string name="camera_mode_option_dilink5">DiLink 5 — Sealion 7 / SA8155P</string>
+    <string name="camera_mode_current_dilink5">Actual: DiLink 5</string>
+    <string name="camera_dilink5_mapping_title">Ordre de les càmeres de DiLink 5</string>
+    <string name="camera_dilink5_mapping_subtitle">Els identificadors físics de les càmeres s\'enumeren com a frontal, dreta, posterior i esquerra. Manteniu el mode automàtic tret que les previsualitzacions en brut demostrin que aquest vehicle utilitza un altre ordre.</string>
+    <string name="camera_dilink5_mapping_current_auto">Actual: automàtic / valor predeterminat del model</string>
+    <string name="camera_dilink5_mapping_current_format">Actual: %1$s</string>
+    <string name="camera_dilink5_mapping_auto">Automàtic — valor predeterminat del model</string>
+    <string name="camera_dilink5_mapping_standard">Estàndard — 0,1,2,3</string>
+    <string name="camera_dilink5_mapping_opposite">Intercanvia frontal/posterior + esquerra/dreta — 2,3,0,1</string>
+    <string name="camera_dilink5_mapping_shark">Shark / DMO — 8,9,5,4</string>
+    <string name="camera_dilink5_mapping_hint">L\'opció de parells oposats només és una possible solució per al símptoma descrit; verifiqueu les quatre previsualitzacions abans d\'aplicar-la. En desar, es reinicia el dimoni de la càmera.</string>
+    <string name="camera_dilink5_mapping_unchanged">Aquest ordre de les càmeres ja està seleccionat.</string>
+    <string name="camera_decoupled_lane_label">Flux de codificació desacoblat (correcció de la càmera de marxa enrere)</string>
+    <string name="camera_decoupled_lane_subtitle">Copia cada fotograma de la càmera abans de codificar-lo perquè un bloqueig de l\'enregistrament no pugui deixar sense imatges la vista de la càmera de marxa enrere del vehicle. Només per al mode de càmera antic; consumeix ~60 MB de memòria de la GPU i una passada addicional de la GPU per fotograma. S\'aplica en el reinici següent de la càmera (cicle d\'ACC o reinici del dimoni).</string>
+    <string name="recording_lib_chip_parking_session">Aquest aparcament</string>
+    <string name="recording_lib_chip_parking_session_at">Aparcament %1$s</string>
+    <string name="dialog_create_evidence_pack_title">Voleu crear un paquet de proves?</string>
+    <string name="dialog_create_evidence_pack_message">OverDrive només envia les metadades filtrades dels esdeveniments al proveïdor d\'IA que heu configurat. El vídeo es manté local i només s\'inclou al paquet de proves que descarregueu.</string>
+    <string name="toast_evidence_pack_creating">S\'està creant el paquet de proves…</string>
+    <string name="toast_evidence_pack_ready">Paquet de proves preparat</string>
+    <string name="toast_evidence_pack_unavailable">Aquest enregistrament encara no està indexat</string>
+    <string name="toast_evidence_pack_failed">No s\'ha pogut crear el paquet de proves: %1$s</string>
+    <string name="error_unknown">Error desconegut</string>
+    <string name="projection_dilink5_mode_required">Establiu el mode del vehicle en DiLink 5 a Diagnòstic i reinicieu el servei de la càmera.</string>
 </resources>

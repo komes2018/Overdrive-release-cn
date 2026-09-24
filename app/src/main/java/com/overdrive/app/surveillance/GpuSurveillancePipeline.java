@@ -86,6 +86,11 @@ public class GpuSurveillancePipeline {
     // an in-flight enable that has not yet set blindSpotEnabled, and bail
     // instead of double-allocating the lane.
     private boolean bsEnabling = false;
+    // Guarded by bsLifecycleLock. A disable increments this even while an enable
+    // is inside buildSharedLaneLocked's lock-released GL wait. The enable must
+    // revalidate before publishing blindSpotEnabled, otherwise a completed stale
+    // build can resurrect a feature the user just disabled.
+    private long bsLifecycleEpoch = 0L;
     private volatile int bsViewMode = 7;   // 7=Rear+Left, 8=Right+Rear
     // On-screen geometry for the SC layer (panel pixels). Read from config on
     // enable; defaults to a top-right card. setBsGeometry updates it live.
@@ -321,13 +326,13 @@ public class GpuSurveillancePipeline {
     // Configuration
     private final int cameraWidth;
     private final int cameraHeight;
-    private int encoderWidth;
-    private int encoderHeight;
+    private final int encoderWidth;
+    private final int encoderHeight;
     private final File eventOutputDir;
     private GpuPipelineConfig config;
     
     // State
-    private boolean initialized = false;
+    private volatile boolean initialized = false;
     // volatile: idle-shutdown thread reads without taking the monitor.
     private volatile boolean running = false;
     // True while {@link #stop()} is mid-teardown (encoders releasing, EGL
@@ -341,11 +346,21 @@ public class GpuSurveillancePipeline {
     // publishing running=true prematurely; this is what keeps
     // isRunning() honest if the camera GL-thread runnable throws.
     private volatile boolean starting = false;
+    // Set only by the explicit/terminal stop path. It blocks every start caller,
+    // including callers that bypass CameraDaemon, until the current lifecycle is
+    // fully stopped and its teardown verdict is known.
+    private volatile boolean confirmedStopInProgress = false;
     // volatile because the cold-start storage-retry thread (RecStorageRetry)
     // reads this without holding the pipeline monitor; without volatile the
     // retry thread can observe a stale `false` after stopRecording() flipped
     // it, defeating the cancellation check.
     private volatile boolean recordingMode = false;  // true = recording, false = viewing only
+    // Admission claims bridge the potentially-blocking setup window before
+    // recordingMode/currentMode/pending state is published. Set under the
+    // pipeline monitor so ownerless teardown's final stop claim and a new
+    // recording/surveillance owner are mutually ordered.
+    private volatile boolean recordingAdmissionInFlight = false;
+    private volatile boolean surveillanceAdmissionInFlight = false;
 
     // Serializes runtime reconfig methods (applyFpsChange, applyBitrateChange,
     // applyCodecChange). Without this, two web-UI changes arriving back-to-back
@@ -353,6 +368,11 @@ public class GpuSurveillancePipeline {
     // mid-tear-down and silently no-ops, or worse, both threads tear down
     // recorder surfaces concurrently.
     private final Object reconfigLock = new Object();
+    // Boot initialization and an HTTP-triggered cold start can arrive on
+    // different threads. Serialize the full init transaction so both cannot
+    // allocate independent encoders/cameras before either publishes
+    // initialized=true.
+    private final Object pipelineInitLock = new Object();
     
     // Saved init params — needed for re-initialization after stop/start cycle (ACC OFF→ON)
     private android.content.res.AssetManager savedAssetManager;
@@ -391,6 +411,22 @@ public class GpuSurveillancePipeline {
     private final java.util.concurrent.atomic.AtomicLong pipelineGen =
         new java.util.concurrent.atomic.AtomicLong(0L);
 
+    // A stream / blind-spot / camera-view owner can legitimately cold-start the
+    // legacy pano and later release it. RMM intentionally only parks an ownerless
+    // pipeline at low fps, so without a separate lifetime audit AVMCamera + EGL +
+    // the render loop remain alive indefinitely. A single daemon scheduler
+    // coalesces release edges, waits out bounded lane/start transitions, then runs
+    // the same generation-pinned, fail-safe ownership verdict used by Live View.
+    private static final long OWNER_RELEASE_AUDIT_DELAY_MS = 2_000L;
+    private static final long OWNER_RELEASE_AUDIT_RETRY_MS = 250L;
+    private static final long OWNER_RELEASE_AUDIT_MAX_WAIT_MS = 60_000L;
+    private final java.util.concurrent.ScheduledThreadPoolExecutor
+        ownerReleaseAuditExecutor = newOwnerReleaseAuditExecutor();
+    private final java.util.concurrent.atomic.AtomicLong ownerReleaseAuditSequence =
+        new java.util.concurrent.atomic.AtomicLong(0L);
+    private final Object ownerReleaseAuditLock = new Object();
+    private java.util.concurrent.ScheduledFuture<?> ownerReleaseAuditFuture;
+
     // FIX (audit R6): cache the resolved camera profile's per-quadrant strip-X
     // offsets so reinitializeEncoder()'s defensive `new GpuMosaicRecorder()`
     // (recorder=null branch) can rebuild with the correct viewport dims.
@@ -419,36 +455,8 @@ public class GpuSurveillancePipeline {
                                    File eventOutputDir) {
         this.cameraWidth = cameraWidth;
         this.cameraHeight = cameraHeight;
-        boolean isDilink5 = com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported();
-        com.overdrive.app.camera.ResolvedCameraConfig resolved =
-            com.overdrive.app.camera.CameraConfigResolver.resolve();
-        if (isDilink5) {
-            String q = "STANDARD";
-            try {
-                org.json.JSONObject rec = com.overdrive.app.config.UnifiedConfigManager.loadConfig().optJSONObject("recording");
-                if (rec != null) {
-                    q = rec.optString("recordingQuality", "STANDARD");
-                }
-            } catch (Throwable ignored) {}
-            boolean want4K = "ULTRA_4K".equalsIgnoreCase(q);
-            if (want4K) {
-                this.encoderWidth = 3840;
-                this.encoderHeight = 2160;
-            } else {
-                this.encoderWidth = 1920;
-                this.encoderHeight = 1080;
-            }
-        } else if (resolved != null && resolved.getProfile() != null) {
-            this.encoderWidth = resolved.getProfile().getEncoderWidth();
-            this.encoderHeight = resolved.getProfile().getEncoderHeight();
-        } else {
-            // Encoder/mosaic dims are derived from the strip aspect: each tile is
-            // (cameraWidth/4) wide x cameraHeight tall, mosaic is 2x2 of tiles, so
-            // encoder = (cameraWidth/2) x (cameraHeight*2). Seal 5120x960 → 2560x1920
-            // (4:3 quadrants). Tang 5120x720 → 2560x1440 (16:9 quadrants).
-            this.encoderWidth = Math.max(1, encoderWidth);
-            this.encoderHeight = Math.max(1, encoderHeight);
-        }
+        this.encoderWidth = Math.max(1, encoderWidth);
+        this.encoderHeight = Math.max(1, encoderHeight);
         this.sharedLaneHeight =
             com.overdrive.app.camera.CameraConfigResolver.isPassiveApaModeEnabled()
                 ? com.overdrive.app.camera.PassiveApaGeometry.HEIGHT
@@ -1572,8 +1580,9 @@ public class GpuSurveillancePipeline {
         GpuMosaicRecorder rec = recorder;
         if (rec == null) return;
         int layoutMode = camera != null ? camera.getCameraLayoutMode() : 0;
+        boolean dilink5 = com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
         rec.setCameraLayout(layoutMode);
-        if (layoutMode == 3) {
+        if (layoutMode == 3 && !dilink5) {
             rec.setProducerLayout(
                 com.overdrive.app.camera.Dilink4Constants.CORNER_FRONT,
                 com.overdrive.app.camera.Dilink4Constants.CORNER_RIGHT,
@@ -1583,6 +1592,11 @@ public class GpuSurveillancePipeline {
                 com.overdrive.app.camera.Dilink4Constants.FLIP_RIGHT,
                 com.overdrive.app.camera.Dilink4Constants.FLIP_REAR,
                 com.overdrive.app.camera.Dilink4Constants.FLIP_LEFT);
+        }
+        if (dilink5) {
+            rec.setRedMaskEnabled(false);
+            rec.setApaCenterInset(0.0f);
+            return;
         }
         try {
             org.json.JSONObject camCfg = com.overdrive.app.config
@@ -1617,7 +1631,29 @@ public class GpuSurveillancePipeline {
         
         // SOTA: First, release recorder's encoder surface on GL thread
         // This prevents EGL_BAD_SURFACE errors when the encoder is released
-        if (camera != null && camera.getGlHandler() != null && recorder != null) {
+        //
+        // Decoupled lane: the recorder's GL lives on the EncoderLane thread
+        // and child context — the surface release must run THERE, serialized
+        // with draws, or a mid-swap draw races the destroy (release-blocker
+        // review, finding 1). Legacy keeps the render-thread post verbatim.
+        if (camera != null && camera.isDecoupledEncoderLane() && recorder != null) {
+            if (!camera.releaseRecorderEncoderSurfaceOnLane(recorder, 1000)) {
+                // ABORT (review round 2, finding 1): a false/timeout means the
+                // lane is stalled and the release task may still be queued or
+                // mid-flight. Proceeding would release the codec beneath an
+                // active draw, and the delayed release could later destroy
+                // the REPLACEMENT surface. The lane marked the task abandoned
+                // (no-op if it hasn't started); recovery is the trip-safe
+                // restart — request it here, then throw so the caller's
+                // failure handling stop()s the pipeline, where a truly wedged
+                // lane escalates again via its own held-gated abort.
+                com.overdrive.app.daemon.CameraDaemon.requestProcessRestartPreservingTrip(
+                    "EncoderLane unresponsive during encoder reconfiguration");
+                throw new IllegalStateException(
+                    "EncoderLane did not release the encoder surface in time — "
+                    + "encoder reconfiguration aborted (trip-safe restart requested)");
+            }
+        } else if (camera != null && camera.getGlHandler() != null && recorder != null) {
             final Object releaseLock = new Object();
             final boolean[] releaseDone = {false};
             
@@ -1670,23 +1706,8 @@ public class GpuSurveillancePipeline {
         int bitrate = config.getEffectiveBitrate();
         int fps = loadTargetFps();
 
-        boolean isDilink5 = com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported();
-        if (isDilink5) {
-            if (config != null && config.is4K()) {
-                this.encoderWidth = 3840;
-                this.encoderHeight = 2160;
-                codecMimeType = "video/hevc";
-                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.set4KUltraEnabled(true);
-            } else {
-                this.encoderWidth = 1920;
-                this.encoderHeight = 1080;
-                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.set4KUltraEnabled(false);
-            }
-        }
-
         logger.info("Creating new encoder: " +
             (codecMimeType.contains("hevc") ? "H.265" : "H.264") +
-            " " + encoderWidth + "x" + encoderHeight +
             " @ " + fps + "fps, " + (bitrate / 1_000_000) + " Mbps");
 
         // FIX (audit R4, Findings 1+2): on encoder allocation failure, ensure
@@ -1710,7 +1731,10 @@ public class GpuSurveillancePipeline {
             if (recorder != null) {
                 try {
                     final GpuMosaicRecorder snapRec = recorder;
-                    if (camera != null && camera.getGlHandler() != null) {
+                    if (camera != null && camera.isDecoupledEncoderLane()) {
+                        // Lane path: serialized with draws (finding 1).
+                        camera.releaseRecorderEncoderSurfaceOnLane(snapRec, 500);
+                    } else if (camera != null && camera.getGlHandler() != null) {
                         camera.getGlHandler().post(() -> {
                             try { snapRec.releaseEncoderSurface(); }
                             catch (Throwable ignored) {}
@@ -1793,7 +1817,41 @@ public class GpuSurveillancePipeline {
         applySegmentDurationFromConfig();
 
         // Reinitialize recorder with new encoder on GL thread
-        if (camera != null && camera.getEglCore() != null) {
+        //
+        // Decoupled lane: recorder CONSTRUCTION (shader-string building, no
+        // GL) happens here on the pipeline thread; init + contention-probe
+        // wiring + lane adoption of the new recorder/encoder refs then run as
+        // ONE serialized lane operation via reinitRecorderOnEncoderLane — so
+        // no draw can interleave with the encoder swap and the lane never
+        // keeps a stale encoder reference (release-blocker review, finding 1).
+        // Keep the construction arms in sync with the legacy runnable below.
+        if (camera != null && camera.isDecoupledEncoderLane()) {
+            if (recorder == null) {
+                if (lastQuadrantStripOffsetX != null) {
+                    logger.info("Reinit(lane): rebuilding recorder with cached profile offsets ("
+                        + encoderWidth + "x" + encoderHeight + ")");
+                    recorder = new GpuMosaicRecorder(
+                        lastQuadrantStripOffsetX,
+                        encoderWidth,
+                        encoderHeight,
+                        camera.isTexture2D(),
+                        camera.isDecoupledEncoderLane());
+                } else {
+                    logger.warn("Reinit(lane): no cached profile offsets — falling back to "
+                        + "default-viewport GpuMosaicRecorder (Tang trims may be miss-sized)");
+                    recorder = new GpuMosaicRecorder(
+                        camera.isTexture2D(),
+                        camera.isDecoupledEncoderLane());
+                }
+                recorder.setSegmentRotatedListener(this::noteSegmentRotated);
+                applyRecorderDilink4Layout();
+            }
+            Exception laneErr = camera.reinitRecorderOnEncoderLane(recorder, encoder, 3000);
+            if (laneErr != null) {
+                logger.error("Failed to reinitialize recorder on EncoderLane", laneErr);
+                throw laneErr;
+            }
+        } else if (camera != null && camera.getEglCore() != null) {
             final Object initLock = new Object();
             final boolean[] initDone = {false};
             final Exception[] initError = {null};
@@ -1814,11 +1872,17 @@ public class GpuSurveillancePipeline {
                             logger.info("Reinit: rebuilding recorder with cached profile offsets ("
                                 + encoderWidth + "x" + encoderHeight + ")");
                             recorder = new GpuMosaicRecorder(
-                                lastQuadrantStripOffsetX, encoderWidth, encoderHeight);
+                                lastQuadrantStripOffsetX,
+                                encoderWidth,
+                                encoderHeight,
+                                camera != null && camera.isTexture2D(),
+                                camera != null && camera.isDecoupledEncoderLane());
                         } else {
                             logger.warn("Reinit: no cached profile offsets — falling back to no-arg "
                                 + "GpuMosaicRecorder (Tang trims may be miss-sized)");
-                            recorder = new GpuMosaicRecorder();
+                            recorder = new GpuMosaicRecorder(
+                                camera != null && camera.isTexture2D(),
+                                camera != null && camera.isDecoupledEncoderLane());
                         }
                         // FIX (audit R1, RESIDUAL): re-wire segment-rotated
                         // listener after a fresh recorder allocation so RMM
@@ -1934,6 +1998,14 @@ public class GpuSurveillancePipeline {
      * @throws Exception if initialization fails
      */
     public void init(android.content.res.AssetManager assetManager, android.content.Context context) throws Exception {
+        synchronized (pipelineInitLock) {
+            initLocked(assetManager, context);
+        }
+    }
+
+    private void initLocked(
+            android.content.res.AssetManager assetManager,
+            android.content.Context context) throws Exception {
         if (initialized) {
             logger.warn("Already initialized");
             return;
@@ -1983,24 +2055,8 @@ public class GpuSurveillancePipeline {
         String codecMimeType = config.getCodecMimeType();
         int bitrate = config.getEffectiveBitrate();
         int fps = loadTargetFps();
-
-        boolean isDilink5 = com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported();
-        if (isDilink5) {
-            if (config != null && config.is4K()) {
-                this.encoderWidth = 3840;
-                this.encoderHeight = 2160;
-                codecMimeType = "video/hevc";
-                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.set4KUltraEnabled(true);
-            } else {
-                this.encoderWidth = 1920;
-                this.encoderHeight = 1080;
-                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.set4KUltraEnabled(false);
-            }
-        }
-
         logger.info("Creating encoder with config: " +
             (codecMimeType.contains("hevc") ? "H.265" : "H.264") +
-            " " + encoderWidth + "x" + encoderHeight +
             " @ " + fps + "fps, " + (bitrate / 1_000_000) + " Mbps");
         encoder = new HardwareEventRecorderGpu(encoderWidth, encoderHeight, fps, bitrate, codecMimeType);
         encoder.setManualClipRetentionDuration(
@@ -2084,12 +2140,36 @@ public class GpuSurveillancePipeline {
             com.overdrive.app.camera.CameraConfigResolver.resolve(getVehicleModel());
         float[] quadrantStripOffsetX = resolvedCamera.getQuadrantStripOffsetX();
         float[] quadrantCornerOffsetsXY = resolvedCamera.getQuadrantCornerOffsetsXY();
+        // Resolve the texture contract from the NEW camera instance before
+        // constructing any shader-backed consumer. On a cold daemon start the
+        // pipeline field is null here; consulting `camera` used to compile the
+        // recorder/downscaler for EXTERNAL_OES even when the newly-created
+        // camera enabled the decoupled lane and published GL_TEXTURE_2D ring
+        // slots. The invalid target/sampler pairing silently left the encoder
+        // surface black (tiny, highly-compressed clips) until a stop/start
+        // happened to leave a stale camera object in the field.
+        //
+        // PanoramicCameraGpu's constructor is side-effect free: its final path
+        // selectors are resolved from platform/config, while EGL/HAL resources
+        // are allocated only by start(). Keep this local until every dependent
+        // component is ready, then publish it at step 5 below.
+        PanoramicCameraGpu nextCamera = new PanoramicCameraGpu(
+            cameraWidth, cameraHeight, quadrantStripOffsetX, quadrantCornerOffsetsXY);
+        boolean isTexture2D = nextCamera.isTexture2D();
+        boolean decoupledEncoderLane = nextCamera.isDecoupledEncoderLane();
+        logger.info("Resolved camera texture contract before consumer construction: "
+            + (isTexture2D ? "GL_TEXTURE_2D" : "EXTERNAL_OES")
+            + ", decoupledEncoderLane=" + decoupledEncoderLane);
         // FIX (audit R6): cache for reinitializeEncoder()'s recorder=null branch.
         this.lastQuadrantStripOffsetX = quadrantStripOffsetX;
 
         // 2. Create GPU mosaic recorder (shared) with profile-driven viewport
         // and per-quadrant offsets. Tang gets 2560x1440 instead of 2560x1920.
-        recorder = new GpuMosaicRecorder(quadrantStripOffsetX, encoderWidth, encoderHeight);
+        // The 5th arg selects the 2D windshield sampler on the decoupled
+        // encoder lane (ring copies); false everywhere else — bit-identical.
+        recorder = new GpuMosaicRecorder(
+            quadrantStripOffsetX, encoderWidth, encoderHeight, isTexture2D,
+            decoupledEncoderLane);
         // Note: recorder.init() will be called after EGL context is created by camera
 
         // FIX (audit R1, RESIDUAL): stamp lastSegmentRotateMs on every
@@ -2123,7 +2203,7 @@ public class GpuSurveillancePipeline {
             }
             downscaler = null;
         }
-        downscaler = new GpuDownscaler(quadrantStripOffsetX);
+        downscaler = new GpuDownscaler(quadrantStripOffsetX, isTexture2D);
         // Note: downscaler.init() will be called after EGL context is created by camera
 
         // 4. Create surveillance engine (uses shared recorder).
@@ -2190,9 +2270,9 @@ public class GpuSurveillancePipeline {
             logger.warn("Failed to load saved config, using defaults: " + e.getMessage());
         }
         
-        // 5. Create camera (this creates EGL context). Pass the profile's
-        // per-quadrant offsets so the foveated cropper + camera-side mosaic
-        // math agree with the recorder/downscaler/scaler.
+        // 5. Publish and wire the camera whose texture contract was used to
+        // build the recorder/downscaler above. EGL/HAL resources are still
+        // created later by camera.start().
         if (cameraWidth != resolvedCamera.getPanoWidth()
                 || cameraHeight != resolvedCamera.getPanoHeight()) {
             logger.warn("Pipeline geometry " + cameraWidth + "x" + cameraHeight
@@ -2200,8 +2280,7 @@ public class GpuSurveillancePipeline {
                 + resolvedCamera.getPanoWidth() + "x" + resolvedCamera.getPanoHeight()
                 + " — restart the daemon to apply the new profile dimensions");
         }
-        camera = new PanoramicCameraGpu(cameraWidth, cameraHeight,
-            quadrantStripOffsetX, quadrantCornerOffsetsXY);
+        camera = nextCamera;
         camera.setConsumers(recorder, downscaler, sentry);
         // Apply the active layout profile's windshield-source preference to the
         // new camera (dashcam profile at startup/IDLE; the surveillance profile
@@ -2366,7 +2445,16 @@ public class GpuSurveillancePipeline {
      * @throws Exception if start fails
      */
     public void start() throws Exception {
-        start(false);
+        start(false, com.overdrive.app.daemon.CameraDaemon.captureCameraStartEpoch());
+    }
+
+    private static void requireCurrentCameraStartEpoch(
+            long startEpoch, String phase) {
+        if (!com.overdrive.app.daemon.CameraDaemon
+                .isCameraStartEpochCurrent(startEpoch)) {
+            throw new IllegalStateException(
+                    "Camera start cancelled during " + phase);
+        }
     }
 
     // TERMINAL latch (audit follow-up): set when a camera stop — normal stop()
@@ -2484,6 +2572,11 @@ public class GpuSurveillancePipeline {
      * @throws Exception if start fails
      */
     public void start(boolean autoStartRecording) throws Exception {
+        start(autoStartRecording,
+                com.overdrive.app.daemon.CameraDaemon.captureCameraStartEpoch());
+    }
+
+    public void start(boolean autoStartRecording, long startEpoch) throws Exception {
         // CRITICAL: claim the start-in-progress slot to prevent race
         // conditions. Multiple threads may call start() concurrently
         // (HTTP + WebSocket). We use `starting` to block concurrent starts
@@ -2493,8 +2586,22 @@ public class GpuSurveillancePipeline {
         // asynchronously and RecordingModeManager's `if (!isRunning())`
         // gates correctly retry on the next trigger.
         synchronized (this) {
+            requireCurrentCameraStartEpoch(startEpoch, "pipeline admission");
             if (running || starting) {
                 logger.warn( "Already running");
+                return;
+            }
+            if (confirmedStopInProgress) {
+                logger.warn("Refusing start() — confirmed stop is in progress");
+                return;
+            }
+            if (com.overdrive.app.daemon.CameraDaemon
+                    .isCameraTerminalStopInProgress()) {
+                logger.warn("Refusing start() — terminal camera stop is in progress");
+                return;
+            }
+            if (!com.overdrive.app.daemon.CameraDaemon.isRunning()) {
+                logger.warn("Refusing start() — daemon shutdown is in progress");
                 return;
             }
             if (stopping) {
@@ -2539,6 +2646,7 @@ public class GpuSurveillancePipeline {
             if (!initialized) {
                 init();
             }
+            requireCurrentCameraStartEpoch(startEpoch, "pipeline initialization");
             
             logger.info( "Starting GPU pipeline (autoRecord=" + autoStartRecording + ")...");
             
@@ -2565,7 +2673,7 @@ public class GpuSurveillancePipeline {
             }
             
             // Start camera (this creates EGL context and initializes downscaler)
-            camera.start();
+            camera.start(startEpoch);
             
             // SOTA: Register yield listener for recording finalization during camera yield.
             // When contention is detected and the camera must yield to the native AVM app,
@@ -2675,16 +2783,14 @@ public class GpuSurveillancePipeline {
 
                 @Override
                 public void onHalRecoveryNeeded() {
-                    // ESCALATION (#3): bare close/reopen restarts have repeatedly
-                    // failed to revive frame delivery — the AVM HAL co-consumer
-                    // state is wedged and only a full teardown + com.byd.avc
-                    // warmup recovers it (the sole thing that ever broke the
-                    // sentry->drive blackout loop in field logs). Route through
-                    // RecordingModeManager's warmup-capable restart. Run on a
-                    // background thread: we're on the GL/watchdog path and the
-                    // recovery does a blocking 4s warmup + pipeline rebuild.
+                    // ESCALATION: callback kick, same-handle SurfaceTexture
+                    // rebuild and bounded bare close/reopen all failed. Route
+                    // through RecordingModeManager's full-rebuild entrypoint.
+                    // In mode=NONE/ACC-off that entrypoint requests a trip-safe
+                    // daemon restart because there is no recording mode to
+                    // reactivate. Run off the GL/watchdog path.
                     logger.error("HAL recovery needed — bare reopen loop cannot recover. "
-                        + "Routing through warmup-restart (full teardown + com.byd.avc warmup).");
+                        + "Routing through full camera/GL rebuild.");
                     final PanoramicCameraGpu cam = camera;
                     new Thread(() -> {
                         try {
@@ -2693,8 +2799,11 @@ public class GpuSurveillancePipeline {
                             if (rmm != null) {
                                 rmm.forceWarmupRestart("hal-zero-frame-escalation");
                             } else {
-                                logger.warn("HAL recovery: RecordingModeManager unavailable — "
-                                    + "cannot route warmup restart; leaving stall watchdog to retry");
+                                logger.error("HAL recovery: RecordingModeManager unavailable — "
+                                    + "requesting trip-safe daemon rebuild");
+                                com.overdrive.app.daemon.CameraDaemon
+                                    .requestProcessRestartPreservingTrip(
+                                        "DI4 HAL recovery without RecordingModeManager");
                             }
                         } catch (Throwable t) {
                             logger.warn("HAL recovery routing failed: " + t.getMessage());
@@ -2704,7 +2813,9 @@ public class GpuSurveillancePipeline {
                             // escalation) if this recovery didn't take. Without
                             // this, a failed recovery would permanently silence
                             // the watchdog for the rest of the drive.
-                            if (cam != null) {
+                            if (cam != null
+                                    && !com.overdrive.app.daemon.CameraDaemon
+                                        .isProcessRestartPending()) {
                                 cam.notePipelineRestarted();
                             }
                         }
@@ -2720,6 +2831,7 @@ public class GpuSurveillancePipeline {
             // showed every startRecording() returning formatAvailable=false
             // when this sleep was skipped on dilink4 — recording never started.
             Thread.sleep(1500);
+            requireCurrentCameraStartEpoch(startEpoch, "camera warmup");
 
             // Verify the camera GL-thread runnable actually completed without
             // throwing. PanoramicCameraGpu.start() posts initializeGl +
@@ -2747,6 +2859,7 @@ public class GpuSurveillancePipeline {
 
             // Camera open verified — publish running=true so isRunning() is honest.
             synchronized (this) {
+                requireCurrentCameraStartEpoch(startEpoch, "pipeline publication");
                 running = true;
             }
 
@@ -2891,6 +3004,7 @@ public class GpuSurveillancePipeline {
             try {
                 if (camera != null) {
                     try { rollbackCameraClean = camera.stop(); } catch (Throwable t) {
+                        rollbackCameraClean = false;
                         logger.warn("start() rollback: camera.stop failed: " + t.getMessage());
                     }
                     camera = null;
@@ -2998,6 +3112,53 @@ public class GpuSurveillancePipeline {
             // is idempotent.)
             synchronized (this) {
                 starting = false;
+                notifyAll();
+            }
+        }
+    }
+
+    /**
+     * Blocks new starts, waits for an in-flight start/stop to settle, then
+     * performs a synchronous stop and returns the actual teardown verdict.
+     */
+    public boolean stopAndConfirm(long timeoutMs) {
+        long deadlineNanos =
+                System.nanoTime() + Math.max(0L, timeoutMs) * 1_000_000L;
+        synchronized (this) {
+            confirmedStopInProgress = true;
+            while (starting || stopping) {
+                long remainingNanos = deadlineNanos - System.nanoTime();
+                if (remainingNanos <= 0L) {
+                    confirmedStopInProgress = false;
+                    notifyAll();
+                    return false;
+                }
+                try {
+                    long waitMs = Math.max(
+                            1L, remainingNanos / 1_000_000L);
+                    wait(waitMs);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    confirmedStopInProgress = false;
+                    notifyAll();
+                    return false;
+                }
+            }
+        }
+
+        try {
+            stop();
+            synchronized (this) {
+                return !running && !starting && !stopping
+                        && !pipelineTeardownWedged;
+            }
+        } catch (Throwable t) {
+            logger.error("Confirmed pipeline stop failed: " + t.getMessage());
+            return false;
+        } finally {
+            synchronized (this) {
+                confirmedStopInProgress = false;
+                notifyAll();
             }
         }
     }
@@ -3023,6 +3184,27 @@ public class GpuSurveillancePipeline {
             // captured an older value and exits before touching torn-down state.
             long newGen = pipelineGen.incrementAndGet();
             logger.info("Pipeline generation bumped on stop: " + newGen);
+            try {
+                com.overdrive.app.daemon.CameraDaemon
+                    .onGpuPipelineStopCommitted(this);
+            } catch (Throwable t) {
+                logger.warn("Could not clear explicit camera ownership on stop: "
+                    + t.getMessage());
+            }
+        }
+        cancelOwnerlessPipelineAudit();
+        try {
+            // Every legacy pano stop retires the AVC keep-alive centrally.
+            // Many historical callers remembered this separately, but external
+            // owner cleanup and direct safety stops do not pass through RMM.
+            // The watchdog already fails closed when running=false; stopping it
+            // here also removes the otherwise-permanent 60s wakeup. DiLink 4's
+            // CameraDaemon.stopAvcKeepAlive() is intentionally a no-op and DiLink
+            // 5 never starts this legacy facility.
+            com.overdrive.app.daemon.CameraDaemon.stopAvcKeepAlive();
+        } catch (Throwable t) {
+            logger.warn("Could not stop AVC keep-alive with pano: "
+                + t.getMessage());
         }
 
         try {
@@ -3122,14 +3304,9 @@ public class GpuSurveillancePipeline {
             // frames. Tear OEM down here so its EGL release runs against a still-
             // valid parent display.
             try {
-                com.overdrive.app.camera.OemDashcamPipeline oem =
-                    com.overdrive.app.daemon.CameraDaemon.getOemDashcamPipeline();
-                if (oem != null && oem.isRunning()) {
-                    logger.info("Stopping OEM Dashcam pipeline before pano camera tear-down "
-                        + "(shared eglDisplay)");
-                    try { oem.stopRecording(); } catch (Throwable ignored) {}
-                    try { oem.stop(); } catch (Throwable ignored) {}
-                    com.overdrive.app.daemon.CameraDaemon.setOemDashcamPipeline(null);
+                if (!com.overdrive.app.server.OemDashcamApiHandler
+                        .stopPipelineBeforePanoTeardown()) {
+                    logger.warn("OEM pre-pano-stop teardown was not confirmed");
                 }
             } catch (Throwable t) {
                 logger.warn("OEM pre-pano-stop teardown failed: " + t.getMessage());
@@ -3213,6 +3390,7 @@ public class GpuSurveillancePipeline {
                         cameraStopClean = camera.stop();
                     }
                 } catch (Throwable t) {
+                    cameraStopClean = false;
                     logger.warn("stop: camera.stop failed: " + t.getMessage());
                 }
             }
@@ -3272,6 +3450,7 @@ public class GpuSurveillancePipeline {
             // Clear stopping flag so concurrent start() can proceed.
             synchronized (this) {
                 stopping = false;
+                notifyAll();
             }
         }
     }
@@ -3351,6 +3530,26 @@ public class GpuSurveillancePipeline {
      * @param prefix Filename prefix (e.g., "cam", "proximity", "event")
      */
     public void startRecording(java.io.File outputDir, String prefix) {
+        synchronized (this) {
+            if (!running || stopping || confirmedStopInProgress) {
+                logger.warn("startRecording refused — pipeline is not available "
+                    + "(running=" + running + ", stopping=" + stopping
+                    + ", confirmedStop=" + confirmedStopInProgress + ")");
+                return;
+            }
+            recordingAdmissionInFlight = true;
+        }
+        try {
+            startRecordingAdmitted(outputDir, prefix);
+        } finally {
+            synchronized (this) {
+                recordingAdmissionInFlight = false;
+                notifyAll();
+            }
+        }
+    }
+
+    private void startRecordingAdmitted(java.io.File outputDir, String prefix) {
         // LANE SAFETY (lifecycle redesign): the recorder lane (PASS 1A) can be
         // switched OFF when the camera is kept warm ONLY for blind-spot (BS has
         // no encoder). ANY recording — RMM mode, manual /api/start, TCP start,
@@ -3709,9 +3908,10 @@ public class GpuSurveillancePipeline {
         // pipeline. Generation gate is the single check that catches that.
         final long capturedGen = pipelineGen.get();
         storageRetryThread = new Thread(() -> {
-            long deadline = System.currentTimeMillis() + STORAGE_RETRY_TIMEOUT_MS;
+            long deadline = android.os.SystemClock.elapsedRealtime()
+                    + STORAGE_RETRY_TIMEOUT_MS;
             int attempt = 0;
-            while (System.currentTimeMillis() < deadline) {
+            while (android.os.SystemClock.elapsedRealtime() < deadline) {
                 try {
                     Thread.sleep(STORAGE_RETRY_INTERVAL_MS);
                 } catch (InterruptedException e) {
@@ -4268,6 +4468,26 @@ public class GpuSurveillancePipeline {
      * SOTA: Ensures SD card is mounted if SD card storage is selected.
      */
     public void enableSurveillance() {
+        synchronized (this) {
+            if (!running || stopping || confirmedStopInProgress) {
+                logger.warn("enableSurveillance refused — pipeline is not available "
+                    + "(running=" + running + ", stopping=" + stopping
+                    + ", confirmedStop=" + confirmedStopInProgress + ")");
+                return;
+            }
+            surveillanceAdmissionInFlight = true;
+        }
+        try {
+            enableSurveillanceAdmitted();
+        } finally {
+            synchronized (this) {
+                surveillanceAdmissionInFlight = false;
+                notifyAll();
+            }
+        }
+    }
+
+    private void enableSurveillanceAdmitted() {
         // Stop normal recording if active (mutually exclusive)
         if (currentMode == Mode.NORMAL_RECORDING) {
             logger.info("Stopping normal recording to enable surveillance (mutually exclusive)");
@@ -4486,25 +4706,31 @@ public class GpuSurveillancePipeline {
                 logger.warn("onAccOn: config.setRecordingMode(NORMAL) failed: " + t.getMessage());
             }
 
-            // OEM-PARITY: dilink4 never closes the AVMCamera handle. oem's
-            // PanoCameraRecord stays alive across ACC ON; the BYD native AVC app
-            // attaches as a co-consumer of the AVM HAL daemon (gl/C5920a.java
-            // observerSet) and shares the producer surface naturally.
-            // reopenCamera() does a full close+reopen of our AVMCamera handle,
-            // which on byd_apa firmware drops mosaic mode and leaves the next
-            // open with all-zero frames — exactly what the user reports.
+            // OEM-PARITY: dilink4 never closes the AVMCamera handle merely
+            // because ACC turns on. oem's PanoCameraRecord stays alive across
+            // this edge; preserving the existing handle avoids needlessly
+            // rebuilding the panorama/viewpoint route. If that retained producer
+            // is stale, the DI4 recovery ladder below repairs it in place first.
             //
             // Legacy fleet keeps the original "release and reopen as secondary
             // consumer" behaviour because that's how non-byd_apa HALs share.
-            boolean dilink4 = false;
+            boolean persistentCamera = false;
             try {
-                dilink4 = com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic();
+                persistentCamera =
+                    com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic()
+                    || com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
             } catch (Throwable ignored) {}
-            if (camera != null && running && !dilink4) {
+            if (camera != null && running && !persistentCamera) {
                 camera.reopenCamera();
                 logger.info("ACC ON transition complete - all recordings finalized, camera reopened");
-            } else if (dilink4) {
-                logger.info("ACC ON transition complete - dilink4 keeps camera alive (oem-parity, no reopen)");
+            } else if (persistentCamera) {
+                logger.info("ACC ON transition complete - DiLink camera stays alive (no reopen)");
+                // A parked DI4 HAL may have intentionally paused its producer
+                // while preserving the AVMCamera handle. Re-arm that handle
+                // in place now, before blind-spot/camera-view becomes visible.
+                if (camera != null) {
+                    camera.requestDiLink4ProducerRecovery("acc-on persistent handle");
+                }
             } else {
                 logger.info("ACC ON transition complete - all recordings finalized");
             }
@@ -4702,6 +4928,7 @@ public class GpuSurveillancePipeline {
         int effectiveStreamFps = streamFps;
         try {
             if (camera != null && camera.isUsingOemSurfaceTexturePath()
+                    && !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
                     && streamFps > DILINK4_STREAM_FPS_CAP) {
                 effectiveStreamFps = DILINK4_STREAM_FPS_CAP;
                 logger.info("dilink4: clamping stream encoder fps " + streamFps + " → "
@@ -4741,29 +4968,39 @@ public class GpuSurveillancePipeline {
         com.overdrive.app.camera.ResolvedCameraConfig streamCfg =
             com.overdrive.app.camera.CameraConfigResolver.resolve(getVehicleModel());
         float[] streamQuadrantStripOffsetX = streamCfg.getQuadrantStripOffsetX();
+        // Sampler type follows the camera's published texture: 2D on DiLink 5
+        // (native compositor) AND on the decoupled encoder lane (ring copies).
+        // camera.isTexture2D() covers both; the platform check remains only as
+        // the pre-camera fallback and is exactly the old behaviour.
         streamScaler = new com.overdrive.app.streaming.GpuStreamScaler(
-            streamWidth, streamHeight, streamQuadrantStripOffsetX);
+            streamWidth,
+            streamHeight,
+            streamQuadrantStripOffsetX,
+            camera != null
+                ? camera.isTexture2D()
+                : com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected());
 
-            try {
-                android.content.Context odCtx = savedContext;
-                if (odCtx == null) odCtx = com.overdrive.app.daemon.CameraDaemon.getAppContext();
-                if (odCtx != null) {
-                    com.overdrive.app.od.Od.authorize(odCtx);
-                } else {
-                    logger.error("od authorize skipped: no context available");
-                }
-            } catch (Throwable t) {
-                logger.warn("od init failed: " + t.getMessage());
+        try {
+            android.content.Context odCtx = savedContext;
+            if (odCtx == null) odCtx = com.overdrive.app.daemon.CameraDaemon.getAppContext();
+            if (odCtx != null) {
+                com.overdrive.app.od.Od.authorize(odCtx);
+            } else {
+                logger.error("od authorize skipped: no context available");
             }
+        } catch (Throwable t) {
+            logger.warn("od init failed: " + t.getMessage());
+        }
 
         // Match the recorder exactly: 0=legacy strip, 1=full-frame passive
-        // APA (and DiLink 5), 3=four-corner DiLink 4 remap.
+        // APA, 3=four-corner DiLink 4 remap.
         streamScaler.setCameraLayout(streamLayout);
 
         // Hardcoded Variant A corner+flip constants on DiLink 4. Mirrors
         // GpuMosaicRecorder so live stream and recording stay aligned. On
         // legacy cars the uniforms are unused (uApaMode != 3 path).
-        if (streamLayout == 3) {
+        if (streamLayout == 3
+                && !com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {
             // Single combined call referencing the shared Dilink4Constants
             // so the stream scaler can never silently diverge from the
             // recorder's mosaic arrangement.
@@ -4777,7 +5014,10 @@ public class GpuSurveillancePipeline {
                 com.overdrive.app.camera.Dilink4Constants.FLIP_REAR,
                 com.overdrive.app.camera.Dilink4Constants.FLIP_LEFT);
         }
-        if (streamLayout != 0) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {
+            streamScaler.setRedMaskEnabled(false);
+            streamScaler.setApaCenterInset(0.0f);
+        } else if (streamLayout != 0) {
             // Red-overlay suppression follows the recorder. Read the same
             // unified-config flag so the live preview matches the MP4.
             try {
@@ -4794,8 +5034,6 @@ public class GpuSurveillancePipeline {
             } catch (Throwable t) {
                 logger.warn("Stream scaler red-mask flag read failed: " + t.getMessage());
             }
-        } else if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
-            streamScaler.setRedMaskEnabled(false);
         }
         
         // Initialize on GL thread and WAIT for completion.
@@ -4941,8 +5179,12 @@ public class GpuSurveillancePipeline {
                             try {
                                 java.util.concurrent.Callable<Boolean> hook = keepAlivePredicate;
                                 if (hook != null) keepAlive = Boolean.TRUE.equals(hook.call());
-                            } catch (Exception e) {
-                                logger.warn("keepAlive predicate threw: " + e.getMessage());
+                            } catch (Throwable t) {
+                                logger.warn("keepAlive predicate threw: " + t.getMessage());
+                                // Ownership checks fail safe. A linkage/runtime
+                                // failure in an optional manager must never turn
+                                // "unknown" into permission to close the camera.
+                                keepAlive = true;
                             }
                             // Keep pipeline running if ANY consumer still needs the camera/encoder:
                             //   - SURVEILLANCE: motion-triggered recording
@@ -4961,31 +5203,76 @@ public class GpuSurveillancePipeline {
                             // tear the pipeline down out from under a deferred
                             // recording that hadn't yet landed.
                             boolean pendingRec = pendingRecordingPrefix != null;
+                            boolean nativeLaneOwned;
+                            bsLifecycleLock.lock();
+                            try {
+                                nativeLaneOwned = blindSpotEnabled || bsEnabling
+                                    || camViewActive || camViewEnabling;
+                            } finally {
+                                bsLifecycleLock.unlock();
+                            }
+                            boolean explicitCommandOwner = false;
+                            try {
+                                explicitCommandOwner =
+                                    com.overdrive.app.daemon.CameraDaemon
+                                        .hasExplicitCameraCommandOwner();
+                            } catch (Throwable t) {
+                                logger.warn("Explicit camera owner check failed: "
+                                    + t.getMessage());
+                                explicitCommandOwner = true;
+                            }
+                            boolean oemCameraOwner =
+                                hasOemCameraOwnerOrTransitionFailSafe(
+                                    "WebSocket idle");
                             // OEM-PARITY: dilink4 keeps the pipeline alive
                             // unconditionally — oem's PanoCameraRecord is
                             // started at boot and never stopped on stream-
                             // client idle. The auto-stop here is a legacy
                             // resource-saving optimisation that breaks the
                             // "always-on camera for parked preview" model.
-                            boolean dilink4Persistent = false;
+                            boolean persistentCamera = false;
                             try {
-                                dilink4Persistent = com.overdrive.app.daemon.CameraDaemon
-                                    .isDilink4ModeActiveStatic();
-                            } catch (Throwable ignored) {}
-                            if (dilink4Persistent) {
-                                logger.info("Pipeline kept alive (dilink4 oem-parity — never auto-stop on WS idle)");
-                            } else if (mode == Mode.IDLE && !recordingActive && !pendingRec && !keepAlive && !sentryActive && running) {
-                                logger.info("No recording consumers active - stopping pipeline to save resources");
-                                self.stop();
+                                persistentCamera = com.overdrive.app.daemon.CameraDaemon
+                                    .isDilink4ModeActiveStatic()
+                                    || com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
+                            } catch (Throwable t) {
+                                logger.warn("Persistent camera check failed: "
+                                    + t.getMessage());
+                                persistentCamera = true;
+                            }
+                            if (persistentCamera) {
+                                logger.info("Pipeline kept alive (DiLink persistent camera)");
+                            } else if (mode == Mode.IDLE && !recordingMode
+                                    && !recordingAdmissionInFlight
+                                    && !surveillanceAdmissionInFlight
+                                    && !recordingActive && !pendingRec
+                                    && !keepAlive && !sentryActive
+                                    && !nativeLaneOwned && !explicitCommandOwner
+                                    && !oemCameraOwner
+                                    && running) {
+                                logger.info("No recording consumers active - "
+                                    + "running final owner-safe stop verdict");
+                                self.stopIfCameraOwnerless(
+                                    self.getLifecycleGeneration(),
+                                    "WebSocket idle");
                             } else {
                                 logger.info("Pipeline kept alive (mode=" + mode
+                                    + ", recordingMode=" + recordingMode
+                                    + ", recordingAdmission="
+                                        + recordingAdmissionInFlight
+                                    + ", surveillanceAdmission="
+                                        + surveillanceAdmissionInFlight
                                     + ", recording=" + recordingActive
                                     + ", pending=" + pendingRec
                                     + ", keepAlive=" + keepAlive
-                                    + ", sentryActive=" + sentryActive + ")");
+                                    + ", sentryActive=" + sentryActive
+                                    + ", nativeLane=" + nativeLaneOwned
+                                    + ", explicitCommand=" + explicitCommandOwner
+                                    + ", oemCamera=" + oemCameraOwner
+                                    + ")");
                             }
-                        } catch (Exception e) {
-                            logger.error("Error during idle shutdown", e);
+                        } catch (Throwable t) {
+                            logger.error("Error during idle shutdown", t);
                         }
                     }
                 }, "IdleShutdown").start();
@@ -5046,6 +5333,403 @@ public class GpuSurveillancePipeline {
             return true;
         } finally {
             streamLifecycleLock.unlock();
+        }
+    }
+
+    private boolean hasOemCameraOwnerOrTransitionFailSafe(String phase) {
+        try {
+            if (com.overdrive.app.server.OemDashcamApiHandler
+                    .isCameraLifecycleTransitionInFlight()) {
+                return true;
+            }
+            com.overdrive.app.camera.OemDashcamPipeline oem =
+                com.overdrive.app.daemon.CameraDaemon.getOemDashcamPipeline();
+            return oem != null && oem.isRunning();
+        } catch (Throwable t) {
+            // Pano stop cascades into OEM teardown before EGL release. If OEM
+            // ownership cannot be evaluated, keep pano rather than truncating
+            // an independent DVR recording or an in-flight lifecycle start.
+            logger.warn(phase + " OEM camera owner check failed: "
+                + t.getMessage());
+            return true;
+        }
+    }
+
+    /**
+     * Re-check owners that are not serialized by streamLifecycleLock or
+     * bsLifecycleLock. Called under the pipeline monitor immediately before
+     * publishing stopping=true, so recording/surveillance admission wrappers
+     * either claim first and are observed here, or see stopping and refuse.
+     */
+    private boolean hasLateNonLaneCameraOwnerFailSafe(String phase) {
+        try {
+            GpuMosaicRecorder rec = recorder;
+            SurveillanceEngineGpu surveillance = sentry;
+            if (currentMode != Mode.IDLE
+                    || recordingMode
+                    || recordingAdmissionInFlight
+                    || surveillanceAdmissionInFlight
+                    || pendingRecordingPrefix != null
+                    || (rec != null && rec.isRecording())
+                    || (surveillance != null && surveillance.isActive())) {
+                return true;
+            }
+
+            java.util.concurrent.Callable<Boolean> hook = keepAlivePredicate;
+            if (hook != null && Boolean.TRUE.equals(hook.call())) {
+                return true;
+            }
+            if (com.overdrive.app.daemon.CameraDaemon
+                    .hasExplicitCameraCommandOwner()) {
+                return true;
+            }
+            if (com.overdrive.app.server.StreamingApiHandler
+                    .hasPendingLiveViewStartupOwner(this)) {
+                return true;
+            }
+            if (com.overdrive.app.server.SurveillanceApiHandler
+                    .hasActiveCameraPreviewLeaseOwner(this)) {
+                return true;
+            }
+            if (hasOemCameraOwnerOrTransitionFailSafe(phase)) {
+                return true;
+            }
+            return com.overdrive.app.daemon.CameraDaemon
+                    .isDilink4ModeActiveStatic()
+                || com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
+        } catch (Throwable t) {
+            logger.warn(phase + " late owner re-check failed: "
+                + t.getMessage());
+            return true;
+        }
+    }
+
+    /**
+     * Stop a pano lifecycle that was cold-started for Live View but never
+     * acquired a real camera consumer. The caller pins this decision to the
+     * generation observed after startup; a timer from an older lifecycle can
+     * therefore never stop a later camera session.
+     *
+     * <p>The stream and shared native-lane locks serialize the final ownership
+     * check against stream, blind-spot, and camera-view adoption. Recording,
+     * surveillance, pending-record, RMM activation/keep-warm, and platform
+     * persistent-camera policies are checked immediately before stop().</p>
+     */
+    public boolean stopIfLiveViewStartupOrphaned(long expectedGeneration) {
+        return stopIfCameraOwnerless(expectedGeneration, "Live View startup");
+    }
+
+    /**
+     * Generation-pinned final camera ownership verdict shared by abandoned
+     * cold-start cleanup and post-release audits.
+     */
+    private boolean stopIfCameraOwnerless(
+            long expectedGeneration, String releaseReason) {
+        boolean stopClaimed = false;
+        streamLifecycleLock.lock();
+        bsLifecycleLock.lock();
+        try {
+            long actualGeneration = pipelineGen.get();
+            if (actualGeneration != expectedGeneration
+                    || !running || starting || stopping
+                    || confirmedStopInProgress) {
+                logger.info("Ownerless camera cleanup cancelled for "
+                    + releaseReason + " (expectedGen="
+                    + expectedGeneration + ", actualGen=" + actualGeneration
+                    + ", running=" + running + ", starting=" + starting
+                    + ", stopping=" + stopping
+                    + ", confirmedStop=" + confirmedStopInProgress + ")");
+                return false;
+            }
+
+            com.overdrive.app.streaming.WebSocketStreamServer server = wsStreamServer;
+            boolean streamOwned = streamingEnabled
+                    || (server != null && server.hasActiveClients());
+            GpuMosaicRecorder rec = recorder;
+            boolean recordingActive = rec != null && rec.isRecording();
+            boolean pendingRecord = pendingRecordingPrefix != null;
+            SurveillanceEngineGpu surveillance = sentry;
+            boolean surveillanceActive = surveillance != null && surveillance.isActive();
+            boolean nativeLaneOwned = blindSpotEnabled || bsEnabling
+                    || camViewActive || camViewEnabling;
+
+            boolean keepAlive = false;
+            try {
+                java.util.concurrent.Callable<Boolean> hook = keepAlivePredicate;
+                if (hook != null) keepAlive = Boolean.TRUE.equals(hook.call());
+            } catch (Throwable t) {
+                logger.warn("Ownerless camera cleanup keepAlive predicate threw: "
+                    + t.getMessage());
+                // Fail safe: an unknown ownership verdict must not stop camera.
+                keepAlive = true;
+            }
+
+            boolean explicitCommandOwner = false;
+            try {
+                explicitCommandOwner = com.overdrive.app.daemon.CameraDaemon
+                    .hasExplicitCameraCommandOwner();
+            } catch (Throwable t) {
+                // This is an ownership guard, not an optional optimization.
+                // Unknown must mean "keep" so a class-init/linkage fault cannot
+                // terminate an explicit legacy camera session.
+                logger.warn("Ownerless camera cleanup explicit-owner check failed: "
+                    + t.getMessage());
+                explicitCommandOwner = true;
+            }
+            boolean oemLifecycleTransition = false;
+            try {
+                oemLifecycleTransition =
+                    com.overdrive.app.server.OemDashcamApiHandler
+                        .isCameraLifecycleTransitionInFlight();
+            } catch (Throwable t) {
+                logger.warn("Ownerless camera cleanup OEM transition check failed: "
+                    + t.getMessage());
+                oemLifecycleTransition = true;
+            }
+            boolean oemCameraOwner =
+                hasOemCameraOwnerOrTransitionFailSafe(
+                    "Ownerless camera cleanup");
+            boolean liveViewStartupOwner = false;
+            try {
+                liveViewStartupOwner =
+                    com.overdrive.app.server.StreamingApiHandler
+                        .hasPendingLiveViewStartupOwner(this);
+            } catch (Throwable t) {
+                logger.warn(
+                    "Ownerless camera cleanup Live View lease check failed: "
+                        + t.getMessage());
+                liveViewStartupOwner = true;
+            }
+            boolean diagnosticsPreviewOwner = false;
+            try {
+                diagnosticsPreviewOwner =
+                    com.overdrive.app.server.SurveillanceApiHandler
+                        .hasActiveCameraPreviewLeaseOwner(this);
+            } catch (Throwable t) {
+                logger.warn(
+                    "Ownerless camera cleanup diagnostics lease check failed: "
+                        + t.getMessage());
+                diagnosticsPreviewOwner = true;
+            }
+
+            boolean persistentCamera = false;
+            try {
+                persistentCamera = com.overdrive.app.daemon.CameraDaemon
+                    .isDilink4ModeActiveStatic()
+                    || com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
+            } catch (Throwable t) {
+                // Platform detection is an ownership guard. Fail safe if it
+                // cannot be evaluated rather than stopping a persistent camera.
+                logger.warn("Live View orphan cleanup platform check failed: "
+                    + t.getMessage());
+                persistentCamera = true;
+            }
+
+            boolean owned = streamOwned
+                    || currentMode != Mode.IDLE
+                    || recordingMode
+                    || recordingAdmissionInFlight
+                    || surveillanceAdmissionInFlight
+                    || recordingActive
+                    || pendingRecord
+                    || surveillanceActive
+                    || nativeLaneOwned
+                    || keepAlive
+                    || explicitCommandOwner
+                    || oemCameraOwner
+                    || liveViewStartupOwner
+                    || diagnosticsPreviewOwner
+                    || persistentCamera;
+            if (owned) {
+                logger.info("Ownerless camera cleanup kept pipeline for "
+                    + releaseReason + " (stream="
+                    + streamOwned + ", mode=" + currentMode
+                    + ", recordingMode=" + recordingMode
+                    + ", recordingAdmission=" + recordingAdmissionInFlight
+                    + ", surveillanceAdmission="
+                        + surveillanceAdmissionInFlight
+                    + ", recording=" + recordingActive
+                    + ", pending=" + pendingRecord
+                    + ", surveillance=" + surveillanceActive
+                    + ", nativeLane=" + nativeLaneOwned
+                    + ", keepAlive=" + keepAlive
+                    + ", explicitCommand=" + explicitCommandOwner
+                    + ", oemCamera=" + oemCameraOwner
+                    + ", liveViewStartup=" + liveViewStartupOwner
+                    + ", diagnosticsPreview=" + diagnosticsPreviewOwner
+                    + ", persistent=" + persistentCamera + ")");
+                if (recordingAdmissionInFlight
+                        || surveillanceAdmissionInFlight
+                        || bsEnabling || camViewEnabling
+                        || oemLifecycleTransition) {
+                    scheduleOwnerlessPipelineAudit(
+                        "transient owner settled after " + releaseReason);
+                }
+                return false;
+            }
+
+            // Claim the lifecycle before releasing the ownership locks. The
+            // stopping flag makes enableStreaming/start reject new work during
+            // the tiny handoff to stop(), while avoiding holding stream/BS locks
+            // through the multi-second camera and encoder teardown.
+            synchronized (this) {
+                actualGeneration = pipelineGen.get();
+                if (actualGeneration != expectedGeneration
+                        || !running || starting || stopping
+                        || confirmedStopInProgress) {
+                    logger.info("Ownerless camera cleanup lost stop claim for "
+                        + releaseReason
+                        + " (expectedGen=" + expectedGeneration
+                        + ", actualGen=" + actualGeneration + ")");
+                    return false;
+                }
+                if (hasLateNonLaneCameraOwnerFailSafe(
+                        "Ownerless camera cleanup final claim")) {
+                    logger.info("Ownerless camera cleanup cancelled for "
+                        + releaseReason
+                        + " — a non-lane owner appeared during the stop claim");
+                    scheduleOwnerlessPipelineAudit(
+                        "late owner settled after " + releaseReason);
+                    return false;
+                }
+                stopping = true;
+                stopClaimed = true;
+            }
+            logger.info(releaseReason
+                + " has no remaining camera owner - stopping pipeline");
+        } catch (Throwable t) {
+            logger.warn("Ownerless camera cleanup failed for "
+                + releaseReason + ": " + t.getMessage());
+            return false;
+        } finally {
+            bsLifecycleLock.unlock();
+            streamLifecycleLock.unlock();
+        }
+
+        if (!stopClaimed) return false;
+        try {
+            stop();
+            return true;
+        } catch (Throwable t) {
+            logger.warn("Ownerless camera teardown failed for "
+                + releaseReason + ": " + t.getMessage());
+            synchronized (this) {
+                stopping = false;
+                notifyAll();
+            }
+            return false;
+        }
+    }
+
+    private static java.util.concurrent.ScheduledThreadPoolExecutor
+            newOwnerReleaseAuditExecutor() {
+        java.util.concurrent.ScheduledThreadPoolExecutor executor =
+            new java.util.concurrent.ScheduledThreadPoolExecutor(1, runnable -> {
+                Thread thread = new Thread(runnable, "CameraOwnerReleaseAudit");
+                thread.setDaemon(true);
+                return thread;
+            });
+        executor.setRemoveOnCancelPolicy(true);
+        executor.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+        return executor;
+    }
+
+    /**
+     * Coalesce external-owner release edges and stop only if the same camera
+     * lifecycle is still running with no owner after bounded transition work
+     * settles. The final verdict is deliberately centralized above.
+     */
+    public void auditOwnerlessPipelineAfterExternalRelease(
+            String releaseReason) {
+        scheduleOwnerlessPipelineAudit(releaseReason);
+    }
+
+    private void scheduleOwnerlessPipelineAudit(String releaseReason) {
+        final long expectedGeneration;
+        synchronized (this) {
+            if (!running || stopping) return;
+            expectedGeneration = pipelineGen.get();
+        }
+        long auditSequence = ownerReleaseAuditSequence.incrementAndGet();
+        long deadlineElapsedMs = android.os.SystemClock.elapsedRealtime()
+            + OWNER_RELEASE_AUDIT_MAX_WAIT_MS;
+        scheduleOwnerlessPipelineAuditStep(
+            auditSequence, expectedGeneration, releaseReason,
+            deadlineElapsedMs, OWNER_RELEASE_AUDIT_DELAY_MS);
+    }
+
+    private void scheduleOwnerlessPipelineAuditStep(
+            long auditSequence, long expectedGeneration, String releaseReason,
+            long deadlineElapsedMs, long delayMs) {
+        synchronized (ownerReleaseAuditLock) {
+            if (auditSequence != ownerReleaseAuditSequence.get()) return;
+            if (ownerReleaseAuditFuture != null) {
+                ownerReleaseAuditFuture.cancel(false);
+            }
+            try {
+                ownerReleaseAuditFuture = ownerReleaseAuditExecutor.schedule(
+                    () -> runOwnerlessPipelineAudit(
+                        auditSequence, expectedGeneration, releaseReason,
+                        deadlineElapsedMs),
+                    Math.max(0L, delayMs),
+                    java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (Throwable t) {
+                logger.warn("Could not schedule ownerless camera audit for "
+                    + releaseReason + ": " + t.getMessage());
+            }
+        }
+    }
+
+    private void runOwnerlessPipelineAudit(
+            long auditSequence, long expectedGeneration, String releaseReason,
+            long deadlineElapsedMs) {
+        if (auditSequence != ownerReleaseAuditSequence.get()
+                || pipelineGen.get() != expectedGeneration
+                || !running || stopping) {
+            return;
+        }
+
+        boolean ownershipTransitionInFlight = starting;
+        bsLifecycleLock.lock();
+        try {
+            ownershipTransitionInFlight |= bsEnabling || camViewEnabling;
+        } finally {
+            bsLifecycleLock.unlock();
+        }
+        try {
+            ownershipTransitionInFlight |=
+                com.overdrive.app.server.OemDashcamApiHandler
+                    .isCameraLifecycleTransitionInFlight();
+        } catch (Throwable t) {
+            logger.warn("Ownerless camera audit could not inspect OEM transition: "
+                + t.getMessage());
+            ownershipTransitionInFlight = true;
+        }
+        if (ownershipTransitionInFlight) {
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (now < deadlineElapsedMs) {
+                scheduleOwnerlessPipelineAuditStep(
+                    auditSequence, expectedGeneration, releaseReason,
+                    deadlineElapsedMs, OWNER_RELEASE_AUDIT_RETRY_MS);
+            } else {
+                logger.warn("Ownerless camera audit timed out waiting for "
+                    + "ownership transition after " + releaseReason
+                    + " — keeping pipeline fail-safe");
+            }
+            return;
+        }
+
+        stopIfCameraOwnerless(expectedGeneration,
+            "external owner release: " + releaseReason);
+    }
+
+    private void cancelOwnerlessPipelineAudit() {
+        ownerReleaseAuditSequence.incrementAndGet();
+        synchronized (ownerReleaseAuditLock) {
+            if (ownerReleaseAuditFuture != null) {
+                ownerReleaseAuditFuture.cancel(false);
+                ownerReleaseAuditFuture = null;
+            }
         }
     }
 
@@ -5211,6 +5895,7 @@ public class GpuSurveillancePipeline {
         // HTTP handler isn't the one that closed it. Best-effort, off-thread-safe
         // (reconcile self-serializes on its own lock).
         fireStreamStateChanged();
+        scheduleOwnerlessPipelineAudit("stream disabled");
     }
 
     /** Notify the registered stream-state listener (RMM camera-profile reconcile)
@@ -5763,6 +6448,10 @@ public class GpuSurveillancePipeline {
         bsLifecycleLock.lock();
         try {
             if (mode == 7 || mode == 8) bsViewMode = mode;
+            if (stopping || confirmedStopInProgress) {
+                throw new BlindSpotNotReadyException(
+                    "blind-spot lane cannot arm — pano stop in progress");
+            }
             // Double-check locking: a concurrent enableBlindSpot() may have already
             // finished (blindSpotEnabled) or be mid-flight (bsEnabling) — its
             // internal init releases this lock around its GL-init wait, so reaching
@@ -5830,8 +6519,9 @@ public class GpuSurveillancePipeline {
                     "blind-spot lane cannot arm — pano pipeline not running yet");
             }
             bsEnabling = true;
+            long enableEpoch = ++bsLifecycleEpoch;
             try {
-                enableBlindSpotInternal();
+                enableBlindSpotInternal(enableEpoch);
             } finally {
                 bsEnabling = false;
             }
@@ -5853,7 +6543,7 @@ public class GpuSurveillancePipeline {
         }
     }
 
-    private void enableBlindSpotInternal() throws Exception {
+    private void enableBlindSpotInternal(long enableEpoch) throws Exception {
         logger.info(String.format("BS: enabling NATIVE blind-spot lane %dx%d, view=%d",
             BS_WIDTH, sharedLaneHeight, bsViewMode));
 
@@ -5867,6 +6557,17 @@ public class GpuSurveillancePipeline {
         // defeating blind-spot PRIORITY. So bail ONLY when BS is already enabled; a
         // false return with blindSpotEnabled==false means "lane reused, proceed".
         buildSharedLaneLocked();
+        if (enableEpoch != bsLifecycleEpoch) {
+            // disableBlindSpot() landed while buildSharedLaneLocked had released
+            // bsLifecycleLock for the bounded GL-init wait. Never publish this
+            // stale request after the user's disable; retire its partial lane
+            // while neither program owns it and let a later fresh enable retry.
+            if (!blindSpotEnabled && !camViewActive) {
+                releasePartialBsLane();
+            }
+            throw new BlindSpotNotReadyException(
+                "blind-spot enable invalidated by a newer lifecycle request");
+        }
         if (blindSpotEnabled) {
             logger.info("BS: already enabled by concurrent call — skipping duplicate init");
             return;
@@ -5993,8 +6694,15 @@ public class GpuSurveillancePipeline {
         // matches the recorder's camera arrangement.
         com.overdrive.app.camera.ResolvedCameraConfig cfg =
             com.overdrive.app.camera.CameraConfigResolver.resolve(getVehicleModel());
+        // Sampler type follows the camera's published texture (2D on DiLink 5
+        // and on the decoupled encoder lane) — same rationale as streamScaler.
         bsScaler = new com.overdrive.app.streaming.GpuStreamScaler(
-            BS_WIDTH, sharedLaneHeight, cfg.getQuadrantStripOffsetX());
+            BS_WIDTH,
+            sharedLaneHeight,
+            cfg.getQuadrantStripOffsetX(),
+            camera != null
+                ? camera.isTexture2D()
+                : com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected());
 
         // BS-LIFECYCLE-1: from here on, bsScaler+bsLayer are assigned to the
         // instance fields and a GL EGLWindowSurface gets created wrapping the SC
@@ -6013,9 +6721,15 @@ public class GpuSurveillancePipeline {
             logger.warn("BS: od init failed: " + t.getMessage());
         }
 
+        boolean dilink5 = com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
         int bsLayout = camera != null ? camera.getCameraLayoutMode() : 0;
+        if (dilink5) {
+            // The hook already emits the canonical 2x2 mosaic. This lane can
+            // crop/stitch views locally without changing the recorder/AI source.
+            bsLayout = 3;
+        }
         bsScaler.setCameraLayout(bsLayout);
-        if (bsLayout == 3) {
+        if (bsLayout == 3 && !dilink5) {
             bsScaler.setProducerLayout(
                 com.overdrive.app.camera.Dilink4Constants.CORNER_FRONT,
                 com.overdrive.app.camera.Dilink4Constants.CORNER_RIGHT,
@@ -6026,7 +6740,10 @@ public class GpuSurveillancePipeline {
                 com.overdrive.app.camera.Dilink4Constants.FLIP_REAR,
                 com.overdrive.app.camera.Dilink4Constants.FLIP_LEFT);
         }
-        if (bsLayout != 0) {
+        if (dilink5) {
+            bsScaler.setRedMaskEnabled(false);
+            bsScaler.setApaCenterInset(0.0f);
+        } else if (bsLayout != 0) {
             // Parity with the recorder + stream lanes: the blind-spot scaler is
             // another GpuStreamScaler sampling the SAME producer, so it needs the
             // same two dilink4 corrections or its card diverges visually from
@@ -7422,7 +8139,10 @@ public class GpuSurveillancePipeline {
                     // projection open under its OWN token (independent of the nav map's
                     // "map" token) AND cancels the 90s max-cap. Idempotent: re-arms the hold
                     // each tick (cheap no-op once held). Released in disableCamView / arbiter.
-                    c.acquireSustained("camview");
+                    if (!c.acquireSustained("camview")) {
+                        logger.warn("camera-view cluster projection was not admitted");
+                        return;
+                    }
                     bsLayerVisible = true;   // intent
                     // The fps ramp is edge-detected inside setBlindSpotVisible, which this
                     // raw write bypasses — so a CLUSTER camview under an enabled-but-idle
@@ -7961,9 +8681,22 @@ public class GpuSurveillancePipeline {
     }
 
     public void disableBlindSpot() {
+        boolean ownerIntentWithdrawn = false;
         bsLifecycleLock.lock();
         try {
-            if (!blindSpotEnabled) return;
+            ownerIntentWithdrawn = blindSpotEnabled || bsEnabling;
+            if (ownerIntentWithdrawn) {
+                // Invalidate an enable that may currently be inside the
+                // lock-released GL-init wait. It will re-check this epoch before
+                // publishing and release its partial lane.
+                bsLifecycleEpoch++;
+            }
+            if (!blindSpotEnabled) {
+                if (bsEnabling) {
+                    logger.info("BS: disable invalidated in-flight lane enable");
+                }
+                return;
+            }
             logger.info("BS: disabling blind-spot lane...");
             // If camera-view will KEEP the lane (and possibly the cluster projection),
             // we must NOT force-close the projection or stop the shared driver — that
@@ -8006,6 +8739,9 @@ public class GpuSurveillancePipeline {
             // emitCamViewState). No-op edge if the card wasn't showing. blindSpotEnabled
             // is already false, so isBlindSpotCardShowing() is false → broadcasts closed.
             fireBsCardStateChanged();
+            if (ownerIntentWithdrawn) {
+                scheduleOwnerlessPipelineAudit("blind-spot disabled");
+            }
         }
     }
 
@@ -8232,6 +8968,10 @@ public class GpuSurveillancePipeline {
                 logger.info("CamView: stale show request rejected (session " + showSession
                     + " superseded by " + camViewSessionId + ") — not arming");
                 return false;
+            }
+            if (stopping || confirmedStopInProgress) {
+                throw new BlindSpotNotReadyException(
+                    "camera-view lane cannot arm — pano stop in progress");
             }
             String newTarget = preTarget;
             // RETARGET LEAK GUARD: if a camview was ALREADY holding the cluster
@@ -8515,6 +9255,9 @@ public class GpuSurveillancePipeline {
             // Let RMM re-reconcile so the camera drops back to a lower rung (BS/stream/idle)
             // now that cam-view no longer needs the higher fps.
             if (wasActive) fireBsVisibilityChanged();
+            if (wasActive) {
+                scheduleOwnerlessPipelineAudit("camera-view hidden");
+            }
         }
     }
 
@@ -8927,20 +9670,15 @@ public class GpuSurveillancePipeline {
     /**
      * Sets the stream view mode (which camera to show).
      * 
-     * @param mode 0=Mosaic (2x2 grid), 1=Front, 2=Right, 3=Rear, 4=Left
+    * @param mode 0=Mosaic (2x2 grid), 1=Front, 2=Right, 3=Rear, 4=Left
      */
     public void setStreamViewMode(int mode) {
-        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
-            int hookMode = 4; // 4 = 2x2 Mosaic
-            if (mode == 0) hookMode = 4;      // Tutte le telecamere
-            else if (mode == 1) hookMode = 0; // Anteriore (Front)
-            else if (mode == 2) hookMode = 1; // Destra (Right)
-            else if (mode == 3) hookMode = 2; // Posteriore (Rear)
-            else if (mode == 4) hookMode = 3; // Sinistra (Left)
-            com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.setActiveCamera(hookMode);
-        }
-        if (streamScaler != null) {
-            streamScaler.setViewMode(mode);
+        com.overdrive.app.streaming.GpuStreamScaler scaler = streamScaler;
+        if (scaler != null) {
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {
+                scaler.setCameraLayout(mode == 7 || mode == 8 ? 3 : 1);
+            }
+            scaler.setViewMode(mode);
             logger.info("Stream view mode changed to " + mode);
         } else {
             logger.warn("Cannot set stream view mode - streaming not enabled");
@@ -9174,6 +9912,14 @@ public class GpuSurveillancePipeline {
     }
 
     /**
+     * Monotonic lifecycle token. It advances on every start and stop so delayed
+     * work can prove it still targets the same camera session.
+     */
+    public long getLifecycleGeneration() {
+        return pipelineGen.get();
+    }
+
+    /**
      * Null-safe "is the encoder currently writing packets to disk" accessor.
      * Used by the boot-time StorageManager cleanup-gate probe wired in
      * CameraDaemon.main(): the probe is bound before this pipeline is
@@ -9280,6 +10026,28 @@ public class GpuSurveillancePipeline {
      */
     public PanoramicCameraGpu getCamera() {
         return camera;
+    }
+
+    /** Publish the single-authority "fresh frames are required" verdict to DI4. */
+    public void setCameraFrameDemand(boolean demanded, String reason) {
+        PanoramicCameraGpu current = camera;
+        if (current != null) {
+            current.setDiLink4FrameDemand(demanded, reason);
+        }
+    }
+
+    /** Lifecycle-edge kick for a persistent DI4 handle (ACC ON, UI reveal). */
+    public void requestDiLink4ProducerRecovery(String reason) {
+        PanoramicCameraGpu current = camera;
+        if (current != null) {
+            current.requestDiLink4ProducerRecovery(reason);
+        }
+    }
+
+    public boolean isCameraSourcePausedForSystemAvm() {
+        PanoramicCameraGpu current = camera;
+        return current != null &&
+                current.isDiLink5SourcePausedForSystemAvm();
     }
     
     /**
@@ -9740,16 +10508,38 @@ public class GpuSurveillancePipeline {
         PanoramicCameraGpu cam = this.camera;
         if (cam == null) return;
         int windshieldCameraId = -1;
+        int primaryCameraId = -1;
         try {
-            windshieldCameraId = com.overdrive.app.camera.CameraConfigResolver
-                .resolve(getVehicleModel())
-                .getDirectCameraIdForRole(com.overdrive.app.camera.CameraRole.WINDSHIELD);
+            com.overdrive.app.camera.ResolvedCameraConfig resolved =
+                com.overdrive.app.camera.CameraConfigResolver.resolve(getVehicleModel());
+            primaryCameraId = resolved.getPanoCameraId();
+            windshieldCameraId = resolved.getDirectCameraIdForRole(
+                com.overdrive.app.camera.CameraRole.WINDSHIELD);
         } catch (Throwable t) {
             windshieldCameraId = -1;
         }
         this.windshieldCameraIdConfig = windshieldCameraId;
-        cam.setDashcamWindshieldCamera(
-            useWindshield && windshieldCameraId >= 0, windshieldCameraId);
+        boolean enableWindshield = useWindshield && windshieldCameraId >= 0;
+        boolean dilink4 = com.overdrive.app.camera.dilink5.DiLink5Platform
+            .isDiLink4Selected();
+        int concurrentAvmSupported = dilink4
+            ? com.overdrive.app.camera.CameraConfigResolver.getCameraSection()
+                .optInt("concurrentAvmSupported", -1)
+            : 1;
+        if (enableWindshield
+                && !com.overdrive.app.camera.Di4CameraSafetyPolicy
+                    .canOpenSecondaryAvmCamera(
+                        dilink4,
+                        primaryCameraId,
+                        windshieldCameraId,
+                        concurrentAvmSupported)) {
+            logger.warn("Dedicated windshield camera suppressed: primaryId="
+                + primaryCameraId + ", windshieldId=" + windshieldCameraId
+                + ", concurrentAvmSupported=" + concurrentAvmSupported
+                + " (DiLink 4 requires distinct IDs and verified concurrency)");
+            enableWindshield = false;
+        }
+        cam.setDashcamWindshieldCamera(enableWindshield, windshieldCameraId);
     }
 
     /**

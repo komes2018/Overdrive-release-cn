@@ -56,7 +56,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         # assembleDebug: keeps debug flags (no R8 shrink) but now uses our fixed keystore
         # instead of the random per-runner debug keystore → consistent fingerprint every run.
-        run: ./gradlew assembleDebug -PoverdriveVersionName=48.19 -PoverdriveVersionCode=4819 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
+        run: ./gradlew assembleDebug -PoverdriveVersionName=49.7 -PoverdriveVersionCode=4970 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
 
       - name: Verify APK signature fingerprint
         run: |
@@ -79,7 +79,7 @@ jobs:
           mkdir -p release-assets
           APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
           echo "Found built APK: $APK_FILE"
-          cp "$APK_FILE" release-assets/Overdrive-v48.19-cn-sec.apk
+          cp "$APK_FILE" release-assets/Overdrive-v49.7-cn-sec.apk
           ls -lh release-assets/
 
       - name: Upload APK Artifact
@@ -93,39 +93,29 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v48.19-cn-sec
-          name: OverDrive v48.19 - 中文深度汉化与安全加固版
+          tag_name: v49.7-cn-sec
+          name: OverDrive v49.7 - 中文深度定制版 (Parking Intelligence 停车智能)
           body: |
-            ## OverDrive v48.19 中文深度精校与安全加固版
+            ## OverDrive v49.7 中文深度定制版
 
-            ### 🚀 本次更新亮点
+            ### 🚗 原版 v49.7 核心特性升级
+            - **停车智能中心 (Parking Intelligence)**：熄火自动记录停车位置、离车时长、环视静态照片及周围邻车进出动态
+            - **车库标识与车位 OCR 识别**：端侧轻量 AI 模型自动从环视画面及驶入录像识别地库楼层、分区与车位编号（如 "B2 · C区 · 142车位"）
+            - **停车电量与能耗估算**：实时追踪停车期间动力电池 SOC 变化与估算消耗/充入电量
+            - **Tailscale 智能路由兜底**：优化代理连接逻辑，外网功能（云端、推送、更新等）在代理不可达外网时毫秒级自动回退直连
+            - **Web & 车机端全新 Parking 独立管理页面**：按天直观查看所有停车记录、环视快照、事件与车位标识
 
-            - **企业微信群机器人推送（国内直连，无需代理）**：
-              - 全新 `WeComNotifier` + `WeComSink`，完整覆盖车→手机通知场景
-              - 哨兵检测到人/车/动物：实时 Markdown 告警 + 摄像头方向 + 置信度
-              - 录像完成通知 + Hero 截图 Base64 直接推送到群（≤2MB）
-              - 隧道 URL 更新时自动推送可点击链接
-              - 充电故障、胎压告警、低电量、进程崩溃等 WARN/CRITICAL 事件全覆盖
-              - 配置极简：`echo "webhook_url=你的企微机器人地址" > /data/local/tmp/wecom_config.properties`
-              - 热更新：修改配置文件即刻生效，无需重新编译
-
-            - **仪表盘汉化深度精校**：
-              - "置信度" → "预估区间"（续航预估区间显示）
-              - "功率: 开/关" → "整车电源: 开/关"
-              - "039 穷人" → "0–39 较差"（驾驶评分区间）
-              - "放心." / "热情" → "平稳" / "激烈"（驾驶风格）
-              - "希利" → "丘陵起伏"（路段坡度特征）
-              - 续航对比栏 "车辆" → "原车表显"
-
-            - **🔐 签名证书永久固定**：
-              - 所有云端编译使用同一固定证书，支持车机直接 `pm install -r` 覆盖升级，无需卸载重装。
-              - 证书指纹 (SHA-256): `AD:C5:2C:FA:28:F7:B9:EA:72:3F:11:DA:E8:74:63:9E:B1:BD:DC:6B:AC:AD:B2:DA:F1:8A:90:43:5D:C8:E2:93`
+            ### 🇨🇳 本项目深度优化（全部保留）
+            - **企业微信群机器人推送**：国内免代理直连，告警、截图、通知全量直推
+            - **国内比亚迪云深度适配**：支持手机号登录、海洋网/王朝网、授权车主账号与远程唤醒
+            - **全量简体中文本地化精校**：严格遵循专业汽车与车机术语规范，消灭机翻
+            - **固化签名证书**：支持车机 `pm install -r` 直接无缝覆盖升级，无需卸载
 
             ### 📝 配置说明（企微推送）
             ```bash
             adb shell "echo 'webhook_url=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的KEY' \
                 > /data/local/tmp/wecom_config.properties"
             ```
-          files: release-assets/Overdrive-v48.19-cn-sec.apk
+          files: release-assets/Overdrive-v49.7-cn-sec.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

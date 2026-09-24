@@ -11,7 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-/** Guards cloud-only controls from becoming API-only again. */
+/** Guards remote and hybrid cloud-capable controls from becoming API-only again. */
 public class CloudAutomationControlCoverageTest {
 
     @Test

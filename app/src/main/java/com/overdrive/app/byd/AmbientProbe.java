@@ -81,6 +81,11 @@ public final class AmbientProbe {
 
     private AmbientProbe() {}
 
+    private static boolean useDiLink5AppProcessBridge() {
+        return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                && !"com.overdrive.app".equals(android.app.Application.getProcessName());
+    }
+
     // ── read ────────────────────────────────────────────────────────────────────
 
     /**
@@ -93,6 +98,10 @@ public final class AmbientProbe {
      * the car that was never read.
      */
     public static JSONObject read(Context ctx) {
+        if (useDiLink5AppProcessBridge()) {
+            JSONObject bridged = VehicleActuatorBridge.readDiLink5Ambient(ctx);
+            return bridged.has("error") ? null : bridged;
+        }
         Object setting = device(ctx, SETTING_DEVICE);
         Object light = device(ctx, LIGHT_DEVICE);
         if (setting == null) return null;
@@ -143,6 +152,9 @@ public final class AmbientProbe {
      * 6, 30, 63 or 126 depending on trim — this car is simply the 30 one.
      */
     public static int colourMax(Context ctx) {
+        if (useDiLink5AppProcessBridge()) {
+            return VehicleActuatorBridge.readDiLink5AmbientColourMax(ctx);
+        }
         Object setting = device(ctx, SETTING_DEVICE);
         if (setting == null) return DEFAULT_SEEKBAR_MAX + 1;
         // A feature-id read, not a named getter: BYD reads SET_IAL_COLOR_CONFIG off the HAL
@@ -174,6 +186,9 @@ public final class AmbientProbe {
      * only if the captured state actually had them on.
      */
     public static JSONObject apply(Context ctx, JSONObject ambient) throws JSONException {
+        if (useDiLink5AppProcessBridge()) {
+            return VehicleActuatorBridge.applyDiLink5Ambient(ctx, ambient);
+        }
         JSONObject result = new JSONObject();
         if (ambient == null) {
             result.put("applied", false);
@@ -236,8 +251,29 @@ public final class AmbientProbe {
             steps.put("mainSwitch", setMainSwitch(false));
         }
 
-        result.put("applied", true);
+        result.put("applied",
+                !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                        || allAttemptedStepsSucceeded(steps));
         result.put("steps", steps);
+        return result;
+    }
+
+    static boolean allAttemptedStepsSucceeded(JSONObject steps) {
+        return Boolean.TRUE.equals(stepResult(steps));
+    }
+
+    private static Boolean stepResult(Object value) {
+        if (value instanceof Boolean) return (Boolean) value;
+        if (!(value instanceof JSONObject)) return null;
+        Boolean result = null;
+        JSONObject object = (JSONObject) value;
+        java.util.Iterator<String> keys = object.keys();
+        while (keys.hasNext()) {
+            Boolean nested = stepResult(object.opt(keys.next()));
+            if (nested == null) continue;
+            if (!nested) return false;
+            result = true;
+        }
         return result;
     }
 

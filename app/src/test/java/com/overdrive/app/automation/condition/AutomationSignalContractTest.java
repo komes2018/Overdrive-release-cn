@@ -70,6 +70,29 @@ public class AutomationSignalContractTest {
     }
 
     @Test
+    public void steeringHeatUsesTheValidatedLiveOnOffSignal() throws Exception {
+        Conditions conditions = new Conditions();
+        EventCondition condition = conditions.getCondition("steeringHeat");
+        assertNotNull(condition);
+        assertEquals(BydEvent.STEERING_HEAT,
+                condition.eventData(BydEvent.STEERING_HEAT.toJson()));
+        assertEquals(AutomationCategories.CLIMATE,
+                AutomationCategories.forId("steeringHeat"));
+        assertEquals("steering_wheel_heat", SignalMqttMap.forId("steeringHeat"));
+
+        assertEquals("off", BydEvent.steeringHeatStateToString(1));
+        assertEquals("on", BydEvent.steeringHeatStateToString(2));
+        assertNull(BydEvent.steeringHeatStateToString(0));
+        assertNull(BydEvent.steeringHeatStateToString(BydVehicleData.UNAVAILABLE));
+
+        Field field = BydEvent.class.getDeclaredField("FAST_POLL_OWNED");
+        field.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Set<EventData> owned = (Set<EventData>) field.get(null);
+        assertTrue(owned.contains(BydEvent.STEERING_HEAT));
+    }
+
+    @Test
     public void targetSocIsPublishedAndSurvivesSnapshotCopies() throws Exception {
         Conditions conditions = new Conditions();
         assertNotNull(conditions.getCondition("targetSoc"));

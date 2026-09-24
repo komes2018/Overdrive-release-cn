@@ -31,6 +31,27 @@ public class LiveViewConnectionStateAssetTest {
         assertTrue(liveView.contains("this.markStreamConnecting();"));
     }
 
+    @Test
+    public void dilink5BroadwayUsesBoundedRecycledDecodePath() throws Exception {
+        String stream = readAsset("shared/stream.js");
+        String liveView = readAsset("local/live-view.html");
+
+        assertTrue(stream.contains("?decoder=broadway"));
+        assertTrue(stream.contains("reuseMemory: this.isDiLink5 === true"));
+        assertTrue(stream.contains("this.isDiLink5 = data.dilink5 === true"));
+        assertTrue(liveView.contains("stream.js?v=index5"));
+    }
+
+    @Test
+    public void jmuxerUsesTheSelectedPresetFps() throws Exception {
+        String stream = readAsset("shared/stream.js");
+        String liveView = readAsset("local/live-view.html");
+
+        assertTrue(stream.contains("fps: this.activeFps || 10"));
+        assertTrue(liveView.contains("if (qData.fps) this.activeFps = qData.fps"));
+        assertTrue(liveView.contains("BYD.stream.activeFps = preset.fps"));
+    }
+
     /**
      * The indicator carries no text, so its state reaches assistive tech
      * through aria-label. Clearing the stage on 'live' must not depend on the

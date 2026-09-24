@@ -1086,14 +1086,7 @@
     "mqtt_trigger": "MQTT 訊息",
     "mqtt_trigger_description": "當你的 MQTT 伺服器向 <base>/automation/<channel> 發布訊息時觸發（例如來自 Home Assistant）。輸入頻道名稱並比對其值。",
     "mqtt_channel": "頻道",
-    "mqtt_value": "數值",
-      "wait_until_state_description": "暫停其餘動作，直到所選的開／關訊號達到某個狀態，或逾時。範例：在繼續前等待 Indicators = Off。",
-      "wait_timeout": "逾時（秒）",
-      "wait_until_description": "暫停其餘動作，直到所選訊號滿足某個比較條件，或逾時。範例：在關閉車窗前等待 Speed = 0。",
-      "save_seat_position": "儲存座椅位置",
-      "save_seat_position_description": "將目前的駕駛座位置存入記憶插槽。",
-      "set_seat_position": "控制座椅位置",
-      "set_seat_position_description": "載入座椅記憶位置。請先確認已從車輛儲存記憶。車輛熄火時此控制無法運作。"
+    "mqtt_value": "數值"
   },
   "messages": {
     "logged_out": "已登入",

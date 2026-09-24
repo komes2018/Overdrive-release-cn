@@ -54,6 +54,8 @@
         { href: 'live-view.html',       i18n: 'nav.live_view',       label: 'Live View',       svg: '<path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><path d="M2 12a9 9 0 0 0 8 8"/><circle cx="2" cy="12" r="2"/>' },
         { href: 'communicate.html',     i18n: 'nav.communicate',     label: 'Communicate',     svg: '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/>' },
         { href: 'events.html',          i18n: 'nav.recordings',      label: 'Recordings',      svg: '<path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/>' },
+        // Parking Intelligence: sessions ("where did I park, what happened").
+        { href: 'parking.html',         i18n: 'nav.parking',         label: 'Parking',         svg: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
 
         // ===== Vehicle ===== — control + trip history.
         { divider: true, label: 'Vehicle', i18n: 'nav.vehicle_group' },
@@ -332,6 +334,73 @@
         return holder;
     }
 
+    function ensureResponsiveShell(aside) {
+        var overlay = document.getElementById('sidebarOverlay');
+        var overlayCreated = false;
+        if (!overlay && document.body) {
+            overlay = document.createElement('div');
+            overlay.id = 'sidebarOverlay';
+            overlay.className = 'sidebar-overlay';
+            document.body.appendChild(overlay);
+            overlayCreated = true;
+        }
+
+        if (typeof window.toggleSidebar !== 'function') {
+            window.toggleSidebar = function (forceOpen) {
+                var open = typeof forceOpen === 'boolean'
+                    ? forceOpen
+                    : !aside.classList.contains('open');
+                if (open) {
+                    aside.classList.add('open');
+                    if (overlay) overlay.classList.add('show');
+                } else {
+                    aside.classList.remove('open');
+                    if (overlay) overlay.classList.remove('show');
+                }
+                var trigger = document.querySelector('.menu-toggle');
+                if (trigger) trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+            };
+        }
+
+        if (overlayCreated) {
+            overlay.addEventListener('click', function () {
+                window.toggleSidebar(false);
+            });
+        }
+
+        if (embeddedInNativeApp ||
+            document.querySelector('.mobile-header, .vc-nav-btn')) return;
+
+        var main = document.querySelector('.main-content');
+        if (!main) return;
+        var source = document.querySelector('.page-title, .dev-view-header h1');
+        var title = source && source.textContent
+            ? source.textContent.replace(/^\s+|\s+$/g, '')
+            : (document.title || 'OverDrive');
+        if (source && source.parentNode &&
+            source.parentNode.classList.contains('dev-view-header')) {
+            source.parentNode.classList.add('mobile-title-source');
+        }
+
+        var header = document.createElement('div');
+        header.className = 'mobile-header';
+        header.setAttribute('data-auto-mobile-header', '1');
+        header.innerHTML =
+            '<button class="menu-toggle" type="button" aria-label="Open menu" aria-expanded="false">' +
+              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">' +
+                '<line x1="4" x2="20" y1="12" y2="12"/>' +
+                '<line x1="4" x2="20" y1="6" y2="6"/>' +
+                '<line x1="4" x2="20" y1="18" y2="18"/>' +
+              '</svg>' +
+            '</button>' +
+            '<span style="font-weight:600;">' + title + '</span>' +
+            '<div style="width:48px;" aria-hidden="true"></div>';
+        header.querySelector('.menu-toggle').addEventListener('click', function () {
+            window.toggleSidebar();
+        });
+        main.insertBefore(header, main.firstChild);
+    }
+
     function mount() {
         var holder = findMount();
         if (!holder) return;
@@ -350,6 +419,10 @@
         // can tighten icon→label spacing across cards, info boxes, settings rows
         // etc. without touching per-page stylesheets.
         if (document.body) document.body.setAttribute('data-app-shell', '1');
+
+        // Fill the two shell pieces that legacy pages occasionally omitted:
+        // the dismiss overlay and the compact mobile app bar.
+        ensureResponsiveShell(aside);
 
         // The brand-logo <img> just got injected — re-run the theme.js icon
         // selector so it picks up the right asset for the active data-theme.

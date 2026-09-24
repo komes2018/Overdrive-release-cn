@@ -1,12 +1,12 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <resources>
     <string name="recording_library_loading">טוען הקלטות</string>
     <string name="recording_library_refreshing">מרענן הקלטות</string>
     <string name="recording_library_loading_more">טוען עוד הקלטות</string>
-    <string name="recording_library_page_error">לא ניתן לטעון עוד הקלטות.</string>
+    <string name="recording_library_page_error">לא הצלחנו לטעון עוד הקלטות.</string>
     <string name="recording_library_page_unavailable">הקלטות נוספות לא זמינות כרגע.</string>
     <string name="recording_library_refresh_error">הרענון נכשל. מוצגות ההקלטות שכבר נטענו.</string>
-    <string name="recording_library_fatal_title">לא ניתן לפתוח הקלטות</string>
+    <string name="recording_library_fatal_title">לא הצלחנו לפתוח הקלטות</string>
     <string name="recording_library_fatal_body">בדוק את שירות ההקלטה ואת האחסון, ואז נסה שוב.</string>
     <string name="recording_library_select">בחר הקלטות</string>
     <string name="recording_library_open_filters">סנן הקלטות</string>
@@ -25,10 +25,10 @@
     <string name="cd_player_mute_audio">השתק שמע</string>
     <string name="video_player_buffering">טוען וידאו</string>
     <string name="video_player_error_title">לא ניתן לנגן את ההקלטה</string>
-    <string name="video_player_error_body">ייתכן שהקובץ לא זמין או שהאחסון נותק.</string>
+    <string name="video_player_error_body">ייתכן שהקובץ לא זמין או שמכשיר האחסון נותק.</string>
     <string name="video_player_retry">נסה שוב</string>
     <string name="video_player_next">ההקלטה הבאה</string>
     <string name="video_timeline_empty">ציר זמן של אירועים. אין אירועים שזוהו.</string>
     <string name="video_timeline_events">ציר זמן של אירועים. %1$d אירועים שזוהו. הקש כדי לקפוץ לאירוע הקרוב.</string>
-    <string name="video_timeline_selected">אירוע %1$s ב-%2$s</string>
+    <string name="video_timeline_selected">אירוע %1$s ב־%2$s</string>
 </resources>

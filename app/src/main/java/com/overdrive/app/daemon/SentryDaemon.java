@@ -79,7 +79,20 @@ public class SentryDaemon {
             System.exit(1);
             return;
         }
-        
+
+        // "Vehicle ON only" parked gate. While the parked-shutdown marker exists the
+        // stack is intentionally terminated for the parked window; this daemon would
+        // otherwise switch Wi-Fi on and run a `dumpsys` every 15 s on a car that is
+        // meant to sleep. The marker is erased by acc_sentry_daemon (the ACC judge) on
+        // the real ACC-on or by a recovery trigger, after which the normal launch path
+        // starts us again. An explicit user Start erases it before launching, so the
+        // manual override still works. Inert in onAndOff (marker never exists).
+        if (isParkedShutdownMarkerPresent()) {
+            log("Parked-shutdown marker present — SentryDaemon must not run while parked. Exiting.");
+            System.exit(0);
+            return;
+        }
+
         log("=== Sentry Daemon Starting ===");
         log("UID: " + myUid + " (" + uidToName(myUid) + ")");
         log("PID: " + android.os.Process.myPid());
@@ -858,7 +871,17 @@ public class SentryDaemon {
                         Thread.sleep(LOCATION_CHECK_INTERVAL_MS);
                     }
                     firstCheck = false;
-                    
+
+                    // "Vehicle ON only" park began while we were running: the reaper
+                    // terminates us, but self-exit here too so a missed kill cannot
+                    // leave this loop probing the system every 15 s all night. One
+                    // stat per tick; inert in onAndOff.
+                    if (isParkedShutdownMarkerPresent()) {
+                        log("Parked-shutdown marker appeared — vehicle parked in ON-only mode; shutting down");
+                        shutdown();
+                        return;
+                    }
+
                     // Check if Location service is running
                     String result = execShell("dumpsys activity services " + LOCATION_SERVICE_NAME + " 2>/dev/null");
                     
@@ -909,6 +932,16 @@ public class SentryDaemon {
     public static void stopLocationMonitor() {
         locationMonitorEnabled = false;
     }
+
+    /** The "Vehicle ON only" parked-shutdown marker (chmod 666, readable from any UID). */
+    private static boolean isParkedShutdownMarkerPresent() {
+        try {
+            return new java.io.File(
+                    com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).isFile();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
     
     /**
      * Setup location permissions using shell commands.
@@ -933,9 +966,11 @@ public class SentryDaemon {
         // Whitelist from battery optimization
         execShell("dumpsys deviceidle whitelist +" + APP_PKG());
         
-        // Apply power settings
-        execShell("settings put global wifi_sleep_policy 2");
-        execShell("settings put global stay_on_while_plugged_in 7");
+        // Legacy firmware relies on these persistent settings. DiLink 5 uses scoped locks.
+        if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            execShell("settings put global wifi_sleep_policy 2");
+            execShell("settings put global stay_on_while_plugged_in 7");
+        }
         
         log("Location permissions configured");
     }

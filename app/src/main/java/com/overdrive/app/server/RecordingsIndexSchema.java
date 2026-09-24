@@ -14,7 +14,11 @@ import java.util.Locale;
 import java.util.Map;
 
 final class RecordingsIndexSchema {
-    static final int VERSION = 4;
+    // v5: additive nullable columns parking_session_id / event_cameras /
+    // peak_confidence (Parking Intelligence session grouping + camera and
+    // confidence filters). Added via ALTER TABLE ADD COLUMN IF NOT EXISTS in
+    // ensure(); the v4 identity migration is untouched.
+    static final int VERSION = 5;
 
     private static final String[] LEGACY_COLUMNS = {
         "filename", "abs_path", "type", "camera_id", "ts_ms", "size_bytes",
@@ -38,6 +42,7 @@ final class RecordingsIndexSchema {
         } else if (!columnExists(connection, "RECORDINGS", "RECORDING_ID")) {
             migrateV3(connection);
         }
+        ensureV5Columns(connection);
         try (Statement statement = connection.createStatement()) {
             createIndexes(statement);
             statement.execute("UPDATE recordings SET type = 'replay'"
@@ -45,6 +50,27 @@ final class RecordingsIndexSchema {
                     + " AND filename LIKE 'replay\\_%' ESCAPE '\\'");
             statement.execute("MERGE INTO recordings_meta KEY(meta_key) VALUES"
                     + "('schema_version', '" + VERSION + "')");
+        }
+    }
+
+    /**
+     * v5 additive columns. Nullable, no defaults required, so existing rows
+     * simply read NULL until the next reconcile re-parses their sidecar.
+     */
+    private static void ensureV5Columns(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            if (!columnExists(connection, "RECORDINGS", "PARKING_SESSION_ID")) {
+                statement.execute("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS"
+                        + " parking_session_id VARCHAR(64)");
+            }
+            if (!columnExists(connection, "RECORDINGS", "EVENT_CAMERAS")) {
+                statement.execute("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS"
+                        + " event_cameras VARCHAR(32)");
+            }
+            if (!columnExists(connection, "RECORDINGS", "PEAK_CONFIDENCE")) {
+                statement.execute("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS"
+                        + " peak_confidence DOUBLE");
+            }
         }
     }
 
@@ -158,6 +184,9 @@ final class RecordingsIndexSchema {
             "  start_lng       DOUBLE," +
             "  ymd             VARCHAR(10)," +
             "  storage         VARCHAR(16)," +
+            "  parking_session_id VARCHAR(64)," +
+            "  event_cameras   VARCHAR(32)," +
+            "  peak_confidence DOUBLE," +
             "  UNIQUE(volume_id, relative_path)" +
             ")"
         );
@@ -177,6 +206,8 @@ final class RecordingsIndexSchema {
         statement.execute("CREATE INDEX IF NOT EXISTS idx_rec_country ON recordings(place_country)");
         statement.execute("CREATE INDEX IF NOT EXISTS idx_rec_severity ON recordings(peak_severity)");
         statement.execute("CREATE INDEX IF NOT EXISTS idx_rec_storage ON recordings(storage)");
+        statement.execute("CREATE INDEX IF NOT EXISTS idx_rec_parking"
+                + " ON recordings(parking_session_id)");
     }
 
     private static void createMetaTable(Statement statement) throws Exception {

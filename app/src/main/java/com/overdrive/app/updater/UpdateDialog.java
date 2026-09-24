@@ -138,6 +138,10 @@ public class UpdateDialog {
                 .setNegativeButton(R.string.update_hide, (d, w) -> { if (onCancel != null) onCancel.run(); d.dismiss(); })
                 .setCancelable(false)
                 .show();
+        // Some vendor dialog themes still propagate an outside touch to the
+        // window even when the builder is non-cancelable. Make the window-level
+        // contract explicit: progress may be hidden only with the Hide button.
+        dialog.setCanceledOnTouchOutside(false);
 
         return new ProgressHandle(context, dialog, statusText, statusIcon, progressBar, percentText);
     }
@@ -259,6 +263,10 @@ public class UpdateDialog {
 
         public void dismiss() {
             dialog.dismiss();
+        }
+
+        public boolean isShowing() {
+            return dialog.isShowing();
         }
 
         public void showError(String error) {

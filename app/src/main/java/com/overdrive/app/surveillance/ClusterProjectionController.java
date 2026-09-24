@@ -1,8 +1,10 @@
 package com.overdrive.app.surveillance;
 
 import android.content.Context;
+import android.os.IBinder;
 
 import com.overdrive.app.config.UnifiedConfigManager;
+import com.overdrive.app.launcher.DiLink5ClusterCast;
 import com.overdrive.app.logging.DaemonLogger;
 
 import java.lang.reflect.Method;
@@ -67,6 +69,24 @@ public final class ClusterProjectionController {
     private static final int OP_DI4_MODE      = 35;  // Di4.0 mode → triggers VD creation
     private static final int OP_CLOSE         = 18;  // close projection
     private static final int OP_REFRESH       = 0;   // refresh/restore native gauge render
+    private static final String AUTO_CONTAINER_SERVICE = "AutoContainer";
+    private static final String[] DI5_AUTO_CONTAINER_SERVICES = {
+            AUTO_CONTAINER_SERVICE, "auto_container"
+    };
+    private static final String SYSTEM_SERVICE_BIN = "/system/bin/service";
+    private static final String SYSTEM_CMD_BIN = "/system/bin/cmd";
+    private static final String SYSTEM_AM_BIN = "/system/bin/am";
+    private static final String XDJA_CONTAINER_PACKAGE =
+            "com.xdja.containerservice";
+    private static final String BYD_CONTAINER_PACKAGE =
+            "com.byd.containerservice";
+    private static final String XDJA_DISPLAY_SERVICE_COMPONENT =
+            "com.xdja.containerservice/"
+                    + "com.xdja.containerservice.AutoDisplayService";
+    private static final long DI5_CONTAINER_BOOTSTRAP_TIMEOUT_MS = 2500L;
+    private static final long DI5_CONTAINER_BOOTSTRAP_THROTTLE_MS = 5000L;
+    private static final Object DI5_CONTAINER_BOOTSTRAP_LOCK = new Object();
+    private static long lastDiLink5ContainerBootstrapMs = Long.MIN_VALUE;
     // NOTE: opcode 1 (disconnect Qt entirely / destroy display) is deliberately
     // NOT defined and NEVER sent — it poisoned a prior teardown test.
 
@@ -132,11 +152,16 @@ public final class ClusterProjectionController {
     private static final long PRESENT_POLL_MS = 250;     // re-resolve cadence (matches BS loop feel)
     private static final long PRESENT_POLL_WINDOW_MS = 4000;  // covers the worst cold materialize (~3.5s)
     private static final int  PRESENT_REDRIVE_TICKS = 2;  // extra re-drives after the present-edge
+    private static final long DEPENDENT_DETACH_RETRY_MS = 250L;
 
     // UCM gate flags (under "surveillance") for SIGKILL recovery — mirror the
     // screenDeterrent* pattern so a respawned daemon can restore the gauges.
     private static final String GATE_FORCE_STOP = "clusterProjectionForceStop";
     private static final String GATE_ACTIVE_UNTIL = "clusterProjectionActiveUntilMs";
+    private static final String GATE_COMMAND_INDETERMINATE =
+            "clusterProjectionCommandIndeterminate";
+    private static final String GATE_COMMAND_BOOT_ID =
+            "clusterProjectionCommandBootId";
 
     private static final int ST_CLOSED  = 0;
     private static final int ST_OPENING = 1;
@@ -144,6 +169,87 @@ public final class ClusterProjectionController {
     private static final int ST_CLOSING = 3;
 
     private static volatile ClusterProjectionController instance;
+    private static final Object BOOT_RESTORE_LOCK = new Object();
+    private static final Object LEGACY_COMMAND_DISPATCH_LOCK = new Object();
+    private static BootRestoreTicket sBootRestoreTicket;
+    private static volatile boolean sLegacyBootRestoreBlocksAdmission;
+    private static final long BOOT_RESTORE_WAIT_TIMEOUT_MS = 20_000L;
+    private static final int BOOT_RESTORE_MAX_ATTEMPTS = 3;
+    private static final long[] BOOT_RESTORE_RETRY_DELAYS_MS =
+            new long[] {500L, 1_500L};
+    private static final long LEGACY_COMMAND_WAIT_TIMEOUT_MS = 2_000L;
+
+    private static final class BootRestoreTicket {
+        final CountDownLatch completion = new CountDownLatch(1);
+        volatile LegacyBootRecoveryResult result =
+                LegacyBootRecoveryResult.RETRYABLE_FAILURE;
+    }
+
+    enum LegacyCommandResult {
+        ACCEPTED,
+        REJECTED,
+        INDETERMINATE
+    }
+
+    public enum LegacyBootRecoveryResult {
+        RECOVERED,
+        RETRYABLE_FAILURE,
+        SAME_BOOT_INDETERMINATE;
+
+        public boolean isRecovered() {
+            return this == RECOVERED;
+        }
+
+        public boolean isSameBootIndeterminate() {
+            return this == SAME_BOOT_INDETERMINATE;
+        }
+    }
+
+    private enum LegacyTransportResult {
+        ACCEPTED,
+        REJECTED,
+        UNAVAILABLE,
+        INDETERMINATE
+    }
+
+    private enum LegacyCommandMarkerResult {
+        MARKED,
+        FAILED_BEFORE_DISPATCH,
+        SAME_BOOT_INDETERMINATE
+    }
+
+    private static final class LegacyCommandAttempt {
+        final CountDownLatch completion = new CountDownLatch(1);
+        volatile LegacyTransportResult result =
+                LegacyTransportResult.INDETERMINATE;
+    }
+
+    static final class LegacyGateSnapshot {
+        final boolean readable;
+        final boolean forceStop;
+        final long activeUntilMs;
+        final boolean commandIndeterminate;
+        final String commandBootId;
+
+        LegacyGateSnapshot(
+                boolean readable,
+                boolean forceStop,
+                long activeUntilMs,
+                boolean commandIndeterminate,
+                String commandBootId) {
+            this.readable = readable;
+            this.forceStop = forceStop;
+            this.activeUntilMs = activeUntilMs;
+            this.commandIndeterminate = commandIndeterminate;
+            this.commandBootId = commandBootId == null ? "" : commandBootId;
+        }
+
+        boolean hasRecoveryOwnership() {
+            return forceStop
+                    || activeUntilMs > 0L
+                    || commandIndeterminate;
+        }
+    }
 
     private final android.os.HandlerThread projThread;
     private final android.os.Handler projHandler;     // opcode sends + sleeps + ready-poll
@@ -268,8 +374,14 @@ public final class ClusterProjectionController {
     // ── Public API (called from the BS turn loop / pipeline) ────────────────────
 
     /** Cheap volatile reads for the show-gate in the pipeline. */
-    public boolean isOpen()  { return projState == ST_OPEN; }
-    public boolean isReady() { return ready && projState == ST_OPEN; }
+    public boolean isOpen()  {
+        return !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                && projState == ST_OPEN;
+    }
+    public boolean isReady() {
+        return !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                && ready && projState == ST_OPEN;
+    }
 
     /** True when the calling thread IS projThread (the dumpsys-owning thread). The
      *  pipeline's clusterShowWhenReady uses this to keep its layerStack-resolving
@@ -289,6 +401,7 @@ public final class ClusterProjectionController {
      *  Cheap: one post; the dumpsys runs at most once per posted re-drive on projThread.
      *  No-op if the projection isn't open/ready. */
     public void requestShowRedrive() {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) return;
         if (shuttingDown) return;
         if (projState != ST_OPEN) return;   // not open → nothing to re-drive
         projHandler.post(() -> {
@@ -313,26 +426,44 @@ public final class ClusterProjectionController {
      * projection began closing. A plain cheap volatile read; not a reflected entrypoint. */
     int currentSeqEpoch() { return seqEpoch; }
 
+    public static boolean isLegacyProjectionAdmissionBlocked() {
+        return sLegacyBootRestoreBlocksAdmission
+                || DiLink5ClusterCast
+                        .isLegacyProjectionBlockedByDiLink5Recovery();
+    }
+
     /**
      * Request the projection be open (idempotent). Called from the cluster branch
      * of the BS turn loop on signal-on. Cheap from the 250 ms loop: a volatile
      * read + at most one post. Also refreshes the linger timer.
      */
-    public void requestOpen() {
+    public boolean requestOpen() {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            return false;
+        }
+        if (isLegacyProjectionAdmissionBlocked()) {
+            return false;
+        }
         // Terminal: once the daemon is shutting down, NEVER (re)enter projection —
         // shutdown() runs the authoritative restore and clears the recovery flags,
         // and a re-open here would undo it with boot-recovery disarmed.
-        if (shuttingDown) return;
+        if (shuttingDown) return false;
         lastSignalMs = System.currentTimeMillis();
         // After a max-cap close, refuse to re-open until the indicator has cycled
         // off at least once (notifySignalCleared). A normal blink reaches off
         // between flashes long before 90s, so this only bites a truly stuck signal.
-        if (maxCapLockout) return;
+        if (maxCapLockout) return false;
         int st = projState;
-        if (st == ST_OPEN || st == ST_OPENING) return;   // already up / coming up
+        if (st == ST_OPEN || st == ST_OPENING) return true;
         final int epoch;
         synchronized (this) {
-            if (shuttingDown) return;   // re-check under the lock (shutdown may have just set it)
+            if (shuttingDown) return false;
+            if (isLegacyProjectionAdmissionBlocked()) {
+                return false;
+            }
+            if (projState == ST_OPEN || projState == ST_OPENING) {
+                return true;
+            }
             // Only re-open from a FULLY-CLOSED state. Admitting ST_CLOSING here let a
             // racing reopen (BS turn-trigger / nav-map thread) supersede a safety
             // forceClose (retarget/disable/relayout) mid-close — bumping seqEpoch so
@@ -341,13 +472,14 @@ public final class ClusterProjectionController {
             // Requiring ST_CLOSED means a still-active turn signal simply re-opens on
             // the next 250ms tick AFTER the close genuinely reaches ST_CLOSED — the
             // restore always completes first. Strengthens the gauge-restore net.
-            if (projState != ST_CLOSED) return;
+            if (projState != ST_CLOSED) return false;
             projState = ST_OPENING;
             ready = false;
             epoch = ++seqEpoch;   // supersede any in-flight close sequence
         }
         loadTuning();
         projHandler.post(() -> doOpenSequence(epoch));
+        return true;
     }
 
     /**
@@ -358,7 +490,9 @@ public final class ClusterProjectionController {
      * and will still tear it down + restore the gauges. No-op while shutting down.
      */
     /** Back-compat: the nav map's sustained hold (token "map"). */
-    public void acquireSustained() { acquireSustained("map"); }
+    public boolean acquireSustained() {
+        return acquireSustained("map");
+    }
 
     /**
      * Acquire the projection as a SUSTAINED holder identified by {@code token} (e.g.
@@ -366,13 +500,31 @@ public final class ClusterProjectionController {
      * tokens can hold concurrently; the auto-close paths are suppressed while ANY token
      * is held. Re-acquiring the same token is idempotent. See {@link #releaseSustained(String)}.
      */
-    public void acquireSustained(String token) {
+    public boolean acquireSustained(String token) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            logger.warn("legacy cluster projection is unavailable in DI5 mode");
+            return false;
+        }
+        if (isLegacyProjectionAdmissionBlocked()) {
+            logger.warn("legacy cluster projection is blocked by unresolved "
+                    + "cluster recovery ownership");
+            return false;
+        }
+        String holderToken = token != null ? token : "default";
         synchronized (this) {
             // A hard close must win over a concurrent cast/map start. Adding a holder while
             // ST_CLOSING would strand the token because requestOpen intentionally refuses to
             // supersede the gauge-restore sequence.
-            if (shuttingDown || projState == ST_CLOSING) return;
-            sustainedHolders.add(token != null ? token : "default");
+            if (shuttingDown ||
+                    projState == ST_CLOSING ||
+                    isLegacyProjectionAdmissionBlocked()) {
+                return false;
+            }
+            sustainedHolders.add(holderToken);
+        }
+        if (!requestOpen()) {
+            sustainedHolders.remove(holderToken);
+            return false;
         }
         // Cancel any pending auto-close left over from a prior transient session.
         watchdogHandler.removeCallbacks(lingerTask);
@@ -397,7 +549,7 @@ public final class ClusterProjectionController {
                 watchdogHandler.removeCallbacks(lingerTask);
             }
         });
-        requestOpen();   // opens if closed; no-op if already up
+        return true;
     }
 
     /** Back-compat: release the nav map's sustained hold (token "map"). */
@@ -413,6 +565,12 @@ public final class ClusterProjectionController {
      */
     public void releaseSustained(String token) {
         sustainedHolders.remove(token != null ? token : "default");
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            // DI5 direct projection has its own owner/lifecycle. A release from a
+            // legacy blind-spot/camera cleanup must never turn into a stray 18→0
+            // against the active shared-display session.
+            return;
+        }
         if (sustainedHeld()) {
             // Another sustained consumer still needs the projection — leave it open.
             return;
@@ -429,7 +587,10 @@ public final class ClusterProjectionController {
     }
 
     /** True while ANY consumer holds the projection sustained (gates BS coexistence). */
-    public boolean isSustainedHeld() { return sustainedHeld(); }
+    public boolean isSustainedHeld() {
+        return !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                && sustainedHeld();
+    }
 
     /** Null-safe static read of {@link #isSustainedHeld()} that does NOT construct the
      *  singleton (mirrors {@link #forceCloseIfActive}/{@link #shutdownIfActive}). If
@@ -440,7 +601,8 @@ public final class ClusterProjectionController {
      *  retarget / ACC-off) is never repainted over the restored gauges. */
     public static boolean isSustainedHeldStatic() {
         ClusterProjectionController i = instance;
-        return i != null && i.sustainedHeld();
+        return !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                && i != null && i.sustainedHeld();
     }
 
     /** Null-safe static check of whether a SPECIFIC {@code token} still holds the
@@ -451,7 +613,8 @@ public final class ClusterProjectionController {
      *  ALL holders — so a torn-down cast reports inactive without a keep-alive loop. */
     public static boolean holdsTokenStatic(String token) {
         ClusterProjectionController i = instance;
-        return i != null && token != null && i.sustainedHolders.contains(token);
+        return !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                && i != null && token != null && i.sustainedHolders.contains(token);
     }
 
     /** Bump the signal timestamp (called every tick while a turn signal is active). */
@@ -485,11 +648,21 @@ public final class ClusterProjectionController {
     /**
      * Hard close + gauge restore. Idempotent and harmless when already closed.
      * Marks the projection non-open first, synchronously detaches every dependent mirror,
-     * then clears the UCM gate flags so even if the close opcodes fail, a respawn won't see
-     * a leaked "projection active" flag. Public so disable / disarm / target-flip / errors
-     * can all force the gauges back.
+     * then retains the durable recovery marker until every restore opcode has succeeded.
+     * Public so disable / disarm / target-flip / errors can all force the gauges back.
      */
     public void forceClose(String reason) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                && projState == ST_CLOSED) {
+            // The legacy controller owns no physical projection. Retire only its
+            // bookkeeping; do not detach the DI5 mirror and do not emit 18→0.
+            // Preserve any durable legacy marker: DI5 boot recovery consumes it
+            // only after the shared DI5 compositor has been retired safely.
+            sustainedHolders.clear();
+            watchdogHandler.removeCallbacks(maxCapTask);
+            watchdogHandler.removeCallbacks(lingerTask);
+            return;
+        }
         final int epoch;
         synchronized (this) {
             if (projState == ST_CLOSED) {
@@ -501,22 +674,77 @@ public final class ClusterProjectionController {
             }
         }
 
+        // A direct controller close must invalidate a pending map launch before
+        // the fission display can disappear. Several safety paths do not route
+        // through ClusterMapProjector.stop().
+        try { com.overdrive.app.navmap.ClusterMapProjector
+                .onLegacyProjectionForceClosed(); }
+        catch (Throwable t) {
+            logger.warn("map pre-close invalidation failed: " + t.getMessage());
+        }
+
         // The app-view mirror owns a second SF display that reads the fission layer stack.
         // Unbind/destroy it synchronously before the close sequence can destroy that source.
         // This also closes hard-error paths, not only the explicit ACC-off/relayout callers.
-        try { ClusterViewMirrorService.detachBeforeProjectionClose(reason); }
-        catch (Throwable t) {
-            logger.warn("view mirror pre-close detach failed: " + t.getMessage());
-        }
+        boolean dependentsDetached =
+                detachProjectionDependents(reason);
 
         // An explicit/safety close always drops ALL sustained holds. Clear after the mirror
         // detach so an attach already in flight cannot leave its viewmirror lease stranded.
         sustainedHolders.clear();
-        try { clearGateFlags(); } catch (Throwable ignored) {}
         watchdogHandler.removeCallbacks(maxCapTask);
         watchdogHandler.removeCallbacks(lingerTask);
         if (epoch < 0) return;
+        sLegacyBootRestoreBlocksAdmission = true;
+        if (!dependentsDetached) {
+            logger.warn("projection source close deferred until every mirror "
+                    + "consumer confirms detach");
+            projHandler.postDelayed(
+                    () -> continueForceCloseAfterDependentDetach(
+                            epoch, reason),
+                    DEPENDENT_DETACH_RETRY_MS);
+            return;
+        }
+        completeForceCloseAfterDependentDetach(epoch, reason);
+    }
 
+    private boolean detachProjectionDependents(String reason) {
+        boolean viewDetached = false;
+        boolean clusterDetached = false;
+        try {
+            viewDetached =
+                    ClusterViewMirrorService
+                            .detachBeforeProjectionClose(reason);
+        } catch (Throwable t) {
+            logger.warn("view mirror pre-close detach failed: "
+                    + t.getMessage());
+        }
+        try {
+            clusterDetached =
+                    ClusterMirrorController
+                            .detachBeforeProjectionClose(reason);
+        } catch (Throwable t) {
+            logger.warn("cluster mirror pre-close detach failed: "
+                    + t.getMessage());
+        }
+        return viewDetached && clusterDetached;
+    }
+
+    private void continueForceCloseAfterDependentDetach(
+            int epoch, String reason) {
+        if (!isCurrentCloseEpoch(epoch)) return;
+        if (!detachProjectionDependents(reason)) {
+            projHandler.postDelayed(
+                    () -> continueForceCloseAfterDependentDetach(
+                            epoch, reason),
+                    DEPENDENT_DETACH_RETRY_MS);
+            return;
+        }
+        completeForceCloseAfterDependentDetach(epoch, reason);
+    }
+
+    private void completeForceCloseAfterDependentDetach(
+            int epoch, String reason) {
         synchronized (this) {
             // A concurrent forceClose may have superseded this one while the synchronous
             // mirror teardown was running. Its newer epoch owns the physical close.
@@ -544,20 +772,50 @@ public final class ClusterProjectionController {
         try {
             if (shuttingDown) return;        // terminal — never issue open opcodes during teardown
             if (epoch != seqEpoch) return;   // superseded before we started
+            if (!writeGateFlags(
+                    System.currentTimeMillis() + maxProjectionMs)) {
+                logger.error("projection open refused: durable recovery "
+                        + "marker could not be committed");
+                forceClose("open-marker-failed");
+                return;
+            }
+            synchronized (this) {
+                if (epoch != seqEpoch
+                        || projState != ST_OPENING
+                        || shuttingDown) {
+                    // A concurrent close owns the durable marker and will
+                    // consume it only after its restore is confirmed.
+                    return;
+                }
+            }
             final int sizeOp = sizeProfileOpcode;
             logger.info("projection open: " + (sizeOp != 0 ? sizeOp + "→" : "") + OP_FULLSCREEN_ON + "→" + OP_DI4_MODE);
             // Size-profile step is optional (0 = skip). Wrong profile = wrong cluster aspect.
-            if (sizeOp != 0 && !sendInfo(sizeOp)) { forceClose("open-size-failed"); return; }
+            if (sizeOp != 0
+                    && !sendOpenInfo(
+                            sizeOp, epoch, "open-size-failed")) {
+                return;
+            }
             // First gap: short — size profile settles fast (0 if we skipped it).
             final long firstGap = (sizeOp != 0) ? sizeStepMs : 0;
             // Second gap: the critical one — 16 must establish the surface before 35.
             final long openGap = openStepDelayMs;
             projHandler.postDelayed(() -> {
                 if (epoch != seqEpoch) return;   // a close/re-open superseded us
-                if (!sendInfo(OP_FULLSCREEN_ON)) { forceClose("open-fullscreen-failed"); return; }
+                if (!sendOpenInfo(
+                        OP_FULLSCREEN_ON,
+                        epoch,
+                        "open-fullscreen-failed")) {
+                    return;
+                }
                 projHandler.postDelayed(() -> {
                     if (epoch != seqEpoch) return;
-                    if (!sendInfo(OP_DI4_MODE)) { forceClose("open-di4-failed"); return; }
+                    if (!sendOpenInfo(
+                            OP_DI4_MODE,
+                            epoch,
+                            "open-di4-failed")) {
+                        return;
+                    }
                     pollReady(0, epoch);
                 }, openGap);
             }, firstGap);
@@ -565,6 +823,31 @@ public final class ClusterProjectionController {
             logger.warn("doOpenSequence error: " + t.getMessage());
             forceClose("open-exception");
         }
+    }
+
+    private boolean sendOpenInfo(
+            int op, int epoch, String rejectionReason) {
+        LegacyCommandResult result = sendInfoResult(op);
+        if (result == LegacyCommandResult.ACCEPTED) return true;
+        if (result == LegacyCommandResult.INDETERMINATE) {
+            synchronized (this) {
+                if (epoch != seqEpoch || projState != ST_OPENING) {
+                    return false;
+                }
+                projState = ST_CLOSED;
+                ready = false;
+            }
+            sLegacyBootRestoreBlocksAdmission = true;
+            watchdogHandler.removeCallbacks(maxCapTask);
+            watchdogHandler.removeCallbacks(lingerTask);
+            notifyPipelineClosed();
+            logger.error("projection open opcode " + op
+                    + " is indeterminate; refusing same-boot close/reopen "
+                    + "and retaining durable ownership until a verified OS reboot");
+            return false;
+        }
+        forceClose(rejectionReason);
+        return false;
     }
 
     private void pollReady(long elapsed, int epoch) {
@@ -606,15 +889,12 @@ public final class ClusterProjectionController {
      *         present-edge re-notify so the pipeline re-drives the show once the
      *         display+stack resolve. */
     private void commitReady(int epoch, String why, boolean presentAtCommit) {
-        final long activeUntil;
         synchronized (this) {
             if (epoch != seqEpoch || projState != ST_OPENING) return;
             openedAtMs = System.currentTimeMillis();
             ready = true;
             projState = ST_OPEN;
-            activeUntil = openedAtMs + maxProjectionMs;
         }
-        writeGateFlags(activeUntil);
         watchdogHandler.removeCallbacks(maxCapTask);
         // Suppress the hard max-cap auto-close while the map holds the projection;
         // the map is meant to stay up for the whole drive. The gate flag still
@@ -746,56 +1026,101 @@ public final class ClusterProjectionController {
 
     private void doCloseSequence(int epoch) {
         try {
-            if (epoch != seqEpoch) return;   // superseded by a newer open before we started
+            if (!isCurrentCloseEpoch(epoch)) return;
+            final int restoreProfile =
+                    restoreProfileOpcode != 0
+                            ? restoreProfileOpcode
+                            : sizeProfileOpcode;
             logger.info("projection close: " + OP_CLOSE + "→" + OP_REFRESH);
-            sendInfo(OP_CLOSE);   // best-effort; even if it returns false we still refresh
+            LegacyCommandResult closeResult =
+                    sendInfoResult(OP_CLOSE);
+            if (closeResult != LegacyCommandResult.ACCEPTED) {
+                completeCloseSequence(
+                        epoch,
+                        false,
+                        "opcode " + OP_CLOSE + " " + closeResult);
+                return;
+            }
             projHandler.postDelayed(() -> {
-                // CRITICAL: the epoch re-check AND the projState write must be atomic
-                // w.r.t. requestOpen (which transitions + bumps seqEpoch under the same
-                // lock). Otherwise a re-open that wins between an unlocked check and the
-                // ST_CLOSED write would be CLOBBERED back to CLOSED — stranding the
-                // projection physically open with every restore path disarmed. Decide
-                // superseded-ness and claim ST_CLOSED in ONE locked section.
-                final boolean superseded;
-                synchronized (this) {
-                    superseded = (epoch != seqEpoch);
-                    if (!superseded) { projState = ST_CLOSED; ready = false; }
+                if (!isCurrentCloseEpoch(epoch)) return;
+                LegacyCommandResult refreshResult =
+                        sendInfoResult(OP_REFRESH);
+                if (refreshResult != LegacyCommandResult.ACCEPTED) {
+                    completeCloseSequence(
+                            epoch,
+                            false,
+                            "opcode " + OP_REFRESH + " "
+                                    + refreshResult);
+                    return;
                 }
-                if (superseded) return;   // a re-open won under the lock — leave its
-                                          // ST_OPENING + fresh open sequence intact, and
-                                          // do NOT send OP_REFRESH (it would land after
-                                          // the open's opcodes and strand the projection).
-                sendInfo(OP_REFRESH);
-                // Re-assert the car's NATIVE size profile so the gauges return to the
-                // model's ORIGINAL layout. The open's size-profile opcode is a
-                // PERSISTENT layout switch that 18→0 does NOT undo; on a model whose
-                // native cluster differs from a generic projection profile, the gauges
-                // would otherwise come back in the wrong layout. The configured profile
-                // (sizeProfileOpcode, = the user's "Cluster layout" dropdown choice) IS
-                // the car's native size, so re-sending it on close is the automatic,
-                // model-correct restore — no per-model opt-in needed. (clusterRestoreProfile
-                // overrides only if a model's projection profile must differ from native.)
-                final int rp = (restoreProfileOpcode != 0) ? restoreProfileOpcode : sizeProfileOpcode;
-                if (rp != 0) {
-                    projHandler.postDelayed(() -> sendInfo(rp), CLOSE_STEP_DELAY_MS);
+                // Re-assert the car's native size profile before consuming the
+                // durable recovery marker. A crash between refresh and this
+                // persistent profile restore must remain boot-recoverable.
+                if (restoreProfile != 0) {
+                    projHandler.postDelayed(() -> {
+                        if (!isCurrentCloseEpoch(epoch)) return;
+                        LegacyCommandResult profileResult =
+                                sendInfoResult(restoreProfile);
+                        boolean profileRestored =
+                                profileResult
+                                        == LegacyCommandResult.ACCEPTED;
+                        completeCloseSequence(
+                                epoch,
+                                profileRestored,
+                                profileRestored
+                                        ? ""
+                                        : "restore profile "
+                                                + restoreProfile
+                                                + " "
+                                                + profileResult);
+                    }, CLOSE_STEP_DELAY_MS);
+                } else {
+                    completeCloseSequence(epoch, true, "");
                 }
-                watchdogHandler.removeCallbacks(maxCapTask);
-                // Authoritative re-clear AFTER the restore. forceClose() clears the
-                // gate flags up-front (SIGKILL-recovery contract), but a pollReady
-                // success on another thread can re-assert them in the tiny window
-                // after it dropped the lock and before its writeGateFlags — leaving
-                // the recovery flag stuck SET with the projection actually closed.
-                // This close runnable is serialized behind that pollReady on
-                // projThread, so a clear here is guaranteed to win. Read-guarded, so
-                // it's a free no-op when forceClose's up-front clear already stuck.
-                try { clearGateFlags(); } catch (Throwable ignored) {}
-                logger.info("projection CLOSED + gauges restore issued");
             }, CLOSE_STEP_DELAY_MS);
         } catch (Throwable t) {
             logger.warn("doCloseSequence error: " + t.getMessage());
+            completeCloseSequence(
+                    epoch, false, "close exception: " + t.getMessage());
+        }
+    }
+
+    private boolean isCurrentCloseEpoch(int epoch) {
+        synchronized (this) {
+            return epoch == seqEpoch && projState == ST_CLOSING;
+        }
+    }
+
+    private void completeCloseSequence(
+            int epoch,
+            boolean restoreCommandsSucceeded,
+            String failureReason) {
+        final boolean fullyRestored;
+        synchronized (this) {
+            if (epoch != seqEpoch || projState != ST_CLOSING) return;
+            // Keep the epoch stable through the durable clear. Otherwise a
+            // concurrent newer forceClose could supersede this close after the
+            // check but before the disk write, letting this stale completion
+            // erase the newer close's crash-recovery marker.
+            boolean markerCleared =
+                    restoreCommandsSucceeded && clearGateFlagsStatic();
+            fullyRestored =
+                    restoreCommandsSucceeded && markerCleared;
             projState = ST_CLOSED;
             ready = false;
         }
+        watchdogHandler.removeCallbacks(maxCapTask);
+        sLegacyBootRestoreBlocksAdmission = !fullyRestored;
+        if (fullyRestored) {
+            logger.info("projection CLOSED + gauges restore confirmed");
+            return;
+        }
+        logger.warn("projection close incomplete; durable recovery marker "
+                + "retained"
+                + (failureReason == null || failureReason.isEmpty()
+                        ? ""
+                        : " (" + failureReason + ")"));
+        clearStaleGateAtBoot();
     }
 
     // ── SIGKILL / SIGTERM recovery ──────────────────────────────────────────────
@@ -809,29 +1134,232 @@ public final class ClusterProjectionController {
      * closed. Static so it needs no live instance.
      */
     public static void clearStaleGateAtBoot() {
-        boolean leaked;
-        long activeUntil;
-        try {
-            org.json.JSONObject s = UnifiedConfigManager.forceReload().optJSONObject("surveillance");
-            leaked = s != null && s.optBoolean(GATE_FORCE_STOP, false);
-            activeUntil = s != null ? s.optLong(GATE_ACTIVE_UNTIL, 0L) : 0L;
-        } catch (Throwable t) {
-            return;
-        }
-        if (!leaked && activeUntil <= 0L) return;
-        logger.warn("stale cluster-projection gate at boot (forceStop=" + leaked
-                + ", activeUntil=" + activeUntil + ") — restoring gauges");
-        new Thread(() -> {
-            try {
-                sendInfoStatic(OP_CLOSE);
-                try { Thread.sleep(CLOSE_STEP_DELAY_MS); } catch (InterruptedException ignored) {}
-                sendInfoStatic(OP_REFRESH);
-            } catch (Throwable t) {
-                logger.warn("clearStaleGateAtBoot restore error: " + t.getMessage());
-            } finally {
-                try { clearGateFlagsStatic(); } catch (Throwable ignored) {}
+        new Thread(
+                ClusterProjectionController
+                        ::clearStaleGateAtBootSynchronously,
+                "ClusterProjBootRestoreDispatch").start();
+    }
+
+    public static boolean clearStaleGateAtBootSynchronously() {
+        return clearStaleGateAtBootResultSynchronously(false)
+                .isRecovered();
+    }
+
+    public static boolean
+            clearStaleGateAfterDiLink5RecoverySynchronously() {
+        return clearStaleGateAfterDiLink5RecoveryResultSynchronously()
+                .isRecovered();
+    }
+
+    public static LegacyBootRecoveryResult
+            clearStaleGateAfterDiLink5RecoveryResultSynchronously() {
+        return clearStaleGateAtBootResultSynchronously(true);
+    }
+
+    private static LegacyBootRecoveryResult
+            clearStaleGateAtBootResultSynchronously(
+            boolean allowDiLink5RecoveryFence) {
+        BootRestoreTicket ticket;
+        boolean ownsRestore = false;
+        synchronized (BOOT_RESTORE_LOCK) {
+            if (sBootRestoreTicket != null) {
+                ticket = sBootRestoreTicket;
+            } else {
+                final LegacyGateSnapshot marker;
+                try {
+                    org.json.JSONObject root =
+                            UnifiedConfigManager
+                                    .readDurableConfigStrict();
+                    marker = parseLegacyGateSnapshot(
+                            root.optJSONObject("surveillance"));
+                } catch (Throwable readFailure) {
+                    sLegacyBootRestoreBlocksAdmission = true;
+                    logger.warn("legacy projection recovery flags are "
+                            + "unreadable; admission remains blocked");
+                    return LegacyBootRecoveryResult.RETRYABLE_FAILURE;
+                }
+                if (!marker.readable) {
+                    sLegacyBootRestoreBlocksAdmission = true;
+                    logger.warn("legacy projection recovery fields are "
+                            + "malformed; admission remains blocked");
+                    return LegacyBootRecoveryResult.RETRYABLE_FAILURE;
+                }
+                if (!marker.hasRecoveryOwnership()) {
+                    sLegacyBootRestoreBlocksAdmission = false;
+                    return LegacyBootRecoveryResult.RECOVERED;
+                }
+                if (legacyIndeterminateCommandMayStillComplete(
+                        marker.commandIndeterminate,
+                        marker.commandBootId,
+                        readCurrentBootId())) {
+                    sLegacyBootRestoreBlocksAdmission = true;
+                    logger.warn("legacy projection command may still complete "
+                            + "in this OS boot; refusing an unordered 18→0 "
+                            + "restore until a verified reboot");
+                    return LegacyBootRecoveryResult
+                            .SAME_BOOT_INDETERMINATE;
+                }
+                if (com.overdrive.app.camera.dilink5.DiLink5Platform
+                        .isSelected()
+                        && !allowDiLink5RecoveryFence) {
+                    // Legacy and DI5 share the cluster compositor. Never erase
+                    // proof of an interrupted legacy projection while DI5 may
+                    // still own that compositor. DiLink5ClusterCast first
+                    // retires its own durable ownership, then re-enters this
+                    // method with explicit cross-mode recovery authority.
+                    sLegacyBootRestoreBlocksAdmission = true;
+                    logger.warn("deferring stale legacy gauge restore until "
+                            + "DI5 compositor recovery completes");
+                    return LegacyBootRecoveryResult.RETRYABLE_FAILURE;
+                }
+                if (!allowDiLink5RecoveryFence
+                        && DiLink5ClusterCast
+                                .isLegacyProjectionBlockedByDiLink5Recovery()) {
+                    logger.warn("deferring legacy projection gate restore "
+                            + "until DI5 ownership recovery completes");
+                    return LegacyBootRecoveryResult.RETRYABLE_FAILURE;
+                }
+                if (!ensureLegacyBootRecoveryOwnership(marker)) {
+                    sLegacyBootRestoreBlocksAdmission = true;
+                    logger.warn("stale legacy projection ownership could not "
+                            + "be promoted to a full recovery gate; refusing "
+                            + "command dispatch");
+                    return LegacyBootRecoveryResult.RETRYABLE_FAILURE;
+                }
+                logger.warn("stale cluster-projection gate at boot "
+                        + "(forceStop=" + marker.forceStop
+                        + ", activeUntil=" + marker.activeUntilMs
+                        + ") — restoring gauges");
+                sLegacyBootRestoreBlocksAdmission = true;
+                ticket = new BootRestoreTicket();
+                sBootRestoreTicket = ticket;
+                ownsRestore = true;
             }
-        }, "ClusterProjBootRestore").start();
+        }
+
+        if (ownsRestore) {
+            try {
+                Thread worker = new Thread(
+                        () -> runBootGaugeRestore(ticket),
+                        "ClusterProjBootRestore");
+                worker.setDaemon(true);
+                worker.start();
+            } catch (Throwable dispatchFailure) {
+                logger.warn("unable to dispatch legacy boot gauge restore: "
+                        + dispatchFailure.getMessage());
+                finishBootGaugeRestore(
+                        ticket,
+                        LegacyBootRecoveryResult.RETRYABLE_FAILURE);
+            }
+        }
+        try {
+            if (!ticket.completion.await(
+                    BOOT_RESTORE_WAIT_TIMEOUT_MS,
+                    TimeUnit.MILLISECONDS)) {
+                logger.warn("timed out waiting for legacy boot gauge restore");
+                return LegacyBootRecoveryResult.RETRYABLE_FAILURE;
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return LegacyBootRecoveryResult.RETRYABLE_FAILURE;
+        }
+        return ticket.result;
+    }
+
+    private static void runBootGaugeRestore(
+            BootRestoreTicket ticket) {
+        LegacyBootRecoveryResult recoveryResult =
+                LegacyBootRecoveryResult.RETRYABLE_FAILURE;
+        try {
+            int restoreProfile = readLegacyRestoreProfileOpcode();
+            for (int attempt = 0;
+                    attempt < BOOT_RESTORE_MAX_ATTEMPTS;
+                    attempt++) {
+                LegacyCommandResult closeResult =
+                        sendInfoStaticResult(OP_CLOSE);
+                if (closeResult == LegacyCommandResult.INDETERMINATE) {
+                    recoveryResult =
+                            LegacyBootRecoveryResult
+                                    .SAME_BOOT_INDETERMINATE;
+                    break;
+                }
+                boolean closeSent =
+                        closeResult == LegacyCommandResult.ACCEPTED;
+                boolean refreshSent = false;
+                boolean profileSent = restoreProfile == 0;
+                if (closeSent
+                        && sleepForLegacyRestore(CLOSE_STEP_DELAY_MS)) {
+                    LegacyCommandResult refreshResult =
+                            sendInfoStaticResult(OP_REFRESH);
+                    if (refreshResult
+                            == LegacyCommandResult.INDETERMINATE) {
+                        recoveryResult =
+                                LegacyBootRecoveryResult
+                                        .SAME_BOOT_INDETERMINATE;
+                        break;
+                    }
+                    refreshSent =
+                            refreshResult == LegacyCommandResult.ACCEPTED;
+                    if (refreshSent && restoreProfile != 0
+                            && sleepForLegacyRestore(
+                                    CLOSE_STEP_DELAY_MS)) {
+                        LegacyCommandResult profileResult =
+                                sendInfoStaticResult(restoreProfile);
+                        if (profileResult
+                                == LegacyCommandResult.INDETERMINATE) {
+                            recoveryResult =
+                                    LegacyBootRecoveryResult
+                                            .SAME_BOOT_INDETERMINATE;
+                            break;
+                        }
+                        profileSent =
+                                profileResult
+                                        == LegacyCommandResult.ACCEPTED;
+                    }
+                }
+                if (closeSent
+                        && refreshSent
+                        && profileSent
+                        && clearGateFlagsStatic()) {
+                    recoveryResult =
+                            LegacyBootRecoveryResult.RECOVERED;
+                    break;
+                }
+                if (attempt < BOOT_RESTORE_RETRY_DELAYS_MS.length) {
+                    if (!sleepForLegacyRestore(
+                            BOOT_RESTORE_RETRY_DELAYS_MS[attempt])) break;
+                }
+            }
+        } catch (Throwable failure) {
+            logger.warn("legacy boot gauge restore failed: "
+                    + failure.getMessage());
+        } finally {
+            finishBootGaugeRestore(ticket, recoveryResult);
+        }
+    }
+
+    private static boolean sleepForLegacyRestore(long delayMs) {
+        try {
+            Thread.sleep(delayMs);
+            return true;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    private static void finishBootGaugeRestore(
+            BootRestoreTicket ticket,
+            LegacyBootRecoveryResult recoveryResult) {
+        ticket.result = recoveryResult;
+        sLegacyBootRestoreBlocksAdmission =
+                !recoveryResult.isRecovered();
+        ticket.completion.countDown();
+        synchronized (BOOT_RESTORE_LOCK) {
+            if (sBootRestoreTicket == ticket) {
+                sBootRestoreTicket = null;
+            }
+        }
     }
 
     /**
@@ -843,19 +1371,28 @@ public final class ClusterProjectionController {
      *   <li>Bumps seqEpoch + sets ST_CLOSING (like {@link #forceClose}) so any
      *       in-flight open-sequence step lambda bails on the epoch mismatch and
      *       cannot re-issue OP_FULLSCREEN_ON/OP_DI4_MODE AFTER our restore.</li>
-     *   <li>Clears the UCM gate flags ONLY after the full 18→0 has actually been
-     *       issued (inside the close runnable), NOT up-front. If the latch times
+     *   <li>Clears the UCM gate flags ONLY after the full 18→0→native-profile
+     *       restore has been confirmed (inside the close runnable), NOT up-front. If the latch times
      *       out before the close completes (a wedged/busy projThread), the flags
      *       stay SET, so the next respawn's {@link #clearStaleGateAtBoot} re-fires
-     *       18→0 — boot recovery is preserved as the backstop. (forceClose can
-     *       safely clear up-front because its close runs on a healthy thread; a
-     *       shutdown close may never land before VM death.)</li>
+     *       the restore — boot recovery is preserved as the backstop.</li>
      * </ul>
-     * The latch budget covers the worst case (2× ~2s shell waitFor + 1s sleep).
+     * The latch budget covers the bounded shell calls and inter-step waits.
      */
     public void shutdown() {
         watchdogHandler.removeCallbacks(maxCapTask);
         watchdogHandler.removeCallbacks(lingerTask);
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                && projState == ST_CLOSED) {
+            synchronized (this) {
+                shuttingDown = true;
+                ready = false;
+                sustainedHolders.clear();
+            }
+            // A legacy marker belongs to cross-mode recovery, not this inactive
+            // controller. Preserve it until DI5 cleanup authorizes 18→0→profile.
+            return;
+        }
         final boolean alreadyClosed;
         synchronized (this) {
             shuttingDown = true;   // terminal — blocks any future requestOpen re-entry
@@ -868,16 +1405,25 @@ public final class ClusterProjectionController {
         }
         // Preserve the same source-before-dependent ordering as forceClose even if shutdown()
         // is invoked outside the daemon hook's normal pre-detach sequence.
-        try { ClusterViewMirrorService.detachBeforeProjectionClose("shutdown"); }
+        try { com.overdrive.app.navmap.ClusterMapProjector
+                .onLegacyProjectionForceClosed(); }
         catch (Throwable t) {
-            logger.warn("view mirror shutdown detach failed: " + t.getMessage());
+            logger.warn("map shutdown invalidation failed: " + t.getMessage());
         }
+        boolean dependentsDetached =
+                detachProjectionDependents("shutdown");
         sustainedHolders.clear();   // teardown drops ALL holds; restore proceeds normally
         if (alreadyClosed) {
-            // Nothing open. Best-effort clear (read-guarded no-op if already clear).
-            try { clearGateFlags(); } catch (Throwable ignored) {}
+            // Nothing open in memory. Preserve any durable marker left by an
+            // earlier incomplete close so the next boot can recover it.
             // Still retire the badge in case a stray arm slipped in (idempotent).
             try { ClusterSpeedOverlay.stopIfActive(); } catch (Throwable ignored) {}
+            return;
+        }
+        sLegacyBootRestoreBlocksAdmission = true;
+        if (!dependentsDetached) {
+            logger.warn("shutdown left the durable projection marker set "
+                    + "because mirror detach was not confirmed");
             return;
         }
         // Tear down the speed badge on daemon exit (SIGTERM / normal). Posted AFTER
@@ -889,52 +1435,435 @@ public final class ClusterProjectionController {
         try { ClusterSpeedOverlay.stopIfActive(); } catch (Throwable ignored) {}
         final CountDownLatch latch = new CountDownLatch(1);
         projHandler.post(() -> {
+            boolean restored = false;
             try {
-                sendInfo(OP_CLOSE);
-                try { Thread.sleep(CLOSE_STEP_DELAY_MS); } catch (InterruptedException ignored) {}
-                sendInfo(OP_REFRESH);
-                // Clear the recovery gate ONLY now that the full restore issued.
-                try { clearGateFlags(); } catch (Throwable ignored) {}
-            } catch (Throwable ignored) {
+                int restoreProfile =
+                        restoreProfileOpcode != 0
+                                ? restoreProfileOpcode
+                                : sizeProfileOpcode;
+                boolean closeSent =
+                        sendInfoResult(OP_CLOSE)
+                                == LegacyCommandResult.ACCEPTED;
+                boolean refreshSent = closeSent
+                        && sleepForLegacyRestore(CLOSE_STEP_DELAY_MS)
+                        && sendInfoResult(OP_REFRESH)
+                                == LegacyCommandResult.ACCEPTED;
+                boolean profileSent = restoreProfile == 0
+                        || (refreshSent
+                                && sleepForLegacyRestore(
+                                        CLOSE_STEP_DELAY_MS)
+                                && sendInfoResult(restoreProfile)
+                                        == LegacyCommandResult.ACCEPTED);
+                restored = closeSent
+                        && refreshSent
+                        && profileSent
+                        && clearGateFlagsStatic();
+            } catch (Throwable failure) {
+                logger.warn("shutdown projection restore failed: "
+                        + failure.getMessage());
             } finally {
                 projState = ST_CLOSED;
                 ready = false;
+                sLegacyBootRestoreBlocksAdmission = !restored;
                 latch.countDown();
             }
         });
-        // Worst case: OP_CLOSE shell ~2s + 1s sleep + OP_REFRESH shell ~2s ≈ 5s.
-        try { latch.await(5500, TimeUnit.MILLISECONDS); } catch (InterruptedException ignored) {}
+        try {
+            latch.await(9_500L, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     // ── UCM gate flags ──────────────────────────────────────────────────────────
 
-    private void writeGateFlags(long activeUntilMs) {
+    /**
+     * A command-only marker from an older boot is valid evidence that the
+     * compositor may need recovery, but it is not sufficient ownership for
+     * dispatching a new command: every physical 18→0→profile step must retain
+     * {@code forceStop=true} until the complete restore is confirmed.
+     */
+    static boolean legacyBootRecoveryOwnershipNeedsPromotion(
+            LegacyGateSnapshot marker) {
+        return marker != null
+                && marker.readable
+                && marker.hasRecoveryOwnership()
+                && (!marker.forceStop || marker.commandIndeterminate);
+    }
+
+    /**
+     * Normalize legacy/partial recovery evidence into the full crash-safe gate
+     * before any boot-restore opcode is dispatched. The caller has already
+     * proved that an indeterminate command belongs to an older OS boot, so its
+     * worker cannot still complete and the command fields can be retired in
+     * the same atomic config commit that establishes {@code forceStop}.
+     */
+    private static boolean ensureLegacyBootRecoveryOwnership(
+            LegacyGateSnapshot marker) {
+        if (marker == null
+                || !marker.readable
+                || !marker.hasRecoveryOwnership()) {
+            return false;
+        }
+        if (!legacyBootRecoveryOwnershipNeedsPromotion(marker)) {
+            return marker.forceStop;
+        }
+
+        Map<String, Object> ownership = new HashMap<>();
+        ownership.put(GATE_FORCE_STOP, true);
+        ownership.put(GATE_ACTIVE_UNTIL, 0L);
+        ownership.put(GATE_COMMAND_INDETERMINATE, false);
+        ownership.put(GATE_COMMAND_BOOT_ID, "");
+        try {
+            if (!UnifiedConfigManager.updateValues(
+                    "surveillance", ownership)) {
+                return false;
+            }
+            org.json.JSONObject root =
+                    UnifiedConfigManager.readDurableConfigStrict();
+            LegacyGateSnapshot promoted = parseLegacyGateSnapshot(
+                    root.optJSONObject("surveillance"));
+            boolean confirmed = promoted.readable
+                    && promoted.forceStop
+                    && promoted.activeUntilMs == 0L
+                    && !promoted.commandIndeterminate
+                    && promoted.commandBootId.isEmpty();
+            if (confirmed) {
+                logger.warn("promoted stale legacy projection ownership to "
+                        + "a full recovery gate before ordered restore");
+            }
+            return confirmed;
+        } catch (Throwable failure) {
+            logger.warn("failed to promote legacy projection recovery "
+                    + "ownership: " + failure.getMessage());
+            return false;
+        }
+    }
+
+    private boolean writeGateFlags(long activeUntilMs) {
         Map<String, Object> m = new HashMap<>();
         m.put(GATE_FORCE_STOP, true);
         m.put(GATE_ACTIVE_UNTIL, activeUntilMs);
-        try { UnifiedConfigManager.updateValues("surveillance", m); } catch (Throwable ignored) {}
+        m.put(GATE_COMMAND_INDETERMINATE, false);
+        m.put(GATE_COMMAND_BOOT_ID, "");
+        try {
+            if (!UnifiedConfigManager.updateValues(
+                    "surveillance", m)) {
+                return false;
+            }
+            org.json.JSONObject root =
+                    UnifiedConfigManager.readDurableConfigStrict();
+            LegacyGateSnapshot marker = parseLegacyGateSnapshot(
+                    root.optJSONObject("surveillance"));
+            return marker.readable
+                    && marker.forceStop
+                    && marker.activeUntilMs == activeUntilMs
+                    && !marker.commandIndeterminate;
+        } catch (Throwable failure) {
+            logger.warn("failed to persist legacy projection ownership "
+                    + "marker: " + failure.getMessage());
+            return false;
+        }
     }
 
-    private void clearGateFlags() { clearGateFlagsStatic(); }
+    private boolean clearGateFlags() { return clearGateFlagsStatic(); }
 
-    private static void clearGateFlagsStatic() {
+    private static boolean clearGateFlagsStatic() {
+        // Retiring the full recovery gate must be serialized with
+        // mark+dispatch. Otherwise this method could read C=false, a command
+        // could then durably mark+verify C=true, and this method's later write
+        // could erase both F and C immediately before the physical dispatch.
+        synchronized (LEGACY_COMMAND_DISPATCH_LOCK) {
+            return clearGateFlagsUnderCommandLock();
+        }
+    }
+
+    private static boolean clearGateFlagsUnderCommandLock() {
         // Read-before-write: skip the full-config disk rewrite when the flags are
         // already clear. This makes the common cases free — the head-unit-default
         // disableBlindSpot() forceClose("bs-disabled") (projection never opened) and
         // any forceClose that early-returns at ST_CLOSED — and is the single
-        // authoritative clear (forceClose runs it BEFORE the close opcodes for
-        // SIGKILL recovery; doCloseSequence no longer re-clears).
+        // authoritative clear. Physical close paths retain the marker until
+        // 18→0→native-profile restoration has been confirmed.
         try {
-            org.json.JSONObject s = UnifiedConfigManager.getSurveillance();
-            if (s != null && !s.optBoolean(GATE_FORCE_STOP, false)
-                    && s.optLong(GATE_ACTIVE_UNTIL, 0L) == 0L) {
-                return;   // already clear — no disk write
+            org.json.JSONObject root =
+                    UnifiedConfigManager.readDurableConfigStrict();
+            LegacyGateSnapshot marker = parseLegacyGateSnapshot(
+                    root.optJSONObject("surveillance"));
+            if (!marker.readable) return false;
+            if (!marker.hasRecoveryOwnership()) {
+                return true;
+            }
+            if (legacyIndeterminateCommandMayStillComplete(
+                    marker.commandIndeterminate,
+                    marker.commandBootId,
+                    readCurrentBootId())) {
+                logger.warn("refusing to clear same-boot indeterminate "
+                        + "legacy projection ownership");
+                return false;
             }
         } catch (Throwable ignored) {}
         Map<String, Object> m = new HashMap<>();
         m.put(GATE_FORCE_STOP, false);
         m.put(GATE_ACTIVE_UNTIL, 0L);
-        try { UnifiedConfigManager.updateValues("surveillance", m); } catch (Throwable ignored) {}
+        m.put(GATE_COMMAND_INDETERMINATE, false);
+        m.put(GATE_COMMAND_BOOT_ID, "");
+        try {
+            if (!UnifiedConfigManager.updateValues(
+                    "surveillance", m)) {
+                return false;
+            }
+            org.json.JSONObject root =
+                    UnifiedConfigManager.readDurableConfigStrict();
+            LegacyGateSnapshot marker = parseLegacyGateSnapshot(
+                    root.optJSONObject("surveillance"));
+            return marker.readable
+                    && !marker.hasRecoveryOwnership();
+        } catch (Throwable failure) {
+            logger.warn("failed to persist legacy projection gate clear: "
+                    + failure.getMessage());
+            return false;
+        }
+    }
+
+    private static LegacyCommandMarkerResult
+            markLegacyCommandInFlight() {
+        String bootId = readCurrentBootId();
+        if (bootId.isEmpty()) {
+            logger.warn("cannot mark legacy projection command in flight: "
+                    + "kernel boot id is unavailable");
+            return LegacyCommandMarkerResult.FAILED_BEFORE_DISPATCH;
+        }
+        try {
+            org.json.JSONObject root =
+                    UnifiedConfigManager.readDurableConfigStrict();
+            LegacyGateSnapshot existing = parseLegacyGateSnapshot(
+                    root.optJSONObject("surveillance"));
+            if (!existing.readable) {
+                logger.warn("cannot mark legacy projection command in "
+                        + "flight: durable ownership is malformed");
+                return LegacyCommandMarkerResult
+                        .FAILED_BEFORE_DISPATCH;
+            }
+            if (legacyIndeterminateCommandMayStillComplete(
+                    existing.commandIndeterminate,
+                    existing.commandBootId,
+                    bootId)) {
+                sLegacyBootRestoreBlocksAdmission = true;
+                logger.warn("refusing a second legacy projection command "
+                        + "while the prior same-boot outcome is unknown");
+                return LegacyCommandMarkerResult
+                        .SAME_BOOT_INDETERMINATE;
+            }
+            if (!existing.forceStop) {
+                sLegacyBootRestoreBlocksAdmission = true;
+                logger.warn("cannot mark legacy projection command in "
+                        + "flight: full recovery ownership is absent");
+                return LegacyCommandMarkerResult
+                        .FAILED_BEFORE_DISPATCH;
+            }
+        } catch (Throwable readFailure) {
+            logger.warn("cannot verify legacy projection command ownership: "
+                    + readFailure.getMessage());
+            return LegacyCommandMarkerResult.FAILED_BEFORE_DISPATCH;
+        }
+        Map<String, Object> markerValues = new HashMap<>();
+        markerValues.put(GATE_COMMAND_INDETERMINATE, true);
+        markerValues.put(GATE_COMMAND_BOOT_ID, bootId);
+        try {
+            if (!UnifiedConfigManager.updateValues(
+                    "surveillance", markerValues)) {
+                return LegacyCommandMarkerResult
+                        .FAILED_BEFORE_DISPATCH;
+            }
+            org.json.JSONObject root =
+                    UnifiedConfigManager.readDurableConfigStrict();
+            LegacyGateSnapshot marker = parseLegacyGateSnapshot(
+                    root.optJSONObject("surveillance"));
+            if (marker.readable
+                    && marker.forceStop
+                    && marker.commandIndeterminate
+                    && bootId.equals(marker.commandBootId)) {
+                return LegacyCommandMarkerResult.MARKED;
+            }
+            logger.warn("legacy command marker verification failed before "
+                    + "dispatch; rolling it back");
+            return rollbackLegacyCommandMarkerBeforeDispatch()
+                    ? LegacyCommandMarkerResult.FAILED_BEFORE_DISPATCH
+                    : LegacyCommandMarkerResult
+                            .SAME_BOOT_INDETERMINATE;
+        } catch (Throwable failure) {
+            logger.warn("failed to persist legacy command in-flight marker: "
+                    + failure.getMessage());
+            return rollbackLegacyCommandMarkerBeforeDispatch()
+                    ? LegacyCommandMarkerResult.FAILED_BEFORE_DISPATCH
+                    : LegacyCommandMarkerResult
+                            .SAME_BOOT_INDETERMINATE;
+        }
+    }
+
+    /**
+     * No physical command was dispatched, so rollback only needs to prove that
+     * the command fields were retired. Requiring {@code forceStop} here caused
+     * the DI3 boot regression: a successfully cleared command-only legacy
+     * marker was falsely reported as an indeterminate physical command.
+     */
+    private static boolean rollbackLegacyCommandMarkerBeforeDispatch() {
+        return clearLegacyCommandMarker(false);
+    }
+
+    /**
+     * A command may have reached the OEM service. Clear its in-flight fields
+     * while atomically re-asserting full sequence ownership for the rest of the
+     * ordered restore. This matters for a late command completion: if another
+     * cleanup raced while the command was unresolved, the command that just
+     * completed must reclaim the recovery gate before scheduling 18→0→profile.
+     */
+    private static boolean clearLegacyCommandInFlightAfterDispatch() {
+        return clearLegacyCommandMarker(true);
+    }
+
+    private static boolean clearLegacyCommandMarker(
+            boolean retainRecoveryOwnership) {
+        Map<String, Object> markerValues = new HashMap<>();
+        if (retainRecoveryOwnership) {
+            markerValues.put(GATE_FORCE_STOP, true);
+        }
+        markerValues.put(GATE_COMMAND_INDETERMINATE, false);
+        markerValues.put(GATE_COMMAND_BOOT_ID, "");
+        try {
+            if (!UnifiedConfigManager.updateValues(
+                    "surveillance", markerValues)) {
+                return false;
+            }
+            org.json.JSONObject root =
+                    UnifiedConfigManager.readDurableConfigStrict();
+            LegacyGateSnapshot marker = parseLegacyGateSnapshot(
+                    root.optJSONObject("surveillance"));
+            return isLegacyCommandMarkerClearVerified(
+                    marker, retainRecoveryOwnership);
+        } catch (Throwable failure) {
+            logger.warn("failed to clear legacy command in-flight marker: "
+                    + failure.getMessage());
+            return false;
+        }
+    }
+
+    static boolean isLegacyCommandMarkerClearVerified(
+            LegacyGateSnapshot marker,
+            boolean requireRecoveryOwnership) {
+        return marker != null
+                && marker.readable
+                && !marker.commandIndeterminate
+                && marker.commandBootId.isEmpty()
+                && (!requireRecoveryOwnership || marker.forceStop);
+    }
+
+    static LegacyGateSnapshot parseLegacyGateSnapshot(
+            org.json.JSONObject surveillance) {
+        if (surveillance == null) {
+            return new LegacyGateSnapshot(
+                    true, false, 0L, false, "");
+        }
+        boolean hasForceStop = surveillance.has(GATE_FORCE_STOP);
+        boolean hasActiveUntil = surveillance.has(GATE_ACTIVE_UNTIL);
+        if (hasForceStop != hasActiveUntil) {
+            return unreadableLegacyGateSnapshot();
+        }
+        boolean forceStop = false;
+        long activeUntil = 0L;
+        if (hasForceStop) {
+            Object forceValue = surveillance.opt(GATE_FORCE_STOP);
+            Object activeValue = surveillance.opt(GATE_ACTIVE_UNTIL);
+            if (!(forceValue instanceof Boolean)
+                    || !(activeValue instanceof Number)) {
+                return unreadableLegacyGateSnapshot();
+            }
+            double activeDouble =
+                    ((Number) activeValue).doubleValue();
+            activeUntil = ((Number) activeValue).longValue();
+            if (!Double.isFinite(activeDouble)
+                    || activeDouble != (double) activeUntil
+                    || activeUntil < 0L) {
+                return unreadableLegacyGateSnapshot();
+            }
+            forceStop = (Boolean) forceValue;
+        }
+
+        boolean hasIndeterminate =
+                surveillance.has(GATE_COMMAND_INDETERMINATE);
+        boolean hasBootId =
+                surveillance.has(GATE_COMMAND_BOOT_ID);
+        if (hasIndeterminate != hasBootId) {
+            return unreadableLegacyGateSnapshot();
+        }
+        boolean indeterminate = false;
+        String bootId = "";
+        if (hasIndeterminate) {
+            Object indeterminateValue =
+                    surveillance.opt(GATE_COMMAND_INDETERMINATE);
+            Object bootValue =
+                    surveillance.opt(GATE_COMMAND_BOOT_ID);
+            if (!(indeterminateValue instanceof Boolean)
+                    || !(bootValue instanceof String)) {
+                return unreadableLegacyGateSnapshot();
+            }
+            indeterminate = (Boolean) indeterminateValue;
+            bootId = (String) bootValue;
+            if (indeterminate) {
+                if (canonicalBootIdOrNull(bootId) == null) {
+                    return unreadableLegacyGateSnapshot();
+                }
+            } else if (!bootId.isEmpty()) {
+                return unreadableLegacyGateSnapshot();
+            }
+        }
+        return new LegacyGateSnapshot(
+                true,
+                forceStop,
+                activeUntil,
+                indeterminate,
+                bootId);
+    }
+
+    private static LegacyGateSnapshot unreadableLegacyGateSnapshot() {
+        return new LegacyGateSnapshot(
+                false, false, 0L, false, "");
+    }
+
+    static boolean legacyIndeterminateCommandMayStillComplete(
+            boolean indeterminate,
+            String originBootId,
+            String currentBootId) {
+        if (!indeterminate) return false;
+        String origin = canonicalBootIdOrNull(originBootId);
+        String current = canonicalBootIdOrNull(currentBootId);
+        return origin == null || current == null || origin.equals(current);
+    }
+
+    private static String readCurrentBootId() {
+        try (java.io.BufferedReader reader =
+                new java.io.BufferedReader(
+                        new java.io.FileReader(
+                                "/proc/sys/kernel/random/boot_id"))) {
+            String value = reader.readLine();
+            String canonical = canonicalBootIdOrNull(
+                    value == null ? "" : value.trim());
+            return canonical == null ? "" : canonical;
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    private static String canonicalBootIdOrNull(String value) {
+        if (value == null || value.length() != 36) return null;
+        try {
+            String canonical =
+                    java.util.UUID.fromString(value).toString();
+            return canonical.equals(value) ? canonical : null;
+        } catch (IllegalArgumentException invalid) {
+            return null;
+        }
     }
 
     private void loadTuning() {
@@ -959,8 +1888,8 @@ public final class ClusterProjectionController {
                 // are valid here. A bad value (typo / stale config / out-of-range) would
                 // send a wrong opcode into the OEM container — clamp to the seed default.
                 // (NEVER opcode 1, and never outside the documented size set.)
-                if (sizeProfileOpcode != 0 && sizeProfileOpcode != 29
-                        && sizeProfileOpcode != 30 && sizeProfileOpcode != 31) {
+                if (sizeProfileOpcode != 0
+                        && !isKnownLegacySizeProfile(sizeProfileOpcode)) {
                     logger.warn("clusterSizeProfile " + sizeProfileOpcode
                             + " out of range — using fingerprint default " + seedDefault);
                     sizeProfileOpcode = seedDefault;
@@ -969,6 +1898,15 @@ public final class ClusterProjectionController {
                 // native cluster size differs from the projection profile. 0 = none.
                 int rpSurv = s.optInt("clusterRestoreProfile", 0);
                 restoreProfileOpcode = (bs != null) ? bs.optInt("clusterRestoreProfile", rpSurv) : rpSurv;
+                if (restoreProfileOpcode != 0
+                        && !isKnownLegacySizeProfile(
+                                restoreProfileOpcode)) {
+                    logger.warn("clusterRestoreProfile "
+                            + restoreProfileOpcode
+                            + " out of range — using configured native "
+                            + "size profile");
+                    restoreProfileOpcode = 0;
+                }
                 // Open-sequence inter-step delay (first-load latency). Clamp 100..3000.
                 long os = s.optLong("clusterOpenStepMs", DEFAULT_OPEN_STEP_DELAY_MS);
                 openStepDelayMs = Math.max(100, Math.min(os, 3000));
@@ -976,6 +1914,53 @@ public final class ClusterProjectionController {
                 sizeStepMs = Math.max(0, Math.min(ss, 3000));
             }
         } catch (Throwable ignored) {}
+    }
+
+    private static int readLegacyRestoreProfileOpcode() {
+        int seedDefault = fingerprintSizeProfile();
+        try {
+            org.json.JSONObject root =
+                    UnifiedConfigManager.readDurableConfigStrict();
+            org.json.JSONObject surveillance =
+                    root.optJSONObject("surveillance");
+            org.json.JSONObject blindspot =
+                    root.optJSONObject("blindspot");
+            int sizeProfile = surveillance != null
+                    ? surveillance.optInt(
+                            "clusterSizeProfile", seedDefault)
+                    : seedDefault;
+            if (blindspot != null) {
+                sizeProfile = blindspot.optInt(
+                        "clusterSizeProfile", sizeProfile);
+            }
+            if (sizeProfile != 0
+                    && !isKnownLegacySizeProfile(sizeProfile)) {
+                sizeProfile = seedDefault;
+            }
+            int restoreProfile = surveillance != null
+                    ? surveillance.optInt(
+                            "clusterRestoreProfile", 0)
+                    : 0;
+            if (blindspot != null) {
+                restoreProfile = blindspot.optInt(
+                        "clusterRestoreProfile", restoreProfile);
+            }
+            if (restoreProfile != 0
+                    && !isKnownLegacySizeProfile(restoreProfile)) {
+                restoreProfile = 0;
+            }
+            return restoreProfile != 0
+                    ? restoreProfile
+                    : sizeProfile;
+        } catch (Throwable failure) {
+            logger.warn("legacy restore profile read failed: "
+                    + failure.getMessage());
+            return seedDefault;
+        }
+    }
+
+    private static boolean isKnownLegacySizeProfile(int opcode) {
+        return opcode == 29 || opcode == 30 || opcode == 31;
     }
 
     /**
@@ -987,7 +1972,7 @@ public final class ClusterProjectionController {
      * Resolution-bucket guessing is deliberately NOT used (it mis-maps the 1920×720
      * fission panel). Unknown → OP_SIZE_PROFILE (31, the verified-good Seal default).
      */
-    private int fingerprintSizeProfile() {
+    private static int fingerprintSizeProfile() {
         String m;
         try {
             m = (String) Class.forName("android.os.SystemProperties")
@@ -1100,52 +2085,843 @@ public final class ClusterProjectionController {
     // ── AutoContainer sendInfo ──────────────────────────────────────────────────
 
     /**
-     * Send a projection opcode. Primary path: the IAutoContainer binder via
-     * ServiceManager reflection. Fallback (the form proven on-device): the shell
-     * {@code service call AutoContainer 2 i32 1000 i32 <op> s16 ''} (transaction
-     * 2 = sendInfo). Returns false if BOTH fail (caller treats false as fatal).
+     * Send a DI3 projection opcode through the firmware-compatible direct
+     * {@code IAutoContainer} Binder path first. The synchronous vendor call runs
+     * on an isolated daemon thread, so a stall cannot pin the projection owner
+     * thread. If the wait budget expires, the worker is deliberately left alive:
+     * a later definitive reply clears its own durable in-flight marker and
+     * schedules an ordered 18→0 recovery. Only a failure that is proven to occur
+     * before Binder dispatch may fall back to the strict {@code service call}
+     * transport.
      */
-    private boolean sendInfo(int op) { return sendInfoStatic(op); }
-
-    private static boolean sendInfoStatic(int op) {
-        if (sendInfoBinder(op)) return true;
-        return sendInfoShell(op);
+    private LegacyCommandResult sendInfoResult(int op) {
+        return sendInfoMarkedResult(AUTO_CONTAINER_SERVICE, op);
     }
 
-    private static boolean sendInfoBinder(int op) {
+    private static LegacyCommandResult sendInfoStaticResult(int op) {
+        return sendInfoMarkedResult(AUTO_CONTAINER_SERVICE, op);
+    }
+
+    private static LegacyCommandResult sendInfoMarkedResult(
+            String service, int op) {
+        synchronized (LEGACY_COMMAND_DISPATCH_LOCK) {
+            LegacyCommandMarkerResult markerResult =
+                    markLegacyCommandInFlight();
+            if (markerResult
+                    == LegacyCommandMarkerResult.FAILED_BEFORE_DISPATCH) {
+                return LegacyCommandResult.REJECTED;
+            }
+            if (markerResult
+                    == LegacyCommandMarkerResult
+                            .SAME_BOOT_INDETERMINATE) {
+                return legacyCommandResult(
+                        LegacyTransportResult.INDETERMINATE);
+            }
+
+            LegacyCommandAttempt attempt = new LegacyCommandAttempt();
+            try {
+                Thread worker = new Thread(
+                        () -> runLegacyBinderAttempt(
+                                attempt, service, op),
+                        "ClusterProjBinder-" + op);
+                worker.setDaemon(true);
+                worker.start();
+            } catch (Throwable dispatchFailure) {
+                logger.warn("unable to dispatch direct legacy Binder command "
+                        + op + ": " + dispatchFailure.getMessage());
+                if (!rollbackLegacyCommandMarkerBeforeDispatch()) {
+                    return legacyCommandResult(
+                            LegacyTransportResult.INDETERMINATE);
+                }
+                return sendInfoShellMarkedResult(service, op);
+            }
+
+            try {
+                if (!attempt.completion.await(
+                        LEGACY_COMMAND_WAIT_TIMEOUT_MS,
+                        TimeUnit.MILLISECONDS)) {
+                    logger.warn("direct legacy Binder command timed out: op="
+                            + op + "; worker retained for late resolution");
+                    watchLateLegacyBinderAttempt(attempt, op);
+                    return legacyCommandResult(
+                            LegacyTransportResult.INDETERMINATE);
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                watchLateLegacyBinderAttempt(attempt, op);
+                return legacyCommandResult(
+                        LegacyTransportResult.INDETERMINATE);
+            }
+
+            if (attempt.result == LegacyTransportResult.UNAVAILABLE) {
+                return sendInfoShellMarkedResult(service, op);
+            }
+            return legacyCommandResult(attempt.result);
+        }
+    }
+
+    private static void runLegacyBinderAttempt(
+            LegacyCommandAttempt attempt,
+            String service,
+            int op) {
+        try {
+            LegacyTransportResult result =
+                    sendInfoBinderTransportResult(service, op);
+            if (result != LegacyTransportResult.INDETERMINATE
+                    && !clearLegacyCommandInFlightAfterDispatch()) {
+                result = LegacyTransportResult.INDETERMINATE;
+            }
+            attempt.result = result;
+        } finally {
+            attempt.completion.countDown();
+        }
+    }
+
+    private static LegacyTransportResult
+            sendInfoBinderTransportResult(String service, int op) {
+        final Object iface;
+        final Method send;
         try {
             Class<?> sm = Class.forName("android.os.ServiceManager");
-            Object binder = sm.getMethod("getService", String.class).invoke(null, "AutoContainer");
-            if (binder == null) return false;
+            Object binder = sm.getMethod("getService", String.class)
+                    .invoke(null, service);
+            if (!(binder instanceof IBinder)) {
+                return LegacyTransportResult.UNAVAILABLE;
+            }
             Class<?> stub = Class.forName("android.os.IAutoContainer$Stub");
-            Object iface = stub.getMethod("asInterface", android.os.IBinder.class)
+            iface = stub.getMethod("asInterface", IBinder.class)
                     .invoke(null, binder);
-            if (iface == null) return false;
-            Method send = iface.getClass().getMethod("sendInfo", int.class, int.class, String.class);
+            if (iface == null) {
+                return LegacyTransportResult.UNAVAILABLE;
+            }
+            send = iface.getClass().getMethod(
+                    "sendInfo", int.class, int.class, String.class);
+        } catch (Throwable unavailable) {
+            logger.debug("direct legacy Binder unavailable for op " + op
+                    + ": " + unavailable.getMessage());
+            return LegacyTransportResult.UNAVAILABLE;
+        }
+
+        try {
             send.invoke(iface, CLUSTER_TYPE, op, "");
-            return true;
-        } catch (Throwable t) {
-            logger.debug("sendInfoBinder(" + op + ") failed: " + t.getMessage());
+            return LegacyTransportResult.ACCEPTED;
+        } catch (Throwable dispatchFailure) {
+            // Once Method.invoke begins, a reflected exception cannot prove
+            // whether the remote service applied the command before replying.
+            logger.warn("direct legacy Binder command " + op
+                    + " completed ambiguously: "
+                    + dispatchFailure.getClass().getSimpleName()
+                    + ": " + dispatchFailure.getMessage());
+            return LegacyTransportResult.INDETERMINATE;
+        }
+    }
+
+    private static void watchLateLegacyBinderAttempt(
+            LegacyCommandAttempt attempt, int op) {
+        startLateLegacyWatcher(
+                "ClusterProjBinderLate-" + op,
+                () -> {
+                    awaitUninterruptibly(attempt.completion);
+                    if (attempt.result
+                            == LegacyTransportResult.INDETERMINATE) {
+                        logger.warn("late legacy Binder command " + op
+                                + " remained indeterminate; durable recovery "
+                                + "ownership retained");
+                        return;
+                    }
+                    logger.info("late legacy Binder command " + op
+                            + " resolved as " + attempt.result
+                            + "; scheduling ordered gauge recovery");
+                    scheduleRecoveryAfterLateLegacyCommand();
+                });
+    }
+
+    private static LegacyCommandResult legacyCommandResult(
+            LegacyTransportResult result) {
+        switch (result) {
+            case ACCEPTED:
+                return LegacyCommandResult.ACCEPTED;
+            case REJECTED:
+            case UNAVAILABLE:
+                return LegacyCommandResult.REJECTED;
+            case INDETERMINATE:
+            default:
+                sLegacyBootRestoreBlocksAdmission = true;
+                return LegacyCommandResult.INDETERMINATE;
+        }
+    }
+
+    private static void startLateLegacyWatcher(
+            String name, Runnable watcher) {
+        try {
+            Thread thread = new Thread(watcher, name);
+            thread.setDaemon(true);
+            thread.start();
+        } catch (Throwable failure) {
+            logger.warn("unable to monitor late legacy projection command: "
+                    + failure.getMessage());
+        }
+    }
+
+    private static void awaitUninterruptibly(CountDownLatch completion) {
+        boolean interrupted = false;
+        while (true) {
+            try {
+                completion.await();
+                break;
+            } catch (InterruptedException ignored) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt();
+    }
+
+    private static void scheduleRecoveryAfterLateLegacyCommand() {
+        ClusterProjectionController current = instance;
+        if (current == null) {
+            DiLink5ClusterCast
+                    .retryRecoveryAfterLegacyCommandResolution();
+            return;
+        }
+        try {
+            boolean posted = current.projHandler.post(() -> {
+                if (current.projState == ST_CLOSING) {
+                    logger.info("active close sequence owns late-command "
+                            + "gauge recovery");
+                    return;
+                }
+                DiLink5ClusterCast
+                        .retryRecoveryAfterLegacyCommandResolution();
+            });
+            if (!posted) {
+                DiLink5ClusterCast
+                        .retryRecoveryAfterLegacyCommandResolution();
+            }
+        } catch (Throwable postFailure) {
+            logger.warn("unable to serialize late-command recovery: "
+                    + postFailure.getMessage());
+            DiLink5ClusterCast
+                    .retryRecoveryAfterLegacyCommandResolution();
+        }
+    }
+
+    public enum DiLink5CommandResult {
+        ACCEPTED,
+        REJECTED,
+        INDETERMINATE,
+        TRANSPORT_FAILURE,
+        UNAVAILABLE
+    }
+
+    private enum DiLink5EndpointResult {
+        ACCEPTED,
+        REJECTED,
+        INDETERMINATE,
+        TRANSPORT_FAILURE,
+        UNAVAILABLE
+    }
+
+    public static boolean sendDiLink5ContainerInfo(int op) {
+        return sendDiLink5ContainerInfoResult(op) == DiLink5CommandResult.ACCEPTED;
+    }
+
+    /**
+     * Preserve the native DI5 verdict instead of collapsing every non-success
+     * into false. On trinket firmware the type=1000 command returns -1 even
+     * though the OEM shared projection display is the actual pixel-routing
+     * primitive, so callers must be able to continue display discovery after a
+     * genuine native rejection. UNAVAILABLE means no service path answered.
+     */
+    public static DiLink5CommandResult sendDiLink5ContainerInfoResult(int op) {
+        return sendDiLink5ContainerInfoResult(op, false);
+    }
+
+    /**
+     * Cleanup-only authority for a daemon that has just committed away from
+     * DI5 but still has durable evidence that the previous DI5 session owns
+     * the cluster compositor. This entry point can send only 18/0; it can
+     * never enable projection or bootstrap the OEM service.
+     */
+    public static DiLink5CommandResult
+            sendDiLink5ContainerCleanupResult(int op) {
+        return sendDiLink5ContainerInfoResult(op, true);
+    }
+
+    private static DiLink5CommandResult sendDiLink5ContainerInfoResult(
+            int op, boolean allowInactiveCleanup) {
+        boolean cleanupOpcode = isAllowedDiLink5CleanupOpcode(op);
+        if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                && !(allowInactiveCleanup && cleanupOpcode)) {
+            return DiLink5CommandResult.UNAVAILABLE;
+        }
+        if (!isAllowedDiLink5ContainerOpcode(op)) {
+            return DiLink5CommandResult.UNAVAILABLE;
+        }
+        if (allowInactiveCleanup && !cleanupOpcode) {
+            return DiLink5CommandResult.UNAVAILABLE;
+        }
+
+        DiLink5CommandResult result =
+                sendDiLink5ContainerInfoWithoutBootstrap(op);
+        if (shouldBootstrapDiLink5ContainerService(op, result)
+                && bootstrapDiLink5ContainerService()) {
+            logger.info("DI5 container service registered after bootstrap; "
+                    + "retrying sendInfo(1000," + op + ")");
+            result = sendDiLink5ContainerInfoWithoutBootstrap(op);
+        }
+        logger.info("DI5 sendInfo(1000," + op + ") finalResult=" + result);
+        return result;
+    }
+
+    private static DiLink5CommandResult
+            sendDiLink5ContainerInfoWithoutBootstrap(int op) {
+        // Run the synchronous Binder transaction inside Android's standalone
+        // `service` process. A vendor Binder stall can then be killed with
+        // that child instead of permanently pinning a daemon thread and
+        // disabling every later 18/0 cleanup command in this process. This is
+        // also the exact command form used by the upstream BYD implementation.
+        for (String service : DI5_AUTO_CONTAINER_SERVICES) {
+            DiLink5EndpointResult result =
+                    sendDiLink5InfoShell(service, op);
+            if (result != DiLink5EndpointResult.UNAVAILABLE) {
+                // AutoContainer and auto_container are aliases on different
+                // firmware builds. Once one endpoint answers, its native
+                // verdict is authoritative; never duplicate the opcode.
+                return toDiLink5CommandResult(result);
+            }
+        }
+        return DiLink5CommandResult.UNAVAILABLE;
+    }
+
+    private static DiLink5CommandResult toDiLink5CommandResult(
+            DiLink5EndpointResult result) {
+        switch (result) {
+            case ACCEPTED:
+                return DiLink5CommandResult.ACCEPTED;
+            case REJECTED:
+                return DiLink5CommandResult.REJECTED;
+            case INDETERMINATE:
+                return DiLink5CommandResult.INDETERMINATE;
+            case TRANSPORT_FAILURE:
+                return DiLink5CommandResult.TRANSPORT_FAILURE;
+            case UNAVAILABLE:
+            default:
+                return DiLink5CommandResult.UNAVAILABLE;
+        }
+    }
+
+    static boolean isAllowedDiLink5ContainerOpcode(int op) {
+        return op == OP_REFRESH
+                || op == OP_FULLSCREEN_ON
+                || op == OP_CLOSE;
+    }
+
+    static boolean isAllowedDiLink5CleanupOpcode(int op) {
+        return op == OP_REFRESH || op == OP_CLOSE;
+    }
+
+    static boolean shouldBootstrapDiLink5ContainerService(
+            int op, DiLink5CommandResult result) {
+        return op == OP_FULLSCREEN_ON
+                && result == DiLink5CommandResult.UNAVAILABLE;
+    }
+
+    private static boolean bootstrapDiLink5ContainerService() {
+        synchronized (DI5_CONTAINER_BOOTSTRAP_LOCK) {
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (lastDiLink5ContainerBootstrapMs != Long.MIN_VALUE
+                    && now - lastDiLink5ContainerBootstrapMs
+                            < DI5_CONTAINER_BOOTSTRAP_THROTTLE_MS) {
+                boolean available = hasDiLink5ContainerService();
+                logger.info("DI5 container bootstrap throttled; "
+                        + "serviceAvailable=" + available);
+                return available;
+            }
+            lastDiLink5ContainerBootstrapMs = now;
+
+            ShellCommandResult xdjaPath = runShellCommand(
+                    2000L,
+                    SYSTEM_CMD_BIN,
+                    "package",
+                    "path",
+                    XDJA_CONTAINER_PACKAGE);
+            if (!isPackagePathResult(xdjaPath.exitCode, xdjaPath.output)) {
+                ShellCommandResult bydPath = runShellCommand(
+                        2000L,
+                        SYSTEM_CMD_BIN,
+                        "package",
+                        "path",
+                        BYD_CONTAINER_PACKAGE);
+                logger.warn("DI5 container bootstrap unavailable: known XDJA "
+                        + "package is not installed; xdja="
+                        + compactCommandOutput(xdjaPath)
+                        + ", byd=" + compactCommandOutput(bydPath)
+                        + ", services=" + readDiLink5ContainerServiceInventory());
+                return false;
+            }
+
+            logger.info("DI5 container bootstrap: installed package confirmed: "
+                    + compactCommandOutput(xdjaPath));
+            ShellCommandResult start = runShellCommand(
+                    3000L,
+                    SYSTEM_AM_BIN,
+                    "startservice",
+                    "--user",
+                    "0",
+                    "-n",
+                    XDJA_DISPLAY_SERVICE_COMPONENT);
+            if (!isSuccessfulServiceStartResult(
+                    start.exitCode, start.timedOut, start.output)) {
+                logger.warn("DI5 container bootstrap start failed: "
+                        + compactCommandOutput(start)
+                        + "; services=" + readDiLink5ContainerServiceInventory());
+                return false;
+            }
+
+            long deadline = android.os.SystemClock.elapsedRealtime()
+                    + DI5_CONTAINER_BOOTSTRAP_TIMEOUT_MS;
+            while (android.os.SystemClock.elapsedRealtime() < deadline) {
+                if (hasDiLink5ContainerService()) {
+                    logger.info("DI5 container bootstrap succeeded; services="
+                            + readDiLink5ContainerServiceInventory());
+                    return true;
+                }
+                try {
+                    Thread.sleep(100L);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    logger.warn("DI5 container bootstrap interrupted");
+                    return false;
+                }
+            }
+            logger.warn("DI5 container bootstrap timed out waiting for binder; "
+                    + "start=" + compactCommandOutput(start)
+                    + ", services=" + readDiLink5ContainerServiceInventory());
             return false;
         }
     }
 
-    private static boolean sendInfoShell(int op) {
+    private static boolean hasDiLink5ContainerService() {
+        for (String service : DI5_AUTO_CONTAINER_SERVICES) {
+            try {
+                Class<?> sm = Class.forName("android.os.ServiceManager");
+                Object resolved = sm.getMethod("getService", String.class)
+                        .invoke(null, service);
+                if (resolved instanceof IBinder) return true;
+            } catch (Throwable ignored) {
+            }
+        }
+        return false;
+    }
+
+    static boolean isPackagePathResult(int exitCode, String output) {
+        return exitCode == 0
+                && output != null
+                && output.trim().startsWith("package:");
+    }
+
+    static boolean isSuccessfulServiceStartResult(
+            int exitCode, boolean timedOut, String output) {
+        if (timedOut || exitCode != 0) return false;
+        String normalized = output == null
+                ? ""
+                : output.toLowerCase(java.util.Locale.US);
+        return !normalized.contains("error:")
+                && !normalized.contains("exception")
+                && !normalized.contains("not found")
+                && !normalized.contains("does not exist")
+                && !normalized.contains("not allowed");
+    }
+
+    private static String readDiLink5ContainerServiceInventory() {
+        ShellCommandResult inventory = runShellCommand(
+                2000L, SYSTEM_SERVICE_BIN, "list");
+        if (inventory.timedOut || inventory.exitCode != 0) {
+            return compactCommandOutput(inventory);
+        }
+        StringBuilder relevant = new StringBuilder();
+        for (String line : inventory.output.split("\\r?\\n")) {
+            String normalized = line.toLowerCase(java.util.Locale.US);
+            if (!normalized.contains("container")
+                    && !normalized.contains("xdja")) {
+                continue;
+            }
+            if (relevant.length() > 0) relevant.append(" | ");
+            relevant.append(line.trim());
+            if (relevant.length() >= 700) break;
+        }
+        return relevant.length() == 0
+                ? "<no container service registered>"
+                : relevant.toString();
+    }
+
+    private static ShellCommandResult runShellCommand(
+            long timeoutMs, String... command) {
+        Process process = null;
+        try {
+            process = new ProcessBuilder(command)
+                    .redirectErrorStream(true)
+                    .start();
+            boolean done = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
+            if (!done) {
+                process.destroyForcibly();
+                return new ShellCommandResult(-1, true, "");
+            }
+            return new ShellCommandResult(
+                    process.exitValue(),
+                    false,
+                    readProcessOutput(process));
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return new ShellCommandResult(-1, true, "interrupted");
+        } catch (Throwable t) {
+            return new ShellCommandResult(
+                    -1,
+                    false,
+                    t.getClass().getSimpleName() + ": " + t.getMessage());
+        } finally {
+            if (process != null) {
+                try {
+                    process.destroy();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+    }
+
+    private static String compactCommandOutput(ShellCommandResult result) {
+        if (result == null) return "<no result>";
+        String compact = result.output == null
+                ? ""
+                : result.output.replaceAll("\\s+", " ").trim();
+        if (compact.length() > 512) {
+            compact = compact.substring(0, 512) + "...";
+        }
+        return "exit=" + result.exitCode
+                + ", timeout=" + result.timedOut
+                + ", output=" + (compact.isEmpty() ? "<empty>" : compact);
+    }
+
+    private static final class ShellCommandResult {
+        final int exitCode;
+        final boolean timedOut;
+        final String output;
+
+        ShellCommandResult(int exitCode, boolean timedOut, String output) {
+            this.exitCode = exitCode;
+            this.timedOut = timedOut;
+            this.output = output == null ? "" : output;
+        }
+    }
+
+    private static DiLink5EndpointResult sendDiLink5InfoShell(
+            String service, int op) {
         Process p = null;
         try {
-            // service call AutoContainer 2 (=TRANSACTION_sendInfo) i32 1000 i32 <op> s16 ""
-            String[] cmd = {"service", "call", "AutoContainer", "2",
+            String[] cmd = {SYSTEM_SERVICE_BIN, "call", service, "2",
                     "i32", String.valueOf(CLUSTER_TYPE), "i32", String.valueOf(op), "s16", ""};
             p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
             boolean done = p.waitFor(2, TimeUnit.SECONDS);
-            if (!done) { p.destroy(); return false; }
-            return p.exitValue() == 0;
+            if (!done) {
+                p.destroyForcibly();
+                logger.warn("DI5 service call timed out: service=" + service
+                        + ", op=" + op
+                        + "; refusing alias retry because transaction outcome "
+                        + "is indeterminate");
+                return DiLink5EndpointResult.INDETERMINATE;
+            }
+            String output = readProcessOutput(p);
+            if (isDiLink5ServiceUnavailableOutput(output, service)) {
+                logger.info("DI5 service call unavailable: service=" + service
+                        + ", op=" + op + ", exit=" + p.exitValue()
+                        + ", output=" + output.replaceAll("\\s+", " ").trim());
+                return DiLink5EndpointResult.UNAVAILABLE;
+            }
+            if (p.exitValue() != 0) {
+                logger.warn("DI5 service call exited ambiguously: service="
+                        + service + ", op=" + op + ", exit=" + p.exitValue()
+                        + ", output=" + output.replaceAll("\\s+", " ").trim()
+                        + "; refusing alias retry");
+                return DiLink5EndpointResult.INDETERMINATE;
+            }
+            Integer result = parseDiLink5ServiceCallResult(output);
+            if (result == null) {
+                logger.warn("sendDiLink5InfoShell(" + service + ", " + op
+                        + ") returned no parseable native result: " + output.trim());
+                Integer status = parseDiLink5ServiceCallStatus(output);
+                if (status != null) {
+                    return status == 0
+                            ? DiLink5EndpointResult.INDETERMINATE
+                            : DiLink5EndpointResult.INDETERMINATE;
+                }
+                return DiLink5EndpointResult.INDETERMINATE;
+            }
+            boolean accepted = isAcceptedDiLink5ContainerResult(result);
+            logger.info("sendDiLink5InfoShell(" + service + ", " + op
+                    + ") nativeResult=" + result + " accepted=" + accepted);
+            return accepted
+                    ? DiLink5EndpointResult.ACCEPTED
+                    : DiLink5EndpointResult.REJECTED;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            logger.warn("sendDiLink5InfoShell(" + service + ", " + op
+                    + ") interrupted; refusing alias retry");
+            return DiLink5EndpointResult.INDETERMINATE;
         } catch (Throwable t) {
-            logger.warn("sendInfoShell(" + op + ") failed: " + t.getMessage());
-            return false;
+            logger.warn("sendDiLink5InfoShell(" + service + ", " + op
+                    + ") failed: " + t.getClass().getSimpleName()
+                    + ": " + t.getMessage());
+            return p == null
+                    ? DiLink5EndpointResult.TRANSPORT_FAILURE
+                    : DiLink5EndpointResult.INDETERMINATE;
         } finally {
-            if (p != null) try { p.destroy(); } catch (Throwable ignored) {}
+            if (p != null) {
+                try {
+                    if (p.isAlive()) {
+                        p.destroyForcibly();
+                    } else {
+                        p.destroy();
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
         }
+    }
+
+    static boolean isDiLink5ServiceUnavailableOutput(
+            String output, String service) {
+        if (output == null || service == null) return false;
+        String normalized =
+                output.toLowerCase(java.util.Locale.US)
+                        .replaceAll("\\s+", " ")
+                        .trim();
+        String normalizedService =
+                service.toLowerCase(java.util.Locale.US);
+        return normalized.contains(
+                        "service " + normalizedService + " does not exist")
+                || normalized.contains(
+                        "service " + normalizedService + ": not found")
+                || normalized.contains(
+                        "service " + normalizedService + " not found");
+    }
+
+    static boolean isAcceptedDiLink5ContainerResult(int result) {
+        return result >= 0;
+    }
+
+    static Integer parseDiLink5ServiceCallResult(String output) {
+        Integer status = parseDiLink5ServiceCallStatus(output);
+        if (status == null || status != 0) return null;
+        return parseDiLink5ServiceCallWord(output, 2);
+    }
+
+    static Integer parseDiLink5ServiceCallStatus(String output) {
+        return parseDiLink5ServiceCallWord(output, 1);
+    }
+
+    private static Integer parseDiLink5ServiceCallWord(
+            String output, int requestedWord) {
+        if (output == null || output.isEmpty()) return null;
+        java.util.regex.Matcher matcher =
+                java.util.regex.Pattern.compile("(?i)\\b([0-9a-f]{8})\\b").matcher(output);
+        int parcelWord = 0;
+        while (matcher.find()) {
+            try {
+                int value = (int) Long.parseLong(matcher.group(1), 16);
+                parcelWord++;
+                if (parcelWord == requestedWord) return value;
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return null;
+    }
+
+    private static String readProcessOutput(Process process) {
+        StringBuilder output = new StringBuilder();
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(process.getInputStream()))) {
+            char[] buffer = new char[512];
+            int count;
+            while ((count = reader.read(buffer)) > 0 && output.length() < 4096) {
+                output.append(buffer, 0, Math.min(count, 4096 - output.length()));
+            }
+        } catch (Throwable ignored) {
+        }
+        return output.toString();
+    }
+
+    private static LegacyCommandResult sendInfoShellMarkedResult(
+            String service, int op) {
+        LegacyCommandMarkerResult markerResult =
+                markLegacyCommandInFlight();
+        if (markerResult
+                == LegacyCommandMarkerResult.FAILED_BEFORE_DISPATCH) {
+            return LegacyCommandResult.REJECTED;
+        }
+        if (markerResult
+                == LegacyCommandMarkerResult.SAME_BOOT_INDETERMINATE) {
+            return legacyCommandResult(
+                    LegacyTransportResult.INDETERMINATE);
+        }
+        Process process;
+        try {
+            String[] command = {
+                    SYSTEM_SERVICE_BIN,
+                    "call",
+                    service,
+                    "2",
+                    "i32",
+                    String.valueOf(CLUSTER_TYPE),
+                    "i32",
+                    String.valueOf(op),
+                    "s16",
+                    ""
+            };
+            process = new ProcessBuilder(command)
+                    .redirectErrorStream(true)
+                    .start();
+        } catch (Throwable launchFailure) {
+            logger.warn("sendInfoShell(" + service + ", " + op
+                    + ") could not start: " + launchFailure.getMessage());
+            return rollbackLegacyCommandMarkerBeforeDispatch()
+                    ? LegacyCommandResult.REJECTED
+                    : legacyCommandResult(
+                            LegacyTransportResult.INDETERMINATE);
+        }
+
+        try {
+            if (!process.waitFor(
+                    LEGACY_COMMAND_WAIT_TIMEOUT_MS,
+                    TimeUnit.MILLISECONDS)) {
+                logger.warn("sendInfoShell(" + service + ", " + op
+                        + ") timed out; child retained for late resolution");
+                watchLateLegacyShellCommand(process, service, op);
+                return legacyCommandResult(
+                        LegacyTransportResult.INDETERMINATE);
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            watchLateLegacyShellCommand(process, service, op);
+            return legacyCommandResult(
+                    LegacyTransportResult.INDETERMINATE);
+        } catch (Throwable waitFailure) {
+            logger.warn("sendInfoShell(" + service + ", " + op
+                    + ") wait failed: " + waitFailure.getMessage());
+            watchLateLegacyShellCommand(process, service, op);
+            return legacyCommandResult(
+                    LegacyTransportResult.INDETERMINATE);
+        }
+
+        LegacyCommandResult result =
+                classifyLegacyServiceCallResult(
+                        process.exitValue(),
+                        false,
+                        readProcessOutput(process));
+        try {
+            process.destroy();
+        } catch (Throwable ignored) {
+        }
+        if (result != LegacyCommandResult.ACCEPTED) {
+            logger.warn("sendInfoShell(" + service + ", " + op
+                    + ") result=" + result);
+        }
+        if (result == LegacyCommandResult.INDETERMINATE) {
+            return legacyCommandResult(
+                    LegacyTransportResult.INDETERMINATE);
+        }
+        return clearLegacyCommandInFlightAfterDispatch()
+                ? result
+                : legacyCommandResult(
+                        LegacyTransportResult.INDETERMINATE);
+    }
+
+    private static void watchLateLegacyShellCommand(
+            Process process, String service, int op) {
+        startLateLegacyWatcher(
+                "ClusterProjShellLate-" + op,
+                () -> {
+                    boolean interrupted = false;
+                    try {
+                        while (true) {
+                            try {
+                                process.waitFor();
+                                break;
+                            } catch (InterruptedException ignored) {
+                                interrupted = true;
+                            }
+                        }
+                        LegacyCommandResult result =
+                                classifyLegacyServiceCallResult(
+                                        process.exitValue(),
+                                        false,
+                                        readProcessOutput(process));
+                        if (result
+                                == LegacyCommandResult.INDETERMINATE) {
+                            logger.warn("late sendInfoShell(" + service
+                                    + ", " + op
+                                    + ") remained indeterminate; durable "
+                                    + "recovery ownership retained");
+                            return;
+                        }
+                        if (!clearLegacyCommandInFlightAfterDispatch()) {
+                            logger.warn("late sendInfoShell(" + service
+                                    + ", " + op
+                                    + ") resolved but its durable marker "
+                                    + "could not be cleared");
+                            return;
+                        }
+                        logger.info("late sendInfoShell(" + service
+                                + ", " + op + ") resolved as " + result
+                                + "; scheduling ordered gauge recovery");
+                        scheduleRecoveryAfterLateLegacyCommand();
+                    } catch (Throwable failure) {
+                        logger.warn("late sendInfoShell(" + service
+                                + ", " + op + ") watcher failed: "
+                                + failure.getMessage());
+                    } finally {
+                        try {
+                            process.destroy();
+                        } catch (Throwable ignored) {
+                        }
+                        if (interrupted) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                });
+    }
+
+    static boolean isAcceptedLegacyServiceCallResult(
+            int exitCode,
+            boolean timedOut,
+            String output) {
+        return classifyLegacyServiceCallResult(
+                exitCode, timedOut, output)
+                == LegacyCommandResult.ACCEPTED;
+    }
+
+    static LegacyCommandResult classifyLegacyServiceCallResult(
+            int exitCode,
+            boolean timedOut,
+            String output) {
+        if (timedOut) return LegacyCommandResult.INDETERMINATE;
+        if (exitCode != 0) {
+            return output != null
+                    && (output.contains("does not exist")
+                            || output.contains("not found"))
+                    ? LegacyCommandResult.REJECTED
+                    : LegacyCommandResult.INDETERMINATE;
+        }
+        Integer status = parseDiLink5ServiceCallStatus(output);
+        if (status == null) return LegacyCommandResult.INDETERMINATE;
+        if (status != 0) return LegacyCommandResult.REJECTED;
+        // Some IAutoContainer builds expose sendInfo as void (status word
+        // only); others append an integer native verdict. Accept a normal
+        // Binder return, but reject an explicit negative native result.
+        Integer nativeResult = parseDiLink5ServiceCallResult(output);
+        return nativeResult == null
+                || isAcceptedDiLink5ContainerResult(nativeResult)
+                ? LegacyCommandResult.ACCEPTED
+                : LegacyCommandResult.REJECTED;
     }
 
     private static Context resolveContext() {

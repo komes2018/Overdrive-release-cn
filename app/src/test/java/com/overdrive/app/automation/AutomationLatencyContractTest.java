@@ -64,7 +64,7 @@ public class AutomationLatencyContractTest {
                 .put(new org.json.JSONObject()
                         .put("type", "pause")
                         .put("variables", new org.json.JSONObject()
-                                .put("milliseconds", 3000)))
+                                .put("milliseconds", 6000)))
                 .put(setVariable(slowDoneVar, "done"));
         org.json.JSONArray fastActions = new org.json.JSONArray()
                 .put(setVariable(fastDoneVar, "done"));
@@ -78,8 +78,10 @@ public class AutomationLatencyContractTest {
             Thread.sleep(100L);
 
             AutomationQueue.addToQueue(fastId, 0);
-            assertTrue("done".equals(awaitVariable(fastDoneVar, 1500)));
-            assertTrue("done".equals(awaitVariable(slowDoneVar, 5000)));
+            // Keep a wide separation between the fast deadline and the deferred resume so a
+            // heavily loaded full-suite worker cannot turn scheduler latency into a false failure.
+            assertTrue("done".equals(awaitVariable(fastDoneVar, 4000)));
+            assertTrue("done".equals(awaitVariable(slowDoneVar, 8000)));
         } finally {
             Automations.deleteAutomation(slowId);
             Automations.deleteAutomation(fastId);

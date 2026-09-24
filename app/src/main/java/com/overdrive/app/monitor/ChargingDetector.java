@@ -335,6 +335,11 @@ public final class ChargingDetector {
     private long pendingSessionEvidenceAtMs = 0L;
     /** Which layer last decided the fused state. For diagnostic logging only. */
     private String fusedSource = "init";
+    private boolean externalVerdictActive = false;
+    private boolean externalVerdictCharging = false;
+    private long externalVerdictAtElapsedMs = 0L;
+    private long externalVerdictFreshnessMs = 0L;
+    private String externalVerdictSource = "external-telemetry";
 
     /**
      * When a recompute first resolves ON->OFF for a non-unplug reason, we
@@ -356,6 +361,7 @@ public final class ChargingDetector {
     private long l2TimerGeneration = 0L;
     private long bmsTimerGeneration = 0L;
     private long l3EvidenceTimerGeneration = 0L;
+    private long externalVerdictTimerGeneration = 0L;
 
     /** Transitions are enqueued while holding {@link #lock}, then drained in that exact order. */
     private final Object transitionDispatchLock = new Object();
@@ -1131,7 +1137,7 @@ public final class ChargingDetector {
                 applyPowerIsChargingLocked(observedPowerIsCharging, elapsedNow);
             }
 
-            inPark = (gearMode == gearP);
+            inPark = isObservedParkGear(gearMode, gearP);
             noteEnginePowerChangeLocked(vd, wallNow, elapsedNow);
 
             boolean evidenceAllowed = !disconnectedLatched && !v2lActive
@@ -1167,6 +1173,10 @@ public final class ChargingDetector {
             pendingSessionEvidenceAtMs = 0L;
         }
         drainFusedTransitions();
+    }
+
+    static boolean isObservedParkGear(int gearMode, int gearP) {
+        return gearMode != BydVehicleData.UNAVAILABLE && gearMode == gearP;
     }
 
     /**
@@ -1333,6 +1343,87 @@ public final class ChargingDetector {
             enqueueTransitionLocked(recompute("acc-" + (isOn ? "on" : "off")));
         }
         drainFusedTransitions();
+    }
+
+    /**
+     * Accept a fused verdict produced by the process that owns the vehicle
+     * telemetry connection. This bypasses local evidence fusion without
+     * bypassing the existing ordered listener dispatch.
+     */
+    public void acceptExternalVerdict(
+            boolean charging, String source, long freshnessMs) {
+        synchronized (lock) {
+            boolean previous = fusedCharging;
+            if (!externalVerdictActive) {
+                clearLocalEvidenceForExternalOwnerLocked();
+            }
+            externalVerdictActive = true;
+            externalVerdictCharging = charging;
+            externalVerdictAtElapsedMs = monotonicNowMs();
+            externalVerdictFreshnessMs = Math.max(1L, freshnessMs);
+            externalVerdictSource = source == null || source.isEmpty()
+                    ? "external-telemetry" : source;
+            pendingOffSinceMs = 0L;
+            invalidateOffTimerLocked();
+            fusedCharging = charging;
+            fusedAtMs = System.currentTimeMillis();
+            fusedSource = externalVerdictSource;
+            if (charging) {
+                disconnectedLatched = false;
+                v2lActive = false;
+                terminalSessionBarrier = false;
+                terminalBarrierAllowsCohesiveRecovery = false;
+                terminalBarrierSinceMs = 0L;
+                terminalBarrierSinceElapsedMs = 0L;
+                clearPendingTerminalCallbackLocked();
+                if (!previous) {
+                    lastSessionStartedAtMs = fusedAtMs;
+                    activeSessionEpoch = sessionEpoch;
+                }
+            } else {
+                activeSessionEpoch = 0L;
+            }
+            scheduleExternalVerdictExpiryLocked();
+            updatePublicationGenerationLocked();
+            if (charging != previous) {
+                enqueueTransitionLocked(new FusedTransition(
+                        true, charging, fusedSource, false));
+            }
+        }
+        drainFusedTransitions();
+    }
+
+    public void clearExternalVerdict() {
+        synchronized (lock) {
+            if (!externalVerdictActive) return;
+            externalVerdictActive = false;
+            externalVerdictAtElapsedMs = 0L;
+            externalVerdictTimerGeneration++;
+            enqueueTransitionLocked(recompute("external-verdict-cleared"));
+        }
+        drainFusedTransitions();
+    }
+
+    private void clearLocalEvidenceForExternalOwnerLocked() {
+        bmsState = BydVehicleData.UNAVAILABLE;
+        bmsStateAtMs = 0L;
+        bmsStateAtElapsedMs = 0L;
+        powerIsChargingTri = null;
+        powerIsChargingAtMs = 0L;
+        enginePowerKw = Double.NaN;
+        enginePowerAtMs = 0L;
+        enginePowerAtElapsedMs = 0L;
+        externalChargingPowerKw = Double.NaN;
+        chargingPowerKw = Double.NaN;
+        inferenceHysteresis = 0;
+        l3Latched = false;
+        l1L2DisagreementSinceMs = 0L;
+        clearRawSignalEvidence();
+        clearEnginePowerChangeBaselineLocked();
+        invalidateBmsTimerLocked();
+        invalidateL2TimerLocked();
+        invalidateL3EvidenceTimerLocked();
+        invalidateDisagreementTimerLocked();
     }
 
     /**
@@ -2005,6 +2096,32 @@ public final class ChargingDetector {
         bmsTimerGeneration++;
     }
 
+    private void scheduleExternalVerdictExpiryLocked() {
+        final long generation = ++externalVerdictTimerGeneration;
+        scheduleExternalVerdictExpiryCheck(generation, externalVerdictFreshnessMs + 1L);
+    }
+
+    private void scheduleExternalVerdictExpiryCheck(long generation, long delayMs) {
+        TIMER.schedule(() -> {
+            synchronized (lock) {
+                if (generation != externalVerdictTimerGeneration
+                        || !externalVerdictActive) {
+                    return;
+                }
+                long remaining = externalVerdictAtElapsedMs
+                        + externalVerdictFreshnessMs + 1L - monotonicNowMs();
+                if (remaining > 0L) {
+                    scheduleExternalVerdictExpiryCheck(generation, remaining);
+                    return;
+                }
+                externalVerdictActive = false;
+                externalVerdictAtElapsedMs = 0L;
+                enqueueTransitionLocked(recompute("external-verdict-expired"));
+            }
+            drainFusedTransitions();
+        }, Math.max(1L, delayMs), java.util.concurrent.TimeUnit.MILLISECONDS);
+    }
+
     private void clearPendingTerminalCallbackLocked() {
         pendingTerminalBmsState = BydVehicleData.UNAVAILABLE;
         pendingTerminalEpoch = 0L;
@@ -2078,6 +2195,15 @@ public final class ChargingDetector {
         String source;
         boolean authoritativeOff = false;
         boolean callbackAuthoritativeStop = false;
+        boolean externalVerdictFresh = externalVerdictActive
+                && externalVerdictAtElapsedMs > 0L
+                && monotonicNow - externalVerdictAtElapsedMs
+                        <= externalVerdictFreshnessMs;
+        if (externalVerdictActive && !externalVerdictFresh) {
+            externalVerdictActive = false;
+            externalVerdictAtElapsedMs = 0L;
+            externalVerdictTimerGeneration++;
+        }
 
         if (disconnectedLatched) {
             next = false;
@@ -2087,6 +2213,10 @@ public final class ChargingDetector {
             next = false;
             source = "v2l-export";
             authoritativeOff = true;
+        } else if (externalVerdictFresh) {
+            next = externalVerdictCharging;
+            source = externalVerdictSource;
+            authoritativeOff = !next;
         } else if (terminalSessionBarrier) {
             next = false;
             source = "completed-session-barrier";

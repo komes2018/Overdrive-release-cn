@@ -1088,12 +1088,7 @@
     "mqtt_channel": "Canale",
     "mqtt_value": "Valore",
     "wait_until_description": "Sospendi le azioni rimanenti fino a quando un segnale scelto incontra un confronto, o il timeout è trascorso. Esempio: attendi fino a Velocità = 0 prima di chiudere le finestre.",
-    "wait_until_state_description": "Sospendi le azioni rimanenti fino a quando un segnale scelto on/off raggiunge uno stato, o il timeout trascorso. Esempio: attendere fino a Indicatori = Off prima di continuare.",
-      "wait_timeout": "Timeout (secondi)",
-      "save_seat_position": "Salva Posizione Del Sedile",
-      "save_seat_position_description": "Memorizzare la posizione corrente del sedile del conducente in uno slot di memoria.",
-      "set_seat_position": "Posizione Del Sedile Di Controllo",
-      "set_seat_position_description": "Carica una posizione di memoria del sedile. Assicurati che la memoria sia stata salvata prima dal veicolo. Questo comando non funziona mentre il veicolo è spento."
+    "wait_until_state_description": "Sospendi le azioni rimanenti fino a quando un segnale scelto on/off raggiunge uno stato, o il timeout trascorso. Esempio: attendere fino a Indicatori = Off prima di continuare."
   },
   "messages": {
     "logged_out": "Disconnesso",

@@ -26,6 +26,28 @@ public final class BydFeatureIds {
     /** Emergency alarm state */
     public static final int BODYWORK_EMERGENCY_ALARM = resolveOrFallback(
         "BODYWORK_EMERGENCY_ALARM_STATE", 692060190);
+    /**
+     * Physical door/lid open-state ids from the Bodywork group.
+     *
+     * <p>These are read through {@link BydManagerChannel}; the per-device
+     * {@code getDoorState(area)} path is permission-gated on some DiLink 3.0 trims. Values are
+     * 0=closed, 1=open, with other values meaning unavailable. Front event areas are drive-side
+     * dependent, so callers must map LF/RF before selecting an id.
+     */
+    public static final int BODYWORK_DOOR_LF = resolveOrFallback(
+        "Bodywork.BODYWORK_LEFT_HAND_FRONT_DOOR", 0x29400008);
+    public static final int BODYWORK_DOOR_RF = resolveOrFallback(
+        "Bodywork.BODYWORK_RIGHT_HAND_FRONT_DOOR", 0x2940000A);
+    public static final int BODYWORK_DOOR_LR = resolveOrFallback(
+        "Bodywork.BODYWORK_LEFT_HAND_REAR_DOOR", 0x2940000C);
+    public static final int BODYWORK_DOOR_RR = resolveOrFallback(
+        "Bodywork.BODYWORK_RIGHT_HAND_REAR_DOOR", 0x2940000E);
+    public static final int BODYWORK_HOOD = resolveOrFallback(
+        "Bodywork.BODYWORK_HOOD", 0x2940001C);
+    public static final int BODYWORK_TRUNK = resolveOrFallback(
+        "Bodywork.BODYWORK_LUGGAGE_DOOR", 0x2940001A);
+    public static final int BODYWORK_FUEL_CAP = resolveOrFallback(
+        "Bodywork.BODYWORK_FUEL_TANK_CAP", 0x4FB00016);
 
     // ==================== ENGINE ====================
     /** Engine power kW */
@@ -118,6 +140,12 @@ public final class BydFeatureIds {
                     0x4EF06044);
 
     // ==================== ENERGY ====================
+    /** EV/HEV selector command used by BYDAutoEnergyDevice.setEnergyMode(int). */
+    public static final int ENERGY_MODE_SET =
+            resolveOrFallback("ENERGY_MODE_SET", 734003254);
+    /** EV/HEV selector readback observed from the OEM control: 1=EV, 3=HEV. */
+    public static final int ENERGY_MODE_INSTRUMENT =
+            resolveOrFallback("ENERGY_MODE_INSTRUMENT", 874512420);
     /** Live road-surface selector: 1=common, 2=snow on the connected DiCar profile. */
     public static final int ENERGY_ROAD_SURFACE_MODE =
             resolveOrFallback("Energy.ENERGY_ROAD_SURFACE_MODE", 0x24000033);
@@ -258,15 +286,16 @@ public final class BydFeatureIds {
     // separate from HUD brightness. It is written as a BYDAutoEventValue via
     // BYDAutoSettingDevice.set(int[], EventValue) (the same sendSetCommand path as every
     // other setting write), from a real app process. An earlier build wrongly concluded
-    // "no HUD switch exists" (that was true only on an older firmware that exposed only
-    // setHUDBrightness) and even a prior guess fabricated 0x0780E026 on the instrument
+    // "no HUD switch exists" (that was true only on older firmware exposing brightness alone)
+    // and even a prior guess fabricated 0x0780E026 on the instrument
     // device — both removed. The real ids, confirmed against the OEM SDK:
     //   SET_HUD_SWITCH_SET             0x4C10E023 (1276174371) — WRITE 1=on / 2=off (NOT 0!)
     //   SET_HUD_CONFIG                 0x38B00015 (951058453)  — READ: HUD is fitted iff 1 or 2
     //   SET_HUD_SWITCH_STATUS_FEEDBACK 0x38B0001C (951058460)  — READ: HUD is on iff 1
     // Note: the switch id lives in the 0x4C10E block a prior comment called "dead" for the
     // brightness-gear id — that was id-specific; this HUD switch id is live. Brightness
-    // stays the named setHUDBrightness(int) 0..100 method. Both actuate from the app
+    // stays the named setHudBrightness(int) 0..100 method, with the legacy capitalization
+    // retained as a compatibility fallback. Both actuate from the app
     // process (VehicleActuatorService); the UID-2000 daemon's setting writes silently no-op.
     public static final int SETTING_HUD_SWITCH_SET = resolveOrFallback("Setting.SET_HUD_SWITCH_SET", 1276174371);
     public static final int SETTING_HUD_CONFIG = resolveOrFallback("Setting.SET_HUD_CONFIG", 951058453);
@@ -293,13 +322,8 @@ public final class BydFeatureIds {
     public static final int STAT_FUEL_DRIVING_RANGE = resolveOrFallback("Statistic.STATISTIC_FUEL_DRIVING_RANGE", 1246773304);
 
     // ==================== AC (EXTENDED) ====================
-    //
-    // Naming: on Di 3.0 every field of BYDAutoFeatureIds$Ac carries an AC_ prefix — all 206 of
-    // them, read off a Sealion 6 DM-i. The unprefixed spellings below resolve on nothing we have
-    // dumped, so they quietly fall through to their literals. That is survivable for most of
-    // these because the literals happen to be right (see the family note below), but it means the
-    // names are documentation, not lookups. Try the prefixed spelling first and keep the original
-    // as an alias so any trim that really uses it still resolves.
+    // DiLink generations disagree on whether Ac fields include the AC_ prefix. Resolve both
+    // spellings while retaining the already field-tested numeric fallbacks.
     public static final int AC_DEFROST_FRONT_SET = resolveAnyOrFallback(501219362,
             "Ac.AC_DEFROST_FRONT_STATE_SET", "Ac.DEFROST_FRONT_SET");
     public static final int AC_DEFROST_REAR_SET = resolveAnyOrFallback(501219357,
@@ -312,39 +336,25 @@ public final class BydFeatureIds {
             "Ac.AC_DEFROST_FRONT_STATE", "Ac.DEFROST_FRONT_STATUS");
     // Wind/fan level SET via the generic set(1000, id, level) path. On some
     // DiLink 3.0 firmware the named setAcWindLevel() is a no-op; the generic
-    // feature write works (verified in wheregoes/byd-apps research on Dolphin).
+    // feature write works (verified on Dolphin firmware).
     // 0x1DE0000C sits in the same 0x1DE000xx AC-write family as CYCLE_MODE_SET
     // (0x1DE0001B) and DEFROST_FRONT_SET (0x1DE00022).
     public static final int AC_WIND_LEVEL_SET = resolveAnyOrFallback(0x1DE0000C,
             "Ac.AC_WIND_LEVEL_SET", "Ac.WIND_LEVEL_SET");
 
     /**
-     * AC auto mode, the legacy single-id axis.
-     *
-     * <p>Deliberately {@link #UNRESOLVED_ID} rather than a literal. Di 3.0 publishes NO auto-mode
-     * write under {@code Ac} at all — the only AUTO fields are AC_AUTOMATIC_BUTTON_TURNED_OFF,
-     * AC_AUTO_CLEAN_AIR* and the AC_HAS_AC_AUTO_MODE capability flag — and the literal previously
-     * carried here (0x4EF01016) is not even in the 0x1DE000xx AC-write family the other ids
-     * belong to. Sending it made the HAL reject the write, which surfaced to the user as a flat
-     * "the car rejected the command" with nothing pointing at an unresolved id. Auto is driven on
-     * that platform by {@link #AC_CTRL_MODE_SET} instead.
+     * Legacy single-id auto-mode axis. There is no safe literal fallback: DiLink 3.0 does not
+     * publish this write, and the former 0x4EF01016 guess is outside the platform's AC-write
+     * family. Callers must skip this id when unresolved and use the control-mode pair below.
      */
     public static final int AC_AUTO_MODE_SET = resolveAnyOrFallback(UNRESOLVED_ID,
             "Ac.AUTO_MODE_SET", "Ac.AC_AUTO_MODE_SET");
 
-    /*
-     * AC control mode (auto vs manual) — the pair the OEM writes together.
-     *
-     * TOP-LEVEL ids, not under the Ac group, which is why an Ac.*-only search concludes the
-     * platform cannot switch auto mode. Values read off a live Di 3.0 car by reflection, both in
-     * the same 0x1DE000xx AC-write family as CYCLE_MODE_SET (0x1DE0001B) and WIND_LEVEL_SET
-     * (0x1DE0000C) — measured, not invented, so they are safe as literals.
-     *
-     * MODE takes 0=AUTO / 1=MANUAL; SOURCE attributes the write. The OEM's own
-     * BYDAutoAcDevice.setAcControlMode writes both in ONE set() call, so callers must too.
-     */
-    public static final int AC_CTRL_MODE_SET = resolveOrFallback("AC_CTRL_MODE_SET", 0x1DE00018);
-    public static final int AC_CTRL_SOURCE_SET = resolveOrFallback("AC_CTRL_SOURCE_SET", 0x1DE00015);
+    /** OEM auto/manual control pair, written together in one batch. */
+    public static final int AC_CTRL_MODE_SET =
+            resolveOrFallback("AC_CTRL_MODE_SET", 0x1DE00018);
+    public static final int AC_CTRL_SOURCE_SET =
+            resolveOrFallback("AC_CTRL_SOURCE_SET", 0x1DE00015);
 
     // ==================== ADAS ====================
     public static final int ADAS_OMS_DRIVER_DETECTION = resolveOrFallback("Adas.OMS_DRIVER_DETECTION_RESULT", 834666600);
@@ -417,18 +427,11 @@ public final class BydFeatureIds {
         return id != UNRESOLVED_ID;
     }
 
-    /**
-     * Resolve the first of {@code fieldNames} the platform actually defines.
-     *
-     * <p>The same id is spelled differently across BYD platform generations — most visibly the
-     * {@code Ac} group, whose fields are uniformly {@code AC_}-prefixed on Di 3.0 but were
-     * originally written here unprefixed. Trying each spelling means one build resolves on every
-     * trim instead of silently falling through to a literal borrowed from another model.
-     */
+    /** Resolve the first field spelling exported by this platform. */
     private static int resolveAnyOrFallback(int fallback, String... fieldNames) {
-        for (String name : fieldNames) {
-            int v = resolveOrFallback(name, UNRESOLVED_ID);
-            if (v != UNRESOLVED_ID) return v;
+        for (String fieldName : fieldNames) {
+            int resolved = resolveOrFallback(fieldName, UNRESOLVED_ID);
+            if (resolved != UNRESOLVED_ID) return resolved;
         }
         return fallback;
     }

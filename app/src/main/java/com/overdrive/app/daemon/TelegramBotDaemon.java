@@ -716,9 +716,33 @@ public class TelegramBotDaemon {
         boolean proxyAvailable = (proxy != null);
 
         if (proxyAvailable) {
-            builder.proxy(proxy);
+            // Proxy first, DIRECT second — a FROZEN chain resolved once per
+            // rebuild (getGlobalProxy() may shell out, so it must never run
+            // per-request). On CN firmware the proxy leg is the one that
+            // works and stays first; on a tailnet-only Tailscale listener
+            // (through which api.telegram.org is unreachable while the
+            // listener probes healthy) OkHttp falls through to direct in the
+            // same call instead of wedging the daemon until the next rebuild.
+            final java.util.List<java.net.Proxy> routeChain =
+                    com.overdrive.app.mqtt.ProxyHelper.proxyRouteChain(proxy);
+            builder.proxySelector(new java.net.ProxySelector() {
+                @Override
+                public java.util.List<java.net.Proxy> select(java.net.URI uri) {
+                    return routeChain;
+                }
+
+                @Override
+                public void connectFailed(
+                        java.net.URI uri,
+                        java.net.SocketAddress address,
+                        java.io.IOException failure) {
+                    // Proxy leg failed — let the next probe re-evaluate.
+                    com.overdrive.app.mqtt.ProxyHelper.invalidateCache();
+                }
+            });
             if (!lastProxyState) {
-                log("HTTP client switched to proxy: " + proxy.address());
+                log("HTTP client switched to proxy: " + proxy.address()
+                        + " (direct fallback armed)");
             }
         } else {
             if (lastProxyState) {
@@ -753,7 +777,7 @@ public class TelegramBotDaemon {
     private static final long UPLOAD_READ_TIMEOUT_SEC = 120L;
 
     /**
-     * Invalidate HTTP client so next request re-checks proxy and flushes stale pool.
+     * Invalidate HTTP client so next request re-checks proxy.
      * Called on connection failures.
      */
     private static synchronized void onHttpFailure() {
@@ -764,8 +788,12 @@ public class TelegramBotDaemon {
             if (uploadHttpClient != null) {
                 uploadHttpClient.connectionPool().evictAll();
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {
+        }
 
+        // Re-check proxy if last check was more than 5 seconds ago. synchronized
+        // (same monitor as refreshHttpClient) so the elapsed-check + rebuild is
+        // atomic across the poll thread and IPC workers — no double rebuild.
         long elapsed = System.currentTimeMillis() - lastProxyCheckTime;
         if (elapsed > 5_000) {
             refreshHttpClient();
@@ -825,6 +853,7 @@ public class TelegramBotDaemon {
             case "notifyMotion":
             case "notifyMotionFinalized":
             case "notifyCritical":
+            case "notifyParking":
                 return true;
             default:
                 return false;
@@ -854,14 +883,16 @@ public class TelegramBotDaemon {
     private static java.net.Proxy getGlobalProxy() {
         try {
             if (com.overdrive.app.mqtt.ProxyHelper.isProxyAvailable()) {
-                java.net.Proxy proxy = com.overdrive.app.mqtt.ProxyHelper.getHttpProxy();
+                java.net.Proxy proxy =
+                        com.overdrive.app.mqtt.ProxyHelper.getHttpProxy();
                 if (proxy != null) {
-                    log("Using sing-box/Tailscale proxy for Telegram: " + proxy.address());
+                    log("Using configured proxy for Telegram: "
+                            + proxy.address());
                     return proxy;
                 }
             }
-        } catch (Throwable t) {
-            log("ProxyHelper probe error: " + t.getMessage());
+        } catch (Throwable failure) {
+            log("ProxyHelper probe error: " + failure.getMessage());
         }
 
         try {
@@ -1042,7 +1073,7 @@ public class TelegramBotDaemon {
 
     /** The finalized hero PHOTO — its own lane, isolated from clips and text. */
     private static boolean isPhotoIpcCommand(String action) {
-        return "notifyMotionFinalized".equals(action);
+        return "notifyMotionFinalized".equals(action) || "notifyParking".equals(action);
     }
 
     private static void startIpcServer() {
@@ -1465,6 +1496,44 @@ public class TelegramBotDaemon {
                     }
                     break;
                     
+                case "notifyParking": {
+                    // Parking Intelligence "Parked" / "Back at car". Photo (the
+                    // four-camera composite) with URL buttons when the still
+                    // exists, text otherwise; never silently dropped. Gated on
+                    // its own toggle, re-read fresh so a flip lands on the next
+                    // event (and on spool replay).
+                    if (!com.overdrive.app.telegram.config.UnifiedTelegramConfig.isParkingMessages()) {
+                        log("notifyParking skipped - parking messages disabled");
+                        response.put("status", "skipped");
+                        response.put("message", "Parking messages disabled");
+                        break;
+                    }
+                    if (ownerChatId <= 0) {
+                        response.put("status", "error");
+                        response.put("message", "Owner not set");
+                        break;
+                    }
+                    String pTitle = cmd.optString("title", "");
+                    String pBody = cmd.optString("body", "");
+                    StringBuilder pText = new StringBuilder();
+                    if (!pTitle.isEmpty()) pText.append("*").append(mdEscape(pTitle)).append("*");
+                    if (!pBody.isEmpty()) {
+                        if (pText.length() > 0) pText.append("\n");
+                        pText.append(mdEscape(pBody));
+                    }
+                    String markup = urlKeyboardMarkup(cmd.optJSONArray("buttons"));
+                    String photoPath = cmd.optString("photoPath", "");
+                    boolean pOk;
+                    if (!photoPath.isEmpty() && new java.io.File(photoPath).exists()) {
+                        pOk = sendPhoto(ownerChatId, photoPath, pText.toString(), markup);
+                        if (!pOk) pOk = sendMessageWithUrlButtons(ownerChatId, pText.toString(), markup);
+                    } else {
+                        pOk = sendMessageWithUrlButtons(ownerChatId, pText.toString(), markup);
+                    }
+                    response.put("status", pOk ? "ok" : "error");
+                    break;
+                }
+
                 case "notifyCritical":
                     if (!criticalAlertsEnabled) {
                         log("notifyCritical skipped - critical alerts disabled");
@@ -2593,6 +2662,87 @@ public class TelegramBotDaemon {
      * PWA notification's hero image.
      */
     public static boolean sendPhoto(long chatId, String photoPath, String caption) {
+        return sendPhoto(chatId, photoPath, caption, null);
+    }
+
+    /**
+     * Inline-keyboard JSON ({@code {"inline_keyboard":[[{text,url}]]}}) for a
+     * JSON array of {@code {"text","url"}} objects — URL buttons open a link,
+     * unlike the callback_data buttons the command flows use. Returns null when
+     * there is nothing valid to show. Package-visible for the parking IPC case.
+     */
+    static String urlKeyboardMarkup(JSONArray buttons) {
+        if (buttons == null || buttons.length() == 0) return null;
+        try {
+            JSONArray keyboard = new JSONArray();
+            for (int i = 0; i < buttons.length(); i++) {
+                JSONObject b = buttons.optJSONObject(i);
+                if (b == null) continue;
+                String text = b.optString("text", "");
+                String link = b.optString("url", "");
+                if (text.isEmpty() || !(link.startsWith("https://") || link.startsWith("http://"))) continue;
+                JSONObject btn = new JSONObject();
+                btn.put("text", text);
+                btn.put("url", link);
+                JSONArray row = new JSONArray();
+                row.put(btn);
+                keyboard.put(row);
+            }
+            if (keyboard.length() == 0) return null;
+            JSONObject markup = new JSONObject();
+            markup.put("inline_keyboard", keyboard);
+            return markup.toString();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Text message with URL buttons (parking "Walk me back"). Same 429 retry
+     * and delivered/undelivered classification as the other text sends.
+     */
+    static boolean sendMessageWithUrlButtons(long chatId, String text, String replyMarkupJson) {
+        lastSendUndelivered.set(Boolean.FALSE);
+        try {
+            String url = TELEGRAM_API_BASE() + botToken + "/sendMessage";
+            JSONObject body = new JSONObject();
+            body.put("chat_id", chatId);
+            body.put("text", text);
+            body.put("parse_mode", "Markdown");
+            if (replyMarkupJson != null) body.put("reply_markup", new JSONObject(replyMarkupJson));
+            String payload = body.toString();
+            for (int attempt = 0; attempt < 2; attempt++) {
+                Request request = new Request.Builder()
+                        .url(url)
+                        .post(RequestBody.create(payload, MediaType.parse("application/json")))
+                        .build();
+                try (Response response = httpClient.newCall(request).execute()) {
+                    if (response.isSuccessful()) return true;
+                    if (response.code() == 429 && attempt == 0) {
+                        long sleepSec = parseRetryAfter(response, 1L);
+                        try { Thread.sleep(Math.min(sleepSec * 1000L, 30_000L)); }
+                        catch (InterruptedException ie) { Thread.currentThread().interrupt(); return false; }
+                        continue;
+                    }
+                    String respBody = response.body() != null ? response.body().string() : "";
+                    log("sendMessageWithUrlButtons HTTP " + response.code() + ": " + respBody);
+                    return false;
+                }
+            }
+            return false;
+        } catch (Exception e) {
+            onHttpFailure();
+            log("sendMessageWithUrlButtons error: " + e.getMessage());
+            if (isDefinitivelyUndelivered(e)) markSendUndelivered();
+            return false;
+        }
+    }
+
+    /**
+     * {@link #sendPhoto(long, String, String)} with an optional
+     * {@code reply_markup} JSON (URL buttons under the photo).
+     */
+    public static boolean sendPhoto(long chatId, String photoPath, String caption, String replyMarkupJson) {
         // Clear the per-thread undelivered flag before starting (see sendMessage).
         lastSendUndelivered.set(Boolean.FALSE);
         File photoFile = new File(photoPath);
@@ -2621,6 +2771,9 @@ public class TelegramBotDaemon {
                     if (caption != null && !caption.isEmpty()) {
                         bodyBuilder.addFormDataPart("caption", caption);
                         bodyBuilder.addFormDataPart("parse_mode", "Markdown");
+                    }
+                    if (replyMarkupJson != null && !replyMarkupJson.isEmpty()) {
+                        bodyBuilder.addFormDataPart("reply_markup", replyMarkupJson);
                     }
 
                     Request request = new Request.Builder()

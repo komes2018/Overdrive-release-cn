@@ -14,6 +14,22 @@ import org.junit.Test;
 public class CameraDaemonRestartSafetyContractTest {
 
     @Test
+    public void standaloneDaemonRegistersTheProcessMainLooper()
+            throws IOException {
+        String source = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/daemon/CameraDaemon.java");
+
+        assertOrdered(
+                source,
+                "if (Looper.myLooper() == null) {",
+                "if (Looper.getMainLooper() == null) {",
+                "Looper.prepareMainLooper();",
+                "} else {",
+                "Looper.prepare();",
+                "mainHandler = new Handler(Looper.myLooper());");
+    }
+
+    @Test
     public void watchdogRestartCheckpointsBeforeSettingRestartIntent()
             throws IOException {
         String source = readRepositoryFile(
@@ -43,7 +59,7 @@ public class CameraDaemonRestartSafetyContractTest {
         assertFalse(source.contains("Runtime.getRuntime().halt(0);"));
         assertFalse(source.contains(
                 "android.os.Process.killProcess(android.os.Process.myPid())"));
-        // 5 = GL stall watchdog, EGLCore exhaustion breaker, reopen-wedge path,
+        // GL stall watchdog, EGLCore exhaustion breaker, reopen-wedge path,
         // plus two audit follow-ups: the stop() GL-thread teardown escalation
         // (a GL thread that won't exit keeps its EGL context CURRENT — pinned
         // in the driver's context table — and only a trip-safe process exit
@@ -51,8 +67,17 @@ public class CameraDaemonRestartSafetyContractTest {
         // stopEncoderDrainersBeforeCameraClose (closing the camera over a
         // mid-dequeue drainer aborts the process — FORTIFY destroyed mutex —
         // before the async restart coordinator can checkpoint the trip).
+        // The eighth site is the decoupled encoder lane's stop() quiesce
+        // failure with the camera NOT held. Two additional DI5 sites replace
+        // a dead GL generation after a rejected delayed source retry or a
+        // null retry handler. DI4 terminal producer recovery adds two guarded
+        // fallbacks: no pipeline listener, and a listener dispatch throw.
+        // Legacy stop adds one conservative fallback when initialization is
+        // still in flight but no camera handle/open ownership is observable.
+        // (The former rejected post-reverse resume site went with the removed
+        // DI5 reverse yield.)
         assertTrue(count(source,
-                "CameraDaemon.requestProcessRestartPreservingTrip(") == 5);
+                "requestProcessRestartPreservingTrip(") == 12);
     }
 
     @Test
@@ -348,11 +373,23 @@ public class CameraDaemonRestartSafetyContractTest {
         assertTrue(camera.contains("\"GL watchdog heartbeat timeout\");"));
         assertTrue(watchdogLog > watchdogUrgent);
 
-        // Exactly the two urgent sites in the camera layer (helper + GL
-        // watchdog); every other failure path stays on the conservative
-        // coordinator (see cameraFailurePathsUseOnlyTripSafeRestartCoordinator).
+        // Eleven urgent sites in the camera layer: helper, GL watchdog, the
+        // stall-recovery legacy HAL open hard bound, the ACC-ON legacy reopen's
+        // timeout/interruption bounds, the legacy stop/open ownership fence, a
+        // bounded legacy windshield-camera lifecycle helper,
+        // DiLink 5 safe-off teardown that cannot reach its owning GL thread, a
+        // bounded ownership-transition wait that expired while camera ownership
+        // was indeterminate, a source that completed native startup but could not
+        // be atomically claimed by the GL owner, and a wedged EncoderLane quiesce
+        // during stop() (decoupled encoder lane — a lane stuck mid-eglSwapBuffers
+        // pins the child EGL context and may still be drawing into the codec the
+        // caller is about to release). Every other failure stays conservative;
+        // the lane site is held-gated with the conservative
+        // requestProcessRestartPreservingTrip fallback like the helper. DI4
+        // pano has no ownership-handoff escape sites because it keeps its
+        // single AVMCamera producer open continuously.
         assertTrue(count(camera,
-                "CameraDaemon.requestUrgentCameraReleaseRestart(") == 2);
+                "requestUrgentCameraReleaseRestart(") == 11);
 
         // Retiring-stream-encoder wedge in the surveillance pipeline: same
         // gate, same request-before-log ordering, urgent only while held.

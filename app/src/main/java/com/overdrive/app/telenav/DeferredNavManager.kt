@@ -2,7 +2,6 @@ package com.overdrive.app.telenav
 
 import android.util.Log
 import com.overdrive.app.config.UnifiedConfigManager
-import com.overdrive.app.daemon.sentry.AccMonitorController
 import com.overdrive.app.monitor.GearMonitor
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -10,6 +9,8 @@ import java.io.InputStreamReader
 import java.io.PrintWriter
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Deferred "navigate here". A phone / on-car "Navigate here" that arrives while the
@@ -17,35 +18,26 @@ import java.net.Socket
  * while Telenav is foregrounded, and the screen is off. So instead we store the
  * latest such target and, on the next ACC-on, offer it as a floating prompt.
  *
- * Runs entirely in the daemon process (byd_cam_daemon), started once from
- * [com.overdrive.app.daemon.CameraDaemon]. It uses its OWN [AccMonitorController]
- * (the same `sys.accanim.status` signal the surveillance side and the automation
- * engine watch) so it is fully isolated from the surveillance ACC state machine.
- * Gear comes from the daemon's [GearMonitor]; the overlay itself lives in the APP
- * process (Telenav bind + SYSTEM_ALERT_WINDOW), reached over 127.0.0.1:19882.
+ * Runs entirely in the daemon process (byd_cam_daemon) and receives the already
+ * deduplicated ACC edge from [com.overdrive.app.daemon.CameraDaemon]. Gear comes
+ * from the daemon's [GearMonitor]; the overlay itself lives in the APP process
+ * (Telenav bind + SYSTEM_ALERT_WINDOW), reached over 127.0.0.1:19882.
  */
 object DeferredNavManager {
 
     private const val TAG = "DeferredNav"
+    private const val TELENAV_PACKAGE = "com.telenav.app.arp"
     private const val SHOW_DELAY_MS = 5_000L        // let the launcher/Telenav settle after power-on
     private const val REVERSE_WAIT_MAX_MS = 30_000L // hold the prompt while reversing (rear cam)
     private const val REVERSE_POLL_MS = 1_000L
 
-    @Volatile private var started = false
-    private var accMonitor: AccMonitorController? = null
+    private val promptInFlight = AtomicBoolean(false)
+    private val stopInFlight = AtomicBoolean(false)
 
-    /** Start the ACC watcher. Idempotent; safe to call from daemon boot. */
+    /** Telenav is demand-launched by Navigate; ACC-off terminates that demand. */
     @JvmStatic
-    fun start() {
-        if (started) return
-        try {
-            accMonitor = AccMonitorController(onAccOff = {}, onAccOn = { onAccOn() })
-                .also { it.startPolling() }
-            started = true
-            Log.i(TAG, "started (ACC watcher for deferred navigate)")
-        } catch (t: Throwable) {
-            Log.w(TAG, "start failed: ${t.message}")
-        }
+    fun onAccStateChanged(accIsOff: Boolean) {
+        if (accIsOff) stopTelenavAsync() else onAccOn()
     }
 
     /** Store the latest target received while the car is off. Called by the endpoint. */
@@ -66,7 +58,8 @@ object DeferredNavManager {
     }
 
     private fun onAccOn() {
-        // Off the ACC poller thread; this waits and does IPC.
+        if (!promptInFlight.compareAndSet(false, true)) return
+        // Off the ACC transition thread; this waits and does IPC.
         Thread({
             try {
                 val d = UnifiedConfigManager.getDeferredNav()
@@ -117,8 +110,33 @@ object DeferredNavManager {
                 Thread.currentThread().interrupt()
             } catch (t: Throwable) {
                 Log.w(TAG, "onAccOn failed: ${t.message}")
+            } finally {
+                promptInFlight.set(false)
             }
-        }, "deferrednav-accon").start()
+        }, "deferrednav-accon").apply { isDaemon = true }.start()
+    }
+
+    private fun stopTelenavAsync() {
+        if (!stopInFlight.compareAndSet(false, true)) return
+        Thread({
+            try {
+                val process = ProcessBuilder("am", "force-stop", TELENAV_PACKAGE)
+                    .redirectErrorStream(true)
+                    .start()
+                if (!process.waitFor(5, TimeUnit.SECONDS)) {
+                    process.destroy()
+                    Log.w(TAG, "ACC-off: Telenav force-stop timed out")
+                } else if (process.exitValue() == 0) {
+                    Log.i(TAG, "ACC-off: Telenav stopped")
+                } else {
+                    Log.w(TAG, "ACC-off: Telenav force-stop exited ${process.exitValue()}")
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "ACC-off: Telenav force-stop failed: ${t.message}")
+            } finally {
+                stopInFlight.set(false)
+            }
+        }, "telenav-acc-off").apply { isDaemon = true }.start()
     }
 
     /** Ask the APP process to draw the prompt overlay. Mirrors TelenavDebugApiHandler.forwardToApp. */

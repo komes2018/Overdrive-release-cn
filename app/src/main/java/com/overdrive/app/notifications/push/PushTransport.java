@@ -43,8 +43,31 @@ public final class PushTransport {
 
     public static Result send(String endpoint, String vapidJwt, String vapidPubKeyB64Url,
                               byte[] aes128gcmBody, int ttlSeconds) throws Exception {
+        // Proxy first, ONE direct retry on an IO-level proxied failure. The
+        // probe behind getHttpProxy() prefers the Tailscale SOCKS listener,
+        // which on most cars is tailnet-only: public push endpoints (FCM,
+        // Mozilla, etc.) are unreachable THROUGH it while the listener probes
+        // healthy — without the retry, every push died for as long as it was
+        // up. The encrypted body is a fixed byte[] so re-sending is safe.
+        java.net.Proxy proxy = ProxyHelper.getHttpProxy();
+        boolean viaProxy = proxy != null
+                && proxy.type() != java.net.Proxy.Type.DIRECT;
+        try {
+            return sendVia(proxy, endpoint, vapidJwt, vapidPubKeyB64Url,
+                    aes128gcmBody, ttlSeconds);
+        } catch (java.io.IOException first) {
+            if (!viaProxy) throw first;
+            ProxyHelper.invalidateCache();
+            return sendVia(java.net.Proxy.NO_PROXY, endpoint, vapidJwt,
+                    vapidPubKeyB64Url, aes128gcmBody, ttlSeconds);
+        }
+    }
+
+    private static Result sendVia(java.net.Proxy route, String endpoint, String vapidJwt,
+                                  String vapidPubKeyB64Url, byte[] aes128gcmBody,
+                                  int ttlSeconds) throws Exception {
         URL url = new URL(endpoint);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection(ProxyHelper.getHttpProxy());
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection(route);
         try {
             conn.setRequestMethod("POST");
             conn.setConnectTimeout(15_000);

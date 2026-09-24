@@ -4,24 +4,24 @@
         <!-- Camera 0: Front -->
         <properties input_id="0"/>
         <display_setting display_id="0"/>
-        <output_setting nbufs="5"/>
+        <output_setting nbufs="5" format="uyvy"/>
     </input_device>
     <input_device>
         <!-- Camera 1: Right -->
         <properties input_id="1"/>
         <display_setting display_id="0"/>
-        <output_setting nbufs="5"/>
+        <output_setting nbufs="5" format="uyvy"/>
     </input_device>
     <input_device>
         <!-- Camera 2: Rear -->
         <properties input_id="2"/>
         <display_setting display_id="0"/>
-        <output_setting nbufs="5"/>
+        <output_setting nbufs="5" format="uyvy"/>
     </input_device>
     <input_device>
         <!-- Camera 3: Left -->
         <properties input_id="3"/>
         <display_setting display_id="0"/>
-        <output_setting nbufs="5"/>
+        <output_setting nbufs="5" format="uyvy"/>
     </input_device>
 </qcarcam_inputs>

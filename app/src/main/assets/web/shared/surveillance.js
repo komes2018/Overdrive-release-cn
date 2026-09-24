@@ -86,10 +86,24 @@ BYD.surveillance = {
         // off lets just that rail sleep on the next ACC-OFF cycle to save the 12V
         // battery. Does NOT affect the cameras — parked surveillance is unaffected.
         keepUsbPowerOnAccOff: true,
+        keepUsbPowerControl: 'vehicle_power',
         // Parked cellular keep-alive. Default false = opt-in; only needed on models
         // whose data module sleeps after ACC OFF. Hydrated from /api/surveillance/config
         // and persisted immediately on toggle (no Apply).
         mobileDataKeepAlive: false,
+        // DiLink 5 only: opt-in BYD-cloud realtime heartbeat while parked.
+        // Capability/readiness arrive with /api/surveillance/config so the
+        // row can stay hidden on other generations and disabled until the
+        // account is verified.
+        di5CloudKeepAlive: false,
+        di5CloudKeepAliveSupported: false,
+        di5CloudKeepAliveCloudReady: false,
+        // Opt-in DiLink 5 parked keep-alive lease (Experimental). Master switch
+        // only — the levers are config-only diagnostics. Deliberately has NO
+        // capability flag: DiLink 5 head units exist with and without the
+        // QCarCam camera stack, so the row is never tied to the camera-mode
+        // selection (unlike di5CloudKeepAlive above).
+        di5ParkedKeepAlive: false,
         // Low-power-while-parked master toggle (mirrors camera.surveillanceIdleThrottle
         // + oemDashcam.idleThrottleWhenParked, which are driven together). Default
         // false = today's behaviour (full idle frame rate). Hydrated from
@@ -143,8 +157,72 @@ BYD.surveillance = {
         minFilesKeep: 10
     },
     savedConfig: null,
+    _hydrated: false,
+    _writeQueue: Promise.resolve(),
+    _surveillanceTogglePending: false,
+    _cdrReady: false,
+    _cdrWritesPending: 0,
+    _cdrWriteVersion: 0,
+    _cdrTogglePending: false,
+    _cdrCleanupPending: false,
+    _cdrSaveTimer: null,
+    _cdrDirty: {},
+    _geocodingWritesPending: 0,
+    _geocodingWriteVersion: 0,
+    _layoutWritePending: false,
+    _layoutWriteVersion: 0,
+    _surveillanceLayout: 'standard',
+    _surveillanceUseWindshield: false,
+    _surveillanceWindshieldAvailable: false,
+    _telemetryWritesPending: 0,
+    _telemetryWriteVersion: 0,
+    _telemetryFieldPostInFlight: 0,
+    _immediateWriteVersions: {},
     hasUnsavedChanges: false,
     lastConfigTimestamp: 0,  // Track config file timestamp for sync
+
+    _enqueueWrite(task) {
+        const run = () => task();
+        const next = this._writeQueue.then(run, run);
+        this._writeQueue = next.catch(() => {});
+        return next;
+    },
+
+    async _fetchJson(url, body) {
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body || {})
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data || data.success !== true) {
+            throw new Error(data && data.error ? data.error : 'Request rejected');
+        }
+        return data;
+    },
+
+    _writeJson(url, body) {
+        return this._enqueueWrite(() => this._fetchJson(url, body));
+    },
+
+    async _postJson(url, body) {
+        try {
+            return await this._writeJson(url, body);
+        } catch (e) {
+            console.warn('Surveillance settings POST failed (' + url + '):', e);
+            return null;
+        }
+    },
+
+    _nextImmediateWrite(key) {
+        const version = (this._immediateWriteVersions[key] || 0) + 1;
+        this._immediateWriteVersions[key] = version;
+        return version;
+    },
+
+    _isLatestImmediateWrite(key, version) {
+        return this._immediateWriteVersions[key] === version;
+    },
 
     distanceMap: {
         1: { size: 0.25 },
@@ -194,7 +272,10 @@ BYD.surveillance = {
         // this page take seconds to become usable, with Apply disabled, the OEM
         // picker dimmed and the Detection tab inert the whole time.
         // Same fix recording.js already carries (see its init()): ~11 RTTs → ~3.
-        await this.loadConfig();
+        const configLoaded = await this.loadConfig();
+        if (!configLoaded) {
+            throw new Error('Failed to load surveillance configuration');
+        }
         await Promise.all([
             this.loadStorageStats(),
             this.loadCameraFps(),
@@ -211,6 +292,7 @@ BYD.surveillance = {
         ]);
         this.savedConfig = JSON.parse(JSON.stringify(this.config));
         this.updateUI();
+        this._hydrated = true;
         this.startClock();
 
         // Telegram pairing state — drives the tier filter availability UI.
@@ -223,7 +305,9 @@ BYD.surveillance = {
             BydCloud.loadStatus();
         }
         
-        // Show CDR cleanup card if SD card is selected on load
+        // CDR status may recursively scan a slow or unhealthy SD card. Its
+        // controls have their own _cdrReady gate, so load it without holding
+        // the page-wide hydration lock or the master surveillance toggle.
         this.updateCdrCleanupVisibility();
         
         // Auto-start heatmap if enabled in config and video display area exists
@@ -845,14 +929,25 @@ BYD.surveillance = {
     // ==================== CDR Cleanup ====================
     
     async loadCdrConfig() {
+        if (this._cdrWritesPending > 0) return false;
+        const writeVersion = this._cdrWriteVersion;
         try {
             const resp = await fetch('/api/storage/external');
             const data = await resp.json();
-            if (data.success) {
-                this.cdrConfig.enabled = data.cleanupEnabled || false;
-                this.cdrConfig.reservedSpaceMb = data.reservedSpaceMb || 2000;
-                this.cdrConfig.protectedHours = data.protectedHours || 24;
-                this.cdrConfig.minFilesKeep = data.minFilesKeep || 10;
+            if (data.success
+                    && this._cdrWritesPending === 0
+                    && writeVersion === this._cdrWriteVersion) {
+                this._cdrReady = true;
+                this.cdrConfig.enabled = !!data.cleanupEnabled;
+                if (typeof data.reservedSpaceMb === 'number') {
+                    this.cdrConfig.reservedSpaceMb = data.reservedSpaceMb;
+                }
+                if (typeof data.protectedHours === 'number') {
+                    this.cdrConfig.protectedHours = data.protectedHours;
+                }
+                if (typeof data.minFilesKeep === 'number') {
+                    this.cdrConfig.minFilesKeep = data.minFilesKeep;
+                }
                 
                 // Store CDR info
                 this.cdrInfo = {
@@ -869,28 +964,46 @@ BYD.surveillance = {
                 };
 
                 this.updateCdrUI();
+                return true;
             }
         } catch (e) {
             console.warn('Failed to load CDR config:', e);
         }
+        return false;
     },
     
-    updateCdrCleanupVisibility() {
+    async updateCdrCleanupVisibility() {
         const card = document.getElementById('cdrCleanupCard');
         if (card) {
+            const wasVisible = card.style.display !== 'none';
             const showCard = this.config.surveillanceStorageType === 'SD_CARD' && this.storageInfo.sdCardAvailable;
             card.style.display = showCard ? 'block' : 'none';
             
             if (showCard) {
-                this.loadCdrConfig();
+                if (!wasVisible) this._cdrReady = false;
+                this.updateCdrUI();
+                return this.loadCdrConfig();
             }
         }
+        return false;
     },
     
     updateCdrUI() {
         // Update toggle
         const toggle = document.getElementById('cdrCleanupEnabled');
-        if (toggle) toggle.checked = this.cdrConfig.enabled;
+        if (toggle) {
+            if (!this._cdrTogglePending) toggle.checked = this.cdrConfig.enabled;
+            toggle.disabled = !this._cdrReady
+                || this._cdrTogglePending || this._cdrCleanupPending
+                || this._cdrWritesPending > 0 || !!this._cdrSaveTimer
+                || Object.keys(this._cdrDirty).length > 0;
+        }
+        const cleanupButton = document.getElementById('cdrCleanupNow');
+        if (cleanupButton) {
+            cleanupButton.disabled = !this._cdrReady || !this.cdrConfig.enabled
+                || this._cdrCleanupPending || this._cdrWritesPending > 0
+                || !!this._cdrSaveTimer || Object.keys(this._cdrDirty).length > 0;
+        }
         
         // Update badge
         const badge = document.getElementById('cdrCleanupBadge');
@@ -902,18 +1015,30 @@ BYD.surveillance = {
         // Update sliders
         const reservedSlider = document.getElementById('cdrReservedSlider');
         const reservedValue = document.getElementById('cdrReservedValue');
-        if (reservedSlider) reservedSlider.value = this.cdrConfig.reservedSpaceMb;
+        if (reservedSlider) {
+            reservedSlider.value = this.cdrConfig.reservedSpaceMb;
+            reservedSlider.disabled = !this._cdrReady || this._cdrCleanupPending
+                || this._cdrTogglePending || this._cdrWritesPending > 0;
+        }
         if (reservedValue) reservedValue.textContent = this.cdrConfig.reservedSpaceMb >= 1000 ? 
             (this.cdrConfig.reservedSpaceMb / 1000) + ' GB' : this.cdrConfig.reservedSpaceMb + ' MB';
         
         const protectedSlider = document.getElementById('cdrProtectedSlider');
         const protectedValue = document.getElementById('cdrProtectedValue');
-        if (protectedSlider) protectedSlider.value = this.cdrConfig.protectedHours;
+        if (protectedSlider) {
+            protectedSlider.value = this.cdrConfig.protectedHours;
+            protectedSlider.disabled = !this._cdrReady || this._cdrCleanupPending
+                || this._cdrTogglePending || this._cdrWritesPending > 0;
+        }
         if (protectedValue) protectedValue.textContent = this.cdrConfig.protectedHours + 'h';
         
         const minKeepSlider = document.getElementById('cdrMinKeepSlider');
         const minKeepValue = document.getElementById('cdrMinKeepValue');
-        if (minKeepSlider) minKeepSlider.value = this.cdrConfig.minFilesKeep;
+        if (minKeepSlider) {
+            minKeepSlider.value = this.cdrConfig.minFilesKeep;
+            minKeepSlider.disabled = !this._cdrReady || this._cdrCleanupPending
+                || this._cdrTogglePending || this._cdrWritesPending > 0;
+        }
         if (minKeepValue) minKeepValue.textContent = this.cdrConfig.minFilesKeep;
         
         // Update info
@@ -972,59 +1097,137 @@ BYD.surveillance = {
     },
     
     async toggleCdrCleanup() {
-        const enabled = document.getElementById('cdrCleanupEnabled').checked;
+        const toggle = document.getElementById('cdrCleanupEnabled');
+        if (!toggle || !this._hydrated || !this._cdrReady
+                || this._cdrTogglePending || this._cdrCleanupPending
+                || this._cdrWritesPending > 0 || this._cdrSaveTimer
+                || Object.keys(this._cdrDirty).length > 0) return;
+        const enabled = toggle.checked;
+        const previous = this.cdrConfig.enabled;
+        let saved = false;
+        this._cdrTogglePending = true;
+        this._cdrWriteVersion++;
+        this._cdrWritesPending++;
+        this.updateCdrUI();
         try {
-            await fetch('/api/storage/external/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled })
-            });
-            this.cdrConfig.enabled = enabled;
+            const data = await this._postJson('/api/storage/external/config', { enabled });
+            if (!data) {
+                this.cdrConfig.enabled = previous;
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast(BYD.i18n.t('recording.cdr_toggle_failed'), 'error');
+                }
+                return;
+            }
+            saved = true;
+            this.cdrConfig.enabled = data.cleanupEnabled == null
+                ? enabled : !!data.cleanupEnabled;
+            if (typeof data.reservedSpaceMb === 'number') {
+                this.cdrConfig.reservedSpaceMb = data.reservedSpaceMb;
+            }
+            if (typeof data.protectedHours === 'number') {
+                this.cdrConfig.protectedHours = data.protectedHours;
+            }
+            if (typeof data.minFilesKeep === 'number') {
+                this.cdrConfig.minFilesKeep = data.minFilesKeep;
+            }
             this.updateCdrUI();
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(enabled ? BYD.i18n.t('recording.cdr_enabled') : BYD.i18n.t('recording.cdr_disabled'), 'success');
-        } catch (e) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.cdr_toggle_failed'), 'error');
+            if (BYD.utils && BYD.utils.toast) {
+                BYD.utils.toast(this.cdrConfig.enabled
+                    ? BYD.i18n.t('recording.cdr_enabled')
+                    : BYD.i18n.t('recording.cdr_disabled'), 'success');
+            }
+        } finally {
+            this._cdrWritesPending--;
+            this._cdrTogglePending = false;
+            if (!saved) this._cdrReady = false;
+            this.updateCdrUI();
+            if (!this._cdrReady && this._cdrWritesPending === 0 && !this._cdrSaveTimer) {
+                this.loadCdrConfig();
+            }
         }
     },
     
     updateCdrReserved(value) {
-        this.cdrConfig.reservedSpaceMb = parseInt(value);
+        if (!this._hydrated || !this._cdrReady || this._cdrCleanupPending
+                || this._cdrTogglePending || this._cdrWritesPending > 0) return;
+        this.cdrConfig.reservedSpaceMb = parseInt(value, 10);
+        this._cdrDirty.reservedSpaceMb = this.cdrConfig.reservedSpaceMb;
+        this._cdrWriteVersion++;
         const el = document.getElementById('cdrReservedValue');
         if (el) el.textContent = value >= 1000 ? (value / 1000) + ' GB' : value + ' MB';
         this.saveCdrConfig();
     },
     
     updateCdrProtected(value) {
-        this.cdrConfig.protectedHours = parseInt(value);
+        if (!this._hydrated || !this._cdrReady || this._cdrCleanupPending
+                || this._cdrTogglePending || this._cdrWritesPending > 0) return;
+        this.cdrConfig.protectedHours = parseInt(value, 10);
+        this._cdrDirty.protectedHours = this.cdrConfig.protectedHours;
+        this._cdrWriteVersion++;
         const el = document.getElementById('cdrProtectedValue');
         if (el) el.textContent = value + 'h';
         this.saveCdrConfig();
     },
     
     updateCdrMinKeep(value) {
-        this.cdrConfig.minFilesKeep = parseInt(value);
+        if (!this._hydrated || !this._cdrReady || this._cdrCleanupPending
+                || this._cdrTogglePending || this._cdrWritesPending > 0) return;
+        this.cdrConfig.minFilesKeep = parseInt(value, 10);
+        this._cdrDirty.minFilesKeep = this.cdrConfig.minFilesKeep;
+        this._cdrWriteVersion++;
         const el = document.getElementById('cdrMinKeepValue');
         if (el) el.textContent = value;
         this.saveCdrConfig();
     },
     
-    async saveCdrConfig() {
+    saveCdrConfig() {
+        if (this._cdrSaveTimer) clearTimeout(this._cdrSaveTimer);
+        this._cdrSaveTimer = setTimeout(() => {
+            this._cdrSaveTimer = null;
+            this._flushCdrConfig();
+        }, 200);
+        this.updateCdrUI();
+    },
+
+    async _flushCdrConfig() {
+        if (!this._hydrated || !this._cdrReady) return;
+        const body = this._cdrDirty;
+        this._cdrDirty = {};
+        if (Object.keys(body).length === 0) return;
+        const writeVersion = this._cdrWriteVersion;
+        this._cdrWritesPending++;
+        this.updateCdrUI();
+        let saved = false;
         try {
-            await fetch('/api/storage/external/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    reservedSpaceMb: this.cdrConfig.reservedSpaceMb,
-                    protectedHours: this.cdrConfig.protectedHours,
-                    minFilesKeep: this.cdrConfig.minFilesKeep
-                })
-            });
-        } catch (e) {
-            console.warn('Failed to save CDR config:', e);
+            const data = await this._postJson('/api/storage/external/config', body);
+            if (!data) return;
+            saved = true;
+            if (writeVersion !== this._cdrWriteVersion) return;
+            if (data.cleanupEnabled != null) {
+                this.cdrConfig.enabled = !!data.cleanupEnabled;
+            }
+            this.cdrConfig.reservedSpaceMb = data.reservedSpaceMb;
+            this.cdrConfig.protectedHours = data.protectedHours;
+            this.cdrConfig.minFilesKeep = data.minFilesKeep;
+            this.updateCdrUI();
+        } finally {
+            this._cdrWritesPending--;
+            if (!saved) this._cdrReady = false;
+            this.updateCdrUI();
+            if (!this._cdrReady && this._cdrWritesPending === 0 && !this._cdrSaveTimer) {
+                this.loadCdrConfig();
+            }
         }
     },
     
     async triggerCdrCleanup() {
+        const button = document.getElementById('cdrCleanupNow');
+        if (!this._hydrated || !this._cdrReady || !this.cdrConfig.enabled
+                || this._cdrCleanupPending || this._cdrWritesPending > 0
+                || this._cdrSaveTimer || Object.keys(this._cdrDirty).length > 0
+                || (button && button.disabled)) return;
+        this._cdrCleanupPending = true;
+        this.updateCdrUI();
         try {
             if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.cdr_cleaning'), 'info');
             
@@ -1048,6 +1251,9 @@ BYD.surveillance = {
             }
         } catch (e) {
             if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.cdr_trigger_failed'), 'error');
+        } finally {
+            this._cdrCleanupPending = false;
+            this.updateCdrUI();
         }
     },
     
@@ -1097,10 +1303,12 @@ BYD.surveillance = {
     },
 
     async loadConfig() {
+        let loaded = false;
         try {
             const resp = await fetch('/api/surveillance/config');
             const data = await resp.json();
             if (data.success && data.config) {
+                loaded = true;
                 this.config = { ...this.config, ...data.config };
                 // Use server-provided distance/sensitivity if available, otherwise calculate from minObjectSize
                 if (!data.config.distance) {
@@ -1156,10 +1364,14 @@ BYD.surveillance = {
                     var card = document.getElementById('survRectifyCard');
                     if (card) card.style.display = (mode === 'dilink4') ? 'none' : '';
                 } catch (_) {}
-                // Low-power-while-parked: read the pano flag (the OEM flag is kept in
-                // lockstep by toggleLowPowerMode). Absent → false (today's default).
-                this.config.lowPowerWhileParked =
-                    !!(uData.config.camera && uData.config.camera.surveillanceIdleThrottle === true);
+                // Treat either persisted flag as ON. They are normally kept in
+                // lockstep; OR makes a legacy/partial mismatch visible and lets one
+                // OFF click heal both sections instead of hiding an active throttle.
+                const cameraLowPower = !!(uData.config.camera
+                    && uData.config.camera.surveillanceIdleThrottle === true);
+                const oemLowPower = !!(uData.config.oemDashcam
+                    && uData.config.oemDashcam.idleThrottleWhenParked === true);
+                this.config.lowPowerWhileParked = cameraLowPower || oemLowPower;
             }
         } catch (e) {
             console.warn('Failed to load rectifyStrength: ' + (e && e.message));
@@ -1168,6 +1380,7 @@ BYD.surveillance = {
         // Join the storage read kicked off above. loadStorageSettings() swallows
         // its own errors, so this can't reject and reach callers.
         await storageSettingsPromise;
+        return loaded;
     },
 
     sizeToDistance(size) {
@@ -1333,23 +1546,29 @@ BYD.surveillance = {
     },
 
     async toggleSurveillance() {
-        const enabled = document.getElementById('survEnabled').checked;
+        const toggle = document.getElementById('survEnabled');
+        if (!toggle) return;
+        if (!this._hydrated || !this.savedConfig || this._surveillanceTogglePending) {
+            toggle.checked = !!this.config.enabled;
+            return;
+        }
+        const enabled = toggle.checked;
+        this._surveillanceTogglePending = true;
+        toggle.disabled = true;
         try {
-            const res = await fetch(enabled ? '/api/surveillance/enable' : '/api/surveillance/disable', { method: 'POST' });
-            // The endpoint answers {"success":false,"error":...} when the config
-            // write fails — previously the response was discarded, so a failed
-            // persist showed a green "Surveillance enabled" toast and the
-            // checkbox stayed on while nothing would arm on the next park.
-            const body = await res.json().catch(() => null);
-            if (body && body.success === false) {
-                document.getElementById('survEnabled').checked = !enabled;
-                if (BYD.utils && BYD.utils.toast) {
-                    BYD.utils.toast(body.error || BYD.i18n.t('surveillance.toggle_failed'), 'error');
+            const body = await this._enqueueWrite(async () => {
+                const res = await fetch(
+                    enabled ? '/api/surveillance/enable' : '/api/surveillance/disable',
+                    { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok || !data || data.success !== true) {
+                    throw new Error((data && data.error)
+                        || BYD.i18n.t('surveillance.toggle_failed'));
                 }
-                return;
-            }
+                return data;
+            });
             this.config.enabled = enabled;
-            this.savedConfig.enabled = enabled;
+            if (this.savedConfig) this.savedConfig.enabled = enabled;
             this.updateUI();
             if (BYD.utils && BYD.utils.toast) {
                 // deferred=true → the vehicle is on, so the preference is stored
@@ -1360,7 +1579,14 @@ BYD.surveillance = {
                 BYD.utils.toast(msg, 'success');
             }
         } catch (e) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('surveillance.toggle_failed'), 'error');
+            toggle.checked = !!this.config.enabled;
+            if (BYD.utils && BYD.utils.toast) {
+                BYD.utils.toast((e && e.message)
+                    || BYD.i18n.t('surveillance.toggle_failed'), 'error');
+            }
+        } finally {
+            this._surveillanceTogglePending = false;
+            this.applyOperatingModeUI();
         }
     },
 
@@ -1421,16 +1647,10 @@ BYD.surveillance = {
         if (this._rectifyDebounce) clearTimeout(this._rectifyDebounce);
         var self = this;
         this._rectifyDebounce = setTimeout(function () {
-            try {
-                fetch('/api/settings/unified', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        section: 'recording',
-                        data: { rectifyStrength: v }
-                    })
-                });
-            } catch (_) { /* live preview is best-effort */ }
+            self._postJson('/api/settings/unified', {
+                section: 'recording',
+                data: { rectifyStrength: v }
+            });
         }, 200);
     },
 
@@ -1534,6 +1754,7 @@ BYD.surveillance = {
         if (mode !== 'smart' && mode !== 'continuous') return;
         const prev = this.config.accOffMode || 'smart';
         if (prev === mode) return;
+        const writeVersion = this._nextImmediateWrite('accOffMode');
 
         this.config.accOffMode = mode;
         // Reflect button state immediately so the click feels responsive
@@ -1543,13 +1764,14 @@ BYD.surveillance = {
         this.applyAccOffModeUI();
 
         const self = this;
-        fetch('/api/surveillance/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ accOffMode: mode })
-        }).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+        this._writeJson('/api/surveillance/config', { accOffMode: mode })
           .then(() => {
               if (self.savedConfig) self.savedConfig.accOffMode = mode;
+              if (!self._isLatestImmediateWrite('accOffMode', writeVersion)) return;
+              self.config.accOffMode = mode;
+              document.querySelectorAll('#accOffModeBtns .btn-toggle').forEach(btn =>
+                  btn.classList.toggle('active', btn.dataset.value === mode));
+              self.applyAccOffModeUI();
               self.markChanged();
               if (BYD.utils && BYD.utils.toast) {
                   const k = mode === 'continuous'
@@ -1563,11 +1785,14 @@ BYD.surveillance = {
               }
           })
           .catch(() => {
+              if (!self._isLatestImmediateWrite('accOffMode', writeVersion)) return;
               // Revert in-memory + UI on failure so the displayed state
               // matches the server.
-              self.config.accOffMode = prev;
+              const persisted = self.savedConfig && self.savedConfig.accOffMode
+                  ? self.savedConfig.accOffMode : prev;
+              self.config.accOffMode = persisted;
               document.querySelectorAll('#accOffModeBtns .btn-toggle').forEach(btn =>
-                  btn.classList.toggle('active', btn.dataset.value === prev));
+                  btn.classList.toggle('active', btn.dataset.value === persisted));
               self.applyAccOffModeUI();
               if (BYD.utils && BYD.utils.toast) {
                   const localized = BYD.i18n && BYD.i18n.t
@@ -1581,6 +1806,7 @@ BYD.surveillance = {
         if (mode !== 'lock' && mode !== 'power') return;
         const prev = this.config.armMode || 'lock';
         if (prev === mode) return;
+        const writeVersion = this._nextImmediateWrite('armMode');
 
         this.config.armMode = mode;
         // Reflect button state immediately so the click feels responsive
@@ -1590,13 +1816,14 @@ BYD.surveillance = {
         this.applyArmModeUI();
 
         const self = this;
-        fetch('/api/surveillance/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ armMode: mode })
-        }).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+        this._writeJson('/api/surveillance/config', { armMode: mode })
           .then(() => {
               if (self.savedConfig) self.savedConfig.armMode = mode;
+              if (!self._isLatestImmediateWrite('armMode', writeVersion)) return;
+              self.config.armMode = mode;
+              document.querySelectorAll('#armModeBtns .btn-toggle').forEach(btn =>
+                  btn.classList.toggle('active', btn.dataset.value === mode));
+              self.applyArmModeUI();
               self.markChanged();
               if (BYD.utils && BYD.utils.toast) {
                   const k = mode === 'power'
@@ -1610,11 +1837,14 @@ BYD.surveillance = {
               }
           })
           .catch(() => {
+              if (!self._isLatestImmediateWrite('armMode', writeVersion)) return;
               // Revert in-memory + UI on failure so the displayed state
               // matches the server.
-              self.config.armMode = prev;
+              const persisted = self.savedConfig && self.savedConfig.armMode
+                  ? self.savedConfig.armMode : prev;
+              self.config.armMode = persisted;
               document.querySelectorAll('#armModeBtns .btn-toggle').forEach(btn =>
-                  btn.classList.toggle('active', btn.dataset.value === prev));
+                  btn.classList.toggle('active', btn.dataset.value === persisted));
               self.applyArmModeUI();
               if (BYD.utils && BYD.utils.toast) {
                   const localized = BYD.i18n && BYD.i18n.t
@@ -1652,6 +1882,7 @@ BYD.surveillance = {
         if (mode !== 'onAndOff' && mode !== 'onOnly') return;
         const prev = this.config.operatingMode || 'onAndOff';
         if (prev === mode) return;
+        const writeVersion = this._nextImmediateWrite('operatingMode');
 
         this.config.operatingMode = mode;
         document.querySelectorAll('#operatingModeBtns .btn-toggle').forEach(btn =>
@@ -1659,13 +1890,14 @@ BYD.surveillance = {
         this.applyOperatingModeUI();
 
         const self = this;
-        fetch('/api/surveillance/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ operatingMode: mode })
-        }).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+        this._writeJson('/api/surveillance/config', { operatingMode: mode })
           .then(() => {
               if (self.savedConfig) self.savedConfig.operatingMode = mode;
+              if (!self._isLatestImmediateWrite('operatingMode', writeVersion)) return;
+              self.config.operatingMode = mode;
+              document.querySelectorAll('#operatingModeBtns .btn-toggle').forEach(btn =>
+                  btn.classList.toggle('active', btn.dataset.value === mode));
+              self.applyOperatingModeUI();
               self.markChanged();
               if (BYD.utils && BYD.utils.toast) {
                   const k = mode === 'onOnly'
@@ -1679,9 +1911,12 @@ BYD.surveillance = {
               }
           })
           .catch(() => {
-              self.config.operatingMode = prev;
+              if (!self._isLatestImmediateWrite('operatingMode', writeVersion)) return;
+              const persisted = self.savedConfig && self.savedConfig.operatingMode
+                  ? self.savedConfig.operatingMode : prev;
+              self.config.operatingMode = persisted;
               document.querySelectorAll('#operatingModeBtns .btn-toggle').forEach(btn =>
-                  btn.classList.toggle('active', btn.dataset.value === prev));
+                  btn.classList.toggle('active', btn.dataset.value === persisted));
               self.applyOperatingModeUI();
               if (BYD.utils && BYD.utils.toast) {
                   const localized = BYD.i18n && BYD.i18n.t
@@ -1730,7 +1965,7 @@ BYD.surveillance = {
             if (h) { h.style.opacity = inert ? '0.45' : ''; }
         };
         // Post-OFF surveillance controls (all inert when onOnly).
-        ['survEnabled', 'survKeepUsbPower', 'survMobileDataKeepAlive', 'survLowPowerMode', 'lowSocCutoffSlider']
+        ['survEnabled', 'survKeepUsbPower', 'survMobileDataKeepAlive', 'survDi5CloudKeepAlive', 'survDi5ParkedKeepAlive', 'survLowPowerMode', 'lowSocCutoffSlider']
             .forEach(dimRow);
         dimHint('lowSocCutoffHint');
         // Arm-mode + ACC-off-mode are btn-groups (no single input id) — dim by their
@@ -1750,8 +1985,14 @@ BYD.surveillance = {
         dimHint('armModeHint');
         dimHint('accOffModeHint');
         // Disable the underlying inputs too (defensive — not touch-only).
-        ['survEnabled', 'survKeepUsbPower', 'survMobileDataKeepAlive', 'survLowPowerMode', 'lowSocCutoffSlider']
-            .forEach(function (id) { const el = document.getElementById(id); if (el) el.disabled = inert; });
+        ['survEnabled', 'survKeepUsbPower', 'survMobileDataKeepAlive', 'survDi5CloudKeepAlive', 'survDi5ParkedKeepAlive', 'survLowPowerMode', 'lowSocCutoffSlider']
+            .forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el) el.disabled = inert
+                    || (id === 'survEnabled' && self._surveillanceTogglePending);
+            });
+        this.applyDi5CloudKeepAliveUI();
+        this.applyDi5ParkedKeepAliveUI();
         // Explanatory note (shown only when inert).
         const note = document.getElementById('postOffDisabledNotice');
         if (note) note.style.display = inert ? '' : 'none';
@@ -1806,6 +2047,7 @@ BYD.surveillance = {
         const el = document.getElementById('survKeepUsbPower');
         if (!el) return;
         const on = el.checked;
+        const previousOn = this.config.keepUsbPowerOnAccOff !== false;
         const self = this;
         const t = (k, fb) => (BYD.i18n && BYD.i18n.t ? (BYD.i18n.t(k) || fb) : fb);
 
@@ -1854,7 +2096,8 @@ BYD.surveillance = {
                 // the notice/button-state refresh inside persist reflects USB-off.
                 self.config.keepUsbPowerOnAccOff = false;
                 const prevStorageType = self._applyInternalStorageForUsbOff();
-                self._persistKeepUsbPower(false, el, /*alsoStorage*/ true, prevStorageType);
+                self._persistKeepUsbPower(
+                    false, el, /*alsoStorage*/ true, prevStorageType, previousOn);
             }).catch(function () {
                 // Dialog threw / rejected — leave USB power ON and keep the toggle in
                 // sync so el.checked (OFF) doesn't diverge from config. Guard el in
@@ -1870,7 +2113,7 @@ BYD.surveillance = {
 
         // Direct persist (ON, or OFF-while-Internal — no consequence to warn about).
         this.config.keepUsbPowerOnAccOff = on;
-        this._persistKeepUsbPower(on, el, /*alsoStorage*/ false);
+        this._persistKeepUsbPower(on, el, /*alsoStorage*/ false, null, previousOn);
     },
 
     /**
@@ -1903,50 +2146,55 @@ BYD.surveillance = {
      * type lives in /api/settings/storage (handled by QualitySettingsApiHandler), so
      * the storage switch is a SEPARATE request chained after the flag persists.
      */
-    _persistKeepUsbPower(on, el, alsoStorage, prevStorageType) {
+    _persistKeepUsbPower(on, el, alsoStorage, prevStorageType, previousOn) {
         const self = this;
         const t = (k, fb) => (BYD.i18n && BYD.i18n.t ? (BYD.i18n.t(k) || fb) : fb);
+        const writeVersion = this._nextImmediateWrite('keepUsbPowerOnAccOff');
+        const request = this._enqueueWrite(async () => {
+            await this._fetchJson('/api/surveillance/config', {
+                keepUsbPowerOnAccOff: on
+            });
+            if (!alsoStorage) return;
+            try {
+                await this._fetchJson('/api/settings/storage', {
+                    surveillanceStorageType: 'INTERNAL'
+                });
+            } catch (e) {
+                // The two values live in separate endpoints. Restore the first
+                // write if the dependent storage switch is rejected.
+                try {
+                    await this._fetchJson('/api/surveillance/config', {
+                        keepUsbPowerOnAccOff: previousOn
+                    });
+                } catch (_) {}
+                throw e;
+            }
+        });
 
-        const persistStorage = function () {
-            if (!alsoStorage) return Promise.resolve();
-            return fetch('/api/settings/storage', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ surveillanceStorageType: 'INTERNAL' })
-            }).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
-              .then(function (data) {
-                  // The daemon answers HTTP 200 with {success:false} when the
-                  // requested storage type change is rejected (target volume
-                  // unavailable). Treat that as a failure so the caller's catch
-                  // reverts the optimistic config instead of diverging on reload.
-                  if (data && data.success === false) {
-                      return Promise.reject(new Error(data.error || 'storage change rejected'));
-                  }
-                  return data;
-              });
-        };
-
-        fetch('/api/surveillance/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ keepUsbPowerOnAccOff: on })
-        }).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
-          .then(persistStorage)
+        request
           .then(() => {
               if (self.savedConfig) {
                   self.savedConfig.keepUsbPowerOnAccOff = on;
                   if (alsoStorage) self.savedConfig.surveillanceStorageType = 'INTERNAL';
               }
               self.markChanged();
+              if (!self._isLatestImmediateWrite('keepUsbPowerOnAccOff', writeVersion)) return;
+              self.config.keepUsbPowerOnAccOff = on;
+              if (el) el.checked = on;
               self.updateUsbPowerStorageNotice();
               if (BYD.utils && BYD.utils.toast) {
                   if (alsoStorage) {
                       BYD.utils.toast(t('surveillance.usb_off_switched_internal',
                           'USB power off — surveillance now records to Internal storage'), 'success');
                   } else {
-                      const msg = on
-                          ? t('surveillance.keep_usb_saved_on', 'USB will stay powered while parked')
-                          : t('surveillance.keep_usb_saved_off', 'USB will sleep while parked (next ACC-OFF)');
+                      const wakeOnly = self.config.keepUsbPowerControl === 'android_wake_only';
+                      const msg = wakeOnly
+                          ? (on
+                              ? 'Android wake requested while parked; hardware power remains best-effort'
+                              : 'The head unit may sleep while parked (next ACC-OFF)')
+                          : (on
+                              ? t('surveillance.keep_usb_saved_on', 'USB will stay powered while parked')
+                              : t('surveillance.keep_usb_saved_off', 'USB will sleep while parked (next ACC-OFF)'));
                       BYD.utils.toast(msg, 'success');
                   }
               }
@@ -1959,9 +2207,13 @@ BYD.surveillance = {
               }
           })
           .catch(() => {
+              if (!self._isLatestImmediateWrite('keepUsbPowerOnAccOff', writeVersion)) return;
               // Revert toggle + config on failure.
-              self.config.keepUsbPowerOnAccOff = !on;
-              if (el) el.checked = !on;
+              const persisted = self.savedConfig
+                  && typeof self.savedConfig.keepUsbPowerOnAccOff === 'boolean'
+                  ? self.savedConfig.keepUsbPowerOnAccOff : previousOn;
+              self.config.keepUsbPowerOnAccOff = persisted;
+              if (el) el.checked = persisted;
               // Also revert the storage type if we switched it to INTERNAL before
               // persisting, so storage doesn't stay changed while the USB flag rolls
               // back (state desync). Re-sync dependent UI + dirty markers.
@@ -1997,23 +2249,39 @@ BYD.surveillance = {
         const el = document.getElementById('survLowPowerMode');
         if (!el) return;
         const on = el.checked;
+        const previous = this.config.lowPowerWhileParked === true;
+        const writeVersion = this._nextImmediateWrite('lowPowerWhileParked');
         const self = this;
         const t = (k, fb) => (BYD.i18n && BYD.i18n.t ? (BYD.i18n.t(k) || fb) : fb);
 
         this.config.lowPowerWhileParked = on;
 
-        // Persist the two section flags in parallel. Both must land for the feature
-        // to behave coherently; if either fails we revert the toggle + config.
-        const postSection = (section, data) => fetch('/api/settings/unified', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ section: section, data: data })
-        }).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)));
+        const request = this._enqueueWrite(async () => {
+            await this._fetchJson('/api/settings/unified', {
+                section: 'camera',
+                data: { surveillanceIdleThrottle: on }
+            });
+            try {
+                await this._fetchJson('/api/settings/unified', {
+                    section: 'oemDashcam',
+                    data: { idleThrottleWhenParked: on }
+                });
+            } catch (e) {
+                try {
+                    await this._fetchJson('/api/settings/unified', {
+                        section: 'camera',
+                        data: { surveillanceIdleThrottle: previous }
+                    });
+                } catch (_) {}
+                throw e;
+            }
+        });
 
-        Promise.all([
-            postSection('camera', { surveillanceIdleThrottle: on }),
-            postSection('oemDashcam', { idleThrottleWhenParked: on })
-        ]).then(function () {
+        request.then(function () {
+            if (self.savedConfig) self.savedConfig.lowPowerWhileParked = on;
+            if (!self._isLatestImmediateWrite('lowPowerWhileParked', writeVersion)) return;
+            self.config.lowPowerWhileParked = on;
+            if (el) el.checked = on;
             if (BYD.utils && BYD.utils.toast) {
                 const msg = on
                     ? t('surveillance.low_power_saved_on', 'Low-power mode on — camera idles at a low frame rate while parked')
@@ -2021,9 +2289,13 @@ BYD.surveillance = {
                 BYD.utils.toast(msg, 'success');
             }
         }).catch(function () {
+            if (!self._isLatestImmediateWrite('lowPowerWhileParked', writeVersion)) return;
             // Revert on failure so the toggle never diverges from persisted state.
-            self.config.lowPowerWhileParked = !on;
-            if (el) el.checked = !on;
+            const persisted = self.savedConfig
+                && typeof self.savedConfig.lowPowerWhileParked === 'boolean'
+                ? self.savedConfig.lowPowerWhileParked : previous;
+            self.config.lowPowerWhileParked = persisted;
+            if (el) el.checked = persisted;
             if (BYD.utils && BYD.utils.toast) {
                 BYD.utils.toast(t('surveillance.low_power_save_failed', 'Could not save low-power mode'), 'error');
             }
@@ -2042,18 +2314,19 @@ BYD.surveillance = {
         const el = document.getElementById('survMobileDataKeepAlive');
         if (!el) return;
         const on = el.checked;
+        const previous = this.config.mobileDataKeepAlive === true;
+        const writeVersion = this._nextImmediateWrite('mobileDataKeepAlive');
         const self = this;
         const t = (k, fb) => (BYD.i18n && BYD.i18n.t ? (BYD.i18n.t(k) || fb) : fb);
 
         this.config.mobileDataKeepAlive = on;
 
-        fetch('/api/surveillance/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mobileDataKeepAlive: on })
-        }).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+        this._writeJson('/api/surveillance/config', { mobileDataKeepAlive: on })
           .then(function () {
               if (self.savedConfig) self.savedConfig.mobileDataKeepAlive = on;
+              if (!self._isLatestImmediateWrite('mobileDataKeepAlive', writeVersion)) return;
+              self.config.mobileDataKeepAlive = on;
+              if (el) el.checked = on;
               if (BYD.utils && BYD.utils.toast) {
                   const msg = on
                       ? t('surveillance.mobile_data_keepalive_saved_on', 'Mobile data will stay awake while parked (next ACC-OFF)')
@@ -2061,14 +2334,229 @@ BYD.surveillance = {
                   BYD.utils.toast(msg, 'success');
               }
           }).catch(function () {
+              if (!self._isLatestImmediateWrite('mobileDataKeepAlive', writeVersion)) return;
               // Revert so the toggle never diverges from persisted state.
-              self.config.mobileDataKeepAlive = !on;
-              if (el) el.checked = !on;
+              const persisted = self.savedConfig
+                  && typeof self.savedConfig.mobileDataKeepAlive === 'boolean'
+                  ? self.savedConfig.mobileDataKeepAlive : previous;
+              self.config.mobileDataKeepAlive = persisted;
+              if (el) el.checked = persisted;
               if (BYD.utils && BYD.utils.toast) {
                   BYD.utils.toast(t('surveillance.mobile_data_keepalive_save_failed',
                       'Could not save mobile-data setting'), 'error');
               }
           });
+    },
+
+    /**
+     * Experimental DiLink 5 BYD-cloud heartbeat. Immediate-save with the same
+     * optimistic/revert contract as the neighboring mobile-data toggle.
+     * CameraDaemon applies it to the current authoritative ACC state, so OFF
+     * stops immediately and ON can start during an already-parked session.
+     */
+    toggleDi5CloudKeepAlive() {
+        const el = document.getElementById('survDi5CloudKeepAlive');
+        if (!el) return;
+        if (el.disabled) {
+            el.checked = (this.config.di5CloudKeepAlive === true);
+            return;
+        }
+        const on = el.checked;
+        const previous = this.config.di5CloudKeepAlive === true;
+        const writeVersion = this._nextImmediateWrite('di5CloudKeepAlive');
+        const self = this;
+        const t = (k, fb) => (BYD.i18n && BYD.i18n.t
+            ? (BYD.i18n.t(k) || fb) : fb);
+
+        this.config.di5CloudKeepAlive = on;
+        this.applyDi5CloudKeepAliveUI();
+
+        this._writeJson('/api/surveillance/config', { di5CloudKeepAlive: on })
+          .then(function () {
+              if (self.savedConfig) self.savedConfig.di5CloudKeepAlive = on;
+              if (!self._isLatestImmediateWrite(
+                      'di5CloudKeepAlive', writeVersion)) return;
+              self.config.di5CloudKeepAlive = on;
+              self.applyDi5CloudKeepAliveUI();
+              if (BYD.utils && BYD.utils.toast) {
+                  const msg = on
+                      ? t('surveillance.di5_cloud_keepalive_saved_on',
+                          'DI5 cloud keep-alive enabled')
+                      : t('surveillance.di5_cloud_keepalive_saved_off',
+                          'DI5 cloud keep-alive disabled');
+                  BYD.utils.toast(msg, 'success');
+              }
+          }).catch(function (error) {
+              if (!self._isLatestImmediateWrite(
+                      'di5CloudKeepAlive', writeVersion)) return;
+              const persisted = self.savedConfig
+                  && typeof self.savedConfig.di5CloudKeepAlive === 'boolean'
+                  ? self.savedConfig.di5CloudKeepAlive : previous;
+              self.config.di5CloudKeepAlive = persisted;
+              self.applyDi5CloudKeepAliveUI();
+              if (BYD.utils && BYD.utils.toast) {
+                  const fallback = error && error.message
+                      ? error.message : 'Could not save DI5 cloud keep-alive';
+                  BYD.utils.toast(t(
+                      'surveillance.di5_cloud_keepalive_save_failed',
+                      fallback), 'error');
+              }
+          });
+    },
+
+    /**
+     * DI5-only capability/readiness reflection. A previously enabled setting
+     * remains switchable OFF after credentials are cleared; only a new enable
+     * is blocked until BYD Cloud is verified again.
+     */
+    applyDi5CloudKeepAliveUI() {
+        const row = document.getElementById('survDi5CloudKeepAliveRow');
+        const toggle = document.getElementById('survDi5CloudKeepAlive');
+        const note = document.getElementById(
+            'survDi5CloudKeepAliveCloudNote');
+        const supported =
+            this.config.di5CloudKeepAliveSupported === true;
+        const enabled = this.config.di5CloudKeepAlive === true;
+        const cloudReady =
+            this.config.di5CloudKeepAliveCloudReady === true
+            || this.config.bydCloudEnabled === true;
+        const inert = (this.config.operatingMode || 'onAndOff')
+            === 'onOnly';
+
+        if (row) row.style.display = supported ? '' : 'none';
+        if (toggle) {
+            toggle.checked = enabled;
+            toggle.disabled = !supported || inert
+                || (!cloudReady && !enabled);
+        }
+        if (note) {
+            note.style.display =
+                supported && !cloudReady && !inert ? 'block' : 'none';
+        }
+    },
+
+    /**
+     * Experimental DiLink 5 parked keep-alive lease (MCU/sentry hold etc.).
+     * Immediate-save with the same optimistic/revert contract as the DI5 cloud
+     * toggle. Turning ON asks for confirmation because the lease spends 12 V
+     * battery while parked; turning OFF persists directly. The lease itself
+     * (acc_sentry_daemon) picks the change up on its next parked tick, so OFF
+     * releases within ~10 s and ON can start during an already-parked session.
+     */
+    toggleDi5ParkedKeepAlive() {
+        const el = document.getElementById('survDi5ParkedKeepAlive');
+        if (!el) return;
+        if (el.disabled) {
+            el.checked = (this.config.di5ParkedKeepAlive === true);
+            return;
+        }
+        const on = el.checked;
+        const previous = this.config.di5ParkedKeepAlive === true;
+        const self = this;
+        const t = (k, fb) => (BYD.i18n && BYD.i18n.t
+            ? (BYD.i18n.t(k) || fb) : fb);
+
+        if (!on) {
+            this._persistDi5ParkedKeepAlive(false, el, previous);
+            return;
+        }
+        // The dialog is the user's consent for the parked battery cost. If it is
+        // unavailable, fail safe: do NOT enable — revert and warn.
+        if (!BYD.utils || !BYD.utils.confirmDialog) {
+            el.checked = previous;
+            self.config.di5ParkedKeepAlive = previous;
+            if (BYD.utils && BYD.utils.toast) {
+                BYD.utils.toast(t('surveillance.di5_parked_keepalive_confirm_unavailable',
+                    'Confirmation unavailable — parked keep-alive was not enabled'), 'error');
+            }
+            return;
+        }
+        const proceed = BYD.utils.confirmDialog({
+            title: t('surveillance.di5_parked_keepalive_confirm_title',
+                'Enable DiLink 5 parked keep-alive?'),
+            body: t('surveillance.di5_parked_keepalive_confirm_body',
+                'This experimental feature holds the vehicle in sentry mode and re-wakes the MCU '
+                + 'while the car is switched off, which uses more 12V battery. It stops by itself '
+                + 'below the voltage cutoff and stays off until the car is switched on or charging '
+                + 'is detected. Every hardware write is logged so you can verify it on your car.'),
+            confirmLabel: t('surveillance.di5_parked_keepalive_confirm_ok', 'Enable'),
+            cancelLabel: t('common.cancel', 'Cancel'),
+            danger: false
+        });
+        Promise.resolve(proceed).then(function (ok) {
+            if (!ok) {
+                if (el) el.checked = previous;
+                self.config.di5ParkedKeepAlive = previous;
+                return;
+            }
+            self._persistDi5ParkedKeepAlive(true, el, previous);
+        }).catch(function () {
+            if (el) el.checked = previous;
+            self.config.di5ParkedKeepAlive = previous;
+            if (BYD.utils && BYD.utils.toast) {
+                BYD.utils.toast(t('surveillance.di5_parked_keepalive_save_failed',
+                    'Could not save DI5 parked keep-alive'), 'error');
+            }
+        });
+    },
+
+    _persistDi5ParkedKeepAlive(on, el, previous) {
+        const self = this;
+        const t = (k, fb) => (BYD.i18n && BYD.i18n.t
+            ? (BYD.i18n.t(k) || fb) : fb);
+        const writeVersion = this._nextImmediateWrite('di5ParkedKeepAlive');
+        this.config.di5ParkedKeepAlive = on;
+        this.applyDi5ParkedKeepAliveUI();
+        this._writeJson('/api/surveillance/config', { di5ParkedKeepAlive: on })
+          .then(function () {
+              if (self.savedConfig) self.savedConfig.di5ParkedKeepAlive = on;
+              if (!self._isLatestImmediateWrite(
+                      'di5ParkedKeepAlive', writeVersion)) return;
+              self.config.di5ParkedKeepAlive = on;
+              self.applyDi5ParkedKeepAliveUI();
+              if (BYD.utils && BYD.utils.toast) {
+                  const msg = on
+                      ? t('surveillance.di5_parked_keepalive_saved_on',
+                          'DI5 parked keep-alive enabled (applies on the next parked tick)')
+                      : t('surveillance.di5_parked_keepalive_saved_off',
+                          'DI5 parked keep-alive disabled');
+                  BYD.utils.toast(msg, 'success');
+              }
+          }).catch(function (error) {
+              if (!self._isLatestImmediateWrite(
+                      'di5ParkedKeepAlive', writeVersion)) return;
+              const persisted = self.savedConfig
+                  && typeof self.savedConfig.di5ParkedKeepAlive === 'boolean'
+                  ? self.savedConfig.di5ParkedKeepAlive : previous;
+              self.config.di5ParkedKeepAlive = persisted;
+              if (el) el.checked = persisted;
+              self.applyDi5ParkedKeepAliveUI();
+              if (BYD.utils && BYD.utils.toast) {
+                  const fallback = error && error.message
+                      ? error.message : 'Could not save DI5 parked keep-alive';
+                  BYD.utils.toast(t(
+                      'surveillance.di5_parked_keepalive_save_failed',
+                      fallback), 'error');
+              }
+          });
+    },
+
+    /**
+     * DI5-only capability reflection for the parked keep-alive row. Hidden off
+     * platform; disabled while the operating mode is onOnly (nothing runs after
+     * ACC OFF there, so the switch would be inert).
+     */
+    applyDi5ParkedKeepAliveUI() {
+        // Always visible (no platform capability flag — see config defaults).
+        // Only the hydration lock and the onOnly dimming disable the toggle.
+        const toggle = document.getElementById('survDi5ParkedKeepAlive');
+        const enabled = this.config.di5ParkedKeepAlive === true;
+        const inert = (this.config.operatingMode || 'onAndOff')
+            === 'onOnly';
+        if (toggle) {
+            toggle.checked = enabled;
+            toggle.disabled = inert;
+        }
     },
 
     /**
@@ -2369,6 +2857,8 @@ BYD.surveillance = {
     _persistTelegramFields(fields) {
         const prev = {};
         const body = {};
+        const writeKey = 'telegram:' + fields.join(',');
+        const writeVersion = this._nextImmediateWrite(writeKey);
         for (let i = 0; i < fields.length; i++) {
             const k = fields[i];
             prev[k] = this.savedConfig ? this.savedConfig[k] : undefined;
@@ -2412,25 +2902,30 @@ BYD.surveillance = {
             const localized = BYD.i18n && BYD.i18n.t ? BYD.i18n.t(key) : null;
             BYD.utils.toast(localized || fallback, kind);
         }
-        fetch('/api/surveillance/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        }).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+        this._writeJson('/api/surveillance/config', body)
           .then(() => {
               if (self.savedConfig) {
                   for (let i = 0; i < fields.length; i++) {
-                      self.savedConfig[fields[i]] = self.config[fields[i]];
+                      self.savedConfig[fields[i]] = body[fields[i]];
                   }
               }
               self.markChanged();
+              if (!self._isLatestImmediateWrite(writeKey, writeVersion)) return;
+              for (let i = 0; i < fields.length; i++) {
+                  self.config[fields[i]] = body[fields[i]];
+              }
               repaintToggles();
               safeToast('telegram.prefs_saved', 'Preferences saved', 'success');
           })
           .catch(() => {
+              if (!self._isLatestImmediateWrite(writeKey, writeVersion)) return;
               for (let i = 0; i < fields.length; i++) {
                   const k = fields[i];
-                  if (prev[k] !== undefined) self.config[k] = prev[k];
+                  if (self.savedConfig && self.savedConfig[k] !== undefined) {
+                      self.config[k] = self.savedConfig[k];
+                  } else if (prev[k] !== undefined) {
+                      self.config[k] = prev[k];
+                  }
               }
               repaintToggles();
               safeToast('telegram.prefs_save_failed', 'Could not save preferences', 'error');
@@ -2811,6 +3306,28 @@ BYD.surveillance = {
         // field (older daemon build) so the switch shows the real out-of-box default.
         const keepUsb = document.getElementById('survKeepUsbPower');
         if (keepUsb) keepUsb.checked = (this.config.keepUsbPowerOnAccOff !== false);
+        const wakeOnly = this.config.keepUsbPowerControl === 'android_wake_only';
+        const keepUsbName = document.getElementById('survKeepUsbPowerName');
+        const keepUsbDesc = document.getElementById('survKeepUsbPowerDesc');
+        const keepUsbNote = document.getElementById('survKeepUsbPowerCapabilityNote');
+        if (keepUsbName) {
+            if (!keepUsbName.dataset.vehiclePowerText) {
+                keepUsbName.dataset.vehiclePowerText = keepUsbName.textContent;
+            }
+            keepUsbName.textContent = wakeOnly
+                ? 'Keep head unit awake while parked'
+                : keepUsbName.dataset.vehiclePowerText;
+        }
+        if (keepUsbDesc) {
+            if (!keepUsbDesc.dataset.vehiclePowerText) {
+                keepUsbDesc.dataset.vehiclePowerText = keepUsbDesc.textContent;
+            }
+            keepUsbDesc.textContent = wakeOnly
+                ? 'Uses Android CPU and network locks after the car is switched off. '
+                    + 'The vehicle firmware may still remove USB or SD-card power.'
+                : keepUsbDesc.dataset.vehiclePowerText;
+        }
+        if (keepUsbNote) keepUsbNote.style.display = wakeOnly ? 'block' : 'none';
         // Reflect the "recording to Internal because USB power is off" notice.
         this.updateUsbPowerStorageNotice();
 
@@ -2822,6 +3339,25 @@ BYD.surveillance = {
         // Parked cellular keep-alive. Default OFF when absent (opt-in feature).
         const mobileData = document.getElementById('survMobileDataKeepAlive');
         if (mobileData) mobileData.checked = (this.config.mobileDataKeepAlive === true);
+
+        // Experimental DI5 cloud heartbeat (hidden on other camera modes).
+        const di5CloudKeepAlive =
+            document.getElementById('survDi5CloudKeepAlive');
+        if (di5CloudKeepAlive) {
+            di5CloudKeepAlive.checked =
+                (this.config.di5CloudKeepAlive === true);
+        }
+        this.applyDi5CloudKeepAliveUI();
+
+        // Experimental DI5 parked keep-alive lease (always visible; not tied to
+        // the camera-mode selection).
+        const di5ParkedKeepAlive =
+            document.getElementById('survDi5ParkedKeepAlive');
+        if (di5ParkedKeepAlive) {
+            di5ParkedKeepAlive.checked =
+                (this.config.di5ParkedKeepAlive === true);
+        }
+        this.applyDi5ParkedKeepAliveUI();
 
         // Low-battery (HV SoC) cutoff slider. 0 renders as "Off".
         const socCutoff = document.getElementById('lowSocCutoffSlider');
@@ -3113,7 +3649,11 @@ BYD.surveillance = {
         return 'general';
     },
 
-    async applySettings() {
+    applySettings() {
+        return this._enqueueWrite(() => this._applySettingsNow());
+    },
+
+    async _applySettingsNow() {
         const btn = document.getElementById('btnApply');
         const origText = btn.innerHTML;
         btn.innerHTML = BYD.i18n.t('surveillance.saving');
@@ -3138,7 +3678,6 @@ BYD.surveillance = {
                         surveillanceStorageType: this.config.surveillanceStorageType
                     })
                 });
-                if (!storageResp.ok) throw new Error('Storage save failed: ' + storageResp.status);
                 storageData = await storageResp.json();
                 // HTTP 200 with {success:false} = the requested storage-TYPE
                 // change was rejected (target volume unavailable). The server
@@ -3146,14 +3685,15 @@ BYD.surveillance = {
                 // nothing was committed — revert both optimistic fields to the
                 // baseline, re-render, and throw so the catch shows an error
                 // instead of baking the rejected value into savedConfig.
-                if (storageData && storageData.success === false) {
+                if (!storageResp.ok || !storageData || storageData.success !== true) {
                     if (this.savedConfig) {
                         this.config.surveillanceStorageType = this.savedConfig.surveillanceStorageType;
                         this.config.surveillanceLimitMb = this.savedConfig.surveillanceLimitMb;
                     }
                     this.updateStorageLimitUI();
                     this.updateStorageTypeUI();
-                    throw new Error(storageData.error || 'storage change rejected');
+                    throw new Error((storageData && storageData.error)
+                        || ('Storage save failed: ' + storageResp.status));
                 }
                 // Re-sync config to the daemon's committed (possibly clamped)
                 // value so the savedConfig snapshot below baselines off the true
@@ -3176,16 +3716,9 @@ BYD.surveillance = {
                 // telemetry burn-in toggle; this page only flips the mode.
                 let oemErr = null;
                 try {
-                    const oemResp = await fetch('/api/oem-dashcam/config', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ surveillanceMode: this.config.oemSurveillanceMode || 'off' })
+                    await this._fetchJson('/api/oem-dashcam/config', {
+                        surveillanceMode: this.config.oemSurveillanceMode || 'off'
                     });
-                    if (!oemResp.ok) throw new Error('OEM save failed: ' + oemResp.status);
-                    const oemData = await oemResp.json();
-                    if (oemData && oemData.success === false) {
-                        throw new Error(oemData.error || 'OEM save rejected');
-                    }
                 } catch (e) {
                     oemErr = e;
                 }
@@ -3220,35 +3753,31 @@ BYD.surveillance = {
                 let firstError = null;
 
                 try {
-                    const qResp = await fetch('/api/settings/quality', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            // ACC-off surveillance knobs — server persists to
-                            // recording.surveillanceQuality / camera.surveillanceTargetFps
-                            // and live-applies to a running parked recording.
-                            surveillanceQuality: this.config.surveillanceQuality,
-                            surveillanceCameraFps: this.config.surveillanceCameraFps,
-                            // Shared with the dashcam page (device-compat + clip length).
-                            recordingCodec: this.config.recordingCodec,
-                            segmentDurationMinutes: this.config.segmentDurationMinutes
-                        })
+                    const qData = await this._fetchJson('/api/settings/quality', {
+                        // ACC-off surveillance knobs — server persists to
+                        // recording.surveillanceQuality / camera.surveillanceTargetFps
+                        // and live-applies to a running parked recording.
+                        surveillanceQuality: this.config.surveillanceQuality,
+                        surveillanceCameraFps: this.config.surveillanceCameraFps,
+                        // Shared with the dashcam page (device-compat + clip length).
+                        recordingCodec: this.config.recordingCodec,
+                        segmentDurationMinutes: this.config.segmentDurationMinutes
                     });
-                    if (!qResp.ok) throw new Error('Quality save failed: ' + qResp.status);
-                    qualityKeys.forEach(k => { committed[k] = true; });
+                    const rejected = (qData.rejected || []).map(r => r.field);
+                    qualityKeys.forEach(k => {
+                        if (rejected.indexOf(k) === -1) committed[k] = true;
+                    });
+                    if (rejected.length) {
+                        throw new Error('Quality fields rejected: ' + rejected.join(', '));
+                    }
                 } catch (e) {
                     firstError = e;
                 }
                 try {
-                    const sResp = await fetch('/api/surveillance/config', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            preRecordSeconds: this.config.preRecordSeconds,
-                            postRecordSeconds: this.config.postRecordSeconds
-                        })
+                    await this._fetchJson('/api/surveillance/config', {
+                        preRecordSeconds: this.config.preRecordSeconds,
+                        postRecordSeconds: this.config.postRecordSeconds
                     });
-                    if (!sResp.ok) throw new Error('Config save failed: ' + sResp.status);
                     survKeys.forEach(k => { committed[k] = true; });
                 } catch (e) {
                     if (firstError == null) firstError = e;
@@ -3261,15 +3790,10 @@ BYD.surveillance = {
                     var rs = (typeof this.config.rectifyStrength === 'number')
                         ? this.config.rectifyStrength : 0;
                     if (rs < 0) rs = 0; if (rs > 100) rs = 100;
-                    const uResp = await fetch('/api/settings/unified', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            section: 'recording',
-                            data: { rectifyStrength: rs }
-                        })
+                    await this._fetchJson('/api/settings/unified', {
+                        section: 'recording',
+                        data: { rectifyStrength: rs }
                     });
-                    if (!uResp.ok) throw new Error('Rectify save failed: ' + uResp.status);
                     committed['rectifyStrength'] = true;
                 } catch (e) {
                     if (firstError == null) firstError = e;
@@ -3320,8 +3844,7 @@ BYD.surveillance = {
                     body: JSON.stringify(partial)
                 });
                 if (!configResp.ok) throw new Error('Config save failed: ' + configResp.status);
-                let configData = null;
-                try { configData = await configResp.json(); } catch (_) {}
+                let configData = await configResp.json();
                 // Daemon guard: a save whose RESULT would disable every object
                 // class is rejected with code=all_classes_off (HTTP 200,
                 // success:false). Ask the user to confirm via the themed
@@ -3355,10 +3878,10 @@ BYD.surveillance = {
                         body: JSON.stringify(partial)
                     });
                     if (!configResp.ok) throw new Error('Config save failed: ' + configResp.status);
-                    try { configData = await configResp.json(); } catch (_) {}
+                    configData = await configResp.json();
                 }
-                if (configData && configData.success === false) {
-                    throw new Error(configData.error || 'config save rejected');
+                if (!configData || configData.success !== true) {
+                    throw new Error((configData && configData.error) || 'config save rejected');
                 }
             }
 
@@ -3404,7 +3927,7 @@ BYD.surveillance = {
      * are skipped without warnings.
      */
     async initTelegramOnly() {
-        await this.loadConfig();
+        if (!await this.loadConfig()) return false;
         // Snapshot savedConfig so _persistTelegramFields' dirty-tracking +
         // failure-revert path has something to compare against. Without
         // this snapshot, prev[k] is undefined for every field on the
@@ -3414,7 +3937,7 @@ BYD.surveillance = {
         // full init() path on surveillance.html does.
         this.savedConfig = JSON.parse(JSON.stringify(this.config));
         this.updateUI();
-        this.refreshTelegramAvailability();
+        await this.refreshTelegramAvailability();
         // Re-poll the pairing state when the user comes back to this tab —
         // a fresh bot pair done in the Telegram daemon page should un-grey
         // the toggles without a manual reload.
@@ -3423,6 +3946,7 @@ BYD.surveillance = {
                 this.refreshTelegramAvailability();
             }
         });
+        return true;
     },
 
     /**
@@ -3498,15 +4022,30 @@ BYD.surveillance = {
     // ── Deterrent Action ────────────────────────────────────────────────
 
     updateDeterrent(value) {
+        const previous = this.config.deterrentAction || 'silent';
+        const writeVersion = this._nextImmediateWrite('deterrentAction');
         this.config.deterrentAction = value;
+        this.updateDeterrentUI();
         // Save immediately (deterrent is independent of the Apply button)
-        fetch('/api/surveillance/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ deterrentAction: value })
-        }).then(() => {
-            this.updateDeterrentUI();
-        }).catch(e => console.warn('Failed to save deterrent:', e));
+        this._writeJson('/api/surveillance/config', { deterrentAction: value })
+            .then(() => {
+                if (this.savedConfig) this.savedConfig.deterrentAction = value;
+                if (!this._isLatestImmediateWrite('deterrentAction', writeVersion)) return;
+                this.config.deterrentAction = value;
+                this.updateDeterrentUI();
+                this.markChanged();
+            }).catch(e => {
+                if (!this._isLatestImmediateWrite('deterrentAction', writeVersion)) return;
+                this.config.deterrentAction = this.savedConfig
+                        && this.savedConfig.deterrentAction
+                    ? this.savedConfig.deterrentAction : previous;
+                this.updateDeterrentUI();
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast(
+                        (e && e.message) || 'Could not save deterrent action',
+                        'error');
+                }
+            });
     },
 
     updateDeterrentUI() {
@@ -3578,23 +4117,7 @@ BYD.surveillance = {
             || (this._screenDeterrentFieldSequences = {});
         var sequence = (fieldSequences[configKey] || 0) + 1;
         fieldSequences[configKey] = sequence;
-        var previous = this._screenDeterrentSaveChain || Promise.resolve();
-        var request = previous.catch(function() {}).then(function() {
-            return fetch('/api/surveillance/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-        }).then(function(resp) {
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            return resp.json();
-        }).then(function(data) {
-            if (!data || !data.success) {
-                throw new Error((data && data.error) || 'Save failed');
-            }
-            return data;
-        });
-        this._screenDeterrentSaveChain = request;
+        var request = this._writeJson('/api/surveillance/config', body);
 
         request.then(function() {
             if (self.savedConfig) {
@@ -3656,21 +4179,34 @@ BYD.surveillance = {
         var v = parseInt(value, 10);
         if (!isFinite(v) || v < 0) v = 0;
         if (v > 30) v = 30;
+        var previous = this.config.lowSocCutoffPercent;
+        var writeVersion = this._nextImmediateWrite('lowSocCutoffPercent');
         this.config.lowSocCutoffPercent = v;
-        if (this.savedConfig) this.savedConfig.lowSocCutoffPercent = v;
         var label = document.getElementById('lowSocCutoffValue');
         if (label) label.textContent = (v === 0)
             ? (BYD.i18n.t('surveillance.low_soc_cutoff_off') || 'Off')
             : v + '%';
-        fetch('/api/surveillance/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ lowSocCutoffPercent: v })
-        }).then(function() {
-            if (BYD.surveillance.markChanged) BYD.surveillance.markChanged();
-        }).catch(function(e) {
-            console.warn('Failed to save low-SoC cutoff:', e);
-        });
+        var self = this;
+        this._writeJson('/api/surveillance/config', { lowSocCutoffPercent: v })
+            .then(function() {
+                if (self.savedConfig) self.savedConfig.lowSocCutoffPercent = v;
+                if (!self._isLatestImmediateWrite('lowSocCutoffPercent', writeVersion)) return;
+                self.config.lowSocCutoffPercent = v;
+                if (self.markChanged) self.markChanged();
+            }).catch(function(e) {
+                if (!self._isLatestImmediateWrite('lowSocCutoffPercent', writeVersion)) return;
+                var persisted = self.savedConfig
+                        && typeof self.savedConfig.lowSocCutoffPercent === 'number'
+                    ? self.savedConfig.lowSocCutoffPercent : previous;
+                self.config.lowSocCutoffPercent = persisted;
+                self.previewLowSocCutoff(persisted);
+                if (self.markChanged) self.markChanged();
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast(
+                        (e && e.message) || 'Could not save low-battery cutoff',
+                        'error');
+                }
+            });
     },
 
     queueScreenDeterrentMessage: function(value) {
@@ -3845,17 +4381,9 @@ BYD.surveillance = {
             if (!confirm(legacy)) return;
         }
         var self = this;
-        fetch('/api/surveillance/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ clearScreenDeterrentImage: true })
-        }).then(function(resp) {
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            return resp.json();
-        }).then(function(data) {
-            if (!data || !data.success) {
-                throw new Error((data && data.error) || 'Clear failed');
-            }
+        this._writeJson('/api/surveillance/config', {
+            clearScreenDeterrentImage: true
+        }).then(function() {
             self.config.screenDeterrentImagePath = '';
             self.config.screenDeterrentHasImage = false;
             self.config.screenDeterrentAssetType = '';
@@ -4070,7 +4598,11 @@ BYD.surveillance = {
                     btn.innerHTML = origText;
                     btn.disabled = false;
                 }, 2000);
-                if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to download theme', 'error');
+                if (BYD.utils && BYD.utils.toast) {
+                    var localized = BYD.i18n && BYD.i18n.t
+                        ? BYD.i18n.t('surveillance.theme_download_failed') : null;
+                    BYD.utils.toast(localized || 'Failed to download theme', 'error');
+                }
             });
     },
 
@@ -4083,15 +4615,23 @@ BYD.surveillance = {
             .then(function(data) {
                 if (!BYD.utils || !BYD.utils.toast) return;
                 if (data && data.success) {
-                    BYD.utils.toast('Deterrent triggered', 'success');
+                    var ok = BYD.i18n && BYD.i18n.t
+                        ? BYD.i18n.t('surveillance.deterrent_test_ok') : null;
+                    BYD.utils.toast(ok || 'Deterrent triggered', 'success');
                 } else {
+                    var fail = BYD.i18n && BYD.i18n.t
+                        ? BYD.i18n.t('surveillance.deterrent_test_failed') : null;
                     BYD.utils.toast(
-                        (data && data.error) || 'Failed to trigger deterrent', 'error');
+                        (data && data.error) || fail || 'Failed to trigger deterrent', 'error');
                 }
             })
             .catch(function(err) {
                 console.error('[deterrent] test failed:', err);
-                if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to trigger deterrent', 'error');
+                if (BYD.utils && BYD.utils.toast) {
+                    var fail = BYD.i18n && BYD.i18n.t
+                        ? BYD.i18n.t('surveillance.deterrent_test_failed') : null;
+                    BYD.utils.toast(fail || 'Failed to trigger deterrent', 'error');
+                }
             });
     },
 
@@ -4103,10 +4643,14 @@ BYD.surveillance = {
     // (advanced sub-section); whichever page writes last wins.
 
     async loadGeocoding() {
+        if (this._geocodingWritesPending > 0) return false;
+        const writeVersion = this._geocodingWriteVersion;
         try {
             const resp = await fetch('/api/settings/geocoding');
             const data = await resp.json();
-            if (!data.success) return;
+            if (!data.success
+                    || this._geocodingWritesPending > 0
+                    || writeVersion !== this._geocodingWriteVersion) return false;
             const surCfg = data.surveillance || {};
             const advCfg = data.advanced || {};
             const swEnabled = document.getElementById('survGeocodingEnabled');
@@ -4121,76 +4665,109 @@ BYD.surveillance = {
                 inputUrl.value = advCfg.customNominatimBase || '';
                 inputUrl.disabled = !surCfg.enabled;
             }
+            return true;
         } catch (e) {
             console.warn('Failed to load surveillance geocoding state:', e);
+            return false;
         }
     },
 
     async _postGeocoding(delta) {
+        this._geocodingWriteVersion++;
+        this._geocodingWritesPending++;
         try {
-            const resp = await fetch('/api/settings/geocoding', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(delta)
-            });
-            const data = await resp.json();
-            return data && data.success ? data : null;
-        } catch (e) {
-            console.warn('Geocoding POST failed:', e);
-            return null;
+            return await this._postJson('/api/settings/geocoding', delta);
+        } finally {
+            this._geocodingWritesPending--;
         }
+    },
+
+    async _reloadGeocodingWhenIdle() {
+        let queue;
+        do {
+            queue = this._writeQueue;
+            await queue;
+            await Promise.resolve();
+        } while (queue !== this._writeQueue || this._geocodingWritesPending > 0);
+        return this.loadGeocoding();
+    },
+
+    _setGeocodingBusy(busy) {
+        const enabled = document.getElementById('survGeocodingEnabled');
+        const online = document.getElementById('survGeocodingOnline');
+        const input = document.getElementById('survGeocodingCustomUrl');
+        if (enabled) enabled.disabled = busy;
+        const featureEnabled = !!(enabled && enabled.checked);
+        if (online) online.disabled = busy || !featureEnabled;
+        if (input) input.disabled = busy || !featureEnabled;
     },
 
     async toggleGeocodingEnabled() {
         const sw = document.getElementById('survGeocodingEnabled');
-        const swOnline = document.getElementById('survGeocodingOnline');
-        const inputUrl = document.getElementById('survGeocodingCustomUrl');
-        if (!sw) return;
+        if (!sw || !this._hydrated || sw.disabled) return;
         const enabled = sw.checked;
-        const result = await this._postGeocoding({ surveillance: { enabled } });
-        if (result) {
-            const sur = result.surveillance || {};
-            sw.checked = !!sur.enabled;
-            if (swOnline) swOnline.disabled = !sur.enabled;
-            if (inputUrl) inputUrl.disabled = !sur.enabled;
-            if (BYD.utils && BYD.utils.toast) {
-                const key = sur.enabled
-                    ? 'surveillance.geocoding_enabled_toast'
-                    : 'surveillance.geocoding_disabled_toast';
-                BYD.utils.toast(BYD.i18n.t(key), 'success');
+        this._setGeocodingBusy(true);
+        try {
+            const result = await this._postGeocoding({ surveillance: { enabled } });
+            if (result) {
+                const sur = result.surveillance || {};
+                sw.checked = !!sur.enabled;
+                if (BYD.utils && BYD.utils.toast) {
+                    const key = sur.enabled
+                        ? 'surveillance.geocoding_enabled_toast'
+                        : 'surveillance.geocoding_disabled_toast';
+                    BYD.utils.toast(BYD.i18n.t(key), 'success');
+                }
+            } else {
+                sw.checked = !enabled;
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast(BYD.i18n.t('surveillance.geocoding_update_failed'), 'error');
+                }
             }
-        } else {
-            sw.checked = !enabled;
-            if (BYD.utils && BYD.utils.toast) {
-                BYD.utils.toast(BYD.i18n.t('surveillance.geocoding_update_failed'), 'error');
-            }
+        } finally {
+            this._setGeocodingBusy(false);
         }
     },
 
     async toggleGeocodingOnline() {
         const sw = document.getElementById('survGeocodingOnline');
-        if (!sw) return;
+        if (!sw || !this._hydrated || sw.disabled) return;
         const allowOnline = sw.checked;
-        const result = await this._postGeocoding({ surveillance: { allowOnline } });
-        if (result && result.surveillance) {
-            sw.checked = !!result.surveillance.allowOnline;
-        } else {
-            sw.checked = !allowOnline;
-            if (BYD.utils && BYD.utils.toast) {
-                BYD.utils.toast(BYD.i18n.t('surveillance.geocoding_update_failed'), 'error');
+        this._setGeocodingBusy(true);
+        try {
+            const result = await this._postGeocoding({ surveillance: { allowOnline } });
+            if (result && result.surveillance) {
+                sw.checked = !!result.surveillance.allowOnline;
+            } else {
+                sw.checked = !allowOnline;
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast(BYD.i18n.t('surveillance.geocoding_update_failed'), 'error');
+                }
             }
+        } finally {
+            this._setGeocodingBusy(false);
         }
     },
 
     async saveGeocodingCustomUrl() {
         const input = document.getElementById('survGeocodingCustomUrl');
-        if (!input) return;
+        if (!input || !this._hydrated || input.disabled) return;
         const url = (input.value || '').trim();
-        const result = await this._postGeocoding({
-            advanced: { customNominatimBase: url }
-        });
-        if (result && result.advanced) {
-            input.value = result.advanced.customNominatimBase || '';
+        this._setGeocodingBusy(true);
+        try {
+            const result = await this._postGeocoding({
+                advanced: { customNominatimBase: url }
+            });
+            if (result && result.advanced) {
+                input.value = result.advanced.customNominatimBase || '';
+            } else {
+                await this._reloadGeocodingWhenIdle();
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast(BYD.i18n.t('surveillance.geocoding_update_failed'), 'error');
+                }
+            }
+        } finally {
+            this._setGeocodingBusy(false);
         }
     },
 
@@ -4544,33 +5121,21 @@ BYD.surveillance = {
     // strings (already translated in every language).
 
     async loadSurveillanceLayout() {
+        if (this._layoutWritePending) return false;
+        const writeVersion = this._layoutWriteVersion;
         try {
             const resp = await fetch('/api/settings/surveillance-layout');
             const data = await resp.json();
-            if (data.success) {
-                this._applySurveillanceLayoutButtons(data.layout || 'standard');
-
-                const wsToggle = document.getElementById('survUseWindshield');
-                if (wsToggle) {
-                    wsToggle.checked = data.dashcamUseWindshield || false;
-                    wsToggle.disabled = !data.windshieldAvailable;
-                }
-
-                const infoLine = document.getElementById('survWindshieldCameraInfo');
-                if (infoLine) {
-                    if (!data.windshieldAvailable) {
-                        infoLine.textContent = BYD.i18n.t('recording.layout_windshield_unavailable');
-                        infoLine.style.display = 'block';
-                    } else {
-                        infoLine.style.display = 'none';
-                    }
-                }
-
-                this._updateSurveillanceWindshieldVisibility(data.layout || 'standard');
+            if (data.success
+                    && !this._layoutWritePending
+                    && writeVersion === this._layoutWriteVersion) {
+                this._applySurveillanceLayoutState(data);
+                return true;
             }
         } catch (e) {
             console.warn('Failed to load surveillance layout:', e);
         }
+        return false;
     },
 
     _updateSurveillanceWindshieldVisibility(layout) {
@@ -4587,13 +5152,41 @@ BYD.surveillance = {
             btn.classList.toggle('active', btn.dataset.value === layout));
     },
 
+    _applySurveillanceLayoutState(data) {
+        this._surveillanceLayout = data.layout || 'standard';
+        this._surveillanceUseWindshield = !!data.dashcamUseWindshield;
+        this._surveillanceWindshieldAvailable = !!data.windshieldAvailable;
+        this._applySurveillanceLayoutButtons(this._surveillanceLayout);
+        this._updateSurveillanceWindshieldVisibility(this._surveillanceLayout);
+
+        const wsToggle = document.getElementById('survUseWindshield');
+        if (wsToggle) {
+            wsToggle.checked = this._surveillanceUseWindshield;
+            wsToggle.disabled = this._layoutWritePending
+                || !this._surveillanceWindshieldAvailable;
+        }
+
+        const infoLine = document.getElementById('survWindshieldCameraInfo');
+        if (infoLine) {
+            if (!this._surveillanceWindshieldAvailable) {
+                infoLine.textContent = BYD.i18n.t('recording.layout_windshield_unavailable');
+                infoLine.style.display = 'block';
+            } else {
+                infoLine.style.display = 'none';
+            }
+        }
+    },
+
     async setSurveillanceLayout(layout) {
+        if (!this._hydrated || this._layoutWritePending
+                || (layout !== 'standard' && layout !== 'dashcam')) return;
         this._applySurveillanceLayoutButtons(layout);
         this._updateSurveillanceWindshieldVisibility(layout);
         await this._saveSurveillanceLayout();
     },
 
     async toggleSurveillanceWindshield() {
+        if (!this._hydrated || this._layoutWritePending) return;
         await this._saveSurveillanceLayout();
     },
 
@@ -4605,31 +5198,42 @@ BYD.surveillance = {
         const wsToggle = document.getElementById('survUseWindshield');
         const dashcamUseWindshield = wsToggle ? wsToggle.checked : false;
 
+        this._layoutWriteVersion++;
+        this._layoutWritePending = true;
+        if (group) {
+            group.querySelectorAll('.btn-toggle').forEach(btn => { btn.disabled = true; });
+        }
+        if (wsToggle) wsToggle.disabled = true;
         try {
-            const resp = await fetch('/api/settings/surveillance-layout', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ layout, dashcamUseWindshield })
+            const data = await this._postJson('/api/settings/surveillance-layout', {
+                layout,
+                dashcamUseWindshield
             });
-            const data = await resp.json();
-            if (data.success) {
-                this._applySurveillanceLayoutButtons(data.layout);
-                this._updateSurveillanceWindshieldVisibility(data.layout);
-
-                if (wsToggle) {
-                    wsToggle.checked = data.dashcamUseWindshield;
-                    wsToggle.disabled = !data.windshieldAvailable;
-                }
+            if (data) {
+                this._applySurveillanceLayoutState(data);
 
                 if (BYD.utils && BYD.utils.toast) {
                     const key = data.layout === 'dashcam' ? 'recording.layout_dashcam_toast' : 'recording.layout_standard_toast';
                     BYD.utils.toast(BYD.i18n.t(key), 'success');
                 }
-            } else if (BYD.utils && BYD.utils.toast) {
-                BYD.utils.toast(BYD.i18n.t('recording.layout_update_failed'), 'error');
+            } else {
+                this._applySurveillanceLayoutState({
+                    layout: this._surveillanceLayout,
+                    dashcamUseWindshield: this._surveillanceUseWindshield,
+                    windshieldAvailable: this._surveillanceWindshieldAvailable
+                });
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast(BYD.i18n.t('recording.layout_update_failed'), 'error');
+                }
             }
-        } catch (e) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.layout_update_failed'), 'error');
+        } finally {
+            this._layoutWritePending = false;
+            if (group) {
+                group.querySelectorAll('.btn-toggle').forEach(btn => { btn.disabled = false; });
+            }
+            if (wsToggle) {
+                wsToggle.disabled = !this._surveillanceWindshieldAvailable;
+            }
         }
     },
 
@@ -4642,18 +5246,45 @@ BYD.surveillance = {
     _telemetryFields: { accOn: [], surveillance: [], oemDashcam: [] },
 
     async loadSurvTelemetryOverlay() {
+        if (this._telemetryWritesPending > 0) return false;
+        const writeVersion = this._telemetryWriteVersion;
         try {
             const resp = await fetch('/api/settings/telemetry-overlay');
             const data = await resp.json();
-            if (!data.success) return;
+            if (!data.success
+                    || this._telemetryWritesPending > 0
+                    || writeVersion !== this._telemetryWriteVersion) return false;
             const toggle = document.getElementById('survTelemetryOverlayEnabled');
             if (toggle) toggle.checked = !!data.surveillanceEnabled;
             this._telemetryCatalog = data.fieldCatalog || null;
             if (data.fields) this._telemetryFields = data.fields;
             this.renderSurvTelemetryFields();
             this.updateSurvTelemetryFieldsVisibility(!!(toggle && toggle.checked));
+            return true;
         } catch (e) {
             console.warn('Failed to load surveillance telemetry overlay:', e);
+            return false;
+        }
+    },
+
+    async _postSurvTelemetry(body) {
+        this._telemetryWriteVersion++;
+        this._telemetryWritesPending++;
+        try {
+            return await this._postJson('/api/settings/telemetry-overlay', body);
+        } finally {
+            this._telemetryWritesPending--;
+        }
+    },
+
+    _setSurvTelemetryBusy(busy) {
+        const toggle = document.getElementById('survTelemetryOverlayEnabled');
+        if (toggle) toggle.disabled = busy;
+        const grid = document.getElementById('telemetryFieldsSurveillanceGrid');
+        if (grid) {
+            grid.querySelectorAll('input[type=checkbox]').forEach(cb => {
+                cb.disabled = busy;
+            });
         }
     },
 
@@ -4675,6 +5306,7 @@ BYD.surveillance = {
     renderSurvTelemetryFields() {
         const grid = document.getElementById('telemetryFieldsSurveillanceGrid');
         if (!grid || !this._telemetryCatalog) return;
+        if (this._telemetryFieldPostInFlight > 0) return;
         const selected = new Set(this._telemetryFields.surveillance || []);
         grid.innerHTML = '';
         this._telemetryCatalog.forEach(f => {
@@ -4702,37 +5334,42 @@ BYD.surveillance = {
     },
 
     async toggleSurvTelemetryField() {
+        if (!this._hydrated || this._telemetryFieldPostInFlight > 0) return;
         const grid = document.getElementById('telemetryFieldsSurveillanceGrid');
         const keys = [];
         if (grid) grid.querySelectorAll('input[type=checkbox]').forEach(cb => {
             if (cb.checked) keys.push(cb.id.replace('telField_surveillance_', ''));
         });
         this._telemetryFields.surveillance = keys;
+        this._telemetryFieldPostInFlight++;
+        this._setSurvTelemetryBusy(true);
+        let failed = false;
         try {
-            const resp = await fetch('/api/settings/telemetry-overlay', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fields: { surveillance: keys } })
+            const data = await this._postSurvTelemetry({
+                fields: { surveillance: keys }
             });
-            const data = await resp.json();
-            if (data.success && data.fields) this._telemetryFields = data.fields;
-        } catch (e) {
-            console.warn('Failed to update surveillance telemetry fields:', e);
+            failed = !data;
+            if (data && data.fields) this._telemetryFields = data.fields;
+        } finally {
+            this._telemetryFieldPostInFlight--;
+            if (this._telemetryFieldPostInFlight === 0) {
+                if (failed) await this.loadSurvTelemetryOverlay();
+                else this.renderSurvTelemetryFields();
+                this._setSurvTelemetryBusy(false);
+            }
         }
     },
 
     async toggleSurvTelemetryOverlay() {
         const toggle = document.getElementById('survTelemetryOverlayEnabled');
-        if (!toggle) return;
+        if (!toggle || !this._hydrated || toggle.disabled) return;
         const enabled = toggle.checked;
+        this._setSurvTelemetryBusy(true);
         try {
-            const resp = await fetch('/api/settings/telemetry-overlay', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ surveillanceEnabled: enabled })
+            const data = await this._postSurvTelemetry({
+                surveillanceEnabled: enabled
             });
-            const data = await resp.json();
-            if (data.success) {
+            if (data) {
                 toggle.checked = !!data.surveillanceEnabled;
                 this.updateSurvTelemetryFieldsVisibility(!!data.surveillanceEnabled);
                 if (BYD.utils && BYD.utils.toast) {
@@ -4744,9 +5381,8 @@ BYD.surveillance = {
                 toggle.checked = !enabled;
                 if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.overlay_update_failed'), 'error');
             }
-        } catch (e) {
-            toggle.checked = !enabled;
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.overlay_update_failed'), 'error');
+        } finally {
+            this._setSurvTelemetryBusy(false);
         }
     }
 };
@@ -4758,6 +5394,11 @@ window.SurvSettings = BYD.surveillance;
 
 window.BydCloud = {
     isConfigured: false,
+    _mergeReady: false,
+    _mergeWriteQueue: Promise.resolve(),
+    _mergeWritesPending: 0,
+    _mergeWriteVersion: 0,
+    _cloudDataMerge: false,
     // Region key → existing surveillance.byd_region_* i18n key. The "no" entry
     // is BYD's own region key for Middle East / Africa (legacy from when the
     // region first launched on the -no.byd.auto host); it is NOT Norway, which
@@ -4969,6 +5610,7 @@ window.BydCloud = {
     },
 
     async loadStatus() {
+        const mergeWriteVersion = this._mergeWriteVersion;
         this.ensureCountryOptions();
         this.applyCountrySelection('GB', 'eu');
         try {
@@ -4976,11 +5618,20 @@ window.BydCloud = {
             const data = await resp.json();
             if (data.success && data.status) {
                 this.isConfigured = data.status.configured;
-                this.updateStatusUI(data.status);
+                const mergeReadIsCurrent = this._mergeWritesPending === 0
+                    && mergeWriteVersion === this._mergeWriteVersion;
+                if (mergeReadIsCurrent) {
+                    const cloudPush = data.status.cloudPush || {};
+                    this._cloudDataMerge = !!cloudPush.cloudDataMerge;
+                    this._mergeReady = true;
+                }
+                this.updateStatusUI(data.status, !mergeReadIsCurrent);
+                return true;
             }
         } catch (e) {
             console.warn('Failed to load BYD Cloud status:', e);
         }
+        return false;
     },
 
     onCountryChange(countryCode) {
@@ -4992,7 +5643,7 @@ window.BydCloud = {
         this.setRegionDisplay(region, null);
     },
 
-    updateStatusUI(status) {
+    updateStatusUI(status, preserveMergeToggle) {
         const badge = document.getElementById('bydCloudBadge');
         const info = document.getElementById('bydCloudInfo');
         const clearSection = document.getElementById('bydClearSection');
@@ -5039,11 +5690,15 @@ window.BydCloud = {
         }
 
         BYD.surveillance.config.bydCloudEnabled = status.verified || false;
+        BYD.surveillance.config.di5CloudKeepAliveCloudReady =
+            status.verified || false;
         BYD.surveillance.updateDeterrentUI();
+        BYD.surveillance.applyDi5CloudKeepAliveUI();
 
         // Cloud push status
         var pushSection = document.getElementById('bydCloudPushSection');
         var mergeSection = document.getElementById('bydCloudMergeSection');
+        var mergeToggle = document.getElementById('bydCloudMergeToggle');
         if (status.verified && status.cloudPush) {
             var cp = status.cloudPush;
             if (pushSection) pushSection.style.display = 'block';
@@ -5108,11 +5763,17 @@ window.BydCloud = {
             }
 
             // Merge toggle
-            var mergeToggle = document.getElementById('bydCloudMergeToggle');
-            if (mergeToggle) mergeToggle.checked = cp.cloudDataMerge || false;
+            if (mergeToggle) {
+                if (!preserveMergeToggle) {
+                    mergeToggle.checked = this._cloudDataMerge;
+                }
+                mergeToggle.disabled = !this._mergeReady
+                    || this._mergeWritesPending > 0;
+            }
         } else {
             if (pushSection) pushSection.style.display = 'none';
             if (mergeSection) mergeSection.style.display = 'none';
+            if (mergeToggle) mergeToggle.disabled = true;
         }
     },
 
@@ -5283,14 +5944,45 @@ window.BydCloud = {
     },
 
     async toggleCloudDataMerge(enabled) {
-        try {
-            await fetch('/api/bydcloud/settings', {
+        const toggle = document.getElementById('bydCloudMergeToggle');
+        if (!this._mergeReady || this._mergeWritesPending > 0) {
+            if (toggle) toggle.checked = this._cloudDataMerge;
+            return;
+        }
+        const previous = this._cloudDataMerge;
+        this._mergeWriteVersion++;
+        this._mergeWritesPending++;
+        if (toggle) toggle.disabled = true;
+        const run = async () => {
+            const resp = await fetch('/api/bydcloud/settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ cloudDataMerge: enabled })
             });
+            const data = await resp.json();
+            if (!resp.ok || !data || data.success !== true) {
+                throw new Error((data && data.error) || 'Could not save setting');
+            }
+            return data;
+        };
+        const request = this._mergeWriteQueue.then(run, run);
+        this._mergeWriteQueue = request.catch(() => {});
+        try {
+            await request;
+            this._cloudDataMerge = !!enabled;
+            if (toggle) toggle.checked = this._cloudDataMerge;
         } catch (e) {
             console.warn('Failed to update cloud data merge:', e);
+            this._cloudDataMerge = previous;
+            if (toggle) toggle.checked = previous;
+            this.showStatus('\u2717 ' + (e && e.message
+                ? e.message : 'Could not save setting'), 'error');
+        } finally {
+            this._mergeWritesPending--;
+            if (toggle) {
+                toggle.disabled = !this._mergeReady
+                    || this._mergeWritesPending > 0;
+            }
         }
     }
 };

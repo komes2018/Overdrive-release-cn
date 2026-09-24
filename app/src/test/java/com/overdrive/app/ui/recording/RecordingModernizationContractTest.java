@@ -91,6 +91,31 @@ public class RecordingModernizationContractTest {
     }
 
     @Test
+    public void nativeRecordingCardsCreateTheSameAuthenticatedEvidencePack()
+            throws IOException {
+        String row = read("app/src/main/res/layout/item_recording.xml");
+        String adapter = read(
+                "app/src/main/java/com/overdrive/app/ui/adapter/RecordingAdapter.kt");
+        String library = read(
+                "app/src/main/java/com/overdrive/app/ui/fragment/RecordingLibraryFragment.kt");
+        String client = read(
+                "app/src/main/java/com/overdrive/app/ui/util/RecordingsApiClient.kt");
+        String providerPaths = read("app/src/main/res/xml/file_paths.xml");
+
+        assertTrue(row.contains("@+id/btnMore"));
+        assertTrue(adapter.contains("R.string.action_create_evidence_pack"));
+        assertTrue(adapter.contains("onEvidencePack?.invoke(recording)"));
+        assertTrue(library.contains("Theme_Overdrive_M3_Dialog"));
+        assertTrue(library.contains("RecordingsApiClient.createIncidentPack("));
+        assertTrue(library.contains("type = \"application/zip\""));
+        assertTrue(client.contains("DaemonHttpClient.open("));
+        assertTrue(client.contains("\"/api/genai/incidents\""));
+        assertTrue(client.contains("\"/api/genai/incidents/$packId/download\""));
+        assertTrue(client.contains("Thread.currentThread().isInterrupted"));
+        assertTrue(providerPaths.contains("path=\"incident-packs/\""));
+    }
+
+    @Test
     public void optionalMetadataCannotChangeRepeatedTileHeight() throws IOException {
         String portrait = read("app/src/main/res/layout/item_recording.xml");
         String landscape = read("app/src/main/res/layout-land/item_recording.xml");

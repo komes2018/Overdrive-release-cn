@@ -51,6 +51,7 @@ public class Automations {
     // All access to this map, and state mutations that add/remove an expiration, use STATE_LOCK.
     private static final Object STATE_LOCK = new Object();
     private static final Map<EventData, Long> stateExpiresAt = new java.util.HashMap<>();
+    private static final ThreadLocal<Long> STATE_EXPIRY_SCOPE = new ThreadLocal<>();
     // Per key: the last value actually DELIVERED to trigger evaluation (stateChanged), as
     // opposed to merely stored. A silent seed stores without delivering; a fired transition
     // does both. This is what makes cross-publisher delivery exactly-once: an OBSERVED edge
@@ -1409,6 +1410,21 @@ public class Automations {
         }
     }
 
+    public static <T> T withStateExpiry(
+            long expiresAtMs, java.util.function.Supplier<T> publisher) {
+        Long previous = STATE_EXPIRY_SCOPE.get();
+        STATE_EXPIRY_SCOPE.set(expiresAtMs);
+        try {
+            return publisher.get();
+        } finally {
+            if (previous == null) {
+                STATE_EXPIRY_SCOPE.remove();
+            } else {
+                STATE_EXPIRY_SCOPE.set(previous);
+            }
+        }
+    }
+
     // Wall-clock deadline (0 = never) until which the snapshot path force-stores its values so the
     // editor can show live readings. Set by the /api/automations/state endpoint, which the editor
     // polls only while a signal picker is on screen; it lapses on its own so a closed editor
@@ -1607,8 +1623,8 @@ public class Automations {
     }
 
     /**
-     * Atomic raw-state and expiration-overlay update. A null expiration makes the value
-     * non-expiring and clears any prior overlay even when the raw value is unchanged.
+     * Atomic raw-state and expiration-overlay update. An explicit expiration wins over
+     * the current publication scope; without either, the value is non-expiring.
      */
     private static void update(EventData key, Value value, boolean forceStore, Long expiresAtMs) {
         update(key, value, forceStore, expiresAtMs, false, false);
@@ -1622,6 +1638,8 @@ public class Automations {
     private static void update(EventData key, Value value, boolean forceStore, Long expiresAtMs,
                                boolean observedEdge, boolean edgeRestatement) {
         if (key == null || value == null) return;
+        Long effectiveExpiresAt =
+                expiresAtMs != null ? expiresAtMs : STATE_EXPIRY_SCOPE.get();
         boolean disabled = isDisabled();
         boolean silentSeed = SILENT_SEED.get();
         boolean forceLatestStateReplay = AutomationQueue.forceLatestStateReplay();
@@ -1654,10 +1672,10 @@ public class Automations {
                 }
                 return current; // unchanged — leave as-is
             });
-            if (expiresAtMs == null) {
+            if (effectiveExpiresAt == null) {
                 stateExpiresAt.remove(key);
             } else {
-                stateExpiresAt.put(key, expiresAtMs);
+                stateExpiresAt.put(key, effectiveExpiresAt);
             }
             // We transitioned iff the stored value is now the new value AND it differs from what
             // was there. The delivery rules:

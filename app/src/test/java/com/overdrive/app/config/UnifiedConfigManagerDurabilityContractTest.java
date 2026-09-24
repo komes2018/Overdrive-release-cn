@@ -19,6 +19,25 @@ import org.junit.Test;
 public class UnifiedConfigManagerDurabilityContractTest {
 
     @Test
+    public void lifecycleSnapshotDoesNotEnterTheCrossProcessConfigLock()
+            throws IOException {
+        String source = managerSource();
+        String snapshot = between(
+                source,
+                "fun isVehicleOnOnlyModeSnapshot(): Boolean",
+                "// ==================== LISTENERS");
+
+        assertTrue(snapshot.contains("JSONObject(file.readText())"));
+        assertTrue(snapshot.contains(
+                "length > LIFECYCLE_SNAPSHOT_MAX_BYTES"));
+        assertTrue(snapshot.contains(
+                ".optString(\"operatingMode\", \"onAndOff\") == \"onOnly\""));
+        assertFalse(snapshot.contains("loadConfig()"));
+        assertFalse(snapshot.contains("withConfigFileLock"));
+        assertFalse(snapshot.contains("cachedConfig"));
+    }
+
+    @Test
     public void everyFileWriteFlushesAndSyncsBeforeSuccess() throws IOException {
         String source = managerSource();
         String writer = between(
@@ -562,7 +581,7 @@ public class UnifiedConfigManagerDurabilityContractTest {
                 "peerReadUnavailable = true",
                 "if (peerReadUnavailable)",
                 "null",
-                "saveConfigInternal(defaults)");
+                "saveRecoveredConfigLocked(defaults)");
     }
 
     @Test
@@ -616,8 +635,53 @@ public class UnifiedConfigManagerDurabilityContractTest {
         assertOrdered(
                 recovery,
                 "android.os.Process.myUid() == SHELL_DAEMON_UID",
-                "saveConfigInternal(recovered)",
+                "saveRecoveredConfigLocked(recovered)",
                 "pendingRootPromotion =");
+    }
+
+    @Test
+    public void corruptionRecoveryStagesModeAndCommitUnderOneRuntimeFence()
+            throws IOException {
+        String source = managerSource();
+        String recoveryCommit = between(
+                source,
+                "private fun saveRecoveredConfigLocked(",
+                "private fun writeFileAndSync(");
+
+        assertOrdered(
+                recoveryCommit,
+                "synchronized(DiLink5Platform::class.java)",
+                "DiLink5Platform.snapshotModeMarkers()",
+                "stageCameraModeChange(config)",
+                "saveConfigInternal(config)",
+                "if (!result.committed",
+                "DiLink5Platform.restoreModeMarkers(markerSnapshot)");
+    }
+
+    @Test
+    public void wholeConfigWithoutVehicleModePreservesTheActiveRuntime()
+            throws IOException {
+        String stage = between(
+                managerSource(),
+                "private fun stageCameraModeChange(",
+                "/**\n     * Recovery replaces an unreadable root");
+
+        assertTrue(stage.contains(
+                "DiLink5Platform.currentActiveMode()"));
+        assertTrue(stage.contains(
+                "if (!requestedCamera.has(\"cameraMode\"))"));
+        assertTrue(stage.contains(
+                "requestedCamera.put(\"cameraMode\", currentMode)"));
+        assertTrue(stage.contains(
+                "DiLink5Platform.normalizeConfiguredMode("));
+        assertFalse(stage.contains(
+                "optString(\"cameraMode\", \"default\")"));
+        assertOrdered(
+                stage,
+                "val currentMode =",
+                "val requestedCamera =",
+                "requestedCamera.put(\"cameraMode\", currentMode)",
+                "DiLink5Platform.stageConfiguredMode(requestedMode, currentMode)");
     }
 
     @Test

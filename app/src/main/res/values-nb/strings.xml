@@ -447,6 +447,7 @@
     <string name="rail_vehicle">Kjøretøy</string>
     <string name="rail_projection">Projeksjon</string>
     <string name="rail_trips">Reiser</string>
+    <string name="rail_parking">Parkering</string>
     <string name="rail_automations">Automatisering</string>
     <string name="rail_integrations">Integrasjoner</string>
     <string name="rail_diagnostics">Diagnostikk</string>
@@ -555,7 +556,6 @@
     <string name="settings_action_reset_data">Tilbakestill data…</string>
     <string name="cd_brand_logo">OverDrive</string>
     <string name="dashboard_hero_headline">På klokken</string>
-    <string name="dashboard_modern_vehicle_status">Kjøretøystatus</string>
     <string name="dashboard_subtitle_all_systems">Alle systemer pålogget</string>
     <string name="dashboard_subtitle_some_offline">%1$d av %2$d tjenester online</string>
     <string name="dashboard_subtitle_no_tunnel">Ekstern tilgang frakoblet</string>
@@ -572,14 +572,11 @@
     <string name="vehicle_dialog_title">Angi batterikapasitet</string>
     <string name="vehicle_dialog_capacity_label">Kapasitet</string>
     <string name="vehicle_dialog_capacity_suffix">kWh</string>
-    <string name="vehicle_dialog_capacity_helper">15 til 120 kWh. La oss bruke modellstandard.</string>
+    <string name="vehicle_dialog_capacity_helper">5 til 120 kWh. La oss bruke modellstandard.</string>
     <string name="vehicle_dialog_model_label">Modell</string>
     <string name="vehicle_dialog_save">Lagre</string>
     <string name="vehicle_dialog_reset">Tilbakestill for automatisk oppdaging</string>
-    <string name="vehicle_dialog_detection">Gjenkjenning: %1$s</string>
-    <string name="vehicle_dialog_detection_auto">Automatisk</string>
-    <string name="vehicle_dialog_detection_manual">Manuell</string>
-    <string name="vehicle_dialog_invalid_capacity">Kapasiteten må være 15 - 120 kWh</string>
+    <string name="vehicle_dialog_invalid_capacity">Kapasiteten må være 5 - 120 kWh</string>
     <string name="vehicle_dialog_summary_effective">Effektiv: %1$.1f kWh</string>
     <string name="vehicle_dialog_summary_calibration">Siste kalibrert: %1$.1f%% på %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">ikke tilgjengelig</string>
@@ -835,7 +832,7 @@
     <string name="onboarding_camera_windshield_primary">Vis meg</string>
     <string name="onboarding_camera_windshield_skip">Nei takk</string>
     <string name="onboarding_vehicle_title">Sørg for å overkjøre batteriet</string>
-    <string name="onboarding_vehicle_body">Velg din modell og vi fyller ut kWh, eller skriv den selv (15–120). Dette gjør rekkevidde og ladingsestimater nøyaktig. Du kan hoppe over og sette den senere.</string>
+    <string name="onboarding_vehicle_body">Velg din modell og vi fyller ut kWh, eller skriv den selv (5–120). Dette gjør rekkevidde og ladingsestimater nøyaktig. Du kan hoppe over og sette den senere.</string>
     <string name="onboarding_vehicle_primary">Angi batteri</string>
     <string name="onboarding_dash_tiles_title">Din cockpit med et titt</string>
     <string name="onboarding_dash_tiles_body">Disse kortene er knappene – Trykk for å åpne Live kamera, Opptaksninger, Tjenester eller Kjøretøyet.</string>
@@ -1085,6 +1082,10 @@
     <string name="projection_preset_right">Høyre halvdel</string>
     <string name="projection_preset_center">Midtstilt</string>
     <string name="projection_lock_aspect">Behold cluster aspect</string>
+    <string name="dashboard_modern_vehicle_status">Kjøretøystatus</string>
+    <string name="vehicle_dialog_detection">Gjenkjenning: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automatisk</string>
+    <string name="vehicle_dialog_detection_manual">Manuell</string>
     <!-- Rail category headers -->
     <string name="rail_section_cameras">Kameraer</string>
     <string name="rail_section_controls">Kontroller</string>

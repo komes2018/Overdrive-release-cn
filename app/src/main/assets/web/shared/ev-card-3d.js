@@ -670,14 +670,22 @@
         loadManifest().then(function (manifest) {
             if (gen !== self._loadGen) return;
             if (!manifest) return; // no manifest → canvas stays empty
+            var modelEntry = null;
+            var manifestModels = manifest.models || [];
+            for (var i = 0; i < manifestModels.length; i++) {
+                if (manifestModels[i].id === modelId) {
+                    modelEntry = manifestModels[i];
+                    break;
+                }
+            }
             resolveModelUrl(modelId, manifest, function (url, err) {
                 if (gen !== self._loadGen || err || !url) return;
-                self._loadGlb(url, gen);
+                self._loadGlb(url, gen, modelEntry);
             });
         });
     };
 
-    OverdriveEvCard3D.prototype._loadGlb = function (url, gen) {
+    OverdriveEvCard3D.prototype._loadGlb = function (url, gen, modelEntry) {
         var self = this;
         var T = window.THREE;
         var loader = new T.GLTFLoader();
@@ -691,6 +699,10 @@
             self._disposeCarModel();
             self.carModel = gltf.scene;
             self.bodyPaintMeshes = [];
+            var paintMeshHint = modelEntry
+                    && typeof modelEntry.paintMeshHint === 'string'
+                ? modelEntry.paintMeshHint.toLowerCase()
+                : '';
 
             // Same body-paint detector as vehicle-control._loadModelFromPath.
             self.carModel.traverse(function (node) {
@@ -698,12 +710,18 @@
                 var mat = node.material;
                 if (!mat || !mat.color) return;
                 if (mat.transparent || mat.opacity < 0.95) return;
-                var col = mat.color;
-                var brightness = col.r * 0.299 + col.g * 0.587 + col.b * 0.114;
-                if (brightness < 0.08) return;          // tyres / rubber
-                if (brightness > 0.85) return;          // chrome / lights
-                var metal = mat.metalness !== undefined ? mat.metalness : 0;
-                if (metal >= 0.95) return;              // chrome
+                if (paintMeshHint) {
+                    var paintName = ((node.name || '') + ' '
+                        + (mat.name || '')).toLowerCase();
+                    if (paintName.indexOf(paintMeshHint) < 0) return;
+                } else {
+                    var col = mat.color;
+                    var brightness = col.r * 0.299 + col.g * 0.587 + col.b * 0.114;
+                    if (brightness < 0.08) return;       // tyres / rubber
+                    if (brightness > 0.85) return;       // chrome / lights
+                    var metal = mat.metalness !== undefined ? mat.metalness : 0;
+                    if (metal >= 0.95) return;           // chrome
+                }
                 self.bodyPaintMeshes.push(node);
             });
 

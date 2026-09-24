@@ -194,6 +194,17 @@ public final class PermissionGranter {
         "android.permission.BYDDIAGNOSTIC_SEND_BUFFER",
     };
 
+    private static final String[] DILINK5_PERMISSIONS = {
+        "android.permission.BYDAUTO_SENSOR_COMMON",
+        "android.permission.BYDAUTO_OTA_COMMON",
+        "android.permission.BYDAUTO_POWER_COMMON",
+        "android.permission.BYDAUTO_REAR_VIEW_MIRROR_COMMON",
+        "android.permission.BYDAUTO_MOTOR_COMMON",
+        "android.permission.BYDAUTO_VEHICLEHEALTH_COMMON",
+        "android.permission.BYDAUTO_VEHICLEHEALTH_GET",
+        "android.permission.BYD",
+    };
+
     private PermissionGranter() {}
 
     /**
@@ -216,10 +227,11 @@ public final class PermissionGranter {
     public static void grantAllPermissions(String packageName) {
         if (hasRun) return;
         hasRun = true;
+        final String[] permissions = permissionsForCurrentMode();
 
         grantThread = new Thread(() -> {
             log("Granting permissions for " + packageName 
-                + " (UID " + android.os.Process.myUid() + ", " + ALL_PERMISSIONS.length + " total)");
+                + " (UID " + android.os.Process.myUid() + ", " + permissions.length + " total)");
             long start = System.currentTimeMillis();
             int granted = 0;
             int failed = 0;
@@ -247,13 +259,13 @@ public final class PermissionGranter {
             // matches the "already held" counter in the Done line — dumpsys
             // also reports grants we never attempt (auto-granted install-time
             // and vendor permissions outside ALL_PERMISSIONS).
-            alreadyGranted.retainAll(java.util.Arrays.asList(ALL_PERMISSIONS));
+            alreadyGranted.retainAll(java.util.Arrays.asList(permissions));
             if (!alreadyGranted.isEmpty()) {
-                log("dumpsys: " + alreadyGranted.size() + " of " + ALL_PERMISSIONS.length
+                log("dumpsys: " + alreadyGranted.size() + " of " + permissions.length
                     + " grant-list permissions already held — skipping those");
             }
 
-            for (String permission : ALL_PERMISSIONS) {
+            for (String permission : permissions) {
                 // Check if daemon is shutting down — stop spawning new processes
                 if (Thread.currentThread().isInterrupted()) {
                     log("Interrupted — aborting remaining grants");
@@ -304,6 +316,21 @@ public final class PermissionGranter {
         }, "PermissionGranter");
         grantThread.setDaemon(true);
         grantThread.start();
+    }
+
+    private static String[] permissionsForCurrentMode() {
+        if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            return ALL_PERMISSIONS;
+        }
+        String[] permissions = java.util.Arrays.copyOf(
+                ALL_PERMISSIONS, ALL_PERMISSIONS.length + DILINK5_PERMISSIONS.length);
+        System.arraycopy(
+                DILINK5_PERMISSIONS,
+                0,
+                permissions,
+                ALL_PERMISSIONS.length,
+                DILINK5_PERMISSIONS.length);
+        return permissions;
     }
     
     /**

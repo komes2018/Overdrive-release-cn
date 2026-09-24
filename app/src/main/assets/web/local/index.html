@@ -10,11 +10,11 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=7"></script>
-    <script src="../shared/app-shell.js?v=5"></script>
+    <script src="../shared/theme.js?v=8"></script>
+    <script src="../shared/app-shell.js?v=7"></script>
     <link rel="stylesheet" href="../shared/leaflet.css">
     <script src="../shared/leaflet.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=24">
+    <link rel="stylesheet" href="../shared/styles.css?v=34">
 </head>
 <body class="dashboard-page">
     <div class="app-layout">
@@ -292,6 +292,10 @@
                             <a class="dash-command" href="trips.html">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17h2v-7l4 4 4-4 4 4 4-4v7h2"/><path d="M4 5h16"/></svg>
                                 <span data-i18n="dashboard.cmd_trips">Trips</span>
+                            </a>
+                            <a class="dash-command" href="parking.html">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/></svg>
+                                <span data-i18n="dashboard.cmd_parking">Parking</span>
                             </a>
                         </div>
                     </article>
@@ -1511,7 +1515,7 @@
     <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js?v=20"></script>
     <script src="../shared/update-flow.js"></script>
-    <script src="../shared/map.js?v=1"></script>
+    <script src="../shared/map.js?v=6"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
@@ -2297,7 +2301,10 @@
                     stateFallback = 'Charge fault';
                     detailKey = 'dashboard.drive_detail_fault';
                     detailFallback = 'Charging system needs attention';
-                } else if (charging.charging === true && (Number(charging.powerKw || charging.chargingPowerKW || 0) > 0 || charging.gunConnected === true || charging.gunState > 0)) {
+                } else if (charging.charging === true
+                    && (Number(charging.powerKw || charging.chargingPowerKW || 0) > 0
+                        || charging.gunConnected === true
+                        || charging.plugged === true)) {
                     mode = 'charging';
                     stateKey = 'dashboard.drive_state_charging';
                     stateFallback = 'Charging';

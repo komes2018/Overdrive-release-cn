@@ -4,6 +4,7 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import android.util.Log
+import com.overdrive.app.camera.dilink5.DiLink5Platform
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -226,7 +227,12 @@ object ConfigBackupService {
 
     // ==================== IMPORT ====================
 
-    data class ApplyResult(val success: Boolean, val message: String, val warnings: List<String>)
+    data class ApplyResult(
+        val success: Boolean,
+        val message: String,
+        val warnings: List<String>,
+        val restartRequired: Boolean = false,
+    )
     private data class ExportSnapshot(
         val unified: JSONObject,
         val did: DidSnapshot,
@@ -245,11 +251,14 @@ object ConfigBackupService {
         val didChanged: Boolean,
         val secretsDecryptable: Boolean,
         val skipSections: Set<String>,
+        val vehicleModeChanged: Boolean,
     )
     private class SohLineageResetException(
         message: String,
         cause: Throwable? = null,
     ) : IllegalStateException(message, cause)
+    private class VehicleModeStagingException :
+        IllegalStateException("Could not stage the restored vehicle mode safely")
 
     /**
      * Validate a bundle WITHOUT writing anything. Used by the import-preview
@@ -429,6 +438,39 @@ object ConfigBackupService {
 
                     UnifiedConfigManager.ensureDefaults(toWrite)
 
+                    val currentCamera = current.optJSONObject("camera")
+                    val currentVehicleMode = if (currentCamera != null
+                            && currentCamera.has("cameraMode")
+                            && !currentCamera.isNull("cameraMode")) {
+                        DiLink5Platform.normalizeConfiguredMode(
+                            currentCamera.optString("cameraMode", "")
+                        ) ?: DiLink5Platform.currentActiveMode()
+                    } else {
+                        DiLink5Platform.currentActiveMode()
+                    }
+                    val restoredCamera = toWrite.optJSONObject("camera")
+                        ?: JSONObject().also { toWrite.put("camera", it) }
+                    val restoredVehicleMode = if (!restoredCamera.has("cameraMode")) {
+                        // Backups predating the selector preserve the mode already
+                        // active on this vehicle. Only an explicit "default" may
+                        // opt a DI5 vehicle back into the legacy runtime.
+                        restoredCamera.put("cameraMode", currentVehicleMode)
+                        currentVehicleMode
+                    } else {
+                        if (restoredCamera.isNull("cameraMode")) {
+                            throw VehicleModeStagingException()
+                        }
+                        DiLink5Platform.normalizeConfiguredMode(
+                            restoredCamera.optString("cameraMode", "")
+                        ) ?: throw VehicleModeStagingException()
+                    }
+                    if (!DiLink5Platform.stageConfiguredMode(
+                            restoredVehicleMode, currentVehicleMode)) {
+                        throw VehicleModeStagingException()
+                    }
+                    val vehicleModeChanged =
+                        !DiLink5Platform.isActiveMode(restoredVehicleMode)
+
                     // A model-lineage boundary is durable before the new model
                     // identity can become durable. A crash between these writes
                     // leaves either old-model+cleared-SOH or new-model+cleared-SOH.
@@ -452,6 +494,7 @@ object ConfigBackupService {
                         didChanged = didWrite.changed,
                         secretsDecryptable = secretsDecryptable,
                         skipSections = skipSections,
+                        vehicleModeChanged = vehicleModeChanged,
                     )
                 } catch (t: Throwable) {
                     if (File(RESTORE_JOURNAL_PATH).exists()) {
@@ -472,6 +515,9 @@ object ConfigBackupService {
             val message = if (t is SohLineageResetException) {
                 "Could not restore settings because battery-health model lineage " +
                     "could not be reset durably."
+            } else if (t is VehicleModeStagingException) {
+                "Could not restore settings because the vehicle mode could not " +
+                    "be staged safely."
             } else {
                 "Could not write settings. The config may be locked or damaged — " +
                     "try again after restarting the camera service."
@@ -505,6 +551,11 @@ object ConfigBackupService {
                 warnings.add("Because $reason, these saved credentials were not restored " +
                     "$disposition — re-enter if needed: $names.")
             }
+        }
+
+        if (transaction.vehicleModeChanged) {
+            warnings.add("The restored vehicle mode is staged and will remain inactive " +
+                "until the camera daemon is safely restarted.")
         }
 
         // The whole-config write bypasses the charging API callback, so its
@@ -556,7 +607,12 @@ object ConfigBackupService {
         }
 
         Log.i(TAG, "Backup applied (warnings=${warnings.size})")
-        return ApplyResult(true, "Settings restored.", warnings)
+        return ApplyResult(
+            true,
+            "Settings restored.",
+            warnings,
+            restartRequired = transaction.vehicleModeChanged,
+        )
     }
 
     // ==================== helpers ====================

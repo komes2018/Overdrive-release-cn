@@ -272,6 +272,9 @@ public class GpuMosaicRecorder {
     private int consecutiveSlowFrames = 0;
     private static final int SLOW_FRAME_SKIP_THRESHOLD = 20; // ~0.7 s at 30 fps
     private int skippedFrames = 0;
+    // Consecutive encoder draws skipped because the encoder's drainer thread
+    // is not running (see the backpressure guard in drawFrame). GL thread only.
+    private int drainerDownSkips = 0;
     // Default probe — never trips. PanoramicCameraGpu installs the real one
     // pointing at BydCameraCoordinator.isNativeAppActive(); if no one wires
     // it, the safety valve stays inert and eglSwap handles backpressure
@@ -428,12 +431,35 @@ public class GpuMosaicRecorder {
         "    gl_FragColor = texture2D(uTexture, vTexCoord);\n" +
         "}\n";
 
+    private final boolean isTexture2D;
+    // Sampler type for the dedicated windshield texture (unit 2). Independent
+    // of isTexture2D because DiLink 5 (isTexture2D=true) still feeds an
+    // EXTERNAL_OES windshield, while the decoupled encoder lane feeds a 2D
+    // ring copy. Baked into the fragment shader at construction.
+    private final boolean windshieldTexture2D;
+
     public GpuMosaicRecorder() {
-        this(null, DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT);
+        this(null, DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT, false);
+    }
+
+    public GpuMosaicRecorder(boolean isTexture2D) {
+        this(null, DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT, isTexture2D);
+    }
+
+    public GpuMosaicRecorder(boolean isTexture2D, boolean windshieldTexture2D) {
+        this(null, DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT,
+            isTexture2D, windshieldTexture2D);
     }
 
     public GpuMosaicRecorder(float[] quadrantStripOffsetX) {
-        this(quadrantStripOffsetX, DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT);
+        this(quadrantStripOffsetX, DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT, false);
+    }
+
+    public GpuMosaicRecorder(
+            float[] quadrantStripOffsetX,
+            int viewportWidth,
+            int viewportHeight) {
+        this(quadrantStripOffsetX, viewportWidth, viewportHeight, false);
     }
 
     /**
@@ -448,7 +474,29 @@ public class GpuMosaicRecorder {
      *     configured height — typically {@code panoHeight*2} (1920 on Seal,
      *     1440 on Tang).
      */
-    public GpuMosaicRecorder(float[] quadrantStripOffsetX, int viewportWidth, int viewportHeight) {
+    public GpuMosaicRecorder(
+            float[] quadrantStripOffsetX,
+            int viewportWidth,
+            int viewportHeight,
+            boolean isTexture2D) {
+        this(quadrantStripOffsetX, viewportWidth, viewportHeight, isTexture2D, false);
+    }
+
+    /**
+     * Full constructor. {@code windshieldTexture2D} selects the sampler type
+     * for the dedicated windshield camera texture (dashcam top band): false =
+     * EXTERNAL_OES (legacy + DiLink 5, unchanged), true = sampler2D — used by
+     * the decoupled encoder lane, whose windshield frames arrive as app-owned
+     * ring copies rather than the camera-owned OES texture.
+     */
+    public GpuMosaicRecorder(
+            float[] quadrantStripOffsetX,
+            int viewportWidth,
+            int viewportHeight,
+            boolean isTexture2D,
+            boolean windshieldTexture2D) {
+        this.isTexture2D = isTexture2D;
+        this.windshieldTexture2D = windshieldTexture2D;
         this.quadrantStripOffsetX = normalizeOffsets(quadrantStripOffsetX);
         this.viewportWidth = viewportWidth > 0 ? viewportWidth : DEFAULT_VIEWPORT_WIDTH;
         this.viewportHeight = viewportHeight > 0 ? viewportHeight : DEFAULT_VIEWPORT_HEIGHT;
@@ -458,7 +506,8 @@ public class GpuMosaicRecorder {
         float topBandAspect =
             ((float) this.viewportWidth / (float) this.viewportHeight) / DASHCAM_SPLIT;
         float cropY = windshieldCropY(WINDSHIELD_SOURCE_ASPECT, topBandAspect);
-        this.fragmentShader = buildFragmentShader(this.quadrantStripOffsetX, cropY);
+        this.fragmentShader = buildFragmentShader(
+            this.quadrantStripOffsetX, cropY, isTexture2D, windshieldTexture2D);
     }
 
     /**
@@ -772,6 +821,28 @@ public class GpuMosaicRecorder {
             return;
         }
 
+        // BACKPRESSURE GUARD: never draw into the encoder input surface while
+        // no drainer thread is consuming the codec's output. MediaCodec has a
+        // handful of output slots; with nobody dequeuing them the input
+        // BufferQueue fills within ~2 s at 10 fps and eglSwapBuffers below
+        // blocks the GL thread for as long as the drainer stays down — the
+        // GL watchdog then kills the process (field incident log_DG87KWQX:
+        // the drainer was stopped for a recording close that wedged on a
+        // stalled SD card). The drainer is down only for teardown windows
+        // (recording close, camera close/yield, release), during which no
+        // frame could reach the pre-record ring or a muxer anyway, so a
+        // skipped frame here loses nothing. Volatile read; no lock.
+        HardwareEventRecorderGpu enc = encoder;
+        if (enc != null && !enc.isDrainerRunning()) {
+            drainerDownSkips++;
+            if (drainerDownSkips % 50 == 1) {
+                logger.info("Encoder drainer not running — skipped " + drainerDownSkips
+                    + " encoder draws to keep the GL thread off codec backpressure");
+            }
+            return;
+        }
+        drainerDownSkips = 0;
+
         // SOTA: Always render to encoder (for pre-record buffer)
         // The encoder decides whether to write to file or just buffer
 
@@ -805,15 +876,24 @@ public class GpuMosaicRecorder {
 
         // Bind camera texture
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+        GLES20.glBindTexture(
+            isTexture2D ? GLES20.GL_TEXTURE_2D
+                        : GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
+            cameraTextureId);
         GLES20.glUniform1i(uCameraTexLocation, 0);
         // Bind the optional windshield texture to unit 2 (dashcam top band).
         // Fall back to the camera texture when no windshield frame is ready so
         // the external sampler always has a valid binding; the shader gates
-        // actual use on uWindshieldReady.
+        // actual use on uWindshieldReady. Bind target follows the sampler type
+        // baked into the shader (windshieldTexture2D — decoupled encoder lane
+        // ring copies are plain 2D; legacy + DiLink 5 stay EXTERNAL_OES).
         GLES20.glActiveTexture(GLES20.GL_TEXTURE2);
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
-            (windshieldReady && windshieldTextureId != 0) ? windshieldTextureId : cameraTextureId);
+        GLES20.glBindTexture(
+            windshieldTexture2D ? GLES20.GL_TEXTURE_2D
+                                : GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
+            (windshieldReady && windshieldTextureId != 0)
+                ? windshieldTextureId
+                : (isTexture2D ? 0 : cameraTextureId));
         if (uWindshieldTexLocation >= 0) {
             GLES20.glUniform1i(uWindshieldTexLocation, 2);
         }
@@ -855,7 +935,9 @@ public class GpuMosaicRecorder {
         // frames pay zero uniform uploads + zero lock acquisitions.
         if (uniformsDirty.compareAndSet(true, false)) {
             if (uApplyManualYFlipLocation >= 0) {
-                // Layouts 1 and 3 consume SurfaceTexture output. Layouts 0, 2 and DiLink 5 need the manual flip.
+                // Layouts 1 and 3 consume SurfaceTexture output, whose matrix
+                // already contains the producer Y-flip. Layouts 0 and 2 use
+                // the legacy orientation and still need the manual flip.
                 GLES20.glUniform1f(uApplyManualYFlipLocation,
                     (cameraLayout == 1 || cameraLayout == 3) ? 0.0f : 1.0f);
             }
@@ -1771,7 +1853,7 @@ public class GpuMosaicRecorder {
     }
 
     public void setRedMaskEnabled(boolean enabled) {
-        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {
             enabled = false;
         }
         if (enabled == this.redMaskEnabled) return;
@@ -2018,7 +2100,11 @@ public class GpuMosaicRecorder {
      * → {TL, TR, BL, BR}. 3-cam (uApaMode > 1.5) and APA (uApaMode > 0.5)
      * branches are layout-independent and stay as-is.
      */
-    private static String buildFragmentShader(float[] offsets, float windshieldCropY) {
+    private static String buildFragmentShader(
+            float[] offsets,
+            float windshieldCropY,
+            boolean isTexture2D,
+            boolean windshieldTexture2D) {
         // uApaMode branches:
         //   0.0  4-camera mosaic: sample 4 quadrants of a 5120x960 horizontal
         //        strip and rearrange into 2x2 corners (legacy Seal layout).
@@ -2026,11 +2112,24 @@ public class GpuMosaicRecorder {
         //   2.0  3-camera mosaic (Atto 3): rear=left half, front=top-right,
         //        left+right=bottom-right.
         //   3.0  DiLink 4 four-corner producer remap.
+        String cameraSampler = isTexture2D
+            ? "uniform sampler2D uCameraTex;\n"
+            : "uniform samplerExternalOES uCameraTex;\n";
+        // Windshield sampler type is independent of the camera's: DiLink 5
+        // keeps an OES windshield with a 2D camera, the decoupled encoder
+        // lane feeds 2D ring copies for both. texture2D() sampling below is
+        // valid GLSL ES for either sampler type, so only this declaration
+        // (and the bind target in drawFrame) changes.
+        String windshieldSampler = windshieldTexture2D
+            ? "uniform sampler2D uWindshieldTex;\n"
+            : "uniform samplerExternalOES uWindshieldTex;\n";
+        String fullFrameSampling = "        samplePos = vTexCoord;\n";
         return String.format(Locale.US,
-            "#extension GL_OES_EGL_image_external : require\n" +
+            "#extension GL_OES_EGL_image_external : "
+                + (isTexture2D ? "enable\n" : "require\n") +
             "precision mediump float;\n" +
-            "uniform samplerExternalOES uCameraTex;\n" +
-            "uniform samplerExternalOES uWindshieldTex;\n" +
+            cameraSampler +
+            windshieldSampler +
             "uniform float uWindshieldReady;\n" +
             "uniform float uApaMode;\n" +
             "uniform vec2 uProducerForFront;\n" +
@@ -2147,9 +2246,7 @@ public class GpuMosaicRecorder {
             "            samplePos = vec2(0.25 + lx * 0.5, vTexCoord.y);\n" +
             "        }\n" +
             "    } else if (uApaMode > 0.5) {\n" +
-            "        // DiLink 5 1:1 direct camera stream: center-crop 1920x1300 source to 1920x1080 canvas (16:9)\n" +
-            "        float cropY = 0.0846;\n" +
-            "        samplePos = vec2(vTexCoord.x, cropY + vTexCoord.y * (1.0 - 2.0 * cropY));\n" +
+            fullFrameSampling +
             "    } else if (uRecordLayout > 0.5) {\n" +
             // Dashcam composition (4-camera 360 source only). The 360 front
             // slice fills the top `split` band at full width; the 360

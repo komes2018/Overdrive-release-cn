@@ -1,12 +1,12 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <resources>
     <string name="dashboard_modern_vehicle_status">מצב הרכב</string>
-    <string name="dashboard_modern_updating">מעדכן מצב רכב</string>
-    <string name="dashboard_modern_vehicle_unavailable">נתוני רכב לא זמינים</string>
+    <string name="dashboard_modern_updating">מעדכן את מצב הרכב</string>
+    <string name="dashboard_modern_vehicle_unavailable">נתוני הרכב לא זמינים</string>
     <string name="dashboard_modern_vehicle_connected">הרכב מחובר</string>
     <string name="dashboard_modern_battery">סוללה</string>
     <string name="dashboard_modern_range">טווח משוער</string>
-    <string name="dashboard_modern_personalized_range">טווח מותאם</string>
+    <string name="dashboard_modern_personalized_range">טווח מותאם אישית</string>
     <string name="dashboard_modern_vehicle_range">הערכת הרכב</string>
     <string name="dashboard_modern_breakdown_ev">EV %1$d %2$s</string>
     <string name="dashboard_modern_breakdown_fuel">דלק %1$d %2$s</string>
@@ -21,12 +21,12 @@
     <string name="dashboard_modern_charge_power_estimated">~%1$.1f kW</string>
     <string name="dashboard_modern_charge_power_label">הספק</string>
     <string name="dashboard_modern_charge_eta_label">זמן שנותר</string>
-    <string name="dashboard_modern_charge_session_label">בסשן הזה</string>
+    <string name="dashboard_modern_charge_session_label">במקטע הזה</string>
     <string name="dashboard_modern_charge_session">%1$.1f kWh</string>
     <string name="dashboard_modern_minutes">%1$d דק׳</string>
     <string name="dashboard_modern_hours_minutes">%1$d שע׳ %2$d דק׳</string>
     <string name="dashboard_modern_storage_summary">%1$s בשימוש · %2$s פנויים</string>
-    <string name="dashboard_modern_storage_unavailable">אחסון לא זמין</string>
+    <string name="dashboard_modern_storage_unavailable">האחסון לא זמין</string>
     <string name="dashboard_modern_clips_today">%1$d קליפים היום</string>
     <string name="dashboard_modern_recordings_unavailable">הקלטות לא זמינות</string>
     <string name="dashboard_modern_recent_activity">פעילות אחרונה</string>

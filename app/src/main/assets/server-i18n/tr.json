@@ -1085,14 +1085,7 @@
     "mqtt_trigger": "MQTT Mesajı",
     "mqtt_trigger_description": "MQTT aracınız <base>/automation/<channel> konusuna yayın yaptığında tetiklenir (ör. Home Assistant'tan). Kanal adını girin ve değerini eşleştirin.",
     "mqtt_channel": "Kanal",
-    "mqtt_value": "Değer",
-      "wait_until_state_description": "Seçilen bir açık/kapalı sinyali bir duruma ulaşana veya zaman aşımına uğrayana kadar kalan eylemleri duraklatın. Örnek: devam etmeden önce Indicators = Off olana kadar bekleyin.",
-      "wait_timeout": "Zaman aşımı (saniye)",
-      "wait_until_description": "Seçilen bir sinyal bir karşılaştırmayı karşılayana veya zaman aşımına uğrayana kadar kalan eylemleri duraklatın. Örnek: camları kapatmadan önce Speed = 0 olana kadar bekleyin.",
-      "save_seat_position": "Koltuk Konumunu Kaydet",
-      "save_seat_position_description": "Mevcut sürücü koltuğu konumunu bir hafıza yuvasına kaydedin.",
-      "set_seat_position": "Koltuk Konumunu Kontrol Et",
-      "set_seat_position_description": "Bir koltuk hafıza konumunu yükleyin. Hafızanın önce araçtan kaydedildiğinden emin olun. Bu kontrol araç kapalıyken çalışmaz."
+    "mqtt_value": "Değer"
   },
   "messages": {
     "logged_out": "Çıkış .",

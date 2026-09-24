@@ -5,6 +5,7 @@ import android.opengl.GLES20;
 import android.opengl.GLES30;
 
 import com.overdrive.app.camera.GlUtil;
+import com.overdrive.app.camera.dilink5.DiLink5Platform;
 import com.overdrive.app.logging.DaemonLogger;
 
 import java.nio.Buffer;
@@ -176,6 +177,25 @@ public class FoveatedCropper {
         "    gl_FragColor = src;\n" +
         "}\n";
 
+    private static String buildFragmentShader(boolean isTexture2D) {
+        if (!isTexture2D) return FRAGMENT_SHADER;
+        return
+            "precision mediump float;\n" +
+            "uniform sampler2D uCameraTex;\n" +
+            "uniform vec4 uCropRect;\n" +
+            "uniform float uRedMaskStrength;\n" +
+            "varying vec2 vTexCoord;\n" +
+            "void main() {\n" +
+            "    vec2 samplePos = vec2(\n" +
+            "        uCropRect.x + vTexCoord.x * uCropRect.z,\n" +
+            "        uCropRect.y + vTexCoord.y * uCropRect.w\n" +
+            "    );\n" +
+            "    vec4 src = texture2D(uCameraTex, samplePos);\n" +
+            com.overdrive.app.camera.GlUtil.RED_MASK_GLSL +
+            "    gl_FragColor = src;\n" +
+            "}\n";
+    }
+
     private static final float[] VERTEX_COORDS = {
         -1.0f, -1.0f,
          1.0f, -1.0f,
@@ -205,6 +225,7 @@ public class FoveatedCropper {
         0.00f, 0.50f,  // Rear  (BL)
         0.50f, 0.50f   // Left  (BR)
     };
+    private final boolean isTexture2D;
 
     public FoveatedCropper() {
         this(5120, 960, DEFAULT_QUADRANT_STRIP_OFFSET_X,
@@ -231,6 +252,15 @@ public class FoveatedCropper {
     public FoveatedCropper(int stripWidth, int stripHeight,
                            float[] quadrantStripOffsetX,
                            float[] quadrantCornerOffsetsXY) {
+        this(stripWidth, stripHeight, quadrantStripOffsetX,
+            quadrantCornerOffsetsXY, false);
+    }
+
+    public FoveatedCropper(int stripWidth, int stripHeight,
+                           float[] quadrantStripOffsetX,
+                           float[] quadrantCornerOffsetsXY,
+                           boolean isTexture2D) {
+        this.isTexture2D = isTexture2D;
         this.stripWidth = Math.max(1, stripWidth);
         this.stripHeight = Math.max(1, stripHeight);
         this.quadrantStripOffsetX = (quadrantStripOffsetX != null && quadrantStripOffsetX.length == 4)
@@ -316,7 +346,8 @@ public class FoveatedCropper {
 
     public void init() {
         try {
-            program = GlUtil.createProgram(VERTEX_SHADER, FRAGMENT_SHADER);
+            program = GlUtil.createProgram(
+                VERTEX_SHADER, buildFragmentShader(isTexture2D));
             if (program == 0) {
                 logger.error("Foveated crop shader compilation failed");
                 return;
@@ -445,13 +476,11 @@ public class FoveatedCropper {
         // Hoisted out of the corner branch so the affine build below sees it.
         float xFlipOut = 0f, yFlipOut = 0f;
         if (useCornerLayout) {
-            // 2x2 mosaic: each role lives in a 0.5×0.5 corner of the
-            // producer frame. The producer is roughly stripWidth/2 wide and
-            // stripHeight*2 tall when the recorder configured 5120×960 →
-            // 2560×1920 (or whatever the HAL emits). CROP_SIZE in
-            // normalised UV is CROP_SIZE / producer_dim.
-            int producerW = Math.max(1, stripWidth / 2);
-            int producerH = Math.max(1, stripHeight * 2);
+            // DiLink 4 receives legacy strip geometry for its 2x2 producer;
+            // DiLink 5 is configured with the producer's actual dimensions.
+            boolean dilink5 = cameraLayout == 1 && DiLink5Platform.isEnabled();
+            int producerW = Math.max(1, dilink5 ? stripWidth : stripWidth / 2);
+            int producerH = Math.max(1, dilink5 ? stripHeight : stripHeight * 2);
             cropWidthNorm = (float) CROP_SIZE / producerW;
             cropHeightNorm = (float) CROP_SIZE / producerH;
             // Look up role corner + flip. quadrant order matches
@@ -582,7 +611,10 @@ public class FoveatedCropper {
 
         GLES20.glUseProgram(program);
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+        GLES20.glBindTexture(
+            isTexture2D ? GLES20.GL_TEXTURE_2D
+                        : GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
+            cameraTextureId);
         GLES20.glUniform1i(uCameraTex, 0);
         GLES20.glUniform4f(uCropRect, cropLeft, cropTop, cropWidthNorm, cropHeightNorm);
         if (uRedMaskStrength >= 0) {

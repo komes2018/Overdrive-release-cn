@@ -25,7 +25,7 @@ object BlindSpotControl {
     private const val BASE_URL = "http://127.0.0.1:8080"
 
     /** Hard cap on the re-arm loop so it always converges (covers daemon cold-start + pano cold-start). */
-    private const val REARM_DEADLINE_MS = 30_000L
+    private const val REARM_DEADLINE_MS = 60_000L
     /** Backoff ceiling between re-arm polls. */
     private const val REARM_MAX_BACKOFF_MS = 2_000L
 
@@ -96,10 +96,13 @@ object BlindSpotControl {
      */
     private fun armWithRetry(gen: Int) {
         Thread({
-            val deadline = System.currentTimeMillis() + REARM_DEADLINE_MS
+            // The head unit can correct wall time from GPS/network during
+            // boot. Use a monotonic deadline so that correction cannot end the
+            // arm loop early or extend its HTTP/config polling unexpectedly.
+            val deadline = android.os.SystemClock.elapsedRealtime() + REARM_DEADLINE_MS
             var delayMs = 500L
             var attempts = 0
-            while (System.currentTimeMillis() < deadline) {
+            while (android.os.SystemClock.elapsedRealtime() < deadline) {
                 // Superseded by a newer sync (disable OR fresh enable): stop, do not POST.
                 if (armGeneration.get() != gen) {
                     return@Thread

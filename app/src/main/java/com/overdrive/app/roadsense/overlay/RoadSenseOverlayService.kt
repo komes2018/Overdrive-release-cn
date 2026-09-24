@@ -591,16 +591,19 @@ class RoadSenseOverlayService : Service() {
             // hid which hazard was actually next and how far it was. The "there are
             // several" awareness now comes from the sequential reveal, not a number.
             val zoneCaption: String? = when {
-                state.zoneRough -> getString(R.string.roadsense_zone_rough, state.zoneLengthM)
+                state.zoneRough -> localizedString(
+                    R.string.roadsense_zone_rough,
+                    state.zoneLengthM,
+                )
                 else -> null
             }
-            pillLabel?.text = getString(
+            pillLabel?.text = localizedString(
                 R.string.roadsense_hazard_format,
-                "${state.nextHazardMeters}${getString(R.string.roadsense_unit_meters)}",
+                "${state.nextHazardMeters}${localizedString(R.string.roadsense_unit_meters)}",
                 zoneCaption ?: severityLabel(state.nextHazardSeverity),
             )
             hazardDistance?.text = state.nextHazardMeters.toString()
-            hazardSeverity?.text = zoneCaption ?: getString(
+            hazardSeverity?.text = zoneCaption ?: localizedString(
                 R.string.roadsense_hazard_format,
                 severityLabel(state.nextHazardSeverity),
                 typeLabel(state.nextHazardType),
@@ -653,7 +656,7 @@ class RoadSenseOverlayService : Service() {
         val pending = if (stale) null else state.pendingConfirm
         if (pending != null) {
             confirmPanel?.visibility = View.VISIBLE
-            confirmAssessment?.text = getString(
+            confirmAssessment?.text = localizedString(
                 R.string.roadsense_hazard_format,
                 severityLabel(pending.algoSeverity),
                 typeLabel(pending.algoType),
@@ -778,12 +781,22 @@ class RoadSenseOverlayService : Service() {
 
     // ── Helpers ────────────────────────────────────────────────────────────────
 
-    private fun severityLabel(sev: Int): String = getString(
+    /** Dynamic strings must use the same locale-aware context as the inflated views. */
+    private fun localizedString(resId: Int, vararg formatArgs: Any): String {
+        val context = themedCtx ?: this
+        return if (formatArgs.isEmpty()) {
+            context.getString(resId)
+        } else {
+            context.getString(resId, *formatArgs)
+        }
+    }
+
+    private fun severityLabel(sev: Int): String = localizedString(
         when (sev) { 1 -> R.string.roadsense_sev_minor; 2 -> R.string.roadsense_sev_moderate
             3 -> R.string.roadsense_sev_severe; else -> R.string.roadsense_clear_ahead }
     )
 
-    private fun typeLabel(type: Int): String = getString(
+    private fun typeLabel(type: Int): String = localizedString(
         when (type) { 0 -> R.string.roadsense_type_breaker; 1 -> R.string.roadsense_type_pothole
             3 -> R.string.roadsense_type_rough; else -> R.string.roadsense_type_hazard }
     )
@@ -840,7 +853,6 @@ class RoadSenseOverlayService : Service() {
             val locale = appLocales[0]
             if (locale != null) {
                 val locList = android.os.LocaleList(locale)
-                android.os.LocaleList.setDefault(locList)
                 cfg.setLocales(locList)
                 overridden = true
             }

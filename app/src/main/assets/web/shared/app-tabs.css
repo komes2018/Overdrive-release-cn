@@ -43,11 +43,10 @@
     /* Bar height is sized for a two-line label so 6-tab pages
        (surveillance) keep "OEM Dashcam" + "Surveillance" readable on the
        BYD portrait panel (1080×1920 → ~820px after the sidebar) without
-       ellipsis-truncating to "OEM D…". The icon row + 2-line label slot
-       is ~78dp; we extend by the bottom safe-area inset so standalone
-       PWAs don't eat into it. */
-    height: calc(78px + var(--safe-bottom, 0px));
-    padding: 6px 8px calc(6px + var(--safe-bottom, 0px));
+       ellipsis-truncating to "OEM D…". The bar paints to the viewport edge;
+       adding the iOS inset as padding creates a separate white strip. */
+    height: 78px;
+    padding: 6px 8px;
     background: var(--bg-glass);
     -webkit-backdrop-filter: saturate(180%) blur(16px);
     backdrop-filter: saturate(180%) blur(16px);
@@ -66,8 +65,8 @@
 @media (max-width: 768px) {
     .bottom-tabs {
         left: 0;
-        height: calc(78px + var(--safe-bottom, 0px));
-        padding: 6px 6px calc(6px + var(--safe-bottom, 0px));
+        height: 78px;
+        padding: 6px;
     }
 }
 
@@ -81,6 +80,15 @@
         left: 0;
         right: 0;
     }
+}
+
+/* The native shell hides the web sidebar. Keep this fallback in the shared
+   layer as well as the first-paint injection so a stale/racing embed style
+   cannot leave the old 260px sidebar-sized strip exposed at the bottom. */
+html[data-android-embed="1"] .bottom-tabs,
+html[data-app-shell="1"] .bottom-tabs {
+    left: 0;
+    right: 0;
 }
 
 .bottom-tabs::before {
@@ -148,29 +156,26 @@
 }
 
 .bottom-tab-label {
-    line-height: 1.1;
+    line-height: 1.15;
     text-align: center;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
     max-width: 100%;
+    max-height: 2.3em;
 }
 
-/* Bump main-content's bottom padding so the last card never hides under
-   the tab bar. .page-body (the inner scroll container some pages use)
-   gets the same lift. Also override the .footer-bar default offset on
-   pages that use OT tabs — the relocated Apply lives in the bar itself. */
-body.ot-tabs-on .main-content,
+/* Reserve the fixed bar once, on the actual scroll container. Applying the
+   same padding to both .main-content and its nested .page-body doubled the
+   empty strip below short pages. */
 body.ot-tabs-on .main-content .page-body {
-    padding-bottom: calc(96px + var(--safe-bottom, 0px));
+    padding-bottom: 96px;
 }
 
 /* Lift any floating action / picture-in-picture overlay above the bottom
-   tab bar so it never blocks the Apply pill. The tab bar is 68dp on
-   tablet+ and 72dp on phone, plus safe-bottom; we add a 16dp gap. */
-body.ot-tabs-on .pip-toggle-btn { bottom: calc(96px + var(--safe-bottom, 0px)); }
-body.ot-tabs-on .pip-container  { bottom: calc(96px + var(--safe-bottom, 0px)); }
-body.ot-tabs-on .toast-container { bottom: calc(96px + var(--safe-bottom, 0px)); }
+   tab bar so it never blocks the Apply pill. */
+body.ot-tabs-on .pip-toggle-btn { bottom: 96px; }
+body.ot-tabs-on .pip-container  { bottom: 96px; }
+body.ot-tabs-on .toast-container { bottom: 96px; }
 
 /* Ensure the tab bar always wins over leaflet, modals, and other overlays. */
 .bottom-tabs { z-index: 400; }
@@ -204,11 +209,7 @@ body.ot-tabs-on .toast-container { bottom: calc(96px + var(--safe-bottom, 0px));
 }
 
 .bottom-tab-action.is-hidden {
-    visibility: hidden;
-    width: 0;
-    margin: 0;
-    padding: 0;
-    border: 0;
+    display: none;
 }
 
 /* Re-style the relocated #btnApply (it was a full-width primary button

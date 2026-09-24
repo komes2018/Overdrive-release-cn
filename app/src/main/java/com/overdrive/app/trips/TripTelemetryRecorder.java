@@ -142,14 +142,52 @@ public class TripTelemetryRecorder {
      * Starts the 5Hz sampling timer and periodic flush timer.
      */
     public void startRecording(long tripId) {
+        // JOURNAL ON INTERNAL STORAGE: the in-flight file used to live in the
+        // user-selected trips dir (usually the SD card). It is the ONLY recovery
+        // source for a trip if the process dies mid-drive, and the field
+        // incident (log_DG87KWQX) showed that same card stalling and dropping
+        // off the bus during a drive — a failed flush there is logged and
+        // dropped (see flushBuffer). The journal now lives next to the trip H2
+        // database on /data/local/tmp and is MOVED to the trips dir as
+        // <dbId>.jsonl.gz when the row is finalized. Falls back to the trips
+        // dir if the journal dir cannot be created.
+        beginRecording(tripId, new File(resolveJournalDir(), tripId + ".jsonl.gz"), null);
+    }
+
+    /**
+     * Re-attach to the journal of a trip that survived a daemon process
+     * restart (same-session resume). Appends to {@code existingFile} — each
+     * flush is an independent gzip member, so the reader
+     * ({@link TelemetryStore#readFromFile}) sees one continuous timeline —
+     * and seeds the live stats/scoring stream from the already-journaled
+     * {@code history} (1 Hz on disk) so the trip-end distance fallback,
+     * max/avg speed and scores cover the WHOLE trip, not just the part
+     * recorded after the restart.
+     */
+    public void resumeRecording(long tripId, File existingFile, List<TelemetrySample> history) {
+        beginRecording(tripId, existingFile, history);
+    }
+
+    /**
+     * Directory the in-flight journal is written to: the internal journal dir
+     * when available, else the trips dir (legacy behaviour).
+     */
+    public static File resolveJournalDir() {
+        try {
+            File journal = StorageManager.getInstance().getTripJournalDir();
+            if (journal != null) return journal;
+        } catch (Throwable ignored) {}
+        return StorageManager.getInstance().getTripsDir();
+    }
+
+    private void beginRecording(long tripId, File file, List<TelemetrySample> history) {
         if (recording) {
             logger.warn("Already recording trip " + currentTripId + ", ignoring start for " + tripId);
             return;
         }
 
         this.currentTripId = tripId;
-        this.outputFile = new File(StorageManager.getInstance().getTripsDir(),
-                tripId + ".jsonl.gz");
+        this.outputFile = file;
         this.maxSpeedKmh = 0;
         this.speedSumKmh = 0;
         this.speedSampleCount = 0;
@@ -168,6 +206,10 @@ public class TripTelemetryRecorder {
         }
         synchronized (allSamplesLock) {
             allSamples.clear();
+        }
+
+        if (history != null && !history.isEmpty()) {
+            seedFromHistory(history);
         }
 
         recording = true;
@@ -205,7 +247,60 @@ public class TripTelemetryRecorder {
         flushFuture = executor.scheduleAtFixedRate(
                 this::flushBuffer, FIRST_FLUSH_DELAY_MS, FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
 
-        logger.info("Started recording trip " + tripId + " → " + outputFile.getAbsolutePath());
+        logger.info((history != null && !history.isEmpty() ? "Resumed" : "Started")
+                + " recording trip " + tripId + " → " + outputFile.getAbsolutePath()
+                + (history != null && !history.isEmpty()
+                        ? " (seeded from " + history.size() + " journaled samples, "
+                            + String.format("%.2f", totalDistanceKm) + " km)"
+                        : ""));
+    }
+
+    /**
+     * Seed the live accumulators from already-journaled samples (same-session
+     * resume). Distance is GPS-integrated with the recovery path's plausibility
+     * gate — the journal has no dt-integrated CAN distance — and stats mirror
+     * {@link #sample}'s rules as far as the 1 Hz file allows: synthetic
+     * stale-zero samples are indistinguishable on disk, so a resumed trip's
+     * average speed may read marginally low. The hardware odometer delta still
+     * overrides this distance at finalize whenever both edges are available.
+     */
+    private void seedFromHistory(List<TelemetrySample> history) {
+        double prevLat = 0, prevLon = 0;
+        long prevTs = 0;
+        boolean havePrev = false;
+        double dist = 0;
+        for (TelemetrySample s : history) {
+            sampleCountTotal++;
+            boolean haveGps = s.lat != 0 || s.lon != 0;
+            if (haveGps) {
+                sampleCountWithGps++;
+                if (havePrev) {
+                    double seg = haversineKm(prevLat, prevLon, s.lat, s.lon);
+                    long dtMs = s.timestampMs - prevTs;
+                    double dtHr = dtMs > 0 ? dtMs / 3_600_000.0 : (1.0 / 3600.0);
+                    // Same 250 km/h implied-speed gate as TripDatabase's
+                    // reconstruction: rejects teleport glitches, keeps a long
+                    // GPS-dropout leg.
+                    if (seg / dtHr <= 250.0) dist += seg;
+                }
+                prevLat = s.lat; prevLon = s.lon; prevTs = s.timestampMs; havePrev = true;
+            }
+            if (s.speedKmh > 0) speedChannelEverLive = true;
+            if (s.speedKmh > maxSpeedKmh) maxSpeedKmh = s.speedKmh;
+            speedSumKmh += s.speedKmh;
+            speedSampleCount++;
+        }
+        totalDistanceKm = dist;
+        if (havePrev) {
+            lastLat = prevLat;
+            lastLon = prevLon;
+            hasLastGps = true;
+        }
+        // lastSampleMs stays 0 so the first live tick integrates no dt across
+        // the restart gap.
+        synchronized (allSamplesLock) {
+            allSamples.addAll(history);
+        }
     }
 
     /**
@@ -213,6 +308,22 @@ public class TripTelemetryRecorder {
      * @return the telemetry file path, or null if not recording
      */
     public String stopRecording() {
+        return stopRecording(false);
+    }
+
+    /**
+     * @param keepActiveMarker true to leave the in-flight file marker SET
+     *   after stopping. The trip-end flow needs continuous protection: rows
+     *   are finalized (or inserted) only AFTER this returns, and a marker
+     *   cleared here — even for the microseconds until the caller re-asserts
+     *   it — is a window in which a concurrent recovery scan (startup thread
+     *   or POST /api/trips/recover) sees a half-open row plus an unprotected
+     *   file and may finalize, duplicate, or (below-floor branch) DELETE it.
+     *   The caller owns clearing the marker once the row is complete. The
+     *   discard path keeps the default (clear immediately: the file is about
+     *   to be deleted, there is nothing to protect).
+     */
+    public String stopRecording(boolean keepActiveMarker) {
         if (!recording) {
             logger.warn("Not recording, ignoring stop");
             return null;
@@ -239,11 +350,17 @@ public class TripTelemetryRecorder {
             executor = null;
         }
 
-        // Notify StorageManager — clear the in-flight marker first so the
-        // post-save cleanup it triggers can reap this file if a downward
-        // limit change made it the oldest over-limit file.
+        // Notify StorageManager. Default path clears the in-flight marker
+        // first so the post-save cleanup it triggers can reap this file if a
+        // downward limit change made it the oldest over-limit file. The
+        // trip-end flow passes keepActiveMarker=true instead: the marker must
+        // stay up CONTINUOUSLY until the DB row is finalized and the file
+        // renamed (the caller clears it in its finally) — the cleanup simply
+        // can't reap this one file until then, which is the point.
         try {
-            StorageManager.getInstance().setActiveTripFile(null);
+            if (!keepActiveMarker) {
+                StorageManager.getInstance().setActiveTripFile(null);
+            }
             StorageManager.getInstance().onTripFileSaved();
         } catch (Exception e) {
             logger.warn("Failed to notify StorageManager: " + e.getMessage());
@@ -659,6 +776,16 @@ public class TripTelemetryRecorder {
     private File resolveOutputFileForFlush() {
         if (outputFile == null) return outputFile;
         File parent = outputFile.getParentFile();
+        // A journal on the internal journal dir is deliberately NOT migrated
+        // mid-trip: that dir exists precisely so the in-flight file is immune
+        // to the trips volume's mount state. The trip-end flow moves it to
+        // the trips dir once the row is finalized.
+        try {
+            File journal = StorageManager.getInstance().getTripJournalDir();
+            if (journal != null && parent != null && journal.equals(parent)) {
+                return outputFile;
+            }
+        } catch (Throwable ignored) {}
         File liveDir = StorageManager.getInstance().getTripsDir();
         if (liveDir == null) return outputFile;
 

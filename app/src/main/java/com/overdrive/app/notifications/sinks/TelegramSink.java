@@ -68,6 +68,16 @@ public final class TelegramSink implements NotificationBus.Sink {
                     && !com.overdrive.app.telegram.config.UnifiedTelegramConfig.isTyreAlerts()) {
                 return;
             }
+            // Parking Intelligence ("Parked", "Back at car") publishes at INFO
+            // on purpose — it is a summary, not an alert — yet it is the one
+            // INFO stream a Telegram-only user explicitly asked for by turning
+            // the feature on. Own toggle (parkingMessages, default ON), own
+            // photo+URL-button path, never the criticalAlerts lane. Handled
+            // BEFORE the INFO drop below.
+            if (event.category != null && event.category.startsWith("parking.")) {
+                forwardParking(event);
+                return;
+            }
             // INFO is Web-Push-only; only escalate WARN/CRITICAL to Telegram — EXCEPT a
             // user-authored automation "Send notification" action, which publishes at INFO
             // (NotificationAction hardcodes Severity.INFO) yet is an intentional, explicitly
@@ -96,6 +106,27 @@ public final class TelegramSink implements NotificationBus.Sink {
         } catch (Throwable t) {
             logger.warn("TelegramSink forward failed: " + t.getMessage());
         }
+    }
+
+    /**
+     * parking.session.started / .ended → {@link TelegramNotifier#notifyParking}.
+     * The generic bus event has no photo or button fields, so the parking
+     * notifier tucks them into {@code data.telegramPhotoPath} and
+     * {@code data.telegramButtons}; the toggle gate lives in TelegramNotifier
+     * (fresh config read) exactly like the other categories.
+     */
+    private static void forwardParking(NotificationEvent event) {
+        if (!com.overdrive.app.telegram.config.UnifiedTelegramConfig.isParkingMessages()) return;
+        String photo = null;
+        String buttons = null;
+        if (event.data != null) {
+            photo = event.data.optString("telegramPhotoPath", null);
+            org.json.JSONArray b = event.data.optJSONArray("telegramButtons");
+            if (b != null && b.length() > 0) buttons = b.toString();
+        }
+        String icon = "parking.session.ended".equals(event.category) ? "🚗" : "🅿️";
+        TelegramNotifier.notifyParking(icon + " " + (event.title == null ? "" : event.title),
+                event.body, photo, buttons);
     }
 
     /**

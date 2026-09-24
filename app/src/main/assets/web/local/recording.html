@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title data-i18n="app.recordings_title">Recordings - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
-    <script src="../shared/theme.js?v=6"></script>
-    <script src="../shared/app-shell.js?v=5"></script>
+    <script src="../shared/theme.js?v=8"></script>
+    <script src="../shared/app-shell.js?v=7"></script>
     <!--
       Bottom-tab manifest. 5 tabs grouping the settings cards:
         Status      — live recording status pill
@@ -30,7 +30,7 @@
         ];
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=24">
+    <link rel="stylesheet" href="../shared/styles.css?v=34">
     <script src="https://cdn.jsdelivr.net/npm/jmuxer@2.0.4/dist/jmuxer.min.js"></script>
     <script src="../shared/SotaPlayer.js?v=13"></script>
     <script src="../shared/Decoder.js"></script>
@@ -43,7 +43,7 @@
         <!-- App shell sidebar (rendered by ../shared/app-shell.js) -->
         <div id="app-shell-mount"></div>
         <!-- Main Content -->
-        <main class="main-content">
+        <main class="main-content" aria-busy="true" inert style="pointer-events:none">
             <div class="mobile-header">
                 <button class="menu-toggle" onclick="toggleSidebar()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -310,7 +310,7 @@
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
-                                    <input type="checkbox" id="geocodingOnline" onchange="RecSettings.toggleGeocodingOnline()">
+                                    <input type="checkbox" id="geocodingOnline" disabled onchange="RecSettings.toggleGeocodingOnline()">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -321,7 +321,7 @@
                                 <div class="setting-desc" data-i18n="recording.geocoding_custom_url_desc">Optional. Point to a self-hosted instance to skip the public OSM endpoint entirely. Shared with surveillance.</div>
                             </div>
                             <div class="setting-control">
-                                <input type="url" id="geocodingCustomUrl" class="text-input" inputmode="url" placeholder="https://nominatim.example.com" onchange="RecSettings.saveGeocodingCustomUrl()" />
+                                <input type="url" id="geocodingCustomUrl" class="text-input" inputmode="url" placeholder="https://nominatim.example.com" disabled onchange="RecSettings.saveGeocodingCustomUrl()" />
                             </div>
                         </div>
                     </div>
@@ -801,7 +801,7 @@
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
-                                    <input type="checkbox" id="cdrCleanupEnabled" onchange="RecSettings.toggleCdrCleanup()">
+                                    <input type="checkbox" id="cdrCleanupEnabled" disabled onchange="RecSettings.toggleCdrCleanup()">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -832,7 +832,7 @@
                             <div class="setting-control">
                                 <div class="slider-control">
                                     <span class="slider-value" id="cdrReservedValue">2 GB</span>
-                                    <input type="range" class="slider" id="cdrReservedSlider" min="100" max="20000" step="100" value="2000" oninput="RecSettings.updateCdrReserved(this.value)">
+                                    <input type="range" class="slider" id="cdrReservedSlider" disabled min="100" max="20000" step="100" value="2000" oninput="RecSettings.updateCdrReserved(this.value)">
                                 </div>
                             </div>
                         </div>
@@ -844,7 +844,7 @@
                             <div class="setting-control">
                                 <div class="slider-control">
                                     <span class="slider-value" id="cdrProtectedValue">24h</span>
-                                    <input type="range" class="slider" id="cdrProtectedSlider" min="0" max="168" step="12" value="24" oninput="RecSettings.updateCdrProtected(this.value)">
+                                    <input type="range" class="slider" id="cdrProtectedSlider" disabled min="0" max="168" step="12" value="24" oninput="RecSettings.updateCdrProtected(this.value)">
                                 </div>
                             </div>
                         </div>
@@ -856,12 +856,12 @@
                             <div class="setting-control">
                                 <div class="slider-control">
                                     <span class="slider-value" id="cdrMinKeepValue">10</span>
-                                    <input type="range" class="slider" id="cdrMinKeepSlider" min="0" max="50" step="5" value="10" oninput="RecSettings.updateCdrMinKeep(this.value)">
+                                    <input type="range" class="slider" id="cdrMinKeepSlider" disabled min="0" max="100" step="5" value="10" oninput="RecSettings.updateCdrMinKeep(this.value)">
                                 </div>
                             </div>
                         </div>
                         <!-- Manual Cleanup Button -->
-                        <button class="btn btn-danger" style="width:100%;margin-top:12px;" onclick="RecSettings.triggerCdrCleanup()">
+                        <button class="btn btn-danger" id="cdrCleanupNow" disabled style="width:100%;margin-top:12px;" onclick="RecSettings.triggerCdrCleanup()">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                             <span data-i18n="recording.cdr_cleanup_now_v2">Clean up now</span>
                         </button>
@@ -893,9 +893,10 @@
 
     <script src="../shared/auth.js"></script>
     <script src="../shared/core.js?v=20"></script>
+    <script src="../shared/settings-hydration.js?v=1"></script>
     <script src="../shared/update-flow.js"></script>
     <script src="../shared/storage-budget.js?v=8"></script>
-    <script src="../shared/recording.js?v=budget8"></script>
+    <script src="../shared/recording.js?v=budget16"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

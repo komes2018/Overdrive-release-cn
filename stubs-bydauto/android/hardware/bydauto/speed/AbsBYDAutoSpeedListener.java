@@ -12,6 +12,7 @@ import android.hardware.bydauto.IBYDAutoEvent;
 public abstract class AbsBYDAutoSpeedListener {
     public void onSpeedChanged(double speed) {}
     public void onSpeedChanged(int speed) {}
+    public void onSpeedValueChanged(double speed) {}
     public void onCurrentSpeedChanged(double speed) {}
     public void onCurrentSpeedChanged(int speed) {}
     public void onAccelerateDeepnessChanged(int value) {}

@@ -10,9 +10,9 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=7"></script>
+    <script src="../shared/theme.js?v=8"></script>
     <script src="../shared/skeleton.js?v=4"></script>
-    <script src="../shared/app-shell.js?v=5"></script>
+    <script src="../shared/app-shell.js?v=7"></script>
     <script>
         if (typeof window.AndroidBridge !== 'undefined') {
             document.documentElement.classList.add('is-app-webview');
@@ -21,7 +21,7 @@
     <style>
         html.is-app-webview .cabin-listen-btn { display: none !important; }
     </style>
-    <link rel="stylesheet" href="../shared/styles.css?v=32">
+    <link rel="stylesheet" href="../shared/styles.css?v=34">
     <link rel="stylesheet" href="../shared/leaflet.css" />
     <script src="../shared/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jmuxer@2.0.4/dist/jmuxer.min.js"></script>
@@ -343,6 +343,10 @@
             --lv-top-overlay: linear-gradient(180deg, rgba(247,250,247,0.85) 0%, transparent 100%);
             --lv-video-bg: var(--bg-base);
         }
+
+        /* The bottom surface owns the iOS inset. Keeping it on the outer tab
+           wrapper as well leaves a second, empty safe-area strip. */
+        .live-view-page .live-tabs-view { padding-bottom: 0; }
 
         /* SOTA Seamless Camera View */
         .seamless-camera-view {
@@ -925,6 +929,7 @@
             min-width: 0;
             min-height: 0;
             padding: 12px;
+            padding-bottom: calc(12px + var(--safe-bottom, 0px));
             background: var(--lv-panel-bg);
         }
 
@@ -1205,7 +1210,7 @@
 
         #panelCameras.map-expanded .location-distance-chip {
             left: 16px;
-            bottom: 16px;
+            bottom: calc(16px + var(--safe-bottom, 0px));
             padding: 8px 12px;
             font-size: 12px;
         }
@@ -1232,9 +1237,9 @@
             [dir="rtl"] .top-bar-right > * + * { margin-right: 6px; }
             .top-bar-left { flex: 1 1 auto; }
             .quality-menu__trigger {
-                width: 108px;
-                min-width: 108px;
-                max-width: 108px;
+                width: 124px;
+                min-width: 124px;
+                max-width: 124px;
                 padding: 6px 8px 6px 10px;
                 font-size: 11px;
             }
@@ -1347,6 +1352,144 @@
                 border-left: 0;
             }
         }
+
+        @media (max-width: 768px) and (orientation: portrait) {
+            #panelCameras .seamless-camera-view {
+                overflow: hidden;
+            }
+            #panelCameras .camera-stage {
+                flex: 1 1 auto;
+                min-height: 0;
+            }
+            #panelCameras .live-utility-rail {
+                flex: 0 0 calc(220px + var(--safe-bottom, 0px));
+                flex-direction: row;
+                min-height: calc(220px + var(--safe-bottom, 0px));
+                padding: 4px 8px 0;
+                overflow: hidden;
+            }
+            #panelCameras .camera-selector-card {
+                flex: 0 0 58%;
+                width: auto;
+                min-height: 0;
+            }
+            #panelCameras .camera-selector-card,
+            #panelCameras .live-location-card {
+                border-radius: var(--radius-md) var(--radius-md) 0 0;
+            }
+            #panelCameras .live-location-card {
+                flex: 1 1 auto;
+                width: auto;
+                min-height: 0;
+                margin: 0 0 0 8px;
+            }
+            [dir="rtl"] #panelCameras .live-location-card {
+                margin-left: 0;
+                margin-right: 8px;
+            }
+            #panelCameras .selector-card-header {
+                padding: 9px 10px 0;
+            }
+            #panelCameras .selector-card-header h2,
+            #panelCameras .location-card-header h2 {
+                overflow: hidden;
+                font-size: 12px;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            #panelCameras .camera-selector-card .car-selector-bottom {
+                padding: 0 4px calc(4px + var(--safe-bottom, 0px));
+            }
+            #panelCameras .camera-selector-card .car-image-container {
+                --car-gutter-top: 14px;
+                --car-gutter-bottom: 18px;
+                width: 60px;
+                height: 126px;
+                transform: none;
+            }
+            #panelCameras .cam-hotspot {
+                width: 32px;
+                height: 32px;
+            }
+            #panelCameras .hotspot-ring,
+            #panelCameras .hotspot-pulse {
+                width: 21px;
+                height: 21px;
+            }
+            #panelCameras .hotspot-label {
+                padding: 2px 4px;
+                font-size: 8px;
+            }
+            #panelCameras .cam-hotspot[data-cam="1"] { top: -6px; }
+            #panelCameras .cam-hotspot[data-cam="3"] { bottom: -6px; }
+            #panelCameras .cam-hotspot[data-cam="4"] { left: -16px; }
+            #panelCameras .cam-hotspot[data-cam="2"] { right: -16px; }
+            #panelCameras .cam-hotspot[data-cam="6"] { top: 18px; }
+            #panelCameras .cam-hotspot.cam-all .hotspot-label {
+                top: calc(50% + 13px);
+            }
+            #panelCameras .location-card-header {
+                padding: 9px 9px 6px;
+            }
+            #panelCameras .location-card-header > div:first-child {
+                min-width: 0;
+            }
+            #panelCameras:not(.map-expanded) .location-freshness,
+            #panelCameras:not(.map-expanded) .location-distance-chip {
+                display: none;
+            }
+            #panelCameras .location-map-frame {
+                min-height: 70px;
+                margin: 0 7px;
+            }
+            #panelCameras .location-expand-button {
+                flex: 0 0 44px;
+                margin: 6px 7px calc(7px + var(--safe-bottom, 0px));
+                font-size: 0;
+            }
+            #panelCameras .location-expand-button svg {
+                width: 17px;
+                height: 17px;
+                margin: 0;
+            }
+            #panelCameras.map-expanded .live-location-card {
+                width: auto;
+                margin: 0;
+            }
+        }
+
+        @media (max-width: 768px) and (max-height: 650px) and (orientation: portrait) {
+            #panelCameras .live-utility-rail {
+                flex-basis: calc(200px + var(--safe-bottom, 0px));
+                min-height: calc(200px + var(--safe-bottom, 0px));
+            }
+            #panelCameras .camera-selector-card .car-image-container {
+                width: 54px;
+                height: 112px;
+            }
+            #panelCameras .hotspot-label {
+                font-size: 7px;
+            }
+        }
+
+        @media (max-width: 768px) and (orientation: landscape) {
+            #panelCameras .live-utility-rail {
+                flex-direction: column;
+                min-width: 220px;
+                max-width: 300px;
+                overflow-y: auto;
+            }
+            #panelCameras .camera-selector-card,
+            #panelCameras .live-location-card {
+                flex: 0 0 auto;
+                width: 100%;
+                min-height: 180px;
+            }
+            #panelCameras .live-location-card {
+                margin-top: 10px;
+                margin-left: 0;
+            }
+        }
     </style>
 
     <script src="../shared/auth.js"></script>
@@ -1354,9 +1497,9 @@
     <script src="../shared/core.js?v=20"></script>
     <script src="../shared/update-flow.js"></script>
     <script src="../shared/cabin-audio.js?v=1"></script>
-    <script src="../shared/stream.js?v=index4"></script>
-    <script src="../shared/map.js?v=4"></script>
-    <script src="../shared/surveillance.js?v=survtoggle1"></script>
+    <script src="../shared/stream.js?v=index5"></script>
+    <script src="../shared/map.js?v=6"></script>
+    <script src="../shared/surveillance.js?v=survtoggle9"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
@@ -1827,7 +1970,11 @@
             // 1. Set quality
             var _qSel = document.getElementById('qualitySelector');
             const quality = (_qSel && _qSel.value) || 'LOW';
-            try { await fetch('/api/stream/quality/' + quality, { method: 'POST' }); } catch(e) {}
+            try {
+                const qRes = await fetch('/api/stream/quality/' + quality, { method: 'POST' });
+                const qData = await qRes.json();
+                if (qData.fps) this.activeFps = qData.fps;
+            } catch(e) {}
             if (superseded() || !selectionIsCurrent()) return false;
 
             // 2. Set view mode BEFORE enabling streaming. Bail if the
@@ -2128,6 +2275,11 @@
                         select.value = data.current;
                         BYD.stream.selectedQuality = data.current;
                         if (BYD.qualityMenu) BYD.qualityMenu.sync();
+                    }
+                    const preset = (data.options || []).find(
+                        option => option.id === data.current);
+                    if (preset && preset.fps) {
+                        BYD.stream.activeFps = preset.fps;
                     }
                 }
             } catch (e) {

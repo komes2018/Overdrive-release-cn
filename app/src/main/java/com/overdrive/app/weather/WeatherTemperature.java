@@ -119,8 +119,11 @@ public final class WeatherTemperature {
                     .url(url)
                     .header("User-Agent", "OverDrive/1.0")
                     .build();
+            // Chain selector (proxy → direct) rather than a frozen proxy: a
+            // tailnet-only Tailscale listener would otherwise block the fetch
+            // while probing healthy, and weather's 3s budget can't afford it.
             OkHttpClient client = new OkHttpClient.Builder()
-                    .proxy(ProxyHelper.getHttpProxy())
+                    .proxySelector(ProxyHelper.chainProxySelector())
                     .connectTimeout(3, TimeUnit.SECONDS)
                     .readTimeout(3, TimeUnit.SECONDS)
                     .build();

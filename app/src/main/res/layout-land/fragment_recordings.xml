@@ -542,6 +542,34 @@
                             app:chipSpacingHorizontal="6dp"
                             app:singleLine="true" />
                     </LinearLayout>
+
+                    <!-- PARKING SESSION chip — only present when the user
+                         arrived from a park on the Parking page ("Open
+                         events"). Narrows the list to the clips recorded
+                         during that park; the close icon (or Reset) drops it.
+                         Mirrors the portrait layout's rowParkingFilter. -->
+                    <LinearLayout
+                        android:id="@+id/rowParkingFilter"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:visibility="gone">
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipParkingSession"
+                            style="@style/Widget.Overdrive.M3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:checkable="false"
+                            android:text="@string/recording_lib_chip_parking_session"
+                            app:chipIcon="@drawable/ic_parking"
+                            app:chipIconSize="16dp"
+                            app:chipIconTint="?attr/colorOnSurfaceVariant"
+                            app:chipIconVisible="true"
+                            app:closeIconVisible="true" />
+                    </LinearLayout>
                 </LinearLayout>
             </HorizontalScrollView>
 

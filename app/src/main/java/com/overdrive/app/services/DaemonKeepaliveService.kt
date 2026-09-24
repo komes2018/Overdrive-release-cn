@@ -72,6 +72,7 @@ class DaemonKeepaliveService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var screenOffReceiver: ScreenOffReceiver? = null
     private var powerStateReceiver: BroadcastReceiver? = null
+    private var startupOnOnlySnapshot: Boolean? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -81,6 +82,14 @@ class DaemonKeepaliveService : Service() {
         createSummaryChannel()
         startForegroundWithNotification()
         postOrUpdateSummary()
+        // A service started with startForegroundService must promote itself
+        // before any shared-storage read. Keep the bounded, lock-free mode read
+        // after startForeground, and reuse it for the first onStartCommand so a
+        // cold AVM request never parses the same config twice on the main thread.
+        val onOnlySnapshot =
+            com.overdrive.app.config.UnifiedConfigManager
+                .isVehicleOnOnlyModeSnapshot()
+        startupOnOnlySnapshot = onOnlySnapshot
         acquireWakeLock()
         registerScreenOffReceiver()
         // GATE (G3): in "Vehicle ON only" mode the app-process keep-alive wakelock
@@ -101,52 +110,154 @@ class DaemonKeepaliveService : Service() {
         // follow, so the unconditional acquire above would pin the wakelock for the whole
         // parked window and defeat onOnly. Reconcile against the CURRENT screen state
         // once at startup: in onOnly, if the screen is already off, release now.
-        reconcileWakeLockToScreenState()
+        reconcileWakeLockToScreenState(onOnlySnapshot)
 
         // Seed out-of-process revival watchdog. If this service was started
         // by the watchdog itself, this just re-arms the next alarm.
         try {
-            ProcessRevivalReceiver.schedule(applicationContext)
+            ProcessRevivalReceiver.schedule(applicationContext, onOnlySnapshot)
         } catch (e: Exception) {
             Log.w(TAG, "ProcessRevivalReceiver.schedule failed: ${e.message}")
         }
 
-        // Initialize BYD Data Collector in the app process (where OEM services like CarAdapterService bind cleanly)
-        Thread({
-            try {
-                com.overdrive.app.byd.BydDataCollector.getInstance().init(applicationContext)
-                Log.i(TAG, "BydDataCollector initialized in app process")
-            } catch (e: Throwable) {
-                Log.w(TAG, "BydDataCollector init in app process failed: ${e.message}")
-            }
-        }, "AppBydCollectorInit").start()
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(TAG, "Service onStartCommand")
-
+        // This method is delivered on the app main thread. The daemon may be
+        // holding the unified-config lock while it asks us to probe AVM, so a
+        // blocking refresh here deadlocks the acknowledgement path and freezes
+        // UI actions (including Projection). The daemon already committed this
+        // marker before issuing the request; use that lock-free source here.
+        com.overdrive.app.camera.dilink5.DiLink5Platform
+            .refreshActiveModeFromCommittedMarker()
+        val startDiLink5Avm = intent?.action ==
+            com.overdrive.app.camera.dilink5.TsAvmCoordinator.ACTION_START_AVM
+        val stopDiLink5Avm = intent?.action ==
+            com.overdrive.app.camera.dilink5.TsAvmCoordinator.ACTION_STOP_AVM
+        val probeDiLink5Avm = intent?.action ==
+            com.overdrive.app.camera.dilink5.TsAvmCoordinator.ACTION_PROBE_AVM
+        val startupSnapshot = startupOnOnlySnapshot
+        val onOnlySnapshot = if (startupSnapshot != null) {
+            startupOnOnlySnapshot = null
+            startupSnapshot
+        } else {
+            com.overdrive.app.config.UnifiedConfigManager
+                .isVehicleOnOnlyModeSnapshot()
+        }
+        val diLink5AvmCompletion =
+            com.overdrive.app.camera.dilink5.TsAvmCoordinator.RequestCompletion {
+                success ->
+                com.overdrive.app.camera.dilink5.TsAvmCoordinator
+                    .sendAppProcessResult(
+                        intent,
+                        success,
+                        if (success) "" else "AVM transition was not confirmed"
+                    )
+            }
         // "Vehicle ON only" parked-shutdown gate. START_STICKY respawns this service after
-        // the process is killed — but while parked in onOnly (marker present) that respawn
-        // must NOT rebuild the daemon stack or it would defeat the terminate. Stop self so
-        // the app process can die again and the head unit stays asleep. The ACC-on recovery
-        // path (BootReceiver) clears the marker and relaunches everything. Guard on onOnly
-        // too (fail-open) so a stray marker can never suppress an onAndOff user.
+        // the process is killed — but while parked (marker present) that respawn must NOT
+        // rebuild the daemon stack or it would defeat the terminate. Stop self so the app
+        // process can die again and the head unit stays asleep. The ACC-on recovery path
+        // (BootReceiver) erases the marker (verified) and relaunches everything.
+        //
+        // The marker is AUTHORITATIVE on its own — this gate no longer also requires the
+        // onOnly config read. That read fails open (false on any error), which let a
+        // START_STICKY respawn rebuild the stack on a parked car whenever the config was
+        // momentarily unreadable. A stray marker in onAndOff cannot happen: it is only
+        // ever written by the onOnly park paths, and switching the mode to onAndOff
+        // clears it daemon-side (SurveillanceApiHandler → CameraDaemon).
         try {
-            if (com.overdrive.app.config.UnifiedConfigManager.isVehicleOnOnlyMode() &&
-                java.io.File(com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).exists() &&
+            if (java.io.File(com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).exists() &&
                 !DaemonStartupManager.recoveryInProgress) {
                 // Marker present AND we're not in the middle of an ACC-on recovery → this
                 // is a START_STICKY respawn while genuinely parked; don't rebuild. The
                 // recoveryInProgress guard avoids self-stopping on the recovery edge, where
-                // clearParkedMarker's async `rm` may not have landed yet even though the
-                // car is on and we SHOULD stay up.
-                Log.i(TAG, "onOnly + parked-shutdown marker present (not recovering) — not rebuilding; stopping keepalive service")
-                stopSelf()
+                // the verified erase may not have completed yet even though the car is on
+                // and we SHOULD stay up.
+                DaemonStartupManager.noteParkObserved()
+                Log.i(TAG, "parked-shutdown marker present (onOnly=$onOnlySnapshot, not recovering) — not rebuilding; stopping keepalive service")
+                if (startDiLink5Avm) {
+                    com.overdrive.app.camera.dilink5.TsAvmCoordinator
+                        .sendAppProcessResult(
+                            intent,
+                            false,
+                            "AVM start is unavailable while parked"
+                        )
+                }
+                if (probeDiLink5Avm) {
+                    com.overdrive.app.camera.dilink5.TsAvmCoordinator
+                        .sendAppProcessResult(
+                            intent,
+                            false,
+                            "AVM probe is unavailable while parked"
+                        )
+                }
+                if (stopDiLink5Avm) {
+                    releaseWakeLock()
+                    com.overdrive.app.camera.dilink5.TsAvmCoordinator
+                        .getInstance(applicationContext)
+                        .stopAvm(
+                            diLink5AvmCompletion,
+                            Runnable { stopSelfResult(startId) }
+                        )
+                    Log.i(TAG, "DiLink 5 AVM stop dispatched in parked app process")
+                } else {
+                    stopSelfResult(startId)
+                }
                 return START_NOT_STICKY
             }
         } catch (e: Exception) {
             Log.w(TAG, "parked-marker onStartCommand gate failed (${e.message}) — proceeding")
         }
+
+        if (stopDiLink5Avm) {
+            com.overdrive.app.camera.dilink5.TsAvmCoordinator
+                .getInstance(applicationContext)
+                .stopAvm(diLink5AvmCompletion)
+            Log.i(TAG, "DiLink 5 AVM stop dispatched in app process")
+            return START_STICKY
+        }
+
+        if (probeDiLink5Avm) {
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {
+                com.overdrive.app.camera.dilink5.TsAvmCoordinator
+                    .probeAvmService(
+                        applicationContext,
+                        diLink5AvmCompletion
+                    )
+                Log.i(TAG, "DiLink 5 AVM Binder preflight dispatched in app process")
+            } else {
+                com.overdrive.app.camera.dilink5.TsAvmCoordinator
+                    .sendAppProcessResult(
+                        intent,
+                        false,
+                        "DiLink 5 camera mode is unavailable"
+                    )
+                Log.w(TAG, "Ignoring DiLink 5 AVM probe while platform is disabled")
+            }
+            return START_STICKY
+        }
+
+        if (startDiLink5Avm) {
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {
+                com.overdrive.app.camera.dilink5.TsAvmCoordinator
+                    .getInstance(applicationContext)
+                    .startAvm(diLink5AvmCompletion)
+                Log.i(TAG, "DiLink 5 AVM start dispatched in app process")
+            } else {
+                com.overdrive.app.camera.dilink5.TsAvmCoordinator
+                    .sendAppProcessResult(
+                        intent,
+                        false,
+                        "DiLink 5 camera mode is unavailable"
+                    )
+                Log.w(TAG, "Ignoring DiLink 5 AVM request while platform is disabled")
+            }
+            return START_STICKY
+        }
+
+        syncVehicleTelemetry()
 
         // Skip daemon startup when a post-update launch is in progress.
         // MainActivity is the sole orchestrator after an install: it runs
@@ -219,6 +330,7 @@ class DaemonKeepaliveService : Service() {
 
         unregisterScreenOffReceiver()
         unregisterPowerStateReceiver()
+        com.overdrive.app.byd.BydDataCollector.stopDiLink5Producer()
         releaseWakeLock()
 
         super.onDestroy()
@@ -431,10 +543,13 @@ class DaemonKeepaliveService : Service() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
                 when (intent?.action) {
                     "com.byd.action.ACC_OFF" -> {
+                        com.overdrive.app.byd.BydDataCollector
+                            .updateDiLink5ProducerAccState(false)
                         // Authoritative parked edge → FULL app-side standdown in onOnly:
                         // the daemon stack is being terminated (reaper + parkTerminate), so
                         // the app must also stop keeping itself/anything alive.
-                        if (com.overdrive.app.config.UnifiedConfigManager.isVehicleOnOnlyMode()) {
+                        if (com.overdrive.app.config.UnifiedConfigManager
+                                .isVehicleOnOnlyModeSnapshot()) {
                             Log.i(TAG, "onOnly + ACC_OFF — full app-side standdown (release wakelock, stop health-check, cancel revival, stop service)")
                             parkStanddown(applicationContext)
                         }
@@ -443,7 +558,8 @@ class DaemonKeepaliveService : Service() {
                         // Secondary/belt-and-suspenders: SCREEN_OFF can fire mid-drive, so
                         // only release the wakelock here (safe — moot while ACC powers the
                         // AP). Do NOT do the heavy standdown on a mere screen-off.
-                        if (com.overdrive.app.config.UnifiedConfigManager.isVehicleOnOnlyMode()) {
+                        if (com.overdrive.app.config.UnifiedConfigManager
+                                .isVehicleOnOnlyModeSnapshot()) {
                             Log.i(TAG, "onOnly + SCREEN_OFF — releasing keep-alive wakelock (secondary)")
                             releaseWakeLock()
                         }
@@ -451,6 +567,8 @@ class DaemonKeepaliveService : Service() {
                     Intent.ACTION_SCREEN_ON,
                     "com.byd.action.ACC_ON",
                     "com.byd.action.IGN_ON" -> {
+                        com.overdrive.app.byd.BydDataCollector
+                            .updateDiLink5ProducerAccState(true)
                         // Re-acquire for the awake/ON session. Idempotent (acquireWakeLock
                         // early-returns if already held), so this is a no-op in onAndOff.
                         acquireWakeLock()
@@ -487,6 +605,26 @@ class DaemonKeepaliveService : Service() {
         }
     }
 
+    private fun syncVehicleTelemetry() {
+        Thread({
+            try {
+                // The full config-backed refresh is allowed to wait, but never
+                // on Android's service/UI main thread.
+                com.overdrive.app.camera.dilink5.DiLink5Platform
+                    .refreshActiveMode()
+                if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                    com.overdrive.app.byd.BydDataCollector
+                        .syncDiLink5Producer(applicationContext)
+                } else {
+                    com.overdrive.app.byd.BydDataCollector
+                        .stopDiLink5Producer()
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "Vehicle telemetry sync failed: ${t.message}")
+            }
+        }, "VehicleTelemetrySync").start()
+    }
+
     /**
      * "Vehicle ON only" full app-side standdown on the authoritative ACC_OFF edge. The
      * daemon stack is being terminated (AccSentryDaemon reaper + CameraDaemon.parkTerminate),
@@ -500,6 +638,10 @@ class DaemonKeepaliveService : Service() {
      * on ACC-on (BootReceiver) clears the marker and restarts the whole stack.
      */
     private fun parkStanddown(appCtx: Context) {
+        // Record the park in-process so startOnBoot can recognise the park-END later
+        // (marker gone after having been present) and rebuild the stack even though
+        // its process-lifetime guard is still set from the pre-park session.
+        DaemonStartupManager.noteParkObserved()
         try { DaemonStartupManager.stopHealthChecks() } catch (t: Throwable) {
             Log.w(TAG, "parkStanddown: stopHealthChecks failed: ${t.message}")
         }
@@ -536,9 +678,9 @@ class DaemonKeepaliveService : Service() {
      * the default behaviour is unchanged. PowerManager.isInteractive() is a synchronous
      * app-process read — it mirrors the SCREEN_ON/OFF edges the receiver keys off.
      */
-    private fun reconcileWakeLockToScreenState() {
+    private fun reconcileWakeLockToScreenState(onOnlySnapshot: Boolean) {
         try {
-            if (!com.overdrive.app.config.UnifiedConfigManager.isVehicleOnOnlyMode()) return
+            if (!onOnlySnapshot) return
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
             if (!pm.isInteractive) {
                 Log.i(TAG, "onOnly + screen already off at startup — releasing keep-alive wakelock so AP can sleep")

@@ -81,6 +81,7 @@ public final class SignalMqttMap {
         MQTT.put("temperature", "inside_temp");
         MQTT.put("outsideTemp", "ext_temp");
         MQTT.put("acSetpoint", "climate_setpoint");
+        MQTT.put("steeringHeat", "steering_wheel_heat");
         // ── Lighting ── (the signal's `area` attribute picks which light_* key)
         MQTT.put("lights", "light_low_beam / light_high_beam / light_hazard / light_drl");
         MQTT.put("ambient", "ambient_enabled");

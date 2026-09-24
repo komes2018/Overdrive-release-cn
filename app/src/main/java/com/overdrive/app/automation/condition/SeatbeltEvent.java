@@ -11,10 +11,9 @@ import com.overdrive.app.automation.Automations;
  * <p><b>Why a dedicated fast poll.</b> The seatbelt state otherwise rides only the main
  * telemetry poll ({@link BydEvent#bydEvent}), which builds every ~5s while stationary —
  * and buckling happens while parked/stopped. So the trigger lagged the buckle by up to
- * ~5s (the reported "takes 2-3 seconds"). This poll reads the same reliable
- * {@code getSafetyBeltStatus(area)} getter the telemetry-recording overlay uses, directly
- * on the daemon at a fast cadence, and publishes on change. Exact mirror of
- * {@link TurnSignalEvent}.
+ * ~5s (the reported "takes 2-3 seconds"). This poll prefers the dedicated belt device and
+ * falls back to the getter used by the telemetry-recording overlay, directly on the daemon at
+ * a fast cadence, and publishes on change. Exact mirror of {@link TurnSignalEvent}.
  *
  * <p><b>Zero cost unless a related automation exists.</b> The scheduled task is cancelled
  * when no belt or occupancy signal is referenced.

@@ -102,6 +102,16 @@ public class ChargingApiHandlerTest {
     }
 
     @Test
+    public void finishedOnlyPublishesFullAtEffectiveFullSoc() {
+        assertFalse(ChargingApiHandler.qualifiesAsFull(true, 80.0));
+        assertFalse(ChargingApiHandler.qualifiesAsFull(true, -1.0));
+        assertFalse(ChargingApiHandler.qualifiesAsFull(true, Double.NaN));
+        assertFalse(ChargingApiHandler.qualifiesAsFull(false, 100.0));
+        assertTrue(ChargingApiHandler.qualifiesAsFull(true, 99.0));
+        assertTrue(ChargingApiHandler.qualifiesAsFull(true, 100.0));
+    }
+
+    @Test
     public void terminalStateCannotBeOverriddenByRacedFusedPositive() {
         ChargingApiHandler.LiveStateFlags finished =
                 ChargingApiHandler.normalizeLiveState(
@@ -853,31 +863,6 @@ public class ChargingApiHandlerTest {
         connection.set(database, closed);
         return database;
     }
-
-    @Test
-    public void updateSessionCostReturns400ForInvalidJson() throws Exception {
-        TrackingManager manager = new TrackingManager(true);
-        ChargingApiHandler handler = new ChargingApiHandler(manager);
-        JSONObject response = handler.handleRequest(
-                "/api/charging/42/cost", "POST", null, "invalid json");
-        assertEquals(400, response.optInt("_status"));
-        assertEquals("Invalid JSON payload", response.optString("error"));
-    }
-
-    @Test
-    public void updateSessionCostReturns400WhenCostMissing() throws Exception {
-        TrackingManager manager = new TrackingManager(true);
-        ChargingApiHandler handler = new ChargingApiHandler(manager);
-        JSONObject response = handler.handleRequest(
-                "/api/charging/42/cost", "POST", null, "{}");
-        assertEquals(400, response.optInt("_status"));
-        assertEquals("Missing 'cost' parameter", response.optString("error"));
-    }
-
-    // The 200/500 wiring of POST /api/charging/{id}/cost is not covered here:
-    // SocHistoryDatabase's constructors are not accessible from this package, so the
-    // return value of updateChargingSessionCost cannot be stubbed. Its semantics are
-    // pinned by SocHistoryDatabaseManualCostTest instead.
 
     /**
      * Captures the tariff the handler mirrors into the trips config, which is

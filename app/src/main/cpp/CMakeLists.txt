@@ -47,12 +47,6 @@ else()
     set(OPENCV_AVAILABLE FALSE)
 endif()
 
-# ==================== Precompiled FastCam Client ====================
-add_library(fast_cam_client SHARED IMPORTED)
-set_target_properties(fast_cam_client PROPERTIES
-    IMPORTED_LOCATION "${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libfast_cam_client.so"
-)
-
 # ==================== Surveillance Library ====================
 set(SURVEILLANCE_SOURCES
     surveillance/native_motion.cpp
@@ -61,8 +55,6 @@ set(SURVEILLANCE_SOURCES
     # Camera/EGL: AHardwareBuffer → EGLImage → GL_TEXTURE_EXTERNAL_OES
     # binding for the ImageReader-based zero-copy camera path.
     camera/HardwareBufferTextureBinder.cpp
-    # DiLink 5 Qualcomm fast_cam_capture JNI bridge
-    camera/qcarcam_bridge.cpp
 )
 
 add_library(surveillance SHARED ${SURVEILLANCE_SOURCES})
@@ -71,11 +63,10 @@ target_include_directories(surveillance PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/surveillance
     ${CMAKE_SOURCE_DIR}/camera
-    ${CMAKE_SOURCE_DIR}/include
 )
 
 # Base libraries — `EGL` and `GLESv2` added for HardwareBufferTextureBinder.
-set(SURVEILLANCE_LIBS android log m EGL GLESv2 fast_cam_client)
+set(SURVEILLANCE_LIBS android log m EGL GLESv2)
 
 # Add OpenCV if available
 if(OPENCV_AVAILABLE)
@@ -126,36 +117,84 @@ set_target_properties(surveillance PROPERTIES
     LINK_FLAGS "-Wl,--gc-sections,--strip-all,--exclude-libs,ALL"
 )
 
+# ==================== DiLink 5 Camera Library ====================
+# Keep the direct camera bridge out of libsurveillance so DiLink 3/4 retain
+# their existing native load graph.
+#
+# Production safety policy: use the app-owned CPU copy + GL_TEXTURE_2D upload
+# path from the first frame. The direct DMA-BUF/EGLImage compositor remains
+# compiled for controlled experiments, but can only be selected by changing
+# this code flag to 1 and rebuilding the APK.
+set(OVERDRIVE_DILINK5_ENABLE_DIRECT_DMA 0)
+
+add_library(fast_cam_release_guard SHARED
+    camera/fast_cam_release_guard.c
+)
+target_include_directories(fast_cam_release_guard PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(fast_cam_release_guard dl)
+target_compile_options(fast_cam_release_guard PRIVATE
+    -ffunction-sections
+    -fdata-sections
+)
+set_target_properties(fast_cam_release_guard PROPERTIES
+    LINK_FLAGS "-Wl,--gc-sections,-z,relro,-z,now"
+)
+
+add_library(dilink5_camera SHARED
+    camera/fast_cam_bridge.cpp
+    camera/qcarcam_bridge.cpp
+)
+target_include_directories(dilink5_camera PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/camera
+    ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(dilink5_camera
+    android
+    EGL
+    GLESv2
+    log
+    m
+)
+target_compile_options(dilink5_camera PRIVATE
+    -fvisibility=hidden
+    -fvisibility-inlines-hidden
+    -ffunction-sections
+    -fdata-sections
+)
+target_compile_definitions(dilink5_camera PRIVATE
+    OVERDRIVE_DILINK5_ENABLE_DIRECT_DMA=${OVERDRIVE_DILINK5_ENABLE_DIRECT_DMA}
+    $<$<CONFIG:Release>:NDEBUG>
+    $<$<CONFIG:RelWithDebInfo>:NDEBUG>
+)
+set_target_properties(dilink5_camera PROPERTIES
+    LINK_FLAGS "-Wl,--gc-sections,--strip-all,--exclude-libs,ALL"
+)
+
 # ==================== od library ====================
 # Standalone utility library with host-authorization gate. Same hardening as surveillance:
 # all symbols hidden, fully stripped, sections GC'd — only the two JNI entry points remain.
-#
-# od/od.cpp is a closed component and is NOT part of this repository. When it is
-# absent (clean public clone), the prebuilt libod.so in jniLibs/ is used at runtime
-# and this target is skipped so the native build still configures and completes.
-if(EXISTS ${CMAKE_SOURCE_DIR}/od/od.cpp)
-    add_library(od SHARED od/od.cpp)
-    target_include_directories(od PRIVATE ${CMAKE_SOURCE_DIR}/od)
-    target_link_libraries(od android log m)
-    target_compile_options(od PRIVATE
-        -fvisibility=hidden
-        -fvisibility-inlines-hidden
-        -ffunction-sections
-        -fdata-sections
-        -O3 -ffast-math
-    )
-    # Force NDEBUG in release configs so the #ifndef NDEBUG host-auth bypass in
-    # od.cpp is preprocessed out (don't rely on the toolchain's implicit default).
-    target_compile_definitions(od PRIVATE
-        $<$<CONFIG:Release>:NDEBUG>
-        $<$<CONFIG:RelWithDebInfo>:NDEBUG>
-    )
-    set_target_properties(od PROPERTIES
-        LINK_FLAGS "-Wl,--gc-sections,--strip-all,--exclude-libs,ALL"
-    )
-else()
-    message(STATUS "od/od.cpp not present — skipping 'od' target; prebuilt libod.so in jniLibs/ is used at runtime.")
-endif()
+add_library(od SHARED od/od.cpp)
+target_include_directories(od PRIVATE ${CMAKE_SOURCE_DIR}/od)
+target_link_libraries(od android log m)
+target_compile_options(od PRIVATE
+    -fvisibility=hidden
+    -fvisibility-inlines-hidden
+    -ffunction-sections
+    -fdata-sections
+    -O3 -ffast-math
+)
+# Force NDEBUG in release configs so the #ifndef NDEBUG host-auth bypass in
+# od.cpp is preprocessed out (don't rely on the toolchain's implicit default).
+target_compile_definitions(od PRIVATE
+    $<$<CONFIG:Release>:NDEBUG>
+    $<$<CONFIG:RelWithDebInfo>:NDEBUG>
+)
+set_target_properties(od PROPERTIES
+    LINK_FLAGS "-Wl,--gc-sections,--strip-all,--exclude-libs,ALL"
+)
 
 # ==================== NEON SIMD Optimization ====================
 # Enable NEON for ARM architectures
@@ -163,6 +202,8 @@ if(ANDROID_ABI STREQUAL "arm64-v8a")
     # ARM64: NEON is mandatory, but we need to define the macro explicitly
     target_compile_definitions(surveillance PRIVATE __ARM_NEON__=1)
     target_compile_options(surveillance PRIVATE -O3 -ffast-math)
+    target_compile_definitions(dilink5_camera PRIVATE __ARM_NEON__=1)
+    target_compile_options(dilink5_camera PRIVATE -O3 -ffast-math)
     message(STATUS "NEON enabled for arm64-v8a")
 elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
     # ARM32: Enable NEON with compiler flags

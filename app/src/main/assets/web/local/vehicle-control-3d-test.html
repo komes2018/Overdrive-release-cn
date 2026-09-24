@@ -105,15 +105,20 @@
     .slider {
         flex: 1;
         -webkit-appearance: none; appearance: none;
+        height: 44px;
+        background: transparent;
+        outline: none;
+        margin: 0;
+    }
+    .slider::-webkit-slider-runnable-track {
         height: 3px;
         border-radius: 2px;
         background: rgba(255,255,255,0.08);
-        outline: none;
-        margin: 0;
     }
     .slider::-webkit-slider-thumb {
         -webkit-appearance: none; appearance: none;
         width: 14px; height: 14px;
+        margin-top: -6px;
         border-radius: 50%;
         background: #00D4AA;
         cursor: pointer;
@@ -125,6 +130,12 @@
         background: #00D4AA;
         cursor: pointer;
         border: 0;
+    }
+    .slider::-moz-range-track {
+        height: 3px;
+        border: 0;
+        border-radius: 2px;
+        background: rgba(255,255,255,0.08);
     }
     .panel { max-height: 92vh; overflow-y: auto; }
 
@@ -164,7 +175,7 @@
 </style>
 
 <!-- Reuse the production CSS so the HUD looks identical -->
-<link rel="stylesheet" href="../shared/vehicle-control.css">
+<link rel="stylesheet" href="../shared/vehicle-control.css?v=44">
 </head>
 <body>
 

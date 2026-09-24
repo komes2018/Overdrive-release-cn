@@ -2,6 +2,8 @@ package com.overdrive.app.server;
 
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.remote.RemoteDevViewBridgeAuth;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -10,6 +12,10 @@ import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -22,6 +28,10 @@ import java.util.concurrent.Executors;
 public class SurveillanceIpcServer implements Runnable {
     private static final String TAG = "SurveillanceIPC";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
+    private static final String DILINK5_INGRESS_SESSION = UUID.randomUUID().toString();
+    private static final Map<String, Long> DILINK5_INGRESS_NONCES =
+            new LinkedHashMap<>();
+    private static final int DILINK5_INGRESS_NONCE_LIMIT = 512;
     
     private final int port;
     // volatile: written by the run() thread on every (re)bind, read+closed by
@@ -76,6 +86,77 @@ public class SurveillanceIpcServer implements Runnable {
 
     public static void setMqttManager(com.overdrive.app.mqtt.MqttConnectionManager manager) {
         mqttManager = manager;
+    }
+
+    /** Reconcile long-lived processes after any vehicle-mode transition. */
+    public static void requestAppVehicleModeSync(
+            String previousMode, String activeMode) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform
+                .isSameMode(previousMode, activeMode)) {
+            return;
+        }
+        if (isDiLink5Mode(previousMode) && !isDiLink5Mode(activeMode)) {
+            com.overdrive.app.monitor.ChargingDetector.getInstance()
+                    .clearExternalVerdict();
+        }
+        if (!isDiLink5Mode(previousMode) && isDiLink5Mode(activeMode)) {
+            Thread grants = new Thread(() -> {
+                if (!com.overdrive.app.util.BydDataCacheWhitelist
+                        .applyViaDaemonWhenReady()) {
+                    logger.warn("DiLink 5 background access was not applied: "
+                            + com.overdrive.app.util.BydDataCacheWhitelist
+                                    .getLastApplyFailure());
+                }
+            }, "DiLink5BackgroundAccess");
+            grants.setDaemon(true);
+            grants.start();
+        }
+        restartAccSentryForVehicleModeChange();
+        try {
+            new ProcessBuilder(
+                    "am",
+                    "start-foreground-service",
+                    "-n",
+                    "com.overdrive.app/.services.DaemonKeepaliveService")
+                    .start();
+        } catch (Exception e) {
+            logger.warn("Could not request app vehicle-mode sync: " + e.getMessage());
+        }
+    }
+
+    private static boolean isDiLink5Mode(String mode) {
+        return "dilink5".equalsIgnoreCase(mode);
+    }
+
+    private static void restartAccSentryForVehicleModeChange() {
+        Thread restart = new Thread(() -> {
+            String command =
+                    "if [ ! -x /data/local/tmp/start_acc_sentry.sh ] "
+                    + "|| [ -f /data/local/tmp/acc_sentry_daemon.disabled ] "
+                    + "|| [ -f /data/local/tmp/overdrive_parked_shutdown ]; then exit 0; fi; "
+                    + "PIDS=\"$(ps -A -o PID,NAME 2>/dev/null "
+                    + "| awk '$2==\"acc_sentry_daemon\" {print $1}')\"; "
+                    + "[ -z \"$PIDS\" ] && exit 0; "
+                    + "kill -9 $PIDS 2>/dev/null; sleep 3; "
+                    + "RUNNING=\"$(ps -A -o PID,NAME 2>/dev/null "
+                    + "| awk '$2==\"acc_sentry_daemon\" {print $1}')\"; "
+                    + "[ -n \"$RUNNING\" ] && exit 0; "
+                    + "nohup sh /data/local/tmp/start_acc_sentry.sh >/dev/null 2>&1 &";
+            try {
+                Process process = new ProcessBuilder("sh", "-c", command).start();
+                if (!process.waitFor(8, java.util.concurrent.TimeUnit.SECONDS)) {
+                    process.destroyForcibly();
+                    logger.warn("ACC worker mode-sync restart timed out");
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } catch (Exception failed) {
+                logger.warn("Could not restart ACC worker for vehicle-mode change: "
+                        + failed.getMessage());
+            }
+        }, "VehicleModeAccRestart");
+        restart.setDaemon(true);
+        restart.start();
     }
     
     public SurveillanceIpcServer(int port) {
@@ -218,12 +299,30 @@ public class SurveillanceIpcServer implements Runnable {
                 // reply with an error, and keep serving the next command.
                 try {
                     JSONObject request = new JSONObject(line);
+                    boolean diLink5Authenticated = false;
+                    if (request.has("signature") && request.has("request")) {
+                        RemoteDevViewBridgeAuth.AuthenticatedRequest authenticated =
+                                RemoteDevViewBridgeAuth.verify(line);
+                        if (!rememberNonce(
+                                authenticated.nonce,
+                                authenticated.timestampMs)) {
+                            throw new SecurityException("vehicle ingress replay rejected");
+                        }
+                        request = authenticated.request;
+                        String signedCommand = request.optString("command", "");
+                        if (!"DILINK5_TELEMETRY".equals(signedCommand)
+                                && !"DILINK5_VEHICLE_EVENT".equals(signedCommand)
+                                && !"DILINK5_HELLO".equals(signedCommand)) {
+                            throw new SecurityException("signed command is not a vehicle ingress");
+                        }
+                        diLink5Authenticated = true;
+                    }
                     if ("DETERRENT_INPUT_CAPTURE".equals(
                             request.optString("command", ""))) {
                         handleDeterrentInputCapture(client, in, out, request);
                         return;
                     }
-                    JSONObject response = handleCommand(request);
+                    JSONObject response = handleCommand(request, diLink5Authenticated);
                     // handleCommand returns null for fire-and-forget streaming
                     // commands (IMU_BATCH ~10/s, UPDATE_GPS ~1/s) whose sidecar
                     // clients never read the reply — skip the per-message
@@ -232,8 +331,9 @@ public class SurveillanceIpcServer implements Runnable {
                     if (response != null) {
                         out.println(response.toString());
                     }
-                } catch (org.json.JSONException je) {
-                    logger.debug("IPC: ignoring malformed command line: " + je.getMessage());
+                } catch (Exception invalid) {
+                    logger.debug("IPC: ignoring invalid command line: "
+                            + invalid.getMessage());
                 }
             }
 
@@ -294,13 +394,77 @@ public class SurveillanceIpcServer implements Runnable {
         }
     }
     
-    private JSONObject handleCommand(JSONObject request) {
+    private JSONObject handleCommand(
+            JSONObject request, boolean diLink5Authenticated) {
         JSONObject response = new JSONObject();
         
         try {
             String command = request.optString("command", "");
             
             switch (command) {
+                case "DILINK5_HELLO":
+                    if (!diLink5Authenticated) return null;
+                    response.put("success", true);
+                    response.put("session", DILINK5_INGRESS_SESSION);
+                    return response;
+
+                case "DILINK5_TELEMETRY": {
+                    if (!diLink5Authenticated
+                            || !hasCurrentDiLink5IngressSession(request)) {
+                        return null;
+                    }
+                    JSONObject data = request.optJSONObject("data");
+                    if (request.optInt("protocol", -1) == 1 && data != null) {
+                        JSONArray encodedDoorStates = request.optJSONArray("doorStates");
+                        int[] doorStates = null;
+                        if (encodedDoorStates != null) {
+                            doorStates = new int[encodedDoorStates.length()];
+                            for (int i = 0; i < doorStates.length; i++) {
+                                doorStates[i] = encodedDoorStates.optInt(
+                                        i,
+                                        com.overdrive.app.byd.BydVehicleData.UNAVAILABLE);
+                            }
+                        }
+                        com.overdrive.app.byd.BydVehicleData snapshot =
+                                com.overdrive.app.byd.BydVehicleData.fromJson(data);
+                        com.overdrive.app.byd.BydDataCollector.getInstance()
+                                .acceptDiLink5Telemetry(
+                                        snapshot,
+                                        request.optLong("sourceEpoch", 0L),
+                                        request.optLong("sequence", 0L),
+                                        request.optLong("sentElapsedMs", 0L),
+                                        request.optLong(
+                                                "dynamicsObservedElapsedMs",
+                                                0L),
+                                        request.optBoolean("charging", false),
+                                        request.optInt("energyFeedback", -1),
+                                        request.optInt(
+                                                "doorLockState",
+                                                com.overdrive.app.byd.BydDataCollector
+                                                        .DOOR_STATE_INVALID),
+                                        doorStates);
+                    }
+                    return null;
+                }
+
+                case "DILINK5_VEHICLE_EVENT": {
+                    if (!diLink5Authenticated
+                            || !hasCurrentDiLink5IngressSession(request)) {
+                        return null;
+                    }
+                    if (request.optInt("protocol", -1) == 1) {
+                        com.overdrive.app.byd.BydDataCollector.getInstance()
+                                .acceptDiLink5VehicleEvent(
+                                        request.optString("event", ""),
+                                        request.optInt("area", 0),
+                                        request.optInt("value", 0),
+                                        request.optLong("sourceEpoch", 0L),
+                                        request.optLong("sequence", 0L),
+                                        request.optLong("sentElapsedMs", 0L));
+                    }
+                    return null;
+                }
+
                 // ==================== TELEGRAM DAEMON COMMANDS ====================
                 // These commands are sent by TelegramBotDaemon for remote control
                 
@@ -339,18 +503,18 @@ public class SurveillanceIpcServer implements Runnable {
                     // nothing is armed while ACC is ON, and the pipeline call
                     // would re-apply the dashcam layout under a live recording.
                     boolean accOn = com.overdrive.app.monitor.AccMonitor.isAccOn();
-                    if (!accOn) {
-                        CameraDaemon.disableSurveillance();   // fires OEM recalc
-                    }
                     if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(false)) {
                         logger.warn("Failed to persist surveillanceEnabled=false via Telegram IPC");
                         response.put("success", false);
                         response.put("error", "Failed to save the surveillance setting");
                         break;
                     }
-                    // Second recalc post-write so resolver sees the new master toggle.
-                    try { com.overdrive.app.server.OemDashcamApiHandler.scheduleLifecycleRecalc(); }
-                    catch (Throwable ignored) {}
+                    if (!accOn) {
+                        CameraDaemon.disableSurveillance();   // fires OEM recalc
+                    } else {
+                        try { com.overdrive.app.server.OemDashcamApiHandler.scheduleLifecycleRecalc(); }
+                        catch (Throwable ignored) {}
+                    }
                     logger.info("Surveillance stopped via Telegram IPC");
                     response.put("success", true);
                     response.put("enabled", false);
@@ -471,7 +635,11 @@ public class SurveillanceIpcServer implements Runnable {
                             // rely on — ext4 mtime has 1s granularity and our
                             // cache could otherwise hide a peer daemon's write.
                             com.overdrive.app.config.UnifiedConfigManager.forceReload();
-                            ok = com.overdrive.app.config.UnifiedConfigManager.updateSection(s, data);
+                            ok = com.overdrive.app.config.UnifiedConfigManager
+                                    .updateSection(s, data);
+                            if (ok && "nativeShell".equals(s) && data.has("locale")) {
+                                LocaleManager.invalidateCaches();
+                            }
                         }
                     }
                     response.put("success", ok);
@@ -491,7 +659,12 @@ public class SurveillanceIpcServer implements Runnable {
                         }
                         synchronized (CONFIG_LOCK) {
                             com.overdrive.app.config.UnifiedConfigManager.forceReload();
-                            ok = com.overdrive.app.config.UnifiedConfigManager.updateValues(s, map);
+                            ok = com.overdrive.app.config.UnifiedConfigManager
+                                    .updateValues(s, map);
+                            if (ok && "nativeShell".equals(s)
+                                    && map.containsKey("locale")) {
+                                LocaleManager.invalidateCaches();
+                            }
                         }
                     }
                     response.put("success", ok);
@@ -539,6 +712,7 @@ public class SurveillanceIpcServer implements Runnable {
                     }
                     com.overdrive.app.config.ConfigBackupService.ApplyResult res;
                     synchronized (CONFIG_LOCK) {
+                        com.overdrive.app.config.UnifiedConfigManager.forceReload();
                         res = com.overdrive.app.config.ConfigBackupService.applyBundle(
                                 bundle,
                                 com.overdrive.app.updater.AppUpdater.getInstalledVersion(),
@@ -547,6 +721,7 @@ public class SurveillanceIpcServer implements Runnable {
                     response.put("success", res.getSuccess());
                     response.put("message", res.getMessage());
                     response.put("warnings", new org.json.JSONArray(res.getWarnings()));
+                    response.put("restartRequired", res.getRestartRequired());
                     break;
                 }
 
@@ -795,6 +970,13 @@ public class SurveillanceIpcServer implements Runnable {
                     handleUploadLog(request, response);
                     break;
 
+                case "PARKING_STATUS":
+                    // Telegram /where: the open (or latest) parking session.
+                    // Same JSON the HTTP API serves, so both surfaces agree.
+                    ParkingApiHandler.fillStatus(response);
+                    response.put("success", true);
+                    break;
+
                 default:
                     logger.warn("Unknown IPC command: " + command);
                     response.put("success", false);
@@ -809,6 +991,35 @@ public class SurveillanceIpcServer implements Runnable {
         }
         
         return response;
+    }
+
+    private static boolean hasCurrentDiLink5IngressSession(JSONObject request) {
+        return request != null
+                && DILINK5_INGRESS_SESSION.equals(
+                        request.optString("session", ""));
+    }
+
+    static synchronized boolean rememberNonce(String nonce, long timestampMs) {
+        long cutoff = System.currentTimeMillis()
+                - RemoteDevViewBridgeAuth.MAX_CLOCK_SKEW_MS;
+        Iterator<Map.Entry<String, Long>> entries =
+                DILINK5_INGRESS_NONCES.entrySet().iterator();
+        while (entries.hasNext()) {
+            if (entries.next().getValue() >= cutoff) break;
+            entries.remove();
+        }
+        if (nonce == null || nonce.isEmpty()
+                || DILINK5_INGRESS_NONCES.containsKey(nonce)) {
+            return false;
+        }
+        DILINK5_INGRESS_NONCES.put(nonce, timestampMs);
+        while (DILINK5_INGRESS_NONCES.size() > DILINK5_INGRESS_NONCE_LIMIT) {
+            Iterator<String> oldest = DILINK5_INGRESS_NONCES.keySet().iterator();
+            if (!oldest.hasNext()) break;
+            oldest.next();
+            oldest.remove();
+        }
+        return true;
     }
     
     /**
@@ -2276,6 +2487,15 @@ public class SurveillanceIpcServer implements Runnable {
                 response.put("error", "No update available");
                 return;
             }
+        }
+
+        String storageError = updater.getUpdateStorageError();
+        if (storageError != null) {
+            com.overdrive.app.updater.AppUpdater.endInstall();
+            try { updater.close(); } catch (Exception ignored) {}
+            response.put("success", false);
+            response.put("error", storageError);
+            return;
         }
 
         // Pre-spawn synchronous region: must release the shared gate on ANY

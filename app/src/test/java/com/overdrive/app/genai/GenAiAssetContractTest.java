@@ -23,6 +23,8 @@ public class GenAiAssetContractTest {
                 "src/main/java/com/overdrive/app/server/GenAiChatWebSocket.java");
         String voiceSocket = readProjectFile(
                 "src/main/java/com/overdrive/app/server/GenAiVoiceWebSocket.java");
+        String runtime = readProjectFile(
+                "src/main/java/com/overdrive/app/genai/GenAiRuntime.java");
 
         assertTrue(html.contains("id=\"genAiInput\""));
         assertTrue(html.contains("id=\"genAiVoiceBtn\""));
@@ -55,8 +57,19 @@ public class GenAiAssetContractTest {
         assertTrue(javascript.contains(
                 "mode === 'automation_diagnostics'"));
         assertTrue(html.contains("data-mode=\"vehicle_action\""));
+        assertTrue(html.contains("data-mode=\"vehicle_history\""));
+        assertTrue(html.contains("id=\"genAiRoutineSuggestions\""));
+        assertTrue(html.contains("id=\"genAiIncidentPacks\""));
+        assertTrue(html.contains(
+                "id=\"genAiRoutineLearningEnabled\""));
         assertTrue(javascript.contains(
                 "'/api/genai/action/execute'"));
+        assertTrue(javascript.contains(
+                "'/api/genai/history/query'"));
+        assertTrue(javascript.contains(
+                "'/api/genai/routines/decision'"));
+        assertTrue(javascript.contains(
+                "'/api/genai/incidents?limit=5'"));
         assertTrue(javascript.contains("Confirm and run"));
         assertTrue(javascript.contains("action_proposal"));
         assertTrue(javascript.contains(
@@ -89,18 +102,31 @@ public class GenAiAssetContractTest {
                 "language: self.responseLanguage()"));
         assertTrue(handler.contains(
                 "GenAiContext.withResponseLanguage("));
+        assertTrue(handler.contains(
+                "GenAiVehicleHistory.execute("));
+        assertTrue(handler.contains(
+                "GenAiRoutineLearner.decision("));
+        assertTrue(handler.contains(
+                "GenAiIncidentPacks.create("));
         assertTrue(chatSocket.contains(
                 "GenAiContext.withResponseLanguage("));
         assertTrue(voiceSocket.contains(
                 "GenAiContext.withResponseLanguage("));
         assertTrue(html.contains("@media (max-width: 900px)"));
+        assertTrue(html.contains(".ai-insight-card {"));
+        assertTrue(html.contains("margin: 0 !important;"));
         assertTrue(html.contains(
-                ".ai-insight-grid > .card + .card { margin-top: 0; }"));
+                "class=\"card ai-insight-card\""));
+        assertTrue(html.contains("core.js?v=21"));
+        assertTrue(html.contains("placeholder=\"Ask OverDrive…\""));
         assertTrue(html.contains(
                 "min-height: 180px; max-height: 720px"));
         assertFalse(html.contains(
                 "bottom: calc(90px + var(--safe-bottom, 0px))"));
-        assertTrue(html.contains("genai.js?v=9"));
+        assertTrue(runtime.contains(
+                "OverDrive is the app name, not the user's name"));
+        assertTrue(html.contains("genai.js?v=11"));
+        assertTrue(javascript.contains("BYD.utils.confirmDialog"));
     }
 
     @Test

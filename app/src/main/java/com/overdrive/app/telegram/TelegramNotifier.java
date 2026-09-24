@@ -77,7 +77,7 @@ public class TelegramNotifier {
      * Notifications → Telegram and the daemon-side gate in
      * TelegramBotDaemon.processIpcCommand.
      */
-    public enum Category { CRITICAL, CONNECTIVITY, MOTION, VIDEO }
+    public enum Category { CRITICAL, CONNECTIVITY, MOTION, VIDEO, PARKING }
 
     /**
      * Read the matching pref directly from the unified config so a toggle
@@ -99,6 +99,7 @@ public class TelegramNotifier {
                 case CONNECTIVITY: return UnifiedTelegramConfig.isConnectivity();
                 case MOTION:       return UnifiedTelegramConfig.isMotionText();
                 case VIDEO:        return UnifiedTelegramConfig.isVideoUploads();
+                case PARKING:      return UnifiedTelegramConfig.isParkingMessages();
                 default:           return true;
             }
         } catch (Exception e) {
@@ -333,6 +334,41 @@ public class TelegramNotifier {
                 }
             } catch (Exception e) {
                 Log.e(TAG, "notifyMotionFinalized IPC error", e);
+            }
+        });
+    }
+
+    /**
+     * Parking Intelligence message ("Parked · place …" / "Back at car …").
+     * Sent as a photo when {@code photoPath} exists (the four-camera arrived
+     * composite), else as text; {@code buttonsJson} is a JSON array of
+     * {@code {"text","url"}} URL buttons (e.g. "Walk me back" → maps link).
+     * Gated on {@code telegram.parkingMessages}; spooled on daemon-down so a
+     * "Parked" fired in the ACC-off bot start-up window is still delivered.
+     *
+     * @param photoPath   absolute JPEG path readable by the bot UID, or null
+     * @param buttonsJson serialized JSON array of {text,url}, or null
+     */
+    public static void notifyParking(String title, String body, String photoPath, String buttonsJson) {
+        final long eventTimeMs = System.currentTimeMillis();
+        executor.execute(() -> {
+            try {
+                if (!isEnabled(Category.PARKING)) {
+                    Log.d(TAG, "notifyParking skipped — parking messages disabled");
+                    return;
+                }
+                JSONObject cmd = new JSONObject();
+                cmd.put("cmd", "notifyParking");
+                cmd.put("eventTimeMs", eventTimeMs);
+                cmd.put("title", title == null ? "" : title);
+                cmd.put("body", body == null ? "" : body);
+                if (photoPath != null && !photoPath.isEmpty()) cmd.put("photoPath", photoPath);
+                if (buttonsJson != null && !buttonsJson.isEmpty()) {
+                    try { cmd.put("buttons", new org.json.JSONArray(buttonsJson)); } catch (Exception ignored) {}
+                }
+                sendIpc(cmd, /*spoolOnDaemonDown=*/true);
+            } catch (Exception e) {
+                Log.e(TAG, "notifyParking IPC error", e);
             }
         });
     }

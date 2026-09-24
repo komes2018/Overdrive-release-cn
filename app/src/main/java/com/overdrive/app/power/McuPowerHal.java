@@ -93,21 +93,20 @@ public final class McuPowerHal {
     /**
      * True when the user has selected DiLink 4 (byd_apa) camera mode.
      *
-     * <p>Read directly from config rather than by calling into a daemon — this class
-     * runs in whichever process boots it. Mirrors
-     * {@code AccSentryDaemon.isDilink4CameraMode()} exactly, including the
-     * fail-closed default, so a transient read error can never expand the write set
-     * on a legacy trim.
+     * <p>Uses the active-mode fence shared by every process, so staged
+     * configuration cannot expand the write set before restart succeeds.
      */
     private static boolean isDilink4CameraMode() {
         try {
-            org.json.JSONObject c = com.overdrive.app.config.UnifiedConfigManager.loadConfig()
-                    .optJSONObject("camera");
-            if (c == null) return false;
-            return "dilink4".equalsIgnoreCase(c.optString("cameraMode", "default"));
+            return com.overdrive.app.camera.dilink5.DiLink5Platform
+                    .isDiLink4Selected();
         } catch (Throwable t) {
             return false;
         }
+    }
+
+    private static boolean isDilink5Mode() {
+        return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
     }
 
     /**
@@ -118,6 +117,14 @@ public final class McuPowerHal {
 
     private static volatile Object cachedPowerDevice;
     private static volatile Object cachedSpecialDevice;
+    /**
+     * Special-device handle for the opt-in parked keep-alive lease ONLY. Kept
+     * separate from {@link #cachedSpecialDevice} on purpose: the lease may
+     * resolve the bare-package FQN on firmware where the legacy paths deliberately
+     * do not, and sharing one cache would let that handle leak into the
+     * fleet-wide requestSentryWake/Sleep writers.
+     */
+    private static volatile Object cachedLeaseSpecialDevice;
 
     private McuPowerHal() {}
 
@@ -132,12 +139,25 @@ public final class McuPowerHal {
         // (possibly null) context and may be unusable.
         cachedPowerDevice = null;
         cachedSpecialDevice = null;
+        cachedLeaseSpecialDevice = null;
+    }
+
+    /**
+     * Set the context only when none is present yet. Unlike {@link #setAppContext}
+     * this never drops already-resolved device handles, so a periodic caller can
+     * guarantee a context without re-resolving the HAL on every tick.
+     */
+    public static void ensureAppContext(android.content.Context ctx) {
+        if (appContext == null && ctx != null) {
+            setAppContext(ctx);
+        }
     }
 
     // ── MCU sleep/wake on BYDAutoPowerDevice ──────────────────────────
 
     /** Request MCU sleep ({@code EVENT_MCU_SLEEP_WAKE} ← 0). */
     public static boolean requestMcuSleep() {
+        if (isDilink5Mode()) return false;
         Object device = resolvePowerDevice();
         if (device == null) {
             logger.info("requestMcuSleep: power device unresolved — no-op");
@@ -150,6 +170,7 @@ public final class McuPowerHal {
 
     /** Request MCU wake ({@code EVENT_MCU_SLEEP_WAKE} ← 1). */
     public static boolean requestMcuWake() {
+        if (isDilink5Mode()) return false;
         Object device = resolvePowerDevice();
         if (device == null) {
             logger.info("requestMcuWake: power device unresolved — no-op");
@@ -190,6 +211,7 @@ public final class McuPowerHal {
 
     /** Request sentry-mode sleep — writes 1901←0, 1902←2 plus the 0x2EA0 sentry pair (0/2). */
     public static boolean requestSentrySleep() {
+        if (isDilink5Mode()) return false;
         Object device = resolveSpecialDevice();
         if (device == null) {
             logger.info("requestSentrySleep: BYDAutoSpecialDevice unavailable — no-op");
@@ -215,6 +237,7 @@ public final class McuPowerHal {
 
     /** Request sentry-mode wake — writes 1901←1, 1902←1 plus the 0x2EA0 sentry pair (1/1). */
     public static boolean requestSentryWake() {
+        if (isDilink5Mode()) return false;
         Object device = resolveSpecialDevice();
         if (device == null) {
             logger.info("requestSentryWake: BYDAutoSpecialDevice unavailable — no-op");
@@ -233,6 +256,193 @@ public final class McuPowerHal {
         }
         logger.info("requestSentryWake 1901<-1=" + a + " 1902<-1=" + b);
         return a && b;
+    }
+
+    // ── DiLink 5 parked keep-alive lease ─────────────────────────────
+    //
+    // The ONLY DiLink 5-capable write path in this class. Every legacy entry
+    // point above keeps its DiLink 5-mode fail-closed early return, and
+    // AccSentryDaemon's setPowerConfig()/VERIFIED_DILINK5_RAIL_SIGNATURES gate
+    // is untouched: those callers run on every variant and were never
+    // exercised against DI5 hardware. This path is reachable only through a
+    // Di5LeaseToken minted by Di5ParkedPowerHold for a specific parked
+    // generation, so the user's explicit opt-in (master toggle) and the current
+    // sentry generation are both required before a single write lands.
+    //
+    // DELIBERATELY NOT keyed to the camera-mode selection. DiLink 5 head units
+    // exist in two flavours — with the QCarCam stack (the user picks the
+    // "dilink5" camera mode) and without it (the user stays on another camera
+    // mode) — and the MCU/sentry flags are a vehicle-power concern, not a
+    // camera one. The user's Experimental master toggle is the platform
+    // declaration; the token supplies the generation fence. Nothing here runs
+    // for an install that never turned the toggle on.
+    //
+    // Value convention is identical to requestSentryWake/requestSentrySleep
+    // (enter 1/0, state 1/2). EVENT_MCU_SLEEP_WAKE (-1442840502) is touched
+    // ONLY by writeMcuPowerHoldForLease (1 = hold/wake, 0 = release), and the
+    // controller issues the release-side 0 only when it asserted the 1 itself —
+    // never as a bare "request MCU sleep".
+
+    /** Capability token for the lease path. Minted only by Di5ParkedPowerHold glue. */
+    public static final class Di5LeaseToken {
+        private final long generation;
+        private final java.util.function.BooleanSupplier current;
+
+        private Di5LeaseToken(long generation, java.util.function.BooleanSupplier current) {
+            this.generation = generation;
+            this.current = current;
+        }
+
+        public long generation() {
+            return generation;
+        }
+
+        /** True while the parked generation this token was minted for is current. */
+        public boolean isCurrent() {
+            try {
+                return current != null && current.getAsBoolean();
+            } catch (Throwable t) {
+                return false;
+            }
+        }
+    }
+
+    public static Di5LeaseToken newDi5LeaseToken(
+            long generation, java.util.function.BooleanSupplier current) {
+        return new Di5LeaseToken(generation, current);
+    }
+
+    /**
+     * Assert-side authorization: a token whose parked generation is still
+     * current. Release-side calls only need a token — releasing is the safe
+     * direction and must work from start-up hygiene and shutdown paths where no
+     * parked generation is current. There is no camera-mode check here (see the
+     * section note): the opt-in toggle evaluated by Di5ParkedPowerHold before it
+     * mints a token is the only platform declaration this path relies on.
+     */
+    private static boolean leaseAuthorized(Di5LeaseToken token, boolean assertSide) {
+        if (token == null) return false;
+        return !assertSide || token.isCurrent();
+    }
+
+    /**
+     * Special device for the lease. Probes BOTH known FQNs (the bare
+     * {@code android.hardware.special} package exists in the wild — see
+     * SPECIAL_CLASS_CANDIDATES) because a DiLink 5 unit that is not in the
+     * "dilink5" camera mode would otherwise be limited to the legacy single-FQN
+     * probe and the opt-in lease would silently no-op. Uses its own cache so the
+     * fleet-wide writers behind {@link #resolveSpecialDevice()} keep their
+     * exact resolution behaviour.
+     */
+    private static Object resolveLeaseSpecialDevice() {
+        if (cachedLeaseSpecialDevice != null) return cachedLeaseSpecialDevice;
+        if (appContext == null) {
+            logger.debug("resolveLeaseSpecialDevice: no appContext — call setAppContext first");
+            return null;
+        }
+        for (String fqn : SPECIAL_CLASS_CANDIDATES) {
+            try {
+                Class<?> cls = Class.forName(fqn);
+                Method getInstance = cls.getMethod("getInstance", android.content.Context.class);
+                Object device = getInstance.invoke(null, appContext);
+                if (device == null) {
+                    logger.debug("resolveLeaseSpecialDevice: " + fqn + " getInstance returned null");
+                    continue;
+                }
+                cachedLeaseSpecialDevice = device;
+                logger.info("resolveLeaseSpecialDevice: " + fqn
+                        + " -> " + device.getClass().getName());
+                return device;
+            } catch (ClassNotFoundException e) {
+                logger.debug("resolveLeaseSpecialDevice: " + fqn + " not present");
+            } catch (Throwable t) {
+                logger.debug("resolveLeaseSpecialDevice: " + fqn + " failed: " + t.getMessage());
+            }
+        }
+        logger.warn("resolveLeaseSpecialDevice: BYDAutoSpecialDevice unavailable ("
+                + SPECIAL_CLASS_CANDIDATES.length
+                + " candidates probed) — lease sentry-flag writes will no-op");
+        return null;
+    }
+
+    /**
+     * Sentry-mode flag pair for the DI5 lease: assert = {@code 782237711←1,
+     * 782237728←1}; release = {@code 782237711←0, 782237728←2}.
+     *
+     * @return {@code int[]{rcEnter, rcState}} — the HAL's RAW return codes (0 =
+     *         confirmed). {@code Integer.MIN_VALUE} when the lease is not
+     *         authorized or the special device is unavailable; nothing is written
+     *         in either case.
+     */
+    public static int[] writeSentryFlagsForLease(Di5LeaseToken token, boolean assertFlags) {
+        int[] unavailable = {Integer.MIN_VALUE, Integer.MIN_VALUE};
+        if (!leaseAuthorized(token, assertFlags)) {
+            logger.info("writeSentryFlagsForLease: lease not authorized — no-op");
+            return unavailable;
+        }
+        Object device = resolveLeaseSpecialDevice();
+        if (device == null) {
+            logger.info("writeSentryFlagsForLease: BYDAutoSpecialDevice unavailable — no-op");
+            return unavailable;
+        }
+        int enter = assertFlags ? 1 : 0;
+        int state = assertFlags ? 1 : 2;
+        int rcEnter = BydDeviceHelper.sendSetCommandRaw(device, SENTRY_MODE_ENTER, enter);
+        int rcState = BydDeviceHelper.sendSetCommandRaw(device, SENTRY_MODE_STATE, state);
+        logger.info("writeSentryFlagsForLease gen=" + token.generation()
+                + " 782237711<-" + enter + " rc=" + rcEnter
+                + " 782237728<-" + state + " rc=" + rcState);
+        return new int[]{rcEnter, rcState};
+    }
+
+    /**
+     * MCU power hold for the lease: {@code EVENT_MCU_SLEEP_WAKE (-1442840502) ←
+     * 1} on hold, {@code ← 0} on release. OEM-app parity — its shipping default
+     * (V1) writes exactly this, unconditionally, on ACC OFF, and never gates it
+     * on {@code getMcuStatus()}; the status-gated variant is the documented
+     * cause of the DiLink 4 rail collapse. The caller (Di5ParkedPowerHold) only
+     * issues the release-side 0 when it asserted the 1 itself, so an install
+     * with the lever off never writes this event at all.
+     *
+     * @return the HAL's RAW return code (0 = confirmed); {@code Integer.MIN_VALUE}
+     *         when the lease is not authorized or the power device is unavailable —
+     *         nothing is written in either case.
+     */
+    public static int writeMcuPowerHoldForLease(Di5LeaseToken token, boolean hold) {
+        if (!leaseAuthorized(token, hold)) {
+            logger.info("writeMcuPowerHoldForLease: lease not authorized — no-op");
+            return Integer.MIN_VALUE;
+        }
+        Object device = resolvePowerDevice();
+        if (device == null) {
+            logger.info("writeMcuPowerHoldForLease: BYDAutoPowerDevice unavailable — no-op");
+            return Integer.MIN_VALUE;
+        }
+        int value = hold ? 1 : 0;
+        int rc = BydDeviceHelper.sendSetCommandRaw(device, EVENT_MCU_SLEEP_WAKE, value);
+        logger.info("writeMcuPowerHoldForLease gen=" + token.generation()
+                + " -1442840502<-" + value + " rc=" + rc);
+        return rc;
+    }
+
+    /** {@code BYDAutoPowerDevice.getMcuStatus()} for the lease; -1 when unavailable. */
+    public static int readMcuStatusForLease(Di5LeaseToken token) {
+        if (!leaseAuthorized(token, true)) return -1;
+        Object device = resolvePowerDevice();
+        if (device == null) return -1;
+        Object v = BydDeviceHelper.callGetter(device, "getMcuStatus");
+        return v instanceof Number ? ((Number) v).intValue() : -1;
+    }
+
+    /** {@code BYDAutoPowerDevice.wakeUpMcu()} for the lease; true when the HAL returned 0. */
+    public static boolean wakeUpMcuForLease(Di5LeaseToken token) {
+        if (!leaseAuthorized(token, true)) return false;
+        Object device = resolvePowerDevice();
+        if (device == null) return false;
+        Object v = BydDeviceHelper.callGetter(device, "wakeUpMcu");
+        boolean ok = v instanceof Number && ((Number) v).intValue() == 0;
+        logger.info("wakeUpMcuForLease gen=" + token.generation() + " rc=" + v);
+        return ok;
     }
 
     // ── Internals ────────────────────────────────────────────────────

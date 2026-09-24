@@ -7,8 +7,8 @@
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=6"></script>
-    <script src="../shared/app-shell.js?v=5"></script>
+    <script src="../shared/theme.js?v=8"></script>
+    <script src="../shared/app-shell.js?v=7"></script>
     <!--
       Bottom-tab manifest — two task-based tabs:
         Bindings — the enable switch + list of current key bindings
@@ -26,7 +26,7 @@
         };
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=24">
+    <link rel="stylesheet" href="../shared/styles.css?v=34">
     <style>
         /* Big capture box — shows the last hardware key the user pressed while
            arming. JetBrains Mono keycode, sized for a phone in a car cradle. */
@@ -186,14 +186,14 @@
                              on. Mutually exclusive with #kmA11yPending below — updateA11yCard()
                              shows exactly one, and hides the settings button in the pending case
                              (there is nothing to go and change). Both need ids for that. -->
-                        <div class="info-box-note" id="kmA11yNeeded" style="background:rgba(255,179,0,0.10);border:1px solid rgba(255,179,0,0.35);">
+                        <div class="info-box-note info-box-framed" id="kmA11yNeeded" style="background:rgba(255,179,0,0.10);border:1px solid rgba(255,179,0,0.35);">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="#ffb300" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                             <div data-i18n="keymap.a11y_needed">Key mapping needs the OverDrive accessibility service turned on to intercept hardware buttons. Bindings are saved but won't fire until you enable it.</div>
                         </div>
                         <!-- Shown INSTEAD of the amber note when the service is enabled but the
                              system hasn't finished starting it — the normal window right after a
                              car power-on, which clears on its own. -->
-                        <div class="info-box-note" id="kmA11yPending" style="display:none;background:rgba(3,169,244,0.10);border:1px solid rgba(3,169,244,0.35);">
+                        <div class="info-box-note info-box-framed" id="kmA11yPending" style="display:none;background:rgba(3,169,244,0.10);border:1px solid rgba(3,169,244,0.35);">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="#03a9f4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                             <div data-i18n="keymap.a11y_pending">The service is enabled and starting up — hardware buttons become active in a few seconds. No action needed.</div>
                         </div>
@@ -206,7 +206,7 @@
 
                 <div class="card" data-tab="bindings" id="kmReplayRestartCard" style="display:none;">
                     <div class="card-body">
-                        <div class="info-box-note" style="background:rgba(255,179,0,0.10);border:1px solid rgba(255,179,0,0.35);">
+                        <div class="info-box-note info-box-framed" style="background:rgba(255,179,0,0.10);border:1px solid rgba(255,179,0,0.35);">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="#ffb300" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                             <div data-i18n="keymap.clip_restart_required">Instant replay is saved. The full window becomes available after a cold restart of Camera daemon from Daemons. The current dashcam recording was not interrupted.</div>
                         </div>
@@ -245,7 +245,7 @@
                                 <div class="setting-desc" data-i18n="keymap.double_tap_window_desc">How long to wait for a second tap before a double-tap binding gives up and the single-tap fires. Raise it if your double-taps often trigger the single action; lower it if a single tap feels laggy.</div>
                             </div>
                             <div class="setting-control" style="display:flex;align-items:center;">
-                                <input type="range" id="kmDoubleTapWindow" min="250" max="1500" step="50"
+                                <input type="range" class="slider" id="kmDoubleTapWindow" min="250" max="1500" step="50"
                                        oninput="KM.onDoubleTapWindowInput()" onchange="KM.onDoubleTapWindowChange()"
                                        style="vertical-align:middle;">
                                 <span id="kmDoubleTapWindowVal" style="margin-left:10px;min-width:40px;display:inline-block;text-align:right;">0.5s</span>
@@ -520,7 +520,7 @@
     <script src="../shared/auth.js"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js?v=20"></script>
-    <script src="../shared/key-mapping.js?v=34"></script>
+    <script src="../shared/key-mapping.js?v=35"></script>
     <script src="../shared/cluster-projection.js?v=1"></script>
     <script>
         function toggleSidebar() {

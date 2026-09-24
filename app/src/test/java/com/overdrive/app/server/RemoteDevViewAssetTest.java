@@ -30,6 +30,20 @@ public class RemoteDevViewAssetTest {
     }
 
     @Test
+    public void sidebarStartsSharedVehicleStatusPolling() throws Exception {
+        String html = read("src/main/assets/web/local/remote-dev-view.html");
+
+        int auth = html.indexOf("../shared/auth.js");
+        int core = html.indexOf("../shared/core.js?v=20");
+        int view = html.indexOf("../shared/remote-dev-view.js?v=10");
+        assertTrue(auth >= 0);
+        assertTrue(core > auth);
+        assertTrue(view > core);
+        assertTrue(html.contains("BYD.i18n.init().then(function ()"));
+        assertTrue(html.contains("BYD.core.init();"));
+    }
+
+    @Test
     public void frameFallbackUsesAuthenticatedPostAndNoStoreWithoutPuttingSessionInUrl() throws Exception {
         String script = read("src/main/assets/web/shared/remote-dev-view.js");
         String html = read("src/main/assets/web/local/remote-dev-view.html");
@@ -46,7 +60,7 @@ public class RemoteDevViewAssetTest {
         assertTrue(script.contains("maxWidth: 960, quality: 55"));
         assertTrue(script.contains("Waiting for a stable app frame"));
         assertTrue(script.contains(": 100"));
-        assertTrue(html.contains("remote-dev-view.js?v=9"));
+        assertTrue(html.contains("remote-dev-view.js?v=10"));
     }
 
     @Test
@@ -143,11 +157,14 @@ public class RemoteDevViewAssetTest {
         assertFalse(html.contains("id=\"textInput\""));
         assertTrue(html.contains("id=\"keyboardButton\""));
         assertTrue(html.contains("id=\"fullscreenKeyboardButton\""));
+        assertTrue(html.contains("id=\"backButton\""));
         assertTrue(html.contains("id=\"keyboardCapture\""));
         assertTrue(script.contains("case 'Escape': return 'back'"));
         assertTrue(script.contains("case 'Backspace': return 'delete'"));
         assertTrue(script.contains("case 'ArrowUp': return 'dpad_up'"));
         assertTrue(script.contains("queueKeyboardText(event.key)"));
+        assertTrue(script.contains("backButton.addEventListener('click'"));
+        assertTrue(script.contains("backButton.disabled = !running"));
         assertTrue(script.contains("keyboardCapture.addEventListener('compositionend'"));
         assertTrue(script.contains("viewerCard.focus({ preventScroll: true })"));
     }

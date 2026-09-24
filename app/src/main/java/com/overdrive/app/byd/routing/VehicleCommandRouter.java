@@ -271,7 +271,9 @@ public final class VehicleCommandRouter {
      * types — everything flows through these declarations, so adding a new
      * command is "extend, declare capabilities, override the leg(s) you have."
      */
-    public static abstract class VehicleCommand {
+    public static abstract class VehicleCommand implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+
         public abstract String name();
 
         /**
@@ -328,6 +330,14 @@ public final class VehicleCommandRouter {
          * Overridden for the find/flash commands; default is normal latency.
          */
         public boolean isLatencySensitive() { return false; }
+
+        /**
+         * Prefer the SDK leg while the connected vehicle is awake or ACC-on,
+         * while retaining the cloud leg as a fallback. This is useful when a
+         * command has equivalent local and remote semantics but should use the
+         * remote path first for an asleep vehicle.
+         */
+        public boolean preferLocalWhenOccupiedOrAwake() { return false; }
 
         /**
          * When the vehicle is AWAKE, run the SDK leg ONLY — never fall through to cloud.
@@ -622,15 +632,23 @@ public final class VehicleCommandRouter {
     }
 
     /**
-     * BYD's cloud OPENWINDOW command opens only a small ventilation crack. Keep it as a distinct
-     * operation so a successful remote vent is never represented as a full all-window opening.
+     * Vent all four side windows. BYD's cloud OPENWINDOW command opens a small
+     * ventilation crack; while the connected vehicle is awake the SDK leg
+     * reproduces that intent with closed-loop 15% positioning.
      */
     public static final class VentAllWindowsCommand extends VehicleCommand {
+        public static final int LOCAL_VENT_PERCENT = 15;
+
         public String name() { return "windows-vent-all"; }
-        public Capability cloudCapability() { return Capability.REQUIRED; }
-        public RoutePreference defaultPreference() { return RoutePreference.CLOUD_ONLY; }
+        public Capability cloudCapability() { return Capability.AVAILABLE; }
+        public Capability sdkCapability() { return Capability.AVAILABLE; }
+        public RoutePreference defaultPreference() { return RoutePreference.CLOUD_FIRST; }
+        public boolean preferLocalWhenOccupiedOrAwake() { return true; }
         public CloudOutcome executeViaCloud(BydCloudClient client, String vin) throws Exception {
             return remoteCommand(client, vin, "OPENWINDOW", null);
+        }
+        public boolean executeViaSdk(BydDataCollector c) {
+            return c.moveAllSideWindowsToPercent(LOCAL_VENT_PERCENT);
         }
         public CloudCapabilities.Feature cloudFeature() {
             return CloudCapabilities.Feature.WINDOWS_OPEN_VENT;
@@ -1291,6 +1309,40 @@ public final class VehicleCommandRouter {
         public RoutePreference defaultPreference() { return RoutePreference.SDK_ONLY; }
         public boolean executeViaSdk(BydDataCollector c) {
             return c.setAmbientLightEnabledZoned(zone, on);
+        }
+    }
+
+    /** Head-up display brightness, executed through the selected vehicle backend. */
+    public static final class HudBrightnessCommand extends VehicleCommand {
+        public final int percent;
+        public HudBrightnessCommand(int percent) { this.percent = percent; }
+        public String name() { return "hud-brightness"; }
+        public Capability sdkCapability() { return Capability.REQUIRED; }
+        public RoutePreference defaultPreference() { return RoutePreference.SDK_ONLY; }
+        public MotionSafety motionSafety() { return MotionSafety.BLOCK_WHILE_MOVING; }
+        public String motionSafetyGuardKey() {
+            return DrivingSafetyGuard.GUARD_DISPLAY_BRIGHTNESS;
+        }
+        public boolean executeViaSdk(BydDataCollector c) {
+            return c.setHudBrightness(percent);
+        }
+    }
+
+    /** Dedicated head-up display power switch, distinct from brightness. */
+    public static final class HudPowerCommand extends VehicleCommand {
+        public final boolean on;
+        public HudPowerCommand(boolean on) { this.on = on; }
+        public String name() { return "hud-power"; }
+        public Capability sdkCapability() { return Capability.REQUIRED; }
+        public RoutePreference defaultPreference() { return RoutePreference.SDK_ONLY; }
+        public MotionSafety motionSafety() {
+            return on ? MotionSafety.UNRESTRICTED : MotionSafety.BLOCK_WHILE_MOVING;
+        }
+        public String motionSafetyGuardKey() {
+            return DrivingSafetyGuard.GUARD_DISPLAY_POWER;
+        }
+        public boolean executeViaSdk(BydDataCollector c) {
+            return c.setHudPower(on);
         }
     }
 
@@ -2083,8 +2135,13 @@ public final class VehicleCommandRouter {
     private CommandResult runCloudFirst(VehicleCommand cmd) {
         long start = System.currentTimeMillis();
 
-        // Latency-sensitive override: SDK is instant when the car is awake.
-        if (cmd.isLatencySensitive() && isVehicleAwake() && cmd.hasSdkPath()) {
+        // Some dual-path commands are instant or semantically preferable on
+        // the local rail while the connected vehicle is awake/occupied.
+        boolean preferLocal = cmd.isLatencySensitive() && isVehicleAwake();
+        if (!preferLocal && cmd.preferLocalWhenOccupiedOrAwake()) {
+            preferLocal = isVehicleOccupiedOrAwake();
+        }
+        if (preferLocal && cmd.hasSdkPath()) {
             SdkLeg leg = invokeSdk(cmd);
             if (leg.success) {
                 return CommandResult.success(Path.SDK, msg("local_sent"),
@@ -2248,7 +2305,10 @@ public final class VehicleCommandRouter {
                 }
                 boolean opened;
                 try {
-                    opened = collector.openTailgate();
+                    opened = shouldDispatchViaDiLink5Bridge(command)
+                            ? com.overdrive.app.byd.VehicleActuatorBridge.dispatchDiLink5Command(
+                                    collector.getRuntimeContext(), command)
+                            : collector.openTailgate();
                 } catch (Exception e) {
                     logger.warn("SDK exec for " + command.name() + " threw: " + e.getMessage());
                     return CommandResult.failed(Path.SDK, msg("not_supported"),
@@ -2400,7 +2460,7 @@ public final class VehicleCommandRouter {
             }
             if (checkDrivingSafety(command) != null) return new SdkLeg(false, null, true);
             try {
-                return new SdkLeg(command.executeViaSdk(BydDataCollector.getInstance()), null);
+                return new SdkLeg(executeSdkCommand(command), null);
             } catch (Exception e) {
                 logger.warn("SDK exec for " + command.name() + " threw: " + e.getMessage());
                 return new SdkLeg(false, e);
@@ -2557,11 +2617,25 @@ public final class VehicleCommandRouter {
             return new SdkLeg(false, null, true);
         }
         try {
-            return new SdkLeg(cmd.executeViaSdk(BydDataCollector.getInstance()), null);
+            return new SdkLeg(executeSdkCommand(cmd), null);
         } catch (Exception e) {
             logger.warn("SDK exec for " + cmd.name() + " threw: " + e.getMessage());
             return new SdkLeg(false, e);
         }
+    }
+
+    private static boolean executeSdkCommand(VehicleCommand cmd) {
+        BydDataCollector collector = BydDataCollector.getInstance();
+        if (shouldDispatchViaDiLink5Bridge(cmd)) {
+            return com.overdrive.app.byd.VehicleActuatorBridge.dispatchDiLink5Command(
+                    collector.getRuntimeContext(), cmd);
+        }
+        return cmd.executeViaSdk(collector);
+    }
+
+    private static boolean shouldDispatchViaDiLink5Bridge(VehicleCommand cmd) {
+        return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                && !"com.overdrive.app".equals(android.app.Application.getProcessName());
     }
 
     private CloudCallResult runCloudCall(final VehicleCommand cmd) {

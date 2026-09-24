@@ -41,6 +41,7 @@ class RecordingAdapter(
     private val onDelete: (RecordingFile) -> Unit,
     private val onSelectionChanged: ((Int) -> Unit)? = null,
     private val onShare: ((RecordingFile) -> Unit)? = null,
+    private val onEvidencePack: ((RecordingFile) -> Unit)? = null,
     private val landscapeRows: Boolean = false
 ) : ListAdapter<RecordingFile, RecordingAdapter.RecordingViewHolder>(RecordingDiffCallback()) {
     
@@ -176,6 +177,7 @@ class RecordingAdapter(
         private var thumbnailJob: Job? = null
 
         fun bind(recording: RecordingFile) {
+            val ctx = itemView.context
             thumbnailJob?.cancel()
             tvCameraId.text = "C${recording.cameraId}"
             tvRecordingTime.text = recording.formattedTime
@@ -252,7 +254,7 @@ class RecordingAdapter(
             when (recording.peakSeverity?.uppercase()) {
                 "CRITICAL" -> {
                     tvSeverity?.visibility = View.VISIBLE
-                    tvSeverity?.text = "CRITICAL"
+                    tvSeverity?.text = ctx.getString(R.string.recording_lib_chip_critical)
                     tvSeverity?.tintAsStatusBadge(
                         R.color.overdrive_status_danger_container,
                         R.color.overdrive_status_danger
@@ -266,7 +268,7 @@ class RecordingAdapter(
                 }
                 "ALERT" -> {
                     tvSeverity?.visibility = View.VISIBLE
-                    tvSeverity?.text = "ALERT"
+                    tvSeverity?.text = ctx.getString(R.string.recording_lib_chip_alert)
                     tvSeverity?.tintAsStatusBadge(
                         R.color.overdrive_status_warning_container,
                         R.color.overdrive_status_warning
@@ -337,7 +339,8 @@ class RecordingAdapter(
                 cbSelect.setOnCheckedChangeListener(null)
                 cbSelect.visibility = View.GONE
                 cbSelect.contentDescription = null
-                btnDelete?.visibility = View.VISIBLE
+                val usesOverflow = btnMore != null
+                btnDelete?.visibility = if (usesOverflow) View.GONE else View.VISIBLE
                 btnMore?.visibility = View.VISIBLE
                 itemView.contentDescription = itemView.context.getString(
                     R.string.recording_item_description,
@@ -350,7 +353,7 @@ class RecordingAdapter(
                 // Per-tile share — only wired when the host fragment opted
                 // into the share callback. Hidden otherwise so the tile
                 // footer doesn't show a dead button.
-                if (onShare != null) {
+                if (!usesOverflow && onShare != null) {
                     btnShare?.visibility = View.VISIBLE
                     btnShare?.setOnClickListener { onShare.invoke(recording) }
                 } else {
@@ -382,14 +385,24 @@ class RecordingAdapter(
 
         private fun showMoreMenu(anchor: View, recording: RecordingFile) {
             val shareTitle = anchor.context.getString(R.string.action_share)
+            val evidenceTitle = anchor.context.getString(
+                R.string.action_create_evidence_pack
+            )
             val deleteTitle = anchor.context.getString(R.string.action_delete)
             PopupMenu(anchor.context, anchor).apply {
                 if (onShare != null) menu.add(shareTitle)
+                if (onEvidencePack != null && !recording.recordingId.isNullOrEmpty()) {
+                    menu.add(evidenceTitle)
+                }
                 menu.add(deleteTitle)
                 setOnMenuItemClickListener { item ->
                     when (item.title?.toString()) {
                         shareTitle -> {
                             onShare?.invoke(recording)
+                            true
+                        }
+                        evidenceTitle -> {
+                            onEvidencePack?.invoke(recording)
                             true
                         }
                         deleteTitle -> {

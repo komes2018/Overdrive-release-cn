@@ -191,12 +191,13 @@ class CloudflareEdgeSyncProvider(
         private const val MAX_REPORTS_PER_BATCH = 256  // server cap
 
         /** Proxy-aware OkHttp client: routes through sing-box/Tailscale when one is
-         *  up (ProxyHelper.getHttpProxy() returns NO_PROXY otherwise), so crowdsource
-         *  sync works for users behind the proxy — same convention as ABRP/updater. */
+         *  up, with a DIRECT fallback leg (ProxyHelper.chainProxySelector()) so a
+         *  tailnet-only Tailscale listener can't wedge crowdsource sync — same
+         *  convention as ABRP/updater. */
         private fun proxiedClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
-            .proxy(com.overdrive.app.mqtt.ProxyHelper.getHttpProxy())
+            .proxySelector(com.overdrive.app.mqtt.ProxyHelper.chainProxySelector())
             .build()
     }
 }

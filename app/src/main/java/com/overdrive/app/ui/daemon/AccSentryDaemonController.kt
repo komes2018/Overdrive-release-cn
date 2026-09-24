@@ -53,6 +53,7 @@ class AccSentryDaemonController(
             com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine("acc_sentry") +
             "sleep 1\n" +
             "rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n" +
+            "rm -rf /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null\n" +
             "echo done\n",
             object : AdbDaemonLauncher.LaunchCallback {
                 override fun onLog(message: String) {}
@@ -89,6 +90,7 @@ class AccSentryDaemonController(
             com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine("acc_sentry") +
             "sleep 1\n" +
             "rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n" +
+            "rm -rf /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null\n" +
             "echo done\n",
             object : AdbDaemonLauncher.LaunchCallback {
                 override fun onLog(message: String) {}

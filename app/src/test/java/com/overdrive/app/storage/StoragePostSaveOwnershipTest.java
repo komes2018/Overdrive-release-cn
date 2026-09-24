@@ -35,7 +35,9 @@ public class StoragePostSaveOwnershipTest {
     public void nonMp4TripFinalizerStillRequestsCleanup() throws IOException {
         String trips = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/trips/TripTelemetryRecorder.java");
-        assertTrue(methodBody(trips, "public String stopRecording()")
+        // The no-arg stopRecording() is a one-line delegate; the notify lives in the
+        // keepActiveMarker overload that carries the actual finalization.
+        assertTrue(methodBody(trips, "public String stopRecording(boolean keepActiveMarker)")
                 .contains("onTripFileSaved()"));
     }
 

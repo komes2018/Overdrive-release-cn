@@ -8,13 +8,15 @@ package com.overdrive.app.ui.util
  * explicit here prevents the UI from presenting multi-select place chips
  * while silently sending only one selection.
  */
-data class RecordingLibraryFilterState(
+data class RecordingLibraryFilterState @JvmOverloads constructor(
     val actorClasses: Set<String> = emptySet(),
     val severities: Set<String> = emptySet(),
     val places: Set<String> = emptySet(),
     val placeContains: String = "",
     val storages: Set<String> = emptySet(),
-    val dateNarrowed: Boolean = false
+    val dateNarrowed: Boolean = false,
+    /** Parking Intelligence session id ("park_yyyyMMdd_HHmmss"); blank = no narrowing. */
+    val parkingSessionId: String = ""
 ) {
     val normalizedActorClasses: Set<String> =
         actorClasses.mapTo(linkedSetOf()) { it.trim().lowercase() }
@@ -28,6 +30,9 @@ data class RecordingLibraryFilterState(
     val normalizedStorages: Set<String> =
         storages.mapTo(linkedSetOf()) { it.trim().uppercase() }
             .filterTo(linkedSetOf()) { it.isNotEmpty() }
+    /** Same token rule as the server (RecordingsApiHandler.applyParkingExtras). */
+    val normalizedParkingSessionId: String? =
+        parkingSessionId.trim().takeIf { it.matches(Regex("[A-Za-z0-9_\\-]{1,64}")) }
 
     val hasActiveNarrowing: Boolean
         get() = dateNarrowed ||
@@ -35,7 +40,8 @@ data class RecordingLibraryFilterState(
             normalizedSeverities.isNotEmpty() ||
             exactPlace != null ||
             normalizedPlaceContains.isNotEmpty() ||
-            normalizedStorages.isNotEmpty()
+            normalizedStorages.isNotEmpty() ||
+            normalizedParkingSessionId != null
 
     fun matchesFallback(
         storageType: String?,

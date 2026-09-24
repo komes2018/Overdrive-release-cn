@@ -7,6 +7,7 @@ import com.overdrive.app.mqtt.ProxyHelper;
 import org.eclipse.paho.mqttv5.client.IMqttToken;
 import org.eclipse.paho.mqttv5.client.MqttCallback;
 import org.eclipse.paho.mqttv5.client.MqttClient;
+import org.eclipse.paho.mqttv5.client.MqttClientException;
 import org.eclipse.paho.mqttv5.client.MqttConnectionOptions;
 import org.eclipse.paho.mqttv5.client.MqttDisconnectResponse;
 import org.eclipse.paho.mqttv5.client.persist.MemoryPersistence;
@@ -62,6 +63,18 @@ public final class BydCloudMqttSubscriber implements MqttCallback {
     private static final int DECRYPT_FAILURE_THRESHOLD = 3;
     private static final long DECRYPT_FAILURE_WINDOW_MS = 60 * 1000;
     private volatile long firstDecryptFailureAtMs = 0;
+    // Route preference learned from the last EMQ connect in this process. The
+    // Tailscale SOCKS listener (ProxyHelper port 8539) is tailnet-only on most
+    // cars: BYD's public EMQ broker is unreachable THROUGH it even though the
+    // listener itself probes healthy, so a proxied connect keeps failing for
+    // as long as the proxy is up — invalidateCache() can't help because the
+    // next probe re-selects the same live listener. After a direct fallback
+    // succeeds, try direct FIRST on later attempts so reconnects and the
+    // 25-min session refresh don't re-pay the dead proxied leg's connect
+    // timeout every time. Flips back to proxy-first the moment a direct-first
+    // attempt has to fall back to the proxy (sing-box / exit-node cars where
+    // the proxy IS the working egress).
+    private volatile boolean preferDirectEmqRoute = false;
 
     private final AtomicBoolean connecting = new AtomicBoolean(false);
     private final Object messageDispatchLock = new Object();
@@ -207,13 +220,6 @@ public final class BydCloudMqttSubscriber implements MqttCallback {
             topic = client.getMqttTopic();
             decryptKey = client.getMqttDecryptKey();
 
-            logger.info("Connecting to BYD EMQ: " + brokerUri + " topic=" + topic
-                    + " proxy=" + ProxyHelper.isProxyAvailable());
-
-            // Create Paho v5 client
-            mc = new MqttClient(brokerUri, clientId, new MemoryPersistence());
-            mc.setCallback(this);
-
             MqttConnectionOptions opts = new MqttConnectionOptions();
             opts.setCleanStart(true);
             opts.setConnectionTimeout(15);
@@ -225,30 +231,40 @@ public final class BydCloudMqttSubscriber implements MqttCallback {
             // queued messages between reconnects.
             opts.setSessionExpiryInterval(0L);
 
-            // SSL with proxy support — same pattern as MqttPublisherService.
-            // BYD Cloud EMQ in China must connect DIRECTLY to domestic servers.
-            // Overseas instances only use public proxy (sing-box), never Tailscale.
+            // Route-aware connect with one fallback leg. BYD's EMQ broker is
+            // public internet; the probed local proxy may be sing-box (general
+            // egress — proxied connect works) OR the tailnet-only Tailscale
+            // SOCKS listener users enable for private MQTT brokers, through
+            // which this broker is unreachable while the listener stays
+            // healthy. So: try the preferred route, and on a TRANSPORT-level
+            // failure (never an auth/CONNACK rejection) retry once via the
+            // other route in the same attempt. Whichever leg wins sets the
+            // preference for the next attempt.
+            // CN optimization: China servers connect DIRECTLY without going through proxy first.
             boolean isChina = client.getConfig() != null && client.getConfig().isChinaRegion();
-            boolean proxyActive = !isChina && ProxyHelper.isPublicProxyAvailable();
-            if (proxyActive) {
-                // Explicitly factory-proxied — immune to the global SOCKS props, so no
-                // props lock needed; connect concurrently with anything.
-                opts.setSocketFactory(ProxyHelper.getProxiedSslSocketFactory(false));
-                mc.connect(opts);
-            } else {
-                // DIRECT connect on the default SSL factory, which DOES honor the
-                // process-global socksProxy* properties: leftover props from a sibling
-                // WS+proxy publisher would misroute this socket through the proxy.
-                // Clear + connect under the shared props lock so (a) our clear can't
-                // strip the props out from under a publisher's mid-flight WS connect,
-                // and (b) a publisher can't re-assert them mid-flight into ours.
-                // See ProxyHelper.SOCKS_PROPS_LOCK.
-                opts.setSocketFactory(javax.net.ssl.SSLSocketFactory.getDefault());
-                synchronized (ProxyHelper.SOCKS_PROPS_LOCK) {
-                    System.clearProperty("socksProxyHost");
-                    System.clearProperty("socksProxyPort");
-                    mc.connect(opts);
+            boolean proxyActive = !isChina && ProxyHelper.isProxyAvailable();
+            boolean firstViaProxy = proxyActive && !preferDirectEmqRoute;
+            logger.info("Connecting to BYD EMQ: " + brokerUri + " topic=" + topic
+                    + " proxy=" + proxyActive
+                    + " route=" + (!proxyActive
+                            ? "direct"
+                            : (firstViaProxy ? "proxy-first" : "direct-first")));
+
+            try {
+                mc = connectClientViaRoute(brokerUri, clientId, opts, firstViaProxy);
+            } catch (Exception first) {
+                if (!proxyActive || !isTransportLevelConnectFailure(first)) {
+                    throw first;
                 }
+                String firstMsg = first.getMessage() != null ? first.getMessage() : first.toString();
+                logger.warn("EMQ connect via " + (firstViaProxy ? "proxy" : "direct")
+                        + " failed at transport level (" + firstMsg + ") — retrying via "
+                        + (firstViaProxy ? "direct" : "proxy"));
+                mc = connectClientViaRoute(brokerUri, clientId, opts, !firstViaProxy);
+                // The fallback leg won: prefer it while this subscriber lives.
+                preferDirectEmqRoute = firstViaProxy;
+                logger.info("EMQ fallback route succeeded — preferring "
+                        + (firstViaProxy ? "direct" : "proxy") + " from now on");
             }
             // A topic listener supersedes the global callback for matching messages in Paho v5.
             // Route both callback surfaces through one ingestion function; its identity guard also
@@ -327,6 +343,74 @@ public final class BydCloudMqttSubscriber implements MqttCallback {
         } finally {
             connecting.set(false);
         }
+    }
+
+    /**
+     * Create a fresh Paho v5 client and connect it via ONE route. On failure
+     * the candidate client is closed here (its sockets must not leak to GC —
+     * see the CloseGuard note in {@link #connectAndSubscribe()}) and the
+     * failure propagates so the caller can decide whether the other route is
+     * worth one retry. A fresh client per leg keeps Paho state clean; clients
+     * whose connect() failed are not reused.
+     */
+    private MqttClient connectClientViaRoute(
+            String brokerUri,
+            String clientId,
+            MqttConnectionOptions opts,
+            boolean viaProxy) throws MqttException {
+        MqttClient candidate = new MqttClient(brokerUri, clientId, new MemoryPersistence());
+        candidate.setCallback(this);
+        try {
+            if (viaProxy) {
+                // Explicitly factory-proxied — immune to the global SOCKS props, so no
+                // props lock needed; connect concurrently with anything.
+                opts.setSocketFactory(ProxyHelper.getProxiedSslSocketFactory(false));
+                candidate.connect(opts);
+            } else {
+                // DIRECT connect on the default SSL factory, which DOES honor the
+                // process-global socksProxy* properties: leftover props from a sibling
+                // WS+proxy publisher would misroute this socket through the proxy.
+                // Clear + connect under the shared props lock so (a) our clear can't
+                // strip the props out from under a publisher's mid-flight WS connect,
+                // and (b) a publisher can't re-assert them mid-flight into ours.
+                // See ProxyHelper.SOCKS_PROPS_LOCK.
+                opts.setSocketFactory(javax.net.ssl.SSLSocketFactory.getDefault());
+                synchronized (ProxyHelper.SOCKS_PROPS_LOCK) {
+                    System.clearProperty("socksProxyHost");
+                    System.clearProperty("socksProxyPort");
+                    candidate.connect(opts);
+                }
+            }
+            return candidate;
+        } catch (MqttException | RuntimeException e) {
+            closeClientQuietly(candidate);
+            throw e;
+        }
+    }
+
+    /**
+     * True only for failures where trying the OTHER local route could help:
+     * socket/TLS-level errors (IOException anywhere in the cause chain) and
+     * Paho's client-side connect codes — client timeout (32000), server
+     * connect error (32103), connection lost mid-handshake (32109). CONNACK
+     * rejections (bad credentials, not-authorized) and other protocol errors
+     * fail the same on every route, so they must NOT burn a second connect.
+     */
+    static boolean isTransportLevelConnectFailure(Throwable failure) {
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < 8; depth++) {
+            if (current instanceof java.io.IOException) return true;
+            if (current instanceof MqttException) {
+                int reason = ((MqttException) current).getReasonCode();
+                if (reason == MqttClientException.REASON_CODE_CLIENT_TIMEOUT
+                        || reason == MqttClientException.REASON_CODE_SERVER_CONNECT_ERROR
+                        || reason == MqttClientException.REASON_CODE_CONNECTION_LOST) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private void scheduleReconnect() {

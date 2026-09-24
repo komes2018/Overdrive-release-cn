@@ -72,32 +72,27 @@ class AccMonitorController(
                         logAllPowerSources()
                     }
                     
-                    // Check Display Power & Interactive State (DiLink 5 & standard Android Automotive)
-                    val screenPower = execShell("dumpsys power 2>/dev/null | grep -i 'Display Power: state=' | head -1").trim()
-                    val isInteractive = execShell("dumpsys power 2>/dev/null | grep -i 'mIsInteractive' | head -1").trim()
-                    val isScreenOff = !screenPower.contains("state=ON") || isInteractive.contains("false")
+                    // Check sys.accanim.status - THIS IS THE KEY INDICATOR
                     var accAnimStatus = execShell("getprop sys.accanim.status").trim()
-                    val carPowerMode = execShell("dumpsys car_service 2>/dev/null | grep -i 'Power Mute State' -A 2 | grep 'current' | head -1").trim()
-                    val isStandby = carPowerMode.contains("Standby") || carPowerMode.contains("Sleep") || carPowerMode.contains("Str") || carPowerMode.contains("4=") || carPowerMode.contains("8=") || carPowerMode.contains("5=")
-
                     if (accAnimStatus.isEmpty()) {
-                        accAnimStatus = if (isScreenOff || isStandby) "1" else "0"
+                        accAnimStatus = "0" // Empty means ACC ON
                     }
-
-                    // Combined ACC OFF logic: if screen is OFF, car in Standby, or accanim.status is 1
-                    val isAccOffNow = (accAnimStatus != "0") || isScreenOff || isStandby
-                    val wasAccOff = (lastAccAnimStatus != "0")
-
-                    if (isAccOffNow != wasAccOff) {
-                        logger.info(">>> ACC STATE CHANGED: isAccOffNow=$isAccOffNow (wasAccOff=$wasAccOff, isStandby=$isStandby, screenOff=$isScreenOff, accAnim=$accAnimStatus, powerMode=$carPowerMode)")
-                        if (isAccOffNow) {
-                            logger.info("!!! ACC OFF DETECTED (Standby/ScreenOff) -> ENTER SENTRY !!!")
+                    
+                    if (accAnimStatus != lastAccAnimStatus) {
+                        logger.info(">>> ACC ANIM STATUS CHANGED: '$accAnimStatus' (was: '$lastAccAnimStatus')")
+                        
+                        // sys.accanim.status != "0" means ACC OFF (shutdown animation started)
+                        if (accAnimStatus != "0" && lastAccAnimStatus == "0") {
+                            logger.info("!!! ACC OFF DETECTED (accanim.status=$accAnimStatus) !!!")
                             onAccOff()
-                        } else {
-                            logger.info("!!! ACC ON DETECTED -> EXIT SENTRY !!!")
+                        }
+                        // sys.accanim.status = "0" means ACC ON (normal operation restored)
+                        else if (accAnimStatus == "0" && lastAccAnimStatus != "0") {
+                            logger.info("!!! ACC ON DETECTED (accanim.status=0) !!!")
                             onAccOn()
                         }
-                        lastAccAnimStatus = if (isAccOffNow) "1" else "0"
+                        
+                        lastAccAnimStatus = accAnimStatus
                     }
                     
                 } catch (e: InterruptedException) {

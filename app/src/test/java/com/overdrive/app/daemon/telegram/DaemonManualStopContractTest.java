@@ -135,6 +135,30 @@ public class DaemonManualStopContractTest {
                 "'disabled by ui'*|'disabled by telegram'*|'disabled by user'*"));
     }
 
+    @Test
+    public void telegramZrokStartRequiresAHealthyShareAndReusesTheWatchdog()
+            throws IOException {
+        String handler = read(
+                "app/src/main/java/com/overdrive/app/daemon/telegram/DaemonCommandHandler.java");
+
+        assertTrue(handler.contains(
+                "if (\"zrok\".equals(processName)) return isZrokShareRunning(ctx);"));
+        assertTrue(handler.contains("isZrokWatchdogRunning(ctx)"));
+        assertTrue(handler.contains(
+                "Zrok watchdog is already recovering; not launching a duplicate"));
+        assertTrue(handler.contains("waitForHealthyZrok"));
+        assertTrue(handler.contains("ZrokRuntimeProbe.probeStatus(url)"));
+        assertTrue(handler.contains("ZrokRuntimeProbe.isHealthyStatus(status)"));
+        assertFalse(handler.contains("Don't return false - zrok might still be starting"));
+
+        assertTrue(DaemonCommandHandler.isLatestZrokAttemptRateLimited(
+                "Starting zrok share...\nSERVER_TOO_MANY_REQUESTS"));
+        assertTrue(DaemonCommandHandler.isLatestZrokAttemptRateLimited(
+                "Starting zrok share...\nToo many requests to alter state"));
+        assertFalse(DaemonCommandHandler.isLatestZrokAttemptRateLimited(
+                "SERVER_TOO_MANY_REQUESTS\nStarting zrok share...\nconnected"));
+    }
+
     private static String read(String relativePath) throws IOException {
         Path current = Paths.get(System.getProperty("user.dir"))
                 .toAbsolutePath().normalize();

@@ -44,6 +44,21 @@ public class PassengerOccupancyTest {
     }
 
     @Test
+    public void readsDedicatedSeatbeltStateWithoutTreatingInvalidAsUnbuckled() {
+        FakeDedicatedSeatbeltDevice device = new FakeDedicatedSeatbeltDevice();
+
+        device.state = 1;
+        assertEquals(1, BydDataCollector.readDedicatedSeatbeltState(device, 2));
+        device.state = 0;
+        assertEquals(0, BydDataCollector.readDedicatedSeatbeltState(device, 2));
+        device.state = 2;
+        assertEquals(BydVehicleData.UNAVAILABLE,
+                BydDataCollector.readDedicatedSeatbeltState(device, 2));
+        assertEquals(BydVehicleData.UNAVAILABLE,
+                BydDataCollector.readDedicatedSeatbeltState(new Object(), 2));
+    }
+
+    @Test
     public void preservesDirectPassengerSensorBeforeApplyingEstimate() {
         assertEquals(0, BydDataCollector.resolvePassengerOccupancy(0, true, 1, true));
         assertEquals(1, BydDataCollector.resolvePassengerOccupancy(1, false, 0, false));
@@ -131,6 +146,14 @@ public class PassengerOccupancyTest {
 
         public void unregisterListener(AbsBYDAutoSafetyBeltListener listener) {
             unregistered = this.listener == listener;
+        }
+    }
+
+    public static final class FakeDedicatedSeatbeltDevice {
+        int state;
+
+        public int getSafetyBeltStatus(int area) {
+            return state;
         }
     }
 }

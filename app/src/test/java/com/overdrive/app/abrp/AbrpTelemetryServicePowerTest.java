@@ -2,10 +2,12 @@ package com.overdrive.app.abrp;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import com.overdrive.app.byd.BydVehicleData;
 import com.overdrive.app.monitor.ChargingStateData;
+import com.overdrive.app.monitor.GearMonitor;
 
 import org.junit.Test;
 
@@ -146,5 +148,39 @@ public class AbrpTelemetryServicePowerTest {
                 }
             }
         }
+    }
+
+    @Test
+    public void freshParkOverridesStaleCollectorDrive() {
+        assertEquals(Boolean.TRUE, AbrpTelemetryService.resolveParkedState(
+                GearMonitor.GEAR_P, GearMonitor.GEAR_D, false));
+    }
+
+    @Test
+    public void freshDriveOverridesStaleCollectorPark() {
+        assertEquals(Boolean.FALSE, AbrpTelemetryService.resolveParkedState(
+                GearMonitor.GEAR_D, GearMonitor.GEAR_P, false));
+    }
+
+    @Test
+    public void confirmedAccOffOverridesStaleCollectorDrive() {
+        assertEquals(Boolean.TRUE, AbrpTelemetryService.resolveParkedState(
+                BydVehicleData.UNAVAILABLE, GearMonitor.GEAR_D, true));
+    }
+
+    @Test
+    public void collectorIsOnlyUsedWhenLiveStateIsUnavailable() {
+        assertEquals(Boolean.TRUE, AbrpTelemetryService.resolveParkedState(
+                BydVehicleData.UNAVAILABLE, GearMonitor.GEAR_P, false));
+        assertEquals(Boolean.FALSE, AbrpTelemetryService.resolveParkedState(
+                BydVehicleData.UNAVAILABLE, GearMonitor.GEAR_D, false));
+    }
+
+    @Test
+    public void unknownGearIsNotManufacturedIntoDrive() {
+        assertNull(AbrpTelemetryService.resolveParkedState(
+                BydVehicleData.UNAVAILABLE,
+                BydVehicleData.UNAVAILABLE,
+                false));
     }
 }

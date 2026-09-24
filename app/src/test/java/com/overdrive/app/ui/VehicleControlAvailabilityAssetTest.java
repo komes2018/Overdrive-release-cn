@@ -50,10 +50,9 @@ public class VehicleControlAvailabilityAssetTest {
         String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
         String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
 
-        // 8 original cloud tiles + the vent preset and the two remote-preconditioning
-        // buttons. The steering-wheel heater is deliberately absent: it is SDK-first
-        // with a working local leg, like the seat tiles beside it.
-        assertEquals(11, count(html, "data-requires-cloud=\"true\""));
+        // 8 original cloud tiles + the two remote-preconditioning buttons. Vent
+        // is deliberately absent because it now has a working local 15% leg.
+        assertEquals(10, count(html, "data-requires-cloud=\"true\""));
         assertFalse("steering heat is dual-path — marking it dashes out a working control",
                 html.contains("id=\"btnSteeringHeat\" title=\"Steering wheel heater\""
                         + " data-i18n-attr=\"title:vehicle.steering_heat\""
@@ -63,39 +62,37 @@ public class VehicleControlAvailabilityAssetTest {
         assertFalse(html.contains(
                 "id=\"btnTrunkOpen\" title=\"Open Trunk\" data-requires-cloud=\"true\""));
         assertTrue(html.contains(
-                "id=\"btnStartCharging\" title=\"Start charging now\" data-requires-cloud=\"true\""));
+                "id=\"btnStartCharging\" title=\"Start charging now\""
+                        + " data-i18n-attr=\"title:vehicle_control.start_charge\""
+                        + " data-requires-cloud=\"true\""));
         assertFalse(html.contains(
                 "id=\"btnTrunkClose\" title=\"Close Trunk\" data-requires-cloud=\"true\""));
         assertFalse(html.contains(
                 "id=\"btnDRL\" title=\"Daytime running lights\" data-requires-cloud=\"true\""));
-        assertTrue(css.contains(".vc-tile[data-requires-cloud=\"true\"]::after"));
+        assertTrue(css.contains(".vc-tile[data-cloud-state=\"unavailable\"]"));
         assertTrue(css.contains(".vc-tile[data-cloud-state=\"not_configured\"]"));
         assertTrue(script.contains("querySelectorAll('[data-requires-cloud=\"true\"]')"));
         assertTrue(script.contains("this.showCloudModal();"));
     }
 
-    /**
-     * Every cloud-ONLY control must both carry the marker and guard its handler:
-     * the marker alone still lets a tap fail opaquely instead of explaining that
-     * an account is needed. The vent preset had the guard missing.
-     */
     @Test
-    public void cloudOnlyControlsGuardTheirHandlers() throws IOException {
+    public void hybridVentDoesNotRequireCloudWhileCloudOnlyControlsStillGuardHandlers()
+            throws IOException {
         String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
         String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
         String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
 
-        // Vent is CLOUD_ONLY (BYD OPENWINDOW); its 0/100 neighbours are SDK paths.
+        // Vent is hybrid: local 15% while awake, BYD OPENWINDOW remotely.
         assertTrue(html.contains("id=\"btnWinAllVent\""));
-        assertTrue(html.contains("id=\"btnWinAllVent\" title=\"Vent all windows\""
+        assertFalse(html.contains("id=\"btnWinAllVent\" title=\"Vent all windows\""
                 + " data-i18n-attr=\"title:vehicle.vent_all_windows\""
                 + " data-requires-cloud=\"true\""));
         assertFalse(html.contains("id=\"btnWinAllOpen\" title=\"All Windows Open\""
                 + " data-requires-cloud=\"true\""));
-        // The marker must render on a preset, not only on a tile.
-        assertTrue(css.contains(".vc-preset[data-requires-cloud=\"true\"]::after"));
-        assertTrue(script.contains("this.bindBtn('btnWinAllVent', function() {\n"
+        assertTrue(css.contains(".vc-preset[data-cloud-state=\"unavailable\"]"));
+        assertFalse(script.contains("this.bindBtn('btnWinAllVent', function() {\n"
                 + "            if (!self.requireCloud()) return;"));
+        assertTrue(script.contains("self.apiPost('/api/vehicle/window', { action: 'vent' })"));
         // Remote preconditioning (BOOKINGAIR) is cloud-only in both directions.
         assertTrue(script.contains("this.bindBtn('btnClimateScheduleSave', function() {\n"
                 + "            if (!self.requireCloud()) return;"));

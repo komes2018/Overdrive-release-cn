@@ -13,7 +13,7 @@ import java.nio.file.Paths;
 public class RemoteDevVirtualDisplayAssetTest {
 
     @Test
-    public void liveStreamUsesAPrivatePacedVirtualDisplayInsteadOfPixelCopy() throws Exception {
+    public void preferredLiveStreamUsesAPrivatePacedVirtualDisplay() throws Exception {
         String host = read("src/main/java/com/overdrive/app/remote/RemoteDevVirtualDisplay.kt");
         String controller = read("src/main/java/com/overdrive/app/remote/RemoteDevViewController.kt");
         String stream = read("src/main/java/com/overdrive/app/server/RemoteDevViewWebSocketStream.java");
@@ -33,6 +33,42 @@ public class RemoteDevVirtualDisplayAssetTest {
         assertTrue(controller.contains("if (!format.equals(\"png\""));
         assertTrue(stream.contains("STREAM_POLL_INTERVAL_MS = 80L"));
         assertTrue(stream.contains("sourceSequence != lastSourceSequence"));
+    }
+
+    @Test
+    public void blockedVirtualActivityLaunchUsesAGatedPhysicalWindowCompatibilityPath()
+            throws Exception {
+        String host = read("src/main/java/com/overdrive/app/remote/RemoteDevVirtualDisplay.kt");
+        String controller = read("src/main/java/com/overdrive/app/remote/RemoteDevViewController.kt");
+        String bridge = read("src/main/java/com/overdrive/app/remote/RemoteDevViewBridgeService.kt");
+        String api = read("src/main/java/com/overdrive/app/server/RemoteDevViewApiHandler.java");
+
+        int launchGate = host.indexOf("if (!session.isActivityLaunchAllowed())");
+        int remoteDisplayBind = host.indexOf(
+            "RemoteDevViewController.bindRemoteDisplay(session.displayId)");
+        assertTrue(launchGate >= 0);
+        assertTrue(remoteDisplayBind > launchGate);
+        assertTrue(host.contains("isActivityStartAllowedOnDisplay("));
+        assertTrue(host.contains("Build.VERSION.SDK_INT < Build.VERSION_CODES.Q"));
+        assertTrue(host.contains("error is SecurityException"));
+        assertTrue(host.contains("COMPATIBILITY_BACKEND_NAME"));
+        assertTrue(host.contains("physicalCompatibilityStatus()"));
+        assertFalse(host.contains("Intent(application, MainActivity::class.java)"));
+        assertFalse(host.contains("D50F_LC"));
+        assertFalse(host.contains("\"2606\""));
+
+        assertTrue(controller.contains("physicalMainActivity"));
+        assertTrue(controller.contains("activity is MainActivity"));
+        assertTrue(controller.contains("activity !is RemoteMainActivity"));
+        assertTrue(controller.contains("activityDisplay == Display.DEFAULT_DISPLAY"));
+        assertTrue(controller.contains("isAttachedToWindow"));
+        assertTrue(controller.contains("RemoteDevVirtualDisplay.isCompatibilityMode()"));
+
+        assertTrue(bridge.contains("response.put(\"captureBackend\", launch.backend)"));
+        assertTrue(bridge.contains("RemoteDevVirtualDisplay.currentBackendName()"));
+        assertTrue(bridge.contains("RemoteDevVirtualDisplay.isCompatibilityMode()"));
+        assertTrue(api.contains("ready.metadata.optBoolean(\"compatibilityMode\", false)"));
+        assertTrue(api.contains("response.put(\"physicalDisplayChanged\", compatibilityMode)"));
     }
 
     @Test

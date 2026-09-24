@@ -633,6 +633,7 @@
     <string name="rail_recordings">التسجيلات</string>
     <string name="rail_vehicle">السيارة</string>
     <string name="rail_trips">رحلات</string>
+    <string name="rail_parking">مواقف السيارات</string>
     <string name="rail_integrations">التكاملات</string>
     <string name="rail_diagnostics">التشخيص</string>
     <string name="rail_settings">الإعدادات</string>
@@ -771,7 +772,6 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">في الساعة</string>
-    <string name="dashboard_modern_vehicle_status">حالة السيارة</string>
     <string name="dashboard_subtitle_all_systems">جميع النظم على الإنترنت</string>
     <string name="dashboard_subtitle_some_offline">%1$d من الخدمات %2$d عبر الإنترنت</string>
     <string name="dashboard_subtitle_no_tunnel">الوصول عن بعد دون اتصال</string>
@@ -791,14 +791,11 @@
     <string name="vehicle_dialog_title">تعيين سعة البطارية</string>
     <string name="vehicle_dialog_capacity_label">السعة</string>
     <string name="vehicle_dialog_capacity_suffix">كيلووات</string>
-    <string name="vehicle_dialog_capacity_helper">15 إلى 120 كيلوواط. اتركه لاستخدام النموذج الافتراضي.</string>
+    <string name="vehicle_dialog_capacity_helper">5 إلى 120 كيلوواط. اتركه لاستخدام النموذج الافتراضي.</string>
     <string name="vehicle_dialog_model_label">الموديل</string>
     <string name="vehicle_dialog_save">حفظ</string>
     <string name="vehicle_dialog_reset">إعادة تعيين للكشف التلقائي</string>
-    <string name="vehicle_dialog_detection">الكشف: %1$s</string>
-    <string name="vehicle_dialog_detection_auto">تلقائي</string>
-    <string name="vehicle_dialog_detection_manual">يدوي</string>
-    <string name="vehicle_dialog_invalid_capacity">يجب أن تكون السعة 15-120 كيلو وات ساعة</string>
+    <string name="vehicle_dialog_invalid_capacity">يجب أن تكون السعة 5-120 كيلو وات ساعة</string>
     <string name="vehicle_dialog_summary_effective">فعالة: %1$.1f kWساعة</string>
     <string name="vehicle_dialog_summary_calibration">آخر معايرة: %1$.1f%% على %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">unavailable</string>
@@ -1308,7 +1305,7 @@
     <string name="onboarding_next">التالي</string>
     <string name="onboarding_reset_toast">إعادة تشغيل الدليل — إعادة تشغيل الجولة</string>
     <string name="onboarding_skip">تخطي</string>
-    <string name="onboarding_vehicle_body">اختر طرازك ونملأ قيمة kWh، أو اكتبها بنفسك (15–120). هذا يجعل تقديرات المدى والشحن دقيقة. يمكنك تخطي ذلك وتعيينه لاحقًا.</string>
+    <string name="onboarding_vehicle_body">اختر طرازك ونملأ قيمة kWh، أو اكتبها بنفسك (5–120). هذا يجعل تقديرات المدى والشحن دقيقة. يمكنك تخطي ذلك وتعيينه لاحقًا.</string>
     <string name="onboarding_vehicle_primary">تعيين البطارية</string>
     <string name="onboarding_vehicle_title">أخبر Overdrive بحجم بطاريتك</string>
     <string name="overlay_mode_continuous_label">CONT</string>
@@ -1403,6 +1400,10 @@
     <string name="projection_autostart_need_app">قم بإسقاط تطبيق أولا، ثم قم بتشغيل هذا.</string>
     <string name="projection_autostart_conflict_confirm">استخدم هذا التطبيق</string>
     <string name="projection_app_uninstalled">لم يعد هذا التطبيق مثبّتا.</string>
+    <string name="dashboard_modern_vehicle_status">حالة السيارة</string>
+    <string name="vehicle_dialog_detection">الكشف: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">تلقائي</string>
+    <string name="vehicle_dialog_detection_manual">يدوي</string>
     <!-- Rail category headers -->
     <string name="rail_section_cameras">الكاميرات</string>
     <string name="rail_section_controls">التحكم</string>

@@ -65,6 +65,12 @@ class OverdriveApplication : Application() {
         // - SCREEN_OFF receiver registration
         // - Daemon startup
         DaemonKeepaliveService.start(this)
+        // Non-blocking and a no-op in steady state. If a language pick was
+        // saved app-private while daemon IPC was unavailable, replay it once
+        // the daemon comes back instead of letting an old server locale win.
+        if (packageName == android.app.Application.getProcessName()) {
+            LocaleManager.replayPendingWriteAsync()
+        }
 
         // App-process listener that binds Telenav's OEM AIDL for the daemon's
         // HTTP endpoint (the daemon can't bindService itself). Idempotent.
@@ -88,15 +94,23 @@ class OverdriveApplication : Application() {
         // accessibility service ever binds. Both start() methods are synchronized and
         // idempotent (they no-op while an instance is registered), so the a11y hook
         // calling them again later is free, and neither call can throw into onCreate.
-        try {
-            com.overdrive.app.services.CallStateMonitor.start(this)
-        } catch (ignored: Throwable) {
-            // Guard only: the a11y hook calls start() again if it ever binds.
-        }
-        try {
-            com.overdrive.app.services.BluetoothStateMonitor.start(this)
-        } catch (ignored: Throwable) {
-            // Guard only: the a11y hook calls start() again if it ever binds.
+        //
+        // MAIN PROCESS ONLY. onCreate also runs in the isolated `com.byd.warning`
+        // process that hosts EnergyModeActuatorService, and the singletons are
+        // per-process — so without this guard that process registers a second pair of
+        // receivers and a second 60s re-assert timer, doubling the relay POSTs for
+        // values the daemon already has. Same idiom as BydDataCollector.
+        if (packageName == android.app.Application.getProcessName()) {
+            try {
+                com.overdrive.app.services.CallStateMonitor.start(this)
+            } catch (ignored: Throwable) {
+                // Guard only: the a11y hook calls start() again if it ever binds.
+            }
+            try {
+                com.overdrive.app.services.BluetoothStateMonitor.start(this)
+            } catch (ignored: Throwable) {
+                // Guard only: the a11y hook calls start() again if it ever binds.
+            }
         }
     }
 
@@ -158,7 +172,7 @@ class OverdriveApplication : Application() {
             val locales = if (raw == null || raw == LocaleManager.AUTO_TAG) {
                 LocaleListCompat.getEmptyLocaleList()
             } else {
-                LocaleListCompat.forLanguageTags(LocaleManager.androidLanguageTags(raw))
+                LocaleListCompat.forLanguageTags(raw)
             }
             AppCompatDelegate.setApplicationLocales(locales)
         } catch (e: Exception) {

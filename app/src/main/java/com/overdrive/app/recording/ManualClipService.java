@@ -340,9 +340,14 @@ public final class ManualClipService {
             return reject(Status.PIPELINE_NOT_READY, "Encoder history is not available", 0);
         }
         if (!encoder.canRetainManualClip(window.getTotalSeconds())) {
+            // The shared history arena is regrown at the next encoder (re)init
+            // (pipeline restart on an ACC cycle, or a camera-daemon restart) —
+            // see HardwareEventRecorderGpu.regrowSharedRingLocked. Until then the
+            // ring physically cannot hold before+after at the current bitrate.
             return reject(Status.RESTART_REQUIRED,
                     "Camera history buffer is smaller than this replay window; "
-                            + "restart the camera daemon after saving the binding", 0);
+                            + "it is resized at the next camera restart "
+                            + "(ACC cycle or camera-daemon restart)", 0);
         }
         if (encoder.isPreRecordFlushInProgress()) {
             return reject(Status.BUSY, "Another pre-record export is in progress", 0);

@@ -7,10 +7,53 @@ import dadb.Dadb
 import java.io.File
 import java.net.Socket
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Handles ADB shell command execution and connection management.
+ *
+ * ## Connection model (field-incident hardening)
+ *
+ * A single process-wide Dadb connection is shared by every AdbShellExecutor
+ * instance, held in a GENERATION-TAGGED holder ([SharedConn]):
+ *
+ *  - Acquire happens under a short mutex ([sharedDadbLock]); commands run
+ *    OUTSIDE the mutex on the acquired snapshot.
+ *  - There is NO per-command liveness probe. The previous design ran
+ *    `dadb.shell("echo ok")` before every command while holding the shared
+ *    lock; a field incident (adbd `CHECK_EQ(payload.size, data_length)` abort
+ *    on a 21-byte OPEN — exactly the `shell,v2,raw:echo ok` packet) implicated
+ *    that probe as the packet class most frequently on the wire, and the
+ *    un-timed probe also stalled every executor behind the monitor when a
+ *    connection was half-dead. The connection is now trusted until failure.
+ *  - INVALIDATION replaces probing: any transport failure or deadline breach
+ *    clears the holder — but only if it still holds the SAME generation the
+ *    failing command used (so concurrent failures / watchdogs can't tear down
+ *    a replacement connection) — and then closes that exact connection.
+ *  - Every command carries a DEADLINE enforced by a watchdog. java.net.Socket
+ *    I/O is not interruptible, so the watchdog unblocks a stuck command the
+ *    only way possible: it closes the connection (gen-guarded), which makes
+ *    the blocked read/write throw. Deadlines are short for control-plane
+ *    commands ([DEFAULT_DEADLINE_MS]) and longer for scripts
+ *    ([SCRIPT_RUN_DEADLINE_MS]); bulk operations get their own lane (below).
+ *  - NOTHING is ever retried automatically. A mutating command whose result
+ *    is unknown (deadline, transport drop) must not be re-sent blindly —
+ *    callers own that decision.
+ *  - When a NEW connection replaces a previously-established one (generation
+ *    > 1), [ConnectionReestablishedListener]s fire asynchronously. adbd death
+ *    implies init SIGKILLed its whole cgroup — every shell-spawned daemon —
+ *    so DaemonStartupManager uses this to resnapshot + relaunch immediately
+ *    instead of waiting for the next 30s tick behind a wedged connection.
+ *
+ * ## Bulk lane
+ *
+ * [executeBulk] runs a command on a DEDICATED per-operation Dadb connection
+ * with a caller-chosen deadline and socketTimeout=0. Use it for anything that
+ * can stay output-silent longer than the control lane tolerates — the updater
+ * download (`timeout 600 wget -q …`) and `pm install` — so a long-quiet
+ * transfer can neither be killed by the shared lane's socket timeout nor
+ * block/tear the control connection every other subsystem depends on.
  */
 class AdbShellExecutor(private val context: Context) {
 
@@ -19,39 +62,127 @@ class AdbShellExecutor(private val context: Context) {
         private const val ADB_PORT = 5555
         private const val ADB_KEY_FILE = "adbkey"
         private const val ADB_PUB_KEY_FILE = "adbkey.pub"
-        // Dadb defaults both values to 0 (infinite). A stale loopback transport
-        // can therefore strand the single shell executor forever, leaving every
-        // daemon switch disabled at STARTING. Keep connection setup short and
-        // give legitimate longer shell commands (for example zrok's 30s probe)
-        // room to finish while still guaranteeing recovery from a dead socket.
-        private const val ADB_CONNECT_TIMEOUT_MS = 3_000
-        private const val ADB_SOCKET_TIMEOUT_MS = 45_000
-        
+
+        /** TCP connect bound passed to Dadb.create. */
+        private const val CONNECT_TIMEOUT_MS = 2_000
+
+        /**
+         * SO_TIMEOUT for the SHARED control connection. Dadb has no dedicated
+         * reader thread — reads happen on whichever thread awaits stream data —
+         * so this fires only for a thread actually blocked in a read, bounding
+         * (a) a stalled ADB auth read during Dadb.create (connectTimeout covers
+         * only the TCP connect) and (b) any single silent stretch of a command.
+         * It is a backstop under the per-command deadline, sized to match
+         * [DEFAULT_DEADLINE_MS]. Control-lane payloads must not stay silent
+         * longer than this in one stretch (current max inline sleep is ~10s in
+         * kill cascades); anything longer belongs on the bulk lane.
+         */
+        private const val SOCKET_TIMEOUT_MS = 60_000
+
+        /** Default per-command deadline on the shared connection. */
+        const val DEFAULT_DEADLINE_MS = 60_000L
+
+        /** Default deadline for the run-phase of [executeScript] payloads. */
+        const val SCRIPT_RUN_DEADLINE_MS = 120_000L
+
+        /** SO_TIMEOUT for the bulk lane's throwaway HANDSHAKE PROBE. Auth is
+         *  already granted when this runs (the control lane connected with
+         *  the same key first), so a healthy CNXN/AUTH completes in
+         *  milliseconds; this only bounds transport weirdness. (dadb's
+         *  AdbConnection — the way to own the raw socket and retune its
+         *  timeout in place — is `internal`, so the probe-then-real two-step
+         *  is how a short handshake bound coexists with a multi-minute
+         *  command read budget.) */
+        private const val BULK_HANDSHAKE_TIMEOUT_MS = 10_000
+
+        /**
+         * SO_TIMEOUT for the throwaway AUTH PROBE connection (first step of
+         * [tryConnectWithTimeout]). While user auth is pending, adbd simply
+         * never answers — the probe's read blocks until this fires. Short on
+         * purpose: an abandoned probe must release its socket within seconds,
+         * not squat on adbd for the control lane's 60s. Sized above any
+         * healthy handshake round-trip (normally <100ms) with generous slack
+         * for a loaded head unit.
+         */
+        private const val PROBE_SOCKET_TIMEOUT_MS = 5_000
+
+        /**
+         * Single-flight gate for connection probes. While auth is pending,
+         * BOTH the polling loop (every 3-30s) and every incoming command
+         * (health checks, UI refreshes) attempt to connect; without a gate,
+         * each attempt stacked another auth-pending socket on adbd for the
+         * probe's lifetime — exactly the connection pressure a fragile vendor
+         * adbd doesn't need. Held from probe start to probe-thread END (see
+         * finally in [tryConnectWithTimeout]); a caller that loses the gate
+         * treats it as "attempt in progress" and returns null immediately
+         * (same contract as an unanswered probe).
+         */
+        private val probeInFlight = AtomicBoolean(false)
+
+        /**
+         * Generation-tagged holder for the process-wide shared connection.
+         * The generation uniquely identifies one Dadb instance for the life of
+         * the process, so invalidation can be exact: "clear the holder only if
+         * it still holds ME".
+         */
+        private class SharedConn(val dadb: Dadb, val generation: Long, val establishedAt: Long)
+
+        @Volatile
+        private var sharedConn: SharedConn? = null
+        private val sharedDadbLock = Object()
+        private val connectionGeneration = java.util.concurrent.atomic.AtomicLong(0)
+
         @Volatile
         private var cachedKeyPair: AdbKeyPair? = null
         private val keyPairLock = Object()
-        
-        @Volatile
-        private var sharedDadb: Dadb? = null
-        private val sharedDadbLock = Object()
-        
+
         // Auth state tracking
         private val isAuthPending = AtomicBoolean(false)
         private val wasAuthGranted = AtomicBoolean(false)
         private val pollingStarted = AtomicBoolean(false)
-        
+
         @Volatile
         private var authCallback: AdbAuthCallback? = null
-        
+
         // Dedicated polling executor (separate from command executor)
         private val pollingExecutor = Executors.newSingleThreadExecutor()
 
         // Process-wide lifeboat for commands whose OWNING executor was shut down mid-chain
         // (the bootManager→Activity handoff). Daemon thread: never shut down, so a
         // non-daemon one would hold the JVM alive after the last Activity finishes. Shares
-        // the sharedDadb that cleanup() deliberately leaves open.
+        // the sharedConn that cleanup() deliberately leaves open.
         private val fallbackExecutor = Executors.newSingleThreadExecutor { r ->
             Thread(r, "AdbShellFallback").apply { isDaemon = true }
+        }
+
+        /**
+         * Watchdog scheduler for per-command deadlines. Single daemon thread:
+         * watchdog bodies do nothing but a gen-guarded holder swap + a socket
+         * close, both fast, so one thread cannot fall meaningfully behind.
+         */
+        private val deadlineScheduler = Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "AdbDeadlineWatchdog").apply { isDaemon = true }
+        }
+
+        /**
+         * Executor that fires [ConnectionReestablishedListener]s. Dedicated so
+         * a slow listener can neither delay watchdogs (deadlineScheduler) nor
+         * run under [sharedDadbLock] (listeners are notified after the lock is
+         * released, from this thread).
+         */
+        private val reconnectNotifier = Executors.newSingleThreadExecutor { r ->
+            Thread(r, "AdbReconnectNotify").apply { isDaemon = true }
+        }
+
+        private val reconnectListeners =
+            java.util.concurrent.CopyOnWriteArrayList<ConnectionReestablishedListener>()
+
+        fun addConnectionReestablishedListener(listener: ConnectionReestablishedListener) {
+            reconnectListeners.addIfAbsent(listener)
+        }
+
+        fun removeConnectionReestablishedListener(listener: ConnectionReestablishedListener) {
+            reconnectListeners.remove(listener)
         }
 
         // Process-wide tiebreaker for executeScript path/delimiter nonces.
@@ -62,45 +193,50 @@ class AdbShellExecutor(private val context: Context) {
         // trap-EXIT rm deletes the second's body. Companion-static eliminates
         // cross-instance collisions.
         private val scriptSeq = java.util.concurrent.atomic.AtomicLong(0)
-        
+
         fun setAuthCallback(callback: AdbAuthCallback?) {
             authCallback = callback
         }
-        
+
         fun checkAndClearAuthGranted(): Boolean {
             return wasAuthGranted.getAndSet(false)
         }
-        
-        fun isAuthPending(): Boolean = isAuthPending.get()
 
-        fun enforceGlobalAdbSettings(context: Context) {
-            try {
-                val cr = context.contentResolver
-                android.provider.Settings.Global.putInt(cr, "adb_enabled", 1)
-                android.provider.Settings.Global.putInt(cr, "adb_wifi_enabled", 1)
-                android.provider.Settings.Global.putInt(cr, "adb_allowed_connection_time", 0)
-                android.provider.Settings.Global.putInt(cr, "development_settings_enabled", 1)
-                android.provider.Settings.Global.putInt(cr, "stay_on_while_plugged_in", 7)
-            } catch (t: Throwable) {
-                LogManager.getInstance().warn(TAG, "enforceGlobalAdbSettings failed: ${t.message}")
-            }
-        }
+        fun isAuthPending(): Boolean = isAuthPending.get()
     }
-    
+
     interface AdbAuthCallback {
         fun onAuthPending()
         fun onAuthGranted()
         fun onAuthFailed(error: String)
     }
-    
+
+    /**
+     * Fired when a NEW shared connection is installed and a previous one had
+     * existed (generation > 1) — i.e. a genuine RE-connect, which on this
+     * platform almost always means adbd died and took its whole cgroup (every
+     * shell-spawned daemon) with it. First-ever connect does NOT fire (daemon
+     * startup is staged separately and must not be preempted). Listeners are
+     * invoked on a dedicated notifier thread and MUST NOT do blocking shell
+     * work inline — post to your own handler.
+     *
+     * Distinct from [AdbAuthCallback]: that is a single process-wide slot
+     * owned by MainActivity's onboarding flow; this is multicast and purely
+     * about transport lifecycle. Register via
+     * [addConnectionReestablishedListener] on the companion.
+     */
+    fun interface ConnectionReestablishedListener {
+        fun onConnectionReestablished(generation: Long)
+    }
+
     private val executor = Executors.newSingleThreadExecutor()
     private val logger = LogManager.getInstance()
-    
+
     interface ShellCallback {
         fun onSuccess(output: String)
         fun onError(error: String)
     }
-    
+
     data class ShellResult(
         val exitCode: Int,
         val output: String
@@ -131,19 +267,25 @@ class AdbShellExecutor(private val context: Context) {
     }
 
     fun execute(command: String, callback: ShellCallback) {
-        executeInternal(command, command, callback)
+        executeInternal(command, command, DEFAULT_DEADLINE_MS, callback)
+    }
+
+    /** [execute] with an explicit per-command deadline. */
+    fun execute(command: String, deadlineMs: Long, callback: ShellCallback) {
+        executeInternal(command, command, deadlineMs, callback)
     }
 
     /**
      * Execute [command] unchanged while keeping its credentials out of diagnostic logs.
      */
     fun executeSensitive(command: String, description: String, callback: ShellCallback) {
-        executeInternal(command, "<sensitive:$description>", callback)
+        executeInternal(command, "<sensitive:$description>", DEFAULT_DEADLINE_MS, callback)
     }
 
     private fun executeInternal(
         command: String,
         commandForLog: String,
+        deadlineMs: Long,
         callback: ShellCallback
     ) {
         val seq = cmdSeq.incrementAndGet()
@@ -156,9 +298,9 @@ class AdbShellExecutor(private val context: Context) {
             val t0 = System.currentTimeMillis()
             try {
                 logger.debug(TAG, "adb#$seq RUN [${Thread.currentThread().name}]")
-                val dadb = getOrCreateConnection()
+                val conn = acquireConnection()
                 val tConn = System.currentTimeMillis() - t0
-                val result = dadb.shell(command)
+                val result = shellGuarded(conn, command, deadlineMs, seq)
                 logger.debug(TAG, "adb#$seq DONE conn=${tConn}ms total=${System.currentTimeMillis() - t0}ms exit=${result.exitCode}")
 
                 if (result.exitCode == 0) {
@@ -173,10 +315,12 @@ class AdbShellExecutor(private val context: Context) {
         }
     }
 
-    fun executeSync(command: String): ShellResult {
+    @JvmOverloads
+    fun executeSync(command: String, deadlineMs: Long = DEFAULT_DEADLINE_MS): ShellResult {
         logger.debug(TAG, "Executing sync: $command")
-        val dadb = getOrCreateConnection()
-        val result = dadb.shell(command)
+        val seq = cmdSeq.incrementAndGet()
+        val conn = acquireConnection()
+        val result = shellGuarded(conn, command, deadlineMs, seq)
         return ShellResult(result.exitCode, result.allOutput)
     }
 
@@ -197,8 +341,18 @@ class AdbShellExecutor(private val context: Context) {
      * `pkill -f` whose pattern also appears as a literal in earlier
      * commands of the same payload. The temp file is cleaned up on
      * completion (best-effort).
+     *
+     * The run phase gets [runDeadlineMs] (default [SCRIPT_RUN_DEADLINE_MS]);
+     * note the shared lane's [SOCKET_TIMEOUT_MS] still bounds any single
+     * output-silent stretch — a script must not sleep longer than that in
+     * one go (none currently does; long-quiet work belongs on [executeBulk]).
      */
-    fun executeScript(scriptBody: String, callback: ShellCallback) {
+    @JvmOverloads
+    fun executeScript(
+        scriptBody: String,
+        callback: ShellCallback,
+        runDeadlineMs: Long = SCRIPT_RUN_DEADLINE_MS
+    ) {
         // Routed through submit() like execute(). This path submitted directly, so a
         // rejection propagated uncaught — the same process-killing crash execute() has
         // guarded against all along, just never fixed here.
@@ -216,7 +370,7 @@ class AdbShellExecutor(private val context: Context) {
             val eofMarker = "__ADB_SCRIPT_EOF_${nonce}__"
             try {
                 logger.debug(TAG, "Executing script via $scriptPath (${scriptBody.length} bytes)")
-                val dadb = getOrCreateConnection()
+                val conn = acquireConnection()
 
                 // Write via a heredoc — the heredoc body comes from stdin
                 // not argv, so a `pkill -f cam_daemon` pattern inside the
@@ -227,10 +381,10 @@ class AdbShellExecutor(private val context: Context) {
                 val writeCmd = "cat > $scriptPath <<'$eofMarker'\n" +
                         scriptBody +
                         "\n$eofMarker"
-                val writeResult = dadb.shell(writeCmd)
+                val writeResult = shellGuarded(conn, writeCmd, DEFAULT_DEADLINE_MS, seq)
                 if (writeResult.exitCode != 0) {
                     // Best-effort cleanup of any partial write
-                    try { dadb.shell("rm -f $scriptPath 2>/dev/null") } catch (ignored: Exception) {}
+                    tryCleanupScript(scriptPath)
                     callback.onError("script-write failed: ${writeResult.allOutput}")
                     return@submit
                 }
@@ -241,8 +395,16 @@ class AdbShellExecutor(private val context: Context) {
                 // form leaked the tmpfile if the inner shell was killed
                 // mid-run (rm never reached). trap-EXIT runs even on
                 // SIGTERM/SIGHUP from dadb transport teardown.
-                val runResult = dadb.shell(
-                    "trap 'rm -f $scriptPath' EXIT; sh $scriptPath"
+                //
+                // Re-acquire: the write above may have invalidated the shared
+                // connection on failure paths that still threw past us; the
+                // holder gives back either the same connection or a fresh one.
+                val runConn = acquireConnection()
+                val runResult = shellGuarded(
+                    runConn,
+                    "trap 'rm -f $scriptPath' EXIT; sh $scriptPath",
+                    runDeadlineMs,
+                    seq
                 )
 
                 if (runResult.exitCode == 0) {
@@ -253,19 +415,214 @@ class AdbShellExecutor(private val context: Context) {
             } catch (e: Exception) {
                 logger.error(TAG, "Script execution failed", e)
                 callback.onError("Execution failed: ${e.message}")
-                // Best-effort cleanup if the connection is still alive.
-                // `getOrCreateConnection()` may itself throw if the
-                // failure was a connection drop — swallow.
-                try { getOrCreateConnection().shell("rm -f $scriptPath 2>/dev/null") } catch (ignored: Exception) {}
+                // Best-effort cleanup if a connection is still obtainable.
+                tryCleanupScript(scriptPath)
             }
         }
     }
-    
+
+    /** Best-effort rm of a leftover script tmpfile; swallows every failure. */
+    private fun tryCleanupScript(scriptPath: String) {
+        try {
+            val conn = acquireConnection()
+            shellGuarded(conn, "rm -f $scriptPath 2>/dev/null", DEFAULT_DEADLINE_MS, cmdSeq.incrementAndGet())
+        } catch (ignored: Exception) {
+        }
+    }
+
+    /**
+     * BULK LANE: run [command] on a DEDICATED, per-operation Dadb connection,
+     * bounded by [deadlineMs], then close it. For long-running operations —
+     * the updater's `timeout 600 wget -q` download, `pm install` — that can
+     * stay output-silent far longer than the shared lane's socket timeout,
+     * and that must not monopolize or tear down the control connection.
+     *
+     * The dedicated connection's socket timeout is derived from the remaining
+     * operation budget (a silent multi-minute transfer is the POINT of this
+     * lane, so it must exceed any legitimate quiet stretch); the watchdog
+     * closes this exact connection on deadline breach, which is safe because
+     * nothing else shares it. The shared control lane is untouched throughout.
+     *
+     * NO automatic retry: on deadline or transport failure the command's
+     * effect is unknown — the caller owns any retry decision.
+     */
+    fun executeBulk(command: String, deadlineMs: Long, callback: ShellCallback) {
+        val seq = cmdSeq.incrementAndGet()
+        logger.debug(TAG, "adb#$seq SUBMIT-BULK deadline=${deadlineMs}ms: $command")
+        // The deadline anchors at SUBMISSION on the MONOTONIC clock, and the
+        // callback is GUARANTEED by deadline+ε: a SETUP watchdog armed right
+        // here covers the phases where the task may not even be running yet
+        // (queue wait behind an earlier command on this single-thread
+        // executor, control-lane acquire, bulk connect), and is swapped for a
+        // COMMAND watchdog that closes the dedicated connection once the
+        // command starts.
+        // Without the setup watchdog, a queued task had no one to deliver its
+        // timeout, so the caller's deadline+margin wait (the updater's
+        // awaitFlag) could expire while the command later ran anyway —
+        // recreating the cleanup-while-command-runs hazard these deadlines
+        // exist to prevent. [settled] is the single-delivery gate: exactly
+        // one of {setup watchdog, command watchdog, task} reports the outcome.
+        val deadlineAtNanos = System.nanoTime() + deadlineMs * 1_000_000L
+        val settled = AtomicBoolean(false)
+        val setupWatchdog = deadlineScheduler.schedule({
+            if (settled.compareAndSet(false, true)) {
+                logger.warn(TAG, "adb#$seq BULK DEADLINE ${deadlineMs}ms expired before the " +
+                    "command could start (queued/connecting) — reporting without executing")
+                callback.onError("Execution failed: deadline ${deadlineMs}ms exceeded before start")
+            }
+        }, deadlineMs, TimeUnit.MILLISECONDS)
+        submit(seq, "<bulk:${command.take(120)}>") {
+            fun remainingMs() = (deadlineAtNanos - System.nanoTime()) / 1_000_000L
+            val t0 = System.currentTimeMillis()
+            var bulk: BulkConnection? = null
+            try {
+                // Queue phase over. If the setup watchdog already reported,
+                // the outcome is delivered and the command has NOT run — do
+                // nothing (a mutating command must never start after its
+                // failure was already reported).
+                if (settled.get()) return@submit
+
+                // Ensure the control lane is healthy first. Same ADB key, so
+                // the bulk connect below can't stall on an unauthorized-key
+                // auth wait.
+                acquireConnection()
+                var remaining = remainingMs()
+                if (remaining <= 0) return@submit   // setup watchdog delivers
+
+                val keyPair = getOrCreateAdbKeyPair()
+                val conn = createBulkConnection(keyPair, remaining)
+                bulk = conn
+
+                // Swap watchdogs. cancel() returning false means the setup
+                // watchdog fired (or is firing) between the checks above and
+                // here — the outcome is already delivered; abort before the
+                // command starts (finally closes the connection).
+                if (!setupWatchdog.cancel(false)) return@submit
+                remaining = remainingMs()
+                if (remaining <= 0) {
+                    if (settled.compareAndSet(false, true)) {
+                        callback.onError("Execution failed: deadline ${deadlineMs}ms exceeded before start")
+                    }
+                    return@submit
+                }
+                val timedOut = AtomicBoolean(false)
+                val cmdWatchdog = deadlineScheduler.schedule({
+                    if (settled.compareAndSet(false, true)) {
+                        timedOut.set(true)
+                        logger.warn(TAG, "adb#$seq BULK DEADLINE ${deadlineMs}ms (from submission) " +
+                            "exceeded — closing dedicated connection to unblock")
+                        conn.closeQuietly()
+                        callback.onError("Execution failed: deadline ${deadlineMs}ms exceeded " +
+                            "(dedicated connection closed to unblock)")
+                    }
+                }, remaining, TimeUnit.MILLISECONDS)
+                try {
+                    val result = conn.adb.shell(command)
+                    if (settled.compareAndSet(false, true)) {
+                        cmdWatchdog.cancel(false)
+                        logger.debug(TAG, "adb#$seq DONE-BULK total=${System.currentTimeMillis() - t0}ms exit=${result.exitCode}")
+                        if (result.exitCode == 0) {
+                            callback.onSuccess(result.allOutput)
+                        } else {
+                            callback.onError("Exit code ${result.exitCode}: ${result.allOutput}")
+                        }
+                    }
+                    // else: the command watchdog won while the result was
+                    // completing — its onError already went out; drop the
+                    // result (callers never auto-retry mutating commands).
+                } catch (e: Exception) {
+                    cmdWatchdog.cancel(false)
+                    if (settled.compareAndSet(false, true)) {
+                        logger.error(TAG, "adb#$seq FAILED-BULK after ${System.currentTimeMillis() - t0}ms: ${e.message}", e)
+                        callback.onError("Execution failed: ${e.message}")
+                    } else if (timedOut.get()) {
+                        // Expected: our own deadline close unblocked the read.
+                        logger.debug(TAG, "adb#$seq bulk command unblocked by deadline close: ${e.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                // Setup-phase failure (control-lane acquire / bulk connect).
+                setupWatchdog.cancel(false)
+                if (settled.compareAndSet(false, true)) {
+                    logger.error(TAG, "adb#$seq FAILED-BULK after ${System.currentTimeMillis() - t0}ms: ${e.message}", e)
+                    callback.onError("Execution failed: ${e.message}")
+                }
+            } finally {
+                bulk?.closeQuietly()
+            }
+        }
+    }
+
+    /**
+     * One bulk operation's connection. Wraps the [Dadb] handle so the
+     * watchdog and every cleanup path share one idempotent close.
+     */
+    private class BulkConnection(val adb: Dadb) {
+        fun closeQuietly() {
+            try { adb.close() } catch (ignored: Exception) {}
+        }
+    }
+
+    /**
+     * Establish the bulk lane's dedicated connection — SYNCHRONOUSLY and
+     * EAGERLY, with the handshake and the command phase bounded SEPARATELY.
+     *
+     * SO_TIMEOUT is fixed for a connection's life at Dadb.create (dadb's
+     * AdbConnection, the socket-owning route, is `internal`), so one socket
+     * cannot carry both a short handshake bound and a multi-minute command
+     * read budget. Two-step instead — the same pattern the control lane's
+     * auth probe uses:
+     *
+     *  1. Throwaway HANDSHAKE PROBE with [BULK_HANDSHAKE_TIMEOUT_MS]:
+     *     `supportsFeature` forces the full CNXN/AUTH exchange (no shell
+     *     OPEN); a stalled handshake throws SocketTimeoutException within
+     *     seconds ON THIS THREAD and the probe is closed in the finally.
+     *     No connect thread, no join, no abandoned socket to stack up.
+     *  2. The REAL connection with the operation-budget socket timeout. Auth
+     *     was just proven, so ITS handshake completes in milliseconds — the
+     *     multi-minute SO_TIMEOUT never guards an unauthenticated read. It
+     *     is likewise established eagerly here, so by the time the command
+     *     watchdog is armed the connection is stored and its close()
+     *     genuinely severs a stuck command.
+     *
+     * Worst case for a transport that stalls between the two steps: the real
+     * connection's handshake read is bounded by its own SO_TIMEOUT — but
+     * that read happens on the executor thread AFTER the setup watchdog is
+     * armed at the submission deadline, so the caller's outcome is still
+     * delivered on time regardless.
+     */
+    private fun createBulkConnection(keyPair: AdbKeyPair, remainingBudgetMs: Long): BulkConnection {
+        // STEP 1 — bounded throwaway handshake probe, always closed.
+        val probeTimeoutMs = BULK_HANDSHAKE_TIMEOUT_MS.toLong()
+            .coerceAtMost(remainingBudgetMs).coerceAtLeast(1L).toInt()
+        val probe = Dadb.create("127.0.0.1", ADB_PORT, keyPair, CONNECT_TIMEOUT_MS, probeTimeoutMs)
+        try {
+            probe.supportsFeature("shell_v2")
+        } finally {
+            try { probe.close() } catch (ignored: Exception) {}
+        }
+
+        // STEP 2 — the real connection, command-phase socket timeout. A
+        // legitimately silent stretch (quiet 600s wget) must never trip a
+        // per-read timeout, so it gets the remaining operation budget; the
+        // ABSOLUTE watchdog is the real command bound.
+        val commandTimeoutMs = remainingBudgetMs.coerceAtLeast(SOCKET_TIMEOUT_MS.toLong())
+            .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        val real = Dadb.create("127.0.0.1", ADB_PORT, keyPair, CONNECT_TIMEOUT_MS, commandTimeoutMs)
+        try {
+            real.supportsFeature("shell_v2")   // establish eagerly (see doc)
+        } catch (e: Exception) {
+            try { real.close() } catch (ignored: Exception) {}
+            throw e
+        }
+        return BulkConnection(real)
+    }
+
     fun checkProcessRunning(processName: String): Int? {
         return try {
-            val dadb = getOrCreateConnection()
-            val result = dadb.shell("pgrep -f '$processName'")
-            
+            val conn = acquireConnection()
+            val result = shellGuarded(conn, "pgrep -f '$processName'", DEFAULT_DEADLINE_MS, cmdSeq.incrementAndGet())
+
             if (result.exitCode == 0 && result.allOutput.trim().isNotEmpty()) {
                 result.allOutput.trim().lines().firstOrNull()?.toIntOrNull()
             } else {
@@ -276,10 +633,10 @@ class AdbShellExecutor(private val context: Context) {
             null
         }
     }
-    
+
     fun killProcess(processName: String): Boolean {
         return try {
-            val dadb = getOrCreateConnection()
+            val conn = acquireConnection()
             // ps+awk+kill instead of pkill -f. dadb.shell runs `shell:cmd`
             // over ADB which is equivalent to `sh -c "<cmd>"`. With
             // pkill -f, the wrapper sh's argv contains the literal
@@ -291,83 +648,164 @@ class AdbShellExecutor(private val context: Context) {
                 "| awk '{print \$1}' | while read pid; do " +
                 "if [ \"\$pid\" != \"\$MY_PID\" ]; then kill -9 \$pid 2>/dev/null; fi; done; " +
                 "echo done"
-            val result = dadb.shell(cmd)
+            val result = shellGuarded(conn, cmd, DEFAULT_DEADLINE_MS, cmdSeq.incrementAndGet())
             result.exitCode == 0
         } catch (e: Exception) {
             logger.error(TAG, "Failed to kill process: $processName", e)
             false
         }
     }
-    
-    fun getOrCreateConnection(): Dadb {
-        // sharedDadbLock is PROCESS-WIDE and the liveness probe below is an un-timed
-        // blocking round-trip, so a hang on a half-dead connection stalls every
-        // AdbShellExecutor behind this monitor — and a thread blocked on a monitor reports
-        // as S (sleeping) in /proc, indistinguishable from idle. Time it explicitly.
+
+    /**
+     * Acquire the shared connection, creating it if absent. NO liveness probe:
+     * a cached connection is trusted until a command on it fails — that
+     * failure (or its deadline watchdog) invalidates the holder via
+     * [invalidateConnection], and the next acquire reconnects. This replaces
+     * the removed `echo ok` per-command probe, which was both the process-wide
+     * stall point (un-timed round-trip inside this monitor) and the packet
+     * class implicated in the vendor adbd abort incident.
+     *
+     * The mutex is held only for the holder check or the connect attempt —
+     * never across command execution.
+     */
+    private fun acquireConnection(): SharedConn {
         val tWait = System.currentTimeMillis()
         synchronized(sharedDadbLock) {
             val waited = System.currentTimeMillis() - tWait
-            if (waited > 1000) logger.warn(TAG, "getOrCreateConnection: waited ${waited}ms for sharedDadbLock")
-            var dadb = sharedDadb
-            if (dadb != null) {
-                try {
-                    val tProbe = System.currentTimeMillis()
-                    val result = dadb.shell("echo ok")
-                    val probeMs = System.currentTimeMillis() - tProbe
-                    if (probeMs > 1000) logger.warn(TAG, "getOrCreateConnection: liveness probe took ${probeMs}ms (holding the shared lock)")
-                    if (result.exitCode == 0) {
-                        if (isAuthPending.getAndSet(false)) {
-                            wasAuthGranted.set(true)
-                            logger.info(TAG, "ADB auth granted! Connection established.")
-                            authCallback?.onAuthGranted()
-                        }
-                        return dadb
-                    }
-                } catch (e: Exception) {
-                    logger.debug(TAG, "Existing ADB connection dead, reconnecting...")
-                }
-                try { dadb.close() } catch (e: Exception) {}
-                sharedDadb = null
-            }
-            
+            if (waited > 1000) logger.warn(TAG, "acquireConnection: waited ${waited}ms for sharedDadbLock")
+
+            sharedConn?.let { return it }
+
             // Check if ADB port is even listening before trying to connect
             if (!isAdbPortOpen()) {
-                logger.warn(TAG, "ADB port $ADB_PORT not open - attempting self-healing via Settings.Global...")
-                enforceGlobalAdbSettings(context)
-                try { Thread.sleep(1000) } catch (ignored: InterruptedException) {}
-                if (!isAdbPortOpen()) {
-                    logger.warn(TAG, "ADB port $ADB_PORT still not open after self-healing attempt")
-                    throw Exception("ADB port not open")
-                }
+                logger.warn(TAG, "ADB port $ADB_PORT not open - ADB not enabled?")
+                throw Exception("ADB port not open")
             }
-            
+
             val adbKeyPair = getOrCreateAdbKeyPair()
             logger.info(TAG, "Attempting ADB connection...")
-            
+
             // Start polling BEFORE we try to connect (on separate executor)
             if (!isAuthPending.get() && pollingStarted.compareAndSet(false, true)) {
                 isAuthPending.set(true)
                 authCallback?.onAuthPending()
                 startAuthPollingInternal(adbKeyPair)
             }
-            
+
             // Try quick connection with timeout wrapper
-            dadb = tryConnectWithTimeout(adbKeyPair, 2000)
-            
-            if (dadb != null) {
-                sharedDadb = dadb
-                isAuthPending.set(false)
-                wasAuthGranted.set(true)
-                pollingStarted.set(false)
-                logger.info(TAG, "ADB connection established successfully")
-                authCallback?.onAuthGranted()
-                return dadb
-            } else {
-                throw Exception("ADB auth pending - waiting for user to accept")
-            }
+            val dadb = tryConnectWithTimeout(adbKeyPair, 2000)
+                ?: throw Exception("ADB auth pending - waiting for user to accept")
+
+            return installConnectionLocked(dadb)
         }
     }
-    
+
+    /**
+     * Install a freshly-established connection into the holder. MUST be called
+     * under [sharedDadbLock]. Bumps the generation, resolves auth state, and —
+     * when this REPLACES a previously-established connection — schedules the
+     * [ConnectionReestablishedListener]s (async, off-lock): a reconnect means
+     * adbd died, and adbd's death SIGKILLed its entire cgroup of shell-spawned
+     * daemons, so listeners resnapshot + relaunch instead of waiting for the
+     * next periodic tick.
+     */
+    private fun installConnectionLocked(dadb: Dadb): SharedConn {
+        val gen = connectionGeneration.incrementAndGet()
+        val conn = SharedConn(dadb, gen, System.currentTimeMillis())
+        sharedConn = conn
+        isAuthPending.set(false)
+        wasAuthGranted.set(true)
+        pollingStarted.set(false)
+        logger.info(TAG, "ADB connection established successfully (gen=$gen)")
+        authCallback?.onAuthGranted()
+        if (gen > 1) {
+            reconnectNotifier.execute {
+                logger.info(TAG, "ADB connection RE-established (gen=$gen) — notifying " +
+                    "${reconnectListeners.size} listener(s)")
+                for (listener in reconnectListeners) {
+                    try {
+                        listener.onConnectionReestablished(gen)
+                    } catch (e: Exception) {
+                        logger.warn(TAG, "reconnect listener failed: ${e.message}")
+                    }
+                }
+            }
+        }
+        return conn
+    }
+
+    /**
+     * Invalidate [conn]: atomically clear the holder ONLY if it still holds
+     * this exact generation, then close it. Gen-guarding makes concurrent
+     * invalidations (command failure racing its own watchdog, or two commands
+     * failing on the same dead connection) idempotent, and guarantees a
+     * REPLACEMENT connection can never be torn down by a stale failure.
+     */
+    private fun invalidateConnection(conn: SharedConn, reason: String) {
+        var shouldClose = false
+        synchronized(sharedDadbLock) {
+            if (sharedConn === conn) {
+                sharedConn = null
+                shouldClose = true
+            }
+        }
+        if (shouldClose) {
+            val ageMs = System.currentTimeMillis() - conn.establishedAt
+            // Forensic breadcrumb: generation + age let a field log distinguish
+            // "one bad command killed a mature connection" from a connect churn
+            // loop, and correlate with adbd tombstones / external ADB clients.
+            logger.warn(TAG, "Invalidating shared ADB connection gen=${conn.generation} " +
+                "(age=${ageMs}ms): $reason")
+            try { conn.dadb.close() } catch (ignored: Exception) {}
+        }
+    }
+
+    /**
+     * Run one shell command on [conn] with a deadline. Socket I/O is not
+     * interruptible, so the watchdog unblocks a stuck command the only way
+     * available: closing the connection (gen-guarded), which makes the blocked
+     * read throw. On ANY failure the connection is invalidated — a transport
+     * error means its state is unknown and the next acquire must reconnect.
+     * The command itself is NEVER retried here (its effect is unknown).
+     */
+    private fun shellGuarded(
+        conn: SharedConn,
+        command: String,
+        deadlineMs: Long,
+        seq: Int
+    ): dadb.AdbShellResponse {
+        val settled = AtomicBoolean(false)
+        val timedOut = AtomicBoolean(false)
+        val watchdog = deadlineScheduler.schedule({
+            if (settled.compareAndSet(false, true)) {
+                timedOut.set(true)
+                invalidateConnection(conn, "deadline ${deadlineMs}ms exceeded by adb#$seq")
+            }
+        }, deadlineMs, TimeUnit.MILLISECONDS)
+        try {
+            val result = conn.dadb.shell(command)
+            if (settled.compareAndSet(false, true)) {
+                watchdog.cancel(false)
+            }
+            // else: the watchdog fired while the result was completing and the
+            // connection is already gone — the result itself is still real, so
+            // return it; the next command simply reconnects.
+            return result
+        } catch (e: Exception) {
+            val genuineFailure = settled.compareAndSet(false, true)
+            watchdog.cancel(false)
+            if (genuineFailure) {
+                // Transport failure on a live watchdog: invalidate (no-op if
+                // another thread's failure got there first).
+                invalidateConnection(conn, "transport failure on adb#$seq: ${e.message}")
+                throw e
+            }
+            // The exception is the consequence of our own deadline close.
+            throw Exception("deadline ${deadlineMs}ms exceeded after adb#$seq " +
+                "(connection closed to unblock)", e)
+        }
+    }
+
     /**
      * Check if ADB port is open (quick TCP check).
      */
@@ -378,79 +816,130 @@ class AdbShellExecutor(private val context: Context) {
             false
         }
     }
-    
+
     /**
-     * Try to connect with a timeout. Returns null if times out (auth pending).
+     * Try to connect with a timeout. Returns null when the attempt is still
+     * unresolved (auth pending) — or when another probe already holds the
+     * process-wide [probeInFlight] gate, which the caller must treat the
+     * same way.
      *
-     * NOTE: java.net.Socket I/O is NOT interruptible — `Thread.interrupt()`
-     * does not unblock a thread blocked inside connect/read. Dadb 1.2.8 does,
-     * however, expose native connect + socket timeouts. Every connection below
-     * uses those bounds, so a probe thread that outlives this quick wrapper can
-     * survive for at most [ADB_SOCKET_TIMEOUT_MS], never indefinitely.
+     * TWO-STEP ESTABLISH. SO_TIMEOUT is fixed for a connection's life at
+     * Dadb.create, so one socket cannot serve both needs: an auth PROBE must
+     * die within seconds when adbd never answers (user dialog up), while the
+     * long-lived control connection needs the full [SOCKET_TIMEOUT_MS] for
+     * command reads. Step 1 probes with [PROBE_SOCKET_TIMEOUT_MS] and is
+     * ALWAYS closed; step 2 — only reached once auth is granted, so it
+     * completes in milliseconds — builds the real connection with the
+     * control-lane timeout. The extra connect happens once per establishment
+     * (rare), and in exchange an unanswered probe holds its socket for ~5s
+     * instead of 60s. Combined with the gate, at most one auth-pending
+     * socket ever sits on adbd, no matter how many commands and poll
+     * attempts pile up behind a pending dialog.
      *
-     * Mitigation: mark the orphan thread as daemon + named so it
-     *   (a) doesn't hold the JVM alive (Android process death is
-     *       unaffected, but JVM-shutdown semantics still matter for
-     *       Robolectric / instrumentation tests),
-     *   (b) shows up in /proc/self/status and `dumpsys meminfo` with a
-     *       distinct name, so leaks are visible if they ever happen,
-     *   (c) is bounded — the thread terminates naturally when its
-     *       blocked I/O times out.
+     * `supportsFeature("shell_v2")` forces the CNXN/AUTH exchange (dadb
+     * connects lazily) WITHOUT opening a shell stream — i.e. without the
+     * 21-byte `shell,v2,raw:echo ok` OPEN implicated in the vendor adbd
+     * abort. Returning at all means "authenticated".
      *
-     * Each timed-out call can leave ONE daemon thread for at most
-     * [ADB_SOCKET_TIMEOUT_MS]. Under normal
-     * operation (good ADB transport) this path is rarely hit.
+     * NOTE: java.net.Socket I/O is NOT interruptible — the probe thread
+     * unblocks only via the socket-level timeouts above. Late-success
+     * handoff: if the join times out but the thread finishes authenticating
+     * afterwards, the real connection is CLOSED, not leaked (decided
+     * atomically under [lock]).
      */
     private fun tryConnectWithTimeout(keyPair: AdbKeyPair, timeoutMs: Long): Dadb? {
-        // Plain locals — Thread.join() itself provides the happens-before
-        // edge required for the caller to safely read writes made on the
-        // connect thread (per JMM: a successful join "happens-after" all
-        // actions of the joined thread). Previously these were marked
-        // `@Volatile` but Kotlin allows that annotation on locals with no
-        // effect; the actual synchronization is from join.
+        if (!probeInFlight.compareAndSet(false, true)) {
+            logger.debug(TAG, "Connection probe already in flight — treating this attempt as pending")
+            return null
+        }
+        val lock = Object()
         var result: Dadb? = null
         var error: Exception? = null
+        var abandoned = false
+        var threadStarted = false
 
         val connectThread = Thread({
+            var real: Dadb? = null
             try {
-                val dadb = Dadb.create(
-                    "127.0.0.1",
-                    ADB_PORT,
-                    keyPair,
-                    ADB_CONNECT_TIMEOUT_MS,
-                    ADB_SOCKET_TIMEOUT_MS
-                )
-                val testResult = dadb.shell("echo ok")
-                if (testResult.exitCode == 0) {
-                    result = dadb
-                } else {
-                    dadb.close()
+                // STEP 1 — throwaway probe, short socket timeout, always closed.
+                val probe = Dadb.create("127.0.0.1", ADB_PORT, keyPair, CONNECT_TIMEOUT_MS, PROBE_SOCKET_TIMEOUT_MS)
+                try {
+                    probe.supportsFeature("shell_v2")
+                } finally {
+                    try { probe.close() } catch (ignored: Exception) {}
+                }
+                // STEP 2 — auth granted: the real connection, control-lane timeout.
+                val dadb = Dadb.create("127.0.0.1", ADB_PORT, keyPair, CONNECT_TIMEOUT_MS, SOCKET_TIMEOUT_MS)
+                real = dadb
+                if (!dadb.supportsFeature("shell_v2")) {
+                    logger.warn(TAG, "adbd does not advertise shell_v2 — shell commands may fail on this transport")
+                }
+                synchronized(lock) {
+                    if (abandoned) {
+                        logger.info(TAG, "ADB connect completed after caller gave up — closing it")
+                    } else {
+                        result = dadb
+                        real = null   // ownership transferred to the caller
+                    }
                 }
             } catch (e: Exception) {
-                error = e
+                synchronized(lock) { error = e }
+            } finally {
+                try { real?.close() } catch (ignored: Exception) {}
+                // Gate released by the THREAD, not the caller: the gate's job
+                // is to bound live sockets, and the socket dies with this
+                // thread (≤ ~PROBE_SOCKET_TIMEOUT_MS after abandonment).
+                probeInFlight.set(false)
             }
         }, "adb-connect-probe").apply {
             // Daemon so it doesn't block JVM shutdown on Robolectric/JUnit
             isDaemon = true
         }
 
-        connectThread.start()
-        connectThread.join(timeoutMs)
-
-        if (connectThread.isAlive) {
-            // Timed out — auth is pending. We attempt to interrupt as a
-            // best-effort, but Socket I/O won't actually unblock; the
-            // thread will terminate naturally when its TCP/handshake
-            // times out (usually within ~75s on Android).
-            logger.debug(TAG, "Connection timed out - auth likely pending; orphan probe thread will exit on socket timeout")
+        try {
+            connectThread.start()
+            threadStarted = true
+        } finally {
+            if (!threadStarted) probeInFlight.set(false)
+        }
+        try {
+            connectThread.join(timeoutMs)
+        } catch (ie: InterruptedException) {
+            // The CALLER was interrupted (e.g. instance shutdown()
+            // interrupting its executor). Two leak vectors, both handled
+            // under one lock hold:
+            //  - a handshake completing AFTER this return would CAS its live
+            //    connection into [result], which nobody will ever read —
+            //    `abandoned` makes the thread close it itself;
+            //  - a handshake that completed JUST BEFORE the interrupt has
+            //    ALREADY published into [result] (the thread saw
+            //    abandoned=false and handed off ownership) — sweep and close
+            //    that one here, or it leaks onto adbd the same way.
+            val alreadyPublished: Dadb?
+            synchronized(lock) {
+                abandoned = true
+                alreadyPublished = result
+                result = null
+            }
+            try { alreadyPublished?.close() } catch (ignored: Exception) {}
             connectThread.interrupt()
+            Thread.currentThread().interrupt()
             return null
         }
 
-        error?.let { throw it }
-        return result
+        synchronized(lock) {
+            result?.let { return it }
+            error?.let { throw it }
+            // Timed out — auth is pending. Abandon: the thread self-cleans
+            // (closes a late success under this lock; a blocked probe read
+            // throws within PROBE_SOCKET_TIMEOUT_MS) and releases the gate.
+            logger.debug(TAG, "Connection timed out - auth likely pending; probe exits within ${PROBE_SOCKET_TIMEOUT_MS}ms")
+            abandoned = true
+            connectThread.interrupt()
+            return null
+        }
     }
-    
+
     /**
      * Background polling on dedicated executor.
      */
@@ -459,75 +948,115 @@ class AdbShellExecutor(private val context: Context) {
             logger.info(TAG, "=== AUTH POLLING STARTED ===")
             var attempts = 0
             val maxAttempts = 60
-            
-            while (isAuthPending.get() && attempts < maxAttempts) {
-                attempts++
 
-                try {
-                    // [local] Back off so a STUCK connection doesn't hammer adbd every 3s. Each
-                    // poll re-opens a TCP + dadb connect to 127.0.0.1:5555; at a 3s cadence that
-                    // churns adbd and flaps any external adb-over-wifi session (observed 2026-07-01:
-                    // laptop adb cycling device->offline while OverDrive was stuck relaunching
-                    // daemons post-reboot). Quick first tries still catch a transient blip / a
-                    // first-time auth grant; then stretch to a 30s ceiling so a persistently-stuck
-                    // OverDrive polls at most every 30s and stops interrupting adb.
-                    val backoffMs = if (attempts <= 3) 3000L
-                                    else minOf(3000L * (1L shl minOf(attempts - 3, 4)), 30000L)
-                    Thread.sleep(backoffMs)
-                } catch (e: InterruptedException) {
-                    logger.debug(TAG, "Polling interrupted")
-                    break
-                }
-                
-                if (!isAuthPending.get()) {
-                    logger.debug(TAG, "Auth no longer pending, stopping poll")
-                    break
-                }
-                
-                logger.info(TAG, "Auth poll attempt $attempts/$maxAttempts...")
-                
-                // Quick TCP check first
-                if (!isAdbPortOpen()) {
-                    logger.debug(TAG, "ADB port not open, skipping attempt")
-                    continue
-                }
-                
-                // Try connection with short timeout
-                val testDadb = tryConnectWithTimeout(keyPair, 2000)
-                
-                if (testDadb != null) {
-                    // Success!
-                    synchronized(sharedDadbLock) {
-                        try { sharedDadb?.close() } catch (ignored: Exception) {}
-                        sharedDadb = testDadb
+            try {
+                while (isAuthPending.get() && attempts < maxAttempts) {
+                    attempts++
+
+                    try {
+                        // [local] Back off so a STUCK connection doesn't hammer adbd every 3s. Each
+                        // poll re-opens a TCP + dadb connect to 127.0.0.1:5555; at a 3s cadence that
+                        // churns adbd and flaps any external adb-over-wifi session (observed 2026-07-01:
+                        // laptop adb cycling device->offline while OverDrive was stuck relaunching
+                        // daemons post-reboot). Quick first tries still catch a transient blip / a
+                        // first-time auth grant; then stretch to a 30s ceiling so a persistently-stuck
+                        // OverDrive polls at most every 30s and stops interrupting adb.
+                        val backoffMs = if (attempts <= 3) 3000L
+                                        else minOf(3000L * (1L shl minOf(attempts - 3, 4)), 30000L)
+                        Thread.sleep(backoffMs)
+                    } catch (e: InterruptedException) {
+                        logger.debug(TAG, "Polling interrupted")
+                        Thread.currentThread().interrupt()
+                        break
                     }
-                    isAuthPending.set(false)
-                    wasAuthGranted.set(true)
-                    pollingStarted.set(false)
-                    logger.info(TAG, "=== AUTH GRANTED VIA POLLING ===")
-                    authCallback?.onAuthGranted()
-                    break
+
+                    if (!isAuthPending.get()) {
+                        logger.debug(TAG, "Auth no longer pending, stopping poll")
+                        break
+                    }
+
+                    logger.info(TAG, "Auth poll attempt $attempts/$maxAttempts...")
+
+                    // Quick TCP check first
+                    if (!isAdbPortOpen()) {
+                        logger.debug(TAG, "ADB port not open, skipping attempt")
+                        continue
+                    }
+
+                    // Try connection with short timeout. A transient Dadb/create
+                    // exception must not escape this long-lived polling Runnable:
+                    // before this guard, one transport error killed the poll while
+                    // leaving isAuthPending=true + pollingStarted=true. Every daemon
+                    // start was then a one-shot failure until the whole app process
+                    // was force-closed. Keep polling and let a later healthy adbd
+                    // handshake recover the existing process.
+                    val testDadb = try {
+                        tryConnectWithTimeout(keyPair, 2000)
+                    } catch (e: Exception) {
+                        logger.warn(TAG, "Auth poll attempt $attempts failed: ${e.message}")
+                        null
+                    }
+
+                    if (testDadb != null) {
+                        // Success! Install ONLY into an empty holder. A command
+                        // thread may have connected on its own while this poll
+                        // attempt was in flight — closing that healthy connection
+                        // here would fail its in-flight commands AND fire a
+                        // spurious reconnect event (gen bump → needless snapshot/
+                        // relaunch churn). If someone beat us, auth is granted
+                        // either way: discard the polling connection.
+                        var installed = false
+                        synchronized(sharedDadbLock) {
+                            if (sharedConn == null) {
+                                installConnectionLocked(testDadb)
+                                installed = true
+                            }
+                        }
+                        if (installed) {
+                            logger.info(TAG, "=== AUTH GRANTED VIA POLLING ===")
+                        } else {
+                            logger.info(TAG, "Auth poll succeeded but a shared connection " +
+                                "already exists — discarding the polling connection")
+                            try { testDadb.close() } catch (ignored: Exception) {}
+                            isAuthPending.set(false)
+                            wasAuthGranted.set(true)
+                            pollingStarted.set(false)
+                        }
+                        break
+                    }
                 }
-            }
-            
-            if (isAuthPending.get() && attempts >= maxAttempts) {
-                logger.warn(TAG, "Auth polling timed out")
-                isAuthPending.set(false)
-                pollingStarted.set(false)
-                authCallback?.onAuthFailed("Auth timeout - please grant ADB permission and restart app")
+            } catch (e: Exception) {
+                logger.warn(TAG, "Auth polling stopped unexpectedly: ${e.message}")
+            } finally {
+                // No exit path may leave these process-wide gates latched.
+                // Once cleared, the next daemon action / 30s health check can
+                // start a fresh poll without requiring a process restart.
+                if (isAuthPending.get()) {
+                    val timedOut = attempts >= maxAttempts
+                    if (timedOut) logger.warn(TAG, "Auth polling timed out")
+                    isAuthPending.set(false)
+                    pollingStarted.set(false)
+                    val reason = if (timedOut) "ADB authorization timed out"
+                                 else "ADB authorization polling stopped"
+                    authCallback?.onAuthFailed("$reason; will retry automatically")
+                }
             }
         }
     }
-    
+
     fun closeConnection() {
+        val toClose: SharedConn?
         synchronized(sharedDadbLock) {
+            toClose = sharedConn
+            sharedConn = null
+        }
+        if (toClose != null) {
             try {
-                sharedDadb?.close()
-                logger.info(TAG, "Closed ADB connection")
+                toClose.dadb.close()
+                logger.info(TAG, "Closed ADB connection (gen=${toClose.generation})")
             } catch (e: Exception) {
                 logger.error(TAG, "Error closing ADB connection", e)
             }
-            sharedDadb = null
         }
     }
 
@@ -544,17 +1073,17 @@ class AdbShellExecutor(private val context: Context) {
             logger.warn(TAG, "executor shutdown failed: ${e.message}")
         }
     }
-    
+
     private fun getOrCreateAdbKeyPair(): AdbKeyPair {
         cachedKeyPair?.let { return it }
-        
+
         synchronized(keyPairLock) {
             cachedKeyPair?.let { return it }
-            
+
             val keyDir = context.filesDir
             val privateKeyFile = File(keyDir, ADB_KEY_FILE)
             val publicKeyFile = File(keyDir, ADB_PUB_KEY_FILE)
-            
+
             val keyPair = if (privateKeyFile.exists() && publicKeyFile.exists()) {
                 try {
                     AdbKeyPair.read(privateKeyFile, publicKeyFile)
@@ -566,12 +1095,12 @@ class AdbShellExecutor(private val context: Context) {
                 logger.info(TAG, "Generating new ADB key pair")
                 generateAndSaveKeyPair(privateKeyFile, publicKeyFile)
             }
-            
+
             cachedKeyPair = keyPair
             return keyPair
         }
     }
-    
+
     private fun generateAndSaveKeyPair(privateKeyFile: File, publicKeyFile: File): AdbKeyPair {
         AdbKeyPair.generate(privateKeyFile, publicKeyFile)
         return AdbKeyPair.read(privateKeyFile, publicKeyFile)

@@ -12,6 +12,20 @@ public class BydVehicleData {
     // Sentinel for unavailable numeric values
     public static final double NaN = Double.NaN;
     public static final int UNAVAILABLE = Integer.MIN_VALUE;
+    public static final int LIGHT_KNOWN_NONE = 0;
+    public static final int LIGHT_KNOWN_LOW_BEAM = 1;
+    public static final int LIGHT_KNOWN_HIGH_BEAM = 1 << 1;
+    public static final int LIGHT_KNOWN_FRONT_FOG = 1 << 2;
+    public static final int LIGHT_KNOWN_REAR_FOG = 1 << 3;
+    public static final int LIGHT_KNOWN_TURN_HAZARD = 1 << 4;
+    public static final int LIGHT_KNOWN_DRL = 1 << 5;
+    public static final int LIGHT_KNOWN_ALL =
+            LIGHT_KNOWN_LOW_BEAM
+                    | LIGHT_KNOWN_HIGH_BEAM
+                    | LIGHT_KNOWN_FRONT_FOG
+                    | LIGHT_KNOWN_REAR_FOG
+                    | LIGHT_KNOWN_TURN_HAZARD
+                    | LIGHT_KNOWN_DRL;
     // Connected-unit BYDAutoTyreDevice contract.
     public static final int TYRE_PRESSURE_STATE_NORMAL = 0;
     public static final int TYRE_PRESSURE_STATE_OVERPRESSURE = 1;
@@ -58,7 +72,7 @@ public class BydVehicleData {
     public final int brakePercent;
 
     // ==================== MOTOR ====================
-    public final int frontMotorSpeed;     // RPM (negated from SDK)
+    public final int frontMotorSpeed;     // RPM
     public final int rearMotorSpeed;      // RPM
     public final double frontMotorTorque; // Nm (negated from SDK)
     public final int engineSpeedRpm;
@@ -155,6 +169,8 @@ public class BydVehicleData {
     final double chargePowerLastObservedKw;
     final double clusterChargePowerLastObservedKw;
     public final double hvPackVoltage;    // HV battery pack voltage (V), from CAN event
+    public final double hvPackCurrentAmps; // Positive=discharge, negative=regen/charging
+    public final double hvBatteryPowerKw;  // Signed V*A/1000 from the same observation pair
 
     // ==================== GEAR ====================
     public final int gearMode;
@@ -183,9 +199,11 @@ public class BydVehicleData {
     public final boolean frontFog;
     public final boolean hazard;
     public final boolean dayTimeLight;
+    private final int lightKnownMask;
     // Interior ambient (atmosphere) light colour: 1-based index into the fixed
-    // 31-colour palette (LightConstants.AMBIENT_COLOURS). Defaults to 1 until read.
+    // 31-colour palette (LightConstants.AMBIENT_COLOURS).
     public final int ambientColour;
+    public final boolean ambientColourKnown;
     // Interior ambient main switch: 1 = on, 0 = off, UNAVAILABLE when this trim reports
     // neither the Light-device status feature nor the atmosphere_lamp provider flag. Kept as
     // a tri-state int (not a boolean) so an unreadable switch cannot masquerade as "off" —
@@ -194,6 +212,7 @@ public class BydVehicleData {
 
     // ==================== ADAS ====================
     public final boolean speedLimitWarning;
+    public final boolean speedLimitWarningKnown;
 
     // ==================== Setting ====================
     public final int childPresenceDetection;
@@ -204,6 +223,8 @@ public class BydVehicleData {
     // ==================== SEATS ====================
     public final int[] seatHeat;    // [driver, passenger] — 0=off, 1=low, 2=high
     public final int[] seatCool;    // [driver, passenger] — 0=off, 1=low, 2=high
+    /** Per-seat ventilation capability: 1=supported, 0=unsupported, UNAVAILABLE=unknown. */
+    public final int[] seatVentilationSupport;
     /** Steering-wheel heater, raw setting-HAL domain: 2=on, 1=off, UNAVAILABLE=not read. */
     public final int steeringWheelHeat;
     /**
@@ -294,6 +315,7 @@ public class BydVehicleData {
     public final int sunshadePercent;
     public final int wirelessChargingStatus;
     public final boolean driftModeEnabled;
+    public final boolean driftModeKnown;
 
     // ==================== EXTENDED SAFETY ====================
     // Seat occupancy. ONE slot: index 0 = FRONT PASSENGER (getPassengerStatus area 1, off the
@@ -384,6 +406,8 @@ public class BydVehicleData {
         this.chargePowerLastObservedKw = b.chargePowerLastObservedKw;
         this.clusterChargePowerLastObservedKw = b.clusterChargePowerLastObservedKw;
         this.hvPackVoltage = b.hvPackVoltage;
+        this.hvPackCurrentAmps = b.hvPackCurrentAmps;
+        this.hvBatteryPowerKw = b.hvBatteryPowerKw;
         this.gearMode = b.gearMode;
         this.tyrePressure = b.tyrePressure;
         this.tyrePressureState = b.tyrePressureState;
@@ -402,13 +426,17 @@ public class BydVehicleData {
         this.frontFog = b.frontFog;
         this.hazard = b.hazard;
         this.dayTimeLight = b.dayTimeLight;
+        this.lightKnownMask = b.lightKnownMask;
         this.ambientColour = b.ambientColour;
+        this.ambientColourKnown = b.ambientColourKnown;
         this.ambientEnabled = b.ambientEnabled;
         this.speedLimitWarning = b.speedLimitWarning;
+        this.speedLimitWarningKnown = b.speedLimitWarningKnown;
         this.childPresenceDetection = b.childPresenceDetection;
         this.seatbeltStatus = b.seatbeltStatus;
         this.seatHeat = b.seatHeat;
         this.seatCool = b.seatCool;
+        this.seatVentilationSupport = b.seatVentilationSupport;
         this.steeringWheelHeat = b.steeringWheelHeat;
         this.seatClimateAtMs = b.seatClimateAtMs;
         this.acStartState = b.acStartState;
@@ -460,6 +488,7 @@ public class BydVehicleData {
         this.sunshadePercent = b.sunshadePercent;
         this.wirelessChargingStatus = b.wirelessChargingStatus;
         this.driftModeEnabled = b.driftModeEnabled;
+        this.driftModeKnown = b.driftModeKnown;
         this.passengerDetection = b.passengerDetection;
         this.pm25Inside = b.pm25Inside;
         this.pm25Outside = b.pm25Outside;
@@ -496,22 +525,44 @@ public class BydVehicleData {
         return Double.NaN;
     }
 
+    public boolean isLightKnown(int light) {
+        return (lightKnownMask & light) == light;
+    }
+
+    int lightKnownMask() {
+        return lightKnownMask;
+    }
+
     /** Convert to JSON for API responses */
     public JSONObject toJson() {
+        return toJsonForPlatform(
+                com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected());
+    }
+
+    JSONObject toJsonForPlatform(boolean diLink5) {
+        return toJson(true, diLink5);
+    }
+
+    private JSONObject toJson(boolean roundDoubles, boolean includeDiLink5Fields) {
         JSONObject j = new JSONObject();
         try {
             if (vin != null) j.put("vin", vin);
 
             // Battery
             JSONObject batt = new JSONObject();
-            putIfValid(batt, "socPercent", socPercent);
-            putIfValid(batt, "socHevPercent", socHevPercent);
+            putIfValid(batt, "socPercent", socPercent, roundDoubles);
+            putIfValid(batt, "socHevPercent", socHevPercent, roundDoubles);
             if (socTargetPercent != UNAVAILABLE) {
                 batt.put("socTargetPercent", socTargetPercent);
             }
-            putIfValid(batt, "capacityAh", capacityAh);
-            putIfValid(batt, "remainKwh", remainKwh);
-            putIfValid(batt, "voltage12v", voltage12v);
+            putIfValid(batt, "capacityAh", capacityAh, roundDoubles);
+            putIfValid(batt, "remainKwh", remainKwh, roundDoubles);
+            putIfValid(batt, "voltage12v", voltage12v, roundDoubles);
+            if (includeDiLink5Fields) {
+                putIfValid(batt, "hvPackVoltage", hvPackVoltage, roundDoubles);
+                putIfValid(batt, "hvPackCurrentAmps", hvPackCurrentAmps, roundDoubles);
+                putIfValid(batt, "hvBatteryPowerKw", hvBatteryPowerKw, roundDoubles);
+            }
             if (voltage12vAtMs > 0L) {
                 batt.put("voltage12vAtMs", voltage12vAtMs);
             }
@@ -520,28 +571,28 @@ public class BydVehicleData {
 
             // Thermal
             JSONObject therm = new JSONObject();
-            putIfValid(therm, "highCellTempC", highCellTempC);
-            putIfValid(therm, "lowCellTempC", lowCellTempC);
-            putIfValid(therm, "avgCellTempC", avgCellTempC);
-            putIfValid(therm, "waterTempC", waterTempC);
-            putIfValid(therm, "outsideTempC", outsideTempC);
+            putIfValid(therm, "highCellTempC", highCellTempC, roundDoubles);
+            putIfValid(therm, "lowCellTempC", lowCellTempC, roundDoubles);
+            putIfValid(therm, "avgCellTempC", avgCellTempC, roundDoubles);
+            putIfValid(therm, "waterTempC", waterTempC, roundDoubles);
+            putIfValid(therm, "outsideTempC", outsideTempC, roundDoubles);
             if (hasFreshCabinTemperature()) {
-                putIfValid(therm, "insideTempC", insideTempC);
+                putIfValid(therm, "insideTempC", insideTempC, roundDoubles);
             }
-            putIfValid(therm, "bodyworkBattTempC", bodyworkBattTempC);
-            putIfValid(therm, "bestBatteryTempC", getBestBatteryTemp());
+            putIfValid(therm, "bodyworkBattTempC", bodyworkBattTempC, roundDoubles);
+            putIfValid(therm, "bestBatteryTempC", getBestBatteryTemp(), roundDoubles);
             j.put("thermal", therm);
 
             // Cell voltage
             JSONObject cellV = new JSONObject();
-            putIfValid(cellV, "highV", highCellVoltage);
-            putIfValid(cellV, "lowV", lowCellVoltage);
-            putIfValid(cellV, "deltaV", getCellVoltageDelta());
+            putIfValid(cellV, "highV", highCellVoltage, roundDoubles);
+            putIfValid(cellV, "lowV", lowCellVoltage, roundDoubles);
+            putIfValid(cellV, "deltaV", getCellVoltageDelta(), roundDoubles);
             j.put("cellVoltage", cellV);
 
             // Speed
             JSONObject spd = new JSONObject();
-            putIfValid(spd, "kmh", speedKmh);
+            putIfValid(spd, "kmh", speedKmh, roundDoubles);
             if (accelPercent != UNAVAILABLE) spd.put("accelPercent", accelPercent);
             if (brakePercent != UNAVAILABLE) spd.put("brakePercent", brakePercent);
             j.put("speed", spd);
@@ -550,20 +601,20 @@ public class BydVehicleData {
             JSONObject mot = new JSONObject();
             if (frontMotorSpeed != UNAVAILABLE) mot.put("frontSpeed", frontMotorSpeed);
             if (rearMotorSpeed != UNAVAILABLE) mot.put("rearSpeed", rearMotorSpeed);
-            putIfValid(mot, "frontTorque", frontMotorTorque);
+            putIfValid(mot, "frontTorque", frontMotorTorque, roundDoubles);
             if (engineSpeedRpm != UNAVAILABLE) mot.put("engineRpm", engineSpeedRpm);
-            putIfValid(mot, "enginePowerKw", enginePowerKw);
+            putIfValid(mot, "enginePowerKw", enginePowerKw, roundDoubles);
             j.put("motor", mot);
 
             // Energy
             JSONObject eng = new JSONObject();
             if (energyMode != UNAVAILABLE) eng.put("mode", energyMode);
             if (operationMode != UNAVAILABLE) eng.put("operationMode", operationMode);
-            putIfValid(eng, "totalElecCon", totalElecCon);
-            putIfValid(eng, "totalFuelCon", totalFuelCon);
-            putIfValid(eng, "avgFuelConPer100Km", avgFuelConPer100Km);
-            putIfValid(eng, "avgElecConPer100Km", avgElecConPer100Km);
-            putIfValid(eng, "lastElecConPer100Km", lastElecConPer100Km);
+            putIfValid(eng, "totalElecCon", totalElecCon, roundDoubles);
+            putIfValid(eng, "totalFuelCon", totalFuelCon, roundDoubles);
+            putIfValid(eng, "avgFuelConPer100Km", avgFuelConPer100Km, roundDoubles);
+            putIfValid(eng, "avgElecConPer100Km", avgElecConPer100Km, roundDoubles);
+            putIfValid(eng, "lastElecConPer100Km", lastElecConPer100Km, roundDoubles);
             j.put("energy", eng);
 
             // Range
@@ -590,20 +641,20 @@ public class BydVehicleData {
             // Keep the legacy diagnostic key for compatibility. This first value is the dedicated
             // framework kW property; the external accessor below remains unit-ambiguous and is
             // classified downstream before it can become a published rate.
-            putIfValid(chg, "powerRaw", chargingPowerKw);
-            putIfValid(chg, "externalPowerRaw", externalChargingPowerKw);
+            putIfValid(chg, "powerRaw", chargingPowerKw, roundDoubles);
+            putIfValid(chg, "externalPowerRaw", externalChargingPowerKw, roundDoubles);
             // DC pack-side (getChargePower). Only emit an in-band value: the getter
             // returns ~359 garbage when idle, which would otherwise mislead anyone
             // reading this diagnostic JSON during a charge test. Same band the
             // consumers (getChargingState / MQTT / ABRP) gate on.
             if (!Double.isNaN(chargePowerKw) && chargePowerKw > 0.1 && chargePowerKw <= 300) {
-                putIfValid(chg, "chargePowerKw", chargePowerKw);
+                putIfValid(chg, "chargePowerKw", chargePowerKw, roundDoubles);
             }
             // Also classifier-managed and unit-unknown here, so name it as a raw diagnostic
             // rather than implying it is the resolved power used by downstream consumers.
             if (!Double.isNaN(clusterChargePowerKw)
                     && clusterChargePowerKw > 0.1 && clusterChargePowerKw <= 300) {
-                putIfValid(chg, "clusterChargePowerRaw", clusterChargePowerKw);
+                putIfValid(chg, "clusterChargePowerRaw", clusterChargePowerKw, roundDoubles);
             }
             j.put("charging", chg);
 
@@ -613,28 +664,38 @@ public class BydVehicleData {
             // Tyres
             if (tyrePressure != null) {
                 JSONArray tp = new JSONArray();
-                for (int p : tyrePressure) tp.put(p);
+                for (int p : tyrePressure) {
+                    tp.put(tyreJsonValue(p, includeDiLink5Fields));
+                }
                 j.put("tyrePressure", tp);
                 j.put("tyrePressureUnit", "kPa");
             }
             if (tyrePressureState != null) {
                 JSONArray a = new JSONArray();
-                for (int v : tyrePressureState) a.put(v);
+                for (int v : tyrePressureState) {
+                    a.put(tyreJsonValue(v, includeDiLink5Fields));
+                }
                 j.put("tyrePressureState", a);
             }
             if (tyreAirLeakState != null) {
                 JSONArray a = new JSONArray();
-                for (int v : tyreAirLeakState) a.put(v);
+                for (int v : tyreAirLeakState) {
+                    a.put(tyreJsonValue(v, includeDiLink5Fields));
+                }
                 j.put("tyreAirLeakState", a);
             }
             if (tyreSignalState != null) {
                 JSONArray a = new JSONArray();
-                for (int v : tyreSignalState) a.put(v);
+                for (int v : tyreSignalState) {
+                    a.put(tyreJsonValue(v, includeDiLink5Fields));
+                }
                 j.put("tyreSignalState", a);
             }
             if (tyreTemperature != null) {
                 JSONArray a = new JSONArray();
-                for (int v : tyreTemperature) a.put(v == UNAVAILABLE ? JSONObject.NULL : (Object) v);
+                for (int v : tyreTemperature) {
+                    a.put(v == UNAVAILABLE ? JSONObject.NULL : (Object) v);
+                }
                 j.put("tyreTemperature", a);
                 j.put("tyreTemperatureUnit", "C");
             }
@@ -657,13 +718,34 @@ public class BydVehicleData {
 
             // Lights
             JSONObject lt = new JSONObject();
-            if (leftTurnState != UNAVAILABLE) lt.put("leftTurn", leftTurnState);
-            if (rightTurnState != UNAVAILABLE) lt.put("rightTurn", rightTurnState);
-            lt.put("lowBeam", lowBeam);
-            lt.put("highBeam", highBeam);
-            lt.put("rearFog", rearFog);
-            lt.put("frontFog", frontFog);
-            lt.put("hazard", hazard);
+            if ((!includeDiLink5Fields
+                    || isLightKnown(LIGHT_KNOWN_TURN_HAZARD))
+                    && leftTurnState != UNAVAILABLE) {
+                lt.put("leftTurn", leftTurnState);
+            }
+            if ((!includeDiLink5Fields
+                    || isLightKnown(LIGHT_KNOWN_TURN_HAZARD))
+                    && rightTurnState != UNAVAILABLE) {
+                lt.put("rightTurn", rightTurnState);
+            }
+            if (!includeDiLink5Fields || isLightKnown(LIGHT_KNOWN_LOW_BEAM)) {
+                lt.put("lowBeam", lowBeam);
+            }
+            if (!includeDiLink5Fields || isLightKnown(LIGHT_KNOWN_HIGH_BEAM)) {
+                lt.put("highBeam", highBeam);
+            }
+            if (!includeDiLink5Fields || isLightKnown(LIGHT_KNOWN_REAR_FOG)) {
+                lt.put("rearFog", rearFog);
+            }
+            if (!includeDiLink5Fields || isLightKnown(LIGHT_KNOWN_FRONT_FOG)) {
+                lt.put("frontFog", frontFog);
+            }
+            if (!includeDiLink5Fields || isLightKnown(LIGHT_KNOWN_TURN_HAZARD)) {
+                lt.put("hazard", hazard);
+            }
+            if (includeDiLink5Fields && isLightKnown(LIGHT_KNOWN_DRL)) {
+                lt.put("dayTimeLight", dayTimeLight);
+            }
             j.put("lights", lt);
 
             // Seatbelts
@@ -679,13 +761,39 @@ public class BydVehicleData {
             }
             if (seatHeat != null) {
                 JSONArray sh = new JSONArray();
-                for (int s : seatHeat) sh.put(s);
+                for (int s : seatHeat) {
+                    sh.put(s == UNAVAILABLE ? JSONObject.NULL : (Object) s);
+                }
                 j.put("seatHeat", sh);
             }
             if (seatCool != null) {
                 JSONArray sc = new JSONArray();
-                for (int s : seatCool) sc.put(s);
+                for (int s : seatCool) {
+                    sc.put(s == UNAVAILABLE ? JSONObject.NULL : (Object) s);
+                }
                 j.put("seatCool", sc);
+            }
+            if (includeDiLink5Fields) {
+                if (seatVentilationSupport != null) {
+                    JSONArray support = new JSONArray();
+                    for (int s : seatVentilationSupport) {
+                        support.put(s == UNAVAILABLE ? JSONObject.NULL : (Object) s);
+                    }
+                    j.put("seatVentilationSupport", support);
+                }
+                if (steeringWheelHeat != UNAVAILABLE) {
+                    j.put("steeringWheelHeat", steeringWheelHeat);
+                }
+                if (seatClimateAtMs > 0L) j.put("seatClimateAtMs", seatClimateAtMs);
+                if (ambientColourKnown) j.put("ambientColour", ambientColour);
+                if (ambientEnabled != UNAVAILABLE) j.put("ambientEnabled", ambientEnabled);
+                if (speedLimitWarningKnown) {
+                    j.put("speedLimitWarning", speedLimitWarning);
+                }
+                if (childPresenceDetection >= 1
+                        && childPresenceDetection <= 3) {
+                    j.put("childPresenceDetection", childPresenceDetection);
+                }
             }
 
             // Climate
@@ -700,7 +808,7 @@ public class BydVehicleData {
             j.put("climate", clim);
 
             // Sensor
-            putIfValid(j, "slopeDegrees", slopeDegrees);
+            putIfValid(j, "slopeDegrees", slopeDegrees, roundDoubles);
 
             // Power
             if (powerLevel != UNAVAILABLE) j.put("powerLevel", powerLevel);
@@ -726,7 +834,7 @@ public class BydVehicleData {
 
             // Extended Battery
             JSONObject extBatt = new JSONObject();
-            putIfValid(extBatt, "sohPercent", sohPercent);
+            putIfValid(extBatt, "sohPercent", sohPercent, roundDoubles);
             if (keyBatteryLevel != UNAVAILABLE) extBatt.put("keyBatteryLevel", keyBatteryLevel);
             if (battery12vLevel != UNAVAILABLE) extBatt.put("battery12vLevel", battery12vLevel);
             if (extBatt.length() > 0) j.put("extendedBattery", extBatt);
@@ -745,7 +853,8 @@ public class BydVehicleData {
             // Note: insideTempCelsius is separate from the existing insideTempC in thermal
             JSONObject extTherm = new JSONObject();
             if (hasFreshCabinTemperature()) {
-                putIfValid(extTherm, "insideTempCelsius", insideTempCelsius);
+                putIfValid(extTherm, "insideTempCelsius",
+                        insideTempCelsius, roundDoubles);
             }
             if (extTherm.length() > 0) j.put("extendedThermal", extTherm);
 
@@ -756,24 +865,30 @@ public class BydVehicleData {
             if (chargingPercent != UNAVAILABLE) extChg.put("chargingPercent", chargingPercent);
             if (chargingType != UNAVAILABLE) extChg.put("chargingType", chargingType);
             if (vtolCharging) extChg.put("vtolCharging", true);
-            putIfValid(extChg, "chargingCapacityKwh", chargingCapacityKwh);
+            putIfValid(extChg, "chargingCapacityKwh",
+                    chargingCapacityKwh, roundDoubles);
             if (wirelessChargingLeftState != UNAVAILABLE) extChg.put("wirelessChargingLeftState", wirelessChargingLeftState);
             if (wirelessChargingRightState != UNAVAILABLE) extChg.put("wirelessChargingRightState", wirelessChargingRightState);
             if (extChg.length() > 0) j.put("extendedCharging", extChg);
 
             // Extended Driving
             JSONObject extDrv = new JSONObject();
-            putIfValid(extDrv, "drivingTimeHours", drivingTimeHours);
-            putIfValid(extDrv, "last50KmConsumption", last50KmConsumption);
-            putIfValid(extDrv, "steeringAngleDegrees", steeringAngleDegrees);
+            putIfValid(extDrv, "drivingTimeHours", drivingTimeHours, roundDoubles);
+            putIfValid(extDrv, "last50KmConsumption",
+                    last50KmConsumption, roundDoubles);
+            putIfValid(extDrv, "steeringAngleDegrees",
+                    steeringAngleDegrees, roundDoubles);
             if (autoSystemState != UNAVAILABLE) extDrv.put("autoSystemState", autoSystemState);
             if (extDrv.length() > 0) j.put("extendedDriving", extDrv);
 
             // Extended Trip
             JSONObject extTrip = new JSONObject();
-            putIfValid(extTrip, "currentTripMileageKm", currentTripMileageKm);
-            putIfValid(extTrip, "currentTripTimeHours", currentTripTimeHours);
-            putIfValid(extTrip, "currentTripConsumptionKwh", currentTripConsumptionKwh);
+            putIfValid(extTrip, "currentTripMileageKm",
+                    currentTripMileageKm, roundDoubles);
+            putIfValid(extTrip, "currentTripTimeHours",
+                    currentTripTimeHours, roundDoubles);
+            putIfValid(extTrip, "currentTripConsumptionKwh",
+                    currentTripConsumptionKwh, roundDoubles);
             if (extTrip.length() > 0) j.put("extendedTrip", extTrip);
 
             // Extended Engine
@@ -792,7 +907,9 @@ public class BydVehicleData {
             if (sunroofPosition != UNAVAILABLE) extBody.put("sunroofPosition", sunroofPosition);
             if (sunshadePercent != UNAVAILABLE) extBody.put("sunshadePercent", sunshadePercent);
             if (wirelessChargingStatus != UNAVAILABLE) extBody.put("wirelessChargingStatus", wirelessChargingStatus);
-            if (driftModeEnabled) extBody.put("driftModeEnabled", true);
+            if (driftModeEnabled || (includeDiLink5Fields && driftModeKnown)) {
+                extBody.put("driftModeEnabled", driftModeEnabled);
+            }
             if (extBody.length() > 0) j.put("extendedBodywork", extBody);
 
             // Extended Safety
@@ -813,80 +930,453 @@ public class BydVehicleData {
         return j;
     }
 
-    private static void putIfValid(JSONObject j, String key, double val) throws org.json.JSONException {
-        if (!Double.isNaN(val)) j.put(key, Math.round(val * 100) / 100.0);
+    private static Object tyreJsonValue(int value, boolean diLink5) {
+        return diLink5 && value == UNAVAILABLE
+                ? JSONObject.NULL : Integer.valueOf(value);
     }
 
-    public static BydVehicleData fromJson(JSONObject j) {
-        if (j == null) return null;
+    /**
+     * Freshness and internal-source metadata layered onto the existing wire
+     * shape for the local cross-process telemetry handoff. Public API responses
+     * continue using {@link #toJson()} unchanged.
+     */
+    public JSONObject toBridgeJson() {
+        JSONObject json = toJson(false, true);
+        try {
+            JSONObject meta = new JSONObject();
+            if (!Double.isNaN(insideTempC)) meta.put("insideTempC", insideTempC);
+            if (!Double.isNaN(insideTempCelsius)) {
+                meta.put("insideTempCelsius", insideTempCelsius);
+            }
+            if (!Double.isNaN(chargingPowerKw)) {
+                meta.put("chargingPowerKw", chargingPowerKw);
+            }
+            if (!Double.isNaN(externalChargingPowerKw)) {
+                meta.put("externalChargingPowerKw", externalChargingPowerKw);
+            }
+            if (!Double.isNaN(chargePowerKw)) meta.put("chargePowerKw", chargePowerKw);
+            if (!Double.isNaN(clusterChargePowerKw)) {
+                meta.put("clusterChargePowerKw", clusterChargePowerKw);
+            }
+            if (!Double.isNaN(chargingPowerLastObservedKw)) {
+                meta.put("chargingPowerLastObservedKw", chargingPowerLastObservedKw);
+            }
+            if (!Double.isNaN(externalChargingPowerLastObservedKw)) {
+                meta.put("externalChargingPowerLastObservedKw",
+                        externalChargingPowerLastObservedKw);
+            }
+            if (!Double.isNaN(chargePowerLastObservedKw)) {
+                meta.put("chargePowerLastObservedKw", chargePowerLastObservedKw);
+            }
+            if (!Double.isNaN(clusterChargePowerLastObservedKw)) {
+                meta.put("clusterChargePowerLastObservedKw",
+                        clusterChargePowerLastObservedKw);
+            }
+            meta.put("insideTempReadAt", insideTempReadAt);
+            meta.put("enginePowerAtMs", enginePowerAtMs);
+            meta.put("clusterChargePowerAtMs", clusterChargePowerAtMs);
+            meta.put("chargingStateAtMs", chargingStateAtMs);
+            meta.put("chargingPowerAtMs", chargingPowerAtMs);
+            meta.put("chargingPowerChangedAtMs", chargingPowerChangedAtMs);
+            meta.put("externalChargingPowerAtMs", externalChargingPowerAtMs);
+            meta.put("externalChargingPowerChangedAtMs",
+                    externalChargingPowerChangedAtMs);
+            meta.put("chargePowerAtMs", chargePowerAtMs);
+            meta.put("chargePowerChangedAtMs", chargePowerChangedAtMs);
+            meta.put("clusterChargePowerChangedAtMs",
+                    clusterChargePowerChangedAtMs);
+            meta.put("lightKnownMask", lightKnownMask);
+            if (unavailableDevices != null) {
+                JSONArray unavailable = new JSONArray();
+                for (String device : unavailableDevices) unavailable.put(device);
+                meta.put("unavailableDevices", unavailable);
+            }
+            json.put("_snapshotMeta", meta);
+        } catch (Exception ignored) {}
+        return json;
+    }
+
+    private static void putIfValid(
+            JSONObject j, String key, double val, boolean round)
+            throws org.json.JSONException {
+        if (!Double.isNaN(val)) {
+            j.put(key, round ? Math.round(val * 100) / 100.0 : val);
+        }
+    }
+
+    public static BydVehicleData fromJson(JSONObject json) {
+        if (json == null) return null;
         Builder b = new Builder();
         try {
-            b.vin = j.optString("vin", null);
-            if (j.has("battery")) {
-                JSONObject batt = j.getJSONObject("battery");
-                b.socPercent = batt.optDouble("socPercent", NaN);
-                b.socHevPercent = batt.optDouble("socHevPercent", NaN);
-                b.socTargetPercent = batt.optInt("socTargetPercent", UNAVAILABLE);
-                b.capacityAh = batt.optDouble("capacityAh", NaN);
-                b.remainKwh = batt.optDouble("remainKwh", NaN);
-                b.voltage12v = batt.optDouble("voltage12v", NaN);
-                b.voltage12vAtMs = batt.optLong("voltage12vAtMs", 0L);
-                b.voltageLevelRaw = batt.optInt("voltageLevelRaw", UNAVAILABLE);
+            b.vin = json.optString("vin", null);
+            b.timestamp = json.optLong("timestamp", System.currentTimeMillis());
+
+            JSONObject battery = json.optJSONObject("battery");
+            if (battery != null) {
+                b.socPercent = battery.optDouble("socPercent", NaN);
+                b.socHevPercent = battery.optDouble("socHevPercent", NaN);
+                b.socTargetPercent = battery.optInt("socTargetPercent", UNAVAILABLE);
+                b.capacityAh = battery.optDouble("capacityAh", NaN);
+                b.remainKwh = battery.optDouble("remainKwh", NaN);
+                b.voltage12v = battery.optDouble("voltage12v", NaN);
+                b.voltage12vAtMs = battery.optLong("voltage12vAtMs", 0L);
+                b.voltageLevelRaw = battery.optInt("voltageLevelRaw", UNAVAILABLE);
+                b.hvPackVoltage = battery.optDouble("hvPackVoltage", NaN);
+                b.hvPackCurrentAmps =
+                        battery.optDouble("hvPackCurrentAmps", NaN);
+                b.hvBatteryPowerKw =
+                        battery.optDouble("hvBatteryPowerKw", NaN);
             }
-            if (j.has("speed")) {
-                JSONObject spd = j.getJSONObject("speed");
-                b.speedKmh = spd.optDouble("kmh", NaN);
-                b.accelPercent = spd.optInt("accelPercent", UNAVAILABLE);
-                b.brakePercent = spd.optInt("brakePercent", UNAVAILABLE);
+            JSONObject thermal = json.optJSONObject("thermal");
+            if (thermal != null) {
+                b.highCellTempC = thermal.optDouble("highCellTempC", NaN);
+                b.lowCellTempC = thermal.optDouble("lowCellTempC", NaN);
+                b.avgCellTempC = thermal.optDouble("avgCellTempC", NaN);
+                b.waterTempC = thermal.optDouble("waterTempC", NaN);
+                b.outsideTempC = thermal.optDouble("outsideTempC", NaN);
+                b.insideTempC = thermal.optDouble("insideTempC", NaN);
+                b.insideTempReadAt = Double.isNaN(b.insideTempC)
+                        ? 0L : b.timestamp;
+                b.bodyworkBattTempC =
+                        thermal.optDouble("bodyworkBattTempC", NaN);
             }
-            if (j.has("gearMode")) b.gearMode = j.optInt("gearMode", UNAVAILABLE);
-            if (j.has("tyrePressure")) {
-                JSONArray tp = j.getJSONArray("tyrePressure");
-                int[] p = new int[tp.length()];
-                for (int i = 0; i < tp.length(); i++) p[i] = tp.getInt(i);
-                b.tyrePressure = p;
+            JSONObject cellVoltage = json.optJSONObject("cellVoltage");
+            if (cellVoltage != null) {
+                b.highCellVoltage = cellVoltage.optDouble("highV", NaN);
+                b.lowCellVoltage = cellVoltage.optDouble("lowV", NaN);
             }
-            if (j.has("tyrePressureState")) {
-                JSONArray a = j.getJSONArray("tyrePressureState");
-                int[] v = new int[a.length()];
-                for (int i = 0; i < a.length(); i++) v[i] = a.getInt(i);
-                b.tyrePressureState = v;
+            JSONObject speed = json.optJSONObject("speed");
+            if (speed != null) {
+                b.speedKmh = speed.optDouble("kmh", NaN);
+                b.accelPercent = speed.optInt("accelPercent", UNAVAILABLE);
+                b.brakePercent = speed.optInt("brakePercent", UNAVAILABLE);
             }
-            if (j.has("tyreTemperature")) {
-                JSONArray a = j.getJSONArray("tyreTemperature");
-                int[] v = new int[a.length()];
-                for (int i = 0; i < a.length(); i++) v[i] = a.isNull(i) ? UNAVAILABLE : a.getInt(i);
-                b.tyreTemperature = v;
+            JSONObject motor = json.optJSONObject("motor");
+            if (motor != null) {
+                b.frontMotorSpeed = motor.optInt("frontSpeed", UNAVAILABLE);
+                b.rearMotorSpeed = motor.optInt("rearSpeed", UNAVAILABLE);
+                b.frontMotorTorque = motor.optDouble("frontTorque", NaN);
+                b.engineSpeedRpm = motor.optInt("engineRpm", UNAVAILABLE);
+                b.enginePowerKw = motor.optDouble("enginePowerKw", NaN);
             }
-            if (j.has("tyreSystemState")) b.tyreSystemState = j.optInt("tyreSystemState", UNAVAILABLE);
-            if (j.has("tyreTemperatureState")) b.tyreTemperatureState = j.optInt("tyreTemperatureState", UNAVAILABLE);
-            if (j.has("doorLockStatus")) {
-                JSONArray dl = j.getJSONArray("doorLockStatus");
-                int[] s = new int[dl.length()];
-                for (int i = 0; i < dl.length(); i++) s[i] = dl.getInt(i);
-                b.doorLockStatus = s;
+            JSONObject energy = json.optJSONObject("energy");
+            if (energy != null) {
+                b.energyMode = energy.optInt("mode", UNAVAILABLE);
+                b.operationMode = energy.optInt("operationMode", UNAVAILABLE);
+                b.totalElecCon = energy.optDouble("totalElecCon", NaN);
+                b.totalFuelCon = energy.optDouble("totalFuelCon", NaN);
+                b.avgFuelConPer100Km =
+                        energy.optDouble("avgFuelConPer100Km", NaN);
+                b.avgElecConPer100Km =
+                        energy.optDouble("avgElecConPer100Km", NaN);
+                b.lastElecConPer100Km =
+                        energy.optDouble("lastElecConPer100Km", NaN);
             }
-            if (j.has("windowOpenPercent")) {
-                JSONArray wp = j.getJSONArray("windowOpenPercent");
-                int[] p = new int[wp.length()];
-                for (int i = 0; i < wp.length(); i++) p[i] = wp.getInt(i);
-                b.windowOpenPercent = p;
+            b.gearMode = json.optInt("gearMode", UNAVAILABLE);
+            JSONObject range = json.optJSONObject("range");
+            if (range != null) {
+                b.elecRangeKm = range.optInt("elecKm", UNAVAILABLE);
+                b.fuelRangeKm = range.optInt("fuelKm", UNAVAILABLE);
+                b.fuelPercent = range.optDouble("fuelPercent", NaN);
+                b.bodyworkRangeKm = range.optInt("bodyworkKm", UNAVAILABLE);
             }
-            if (j.has("range")) {
-                JSONObject rng = j.getJSONObject("range");
-                b.elecRangeKm = rng.optInt("elecKm", UNAVAILABLE);
-                b.fuelRangeKm = rng.optInt("fuelKm", UNAVAILABLE);
-                b.bodyworkRangeKm = rng.optInt("bodyworkKm", UNAVAILABLE);
-                b.fuelPercent = rng.optDouble("fuelPercent", -1.0);
+            JSONObject mileage = json.optJSONObject("mileage");
+            if (mileage != null) {
+                b.totalMileageKm = mileage.optInt("totalKm", UNAVAILABLE);
+                b.evMileageKm = mileage.optInt("evKm", UNAVAILABLE);
+                b.hevMileageKm = mileage.optInt("hevKm", UNAVAILABLE);
             }
-            if (j.has("mileage")) {
-                JSONObject mil = j.getJSONObject("mileage");
-                b.totalMileageKm = mil.optInt("totalKm", UNAVAILABLE);
-                b.evMileageKm = mil.optInt("evKm", UNAVAILABLE);
-                b.hevMileageKm = mil.optInt("hevKm", UNAVAILABLE);
+            JSONObject charging = json.optJSONObject("charging");
+            if (charging != null) {
+                b.chargingState = charging.optInt("state", UNAVAILABLE);
+                b.chargingGunState = charging.optInt("gunState", UNAVAILABLE);
+                b.chargerWorkState =
+                        charging.optInt("chargerState", UNAVAILABLE);
+                b.chargingMode = charging.optInt("mode", UNAVAILABLE);
+                b.chargingPowerKw = charging.optDouble("powerRaw", NaN);
+                b.externalChargingPowerKw =
+                        charging.optDouble("externalPowerRaw", NaN);
+                b.chargePowerKw =
+                        charging.optDouble("chargePowerKw", NaN);
+                b.clusterChargePowerKw =
+                        charging.optDouble("clusterChargePowerRaw", NaN);
             }
-        } catch (Exception ignored) {}
-        return b.build();
+            JSONArray pressures = json.optJSONArray("tyrePressure");
+            if (pressures != null) b.tyrePressure = intArray(pressures);
+            JSONArray pressureStates = json.optJSONArray("tyrePressureState");
+            if (pressureStates != null) b.tyrePressureState = intArray(pressureStates);
+            JSONArray leakStates = json.optJSONArray("tyreAirLeakState");
+            if (leakStates != null) b.tyreAirLeakState = intArray(leakStates);
+            JSONArray signalStates = json.optJSONArray("tyreSignalState");
+            if (signalStates != null) b.tyreSignalState = intArray(signalStates);
+            JSONArray temperatures = json.optJSONArray("tyreTemperature");
+            if (temperatures != null) b.tyreTemperature = intArray(temperatures);
+            b.tyreSystemState = json.optInt("tyreSystemState", UNAVAILABLE);
+            b.tyreTemperatureState =
+                    json.optInt("tyreTemperatureState", UNAVAILABLE);
+            JSONArray locks = json.optJSONArray("doorLockStatus");
+            if (locks != null) b.doorLockStatus = intArray(locks);
+            JSONArray windows = json.optJSONArray("windowOpenPercent");
+            if (windows != null) b.windowOpenPercent = intArray(windows);
+            JSONObject lights = json.optJSONObject("lights");
+            if (lights != null) {
+                b.leftTurnState = lights.optInt("leftTurn", UNAVAILABLE);
+                b.rightTurnState = lights.optInt("rightTurn", UNAVAILABLE);
+                b.lowBeam = lights.optBoolean("lowBeam", false);
+                b.highBeam = lights.optBoolean("highBeam", false);
+                b.rearFog = lights.optBoolean("rearFog", false);
+                b.frontFog = lights.optBoolean("frontFog", false);
+                b.hazard = lights.optBoolean("hazard", false);
+                b.dayTimeLight = lights.optBoolean("dayTimeLight", false);
+            }
+            JSONArray seatbelts = json.optJSONArray("seatbeltStatus");
+            if (seatbelts != null) b.seatbeltStatus = intArray(seatbelts);
+            JSONArray heat = json.optJSONArray("seatHeat");
+            if (heat != null) b.seatHeat = intArray(heat);
+            JSONArray cool = json.optJSONArray("seatCool");
+            if (cool != null) b.seatCool = intArray(cool);
+            JSONArray ventilationSupport =
+                    json.optJSONArray("seatVentilationSupport");
+            if (ventilationSupport != null) {
+                b.seatVentilationSupport = intArray(ventilationSupport);
+            }
+            b.steeringWheelHeat =
+                    json.optInt("steeringWheelHeat", UNAVAILABLE);
+            b.seatClimateAtMs = json.optLong("seatClimateAtMs", 0L);
+            if (json.has("ambientColour") && !json.isNull("ambientColour")) {
+                int colour = json.optInt("ambientColour", UNAVAILABLE);
+                if (colour >= 1 && colour <= 31) {
+                    b.ambientColour = colour;
+                    b.ambientColourKnown = true;
+                }
+            }
+            b.ambientEnabled = json.optInt("ambientEnabled", UNAVAILABLE);
+            if (json.has("speedLimitWarning")
+                    && !json.isNull("speedLimitWarning")) {
+                b.speedLimitWarning =
+                        json.optBoolean("speedLimitWarning", false);
+                b.speedLimitWarningKnown = true;
+            }
+            b.childPresenceDetection =
+                    json.optInt("childPresenceDetection", UNAVAILABLE);
+            JSONObject climate = json.optJSONObject("climate");
+            if (climate != null) {
+                b.acStartState = climate.optInt("acOn", UNAVAILABLE);
+                b.acCycleMode = climate.optInt("cycleMode", UNAVAILABLE);
+                b.acWindMode = climate.optInt("windMode", UNAVAILABLE);
+                b.acFanLevel = climate.optInt("fanLevel", UNAVAILABLE);
+                b.tempUnit = climate.optInt("tempUnit", UNAVAILABLE);
+                b.acSetpointDriver =
+                        climate.optInt("setpointDriver", UNAVAILABLE);
+                b.acSetpointPassenger =
+                        climate.optInt("setpointPassenger", UNAVAILABLE);
+            }
+            b.slopeDegrees = json.optDouble("slopeDegrees", NaN);
+            b.powerLevel = json.optInt("powerLevel", UNAVAILABLE);
+            b.mcuStatus = json.optInt("mcuStatus", UNAVAILABLE);
+            b.emergencyAlarmState =
+                    json.optInt("emergencyAlarm", UNAVAILABLE);
+            JSONArray radar = json.optJSONArray("radarDistances");
+            if (radar != null) b.radarDistances = intArray(radar);
+            JSONArray devices = json.optJSONArray("availableDevices");
+            if (devices != null) b.availableDevices = stringArray(devices);
+
+            JSONObject extendedBattery = json.optJSONObject("extendedBattery");
+            if (extendedBattery != null) {
+                b.sohPercent =
+                        extendedBattery.optDouble("sohPercent", NaN);
+                b.keyBatteryLevel =
+                        extendedBattery.optInt("keyBatteryLevel", UNAVAILABLE);
+                b.battery12vLevel =
+                        extendedBattery.optInt("battery12vLevel", UNAVAILABLE);
+            }
+            JSONObject key = json.optJSONObject("key");
+            if (key != null) {
+                b.keyStartState = key.optInt("startState", UNAVAILABLE);
+                b.keyMissingInd = key.optInt("missingInd", UNAVAILABLE);
+                b.keyBtLowPowerMode =
+                        key.optInt("btLowPowerMode", UNAVAILABLE);
+                b.keyPowerLowInd = key.optInt("powerLowInd", UNAVAILABLE);
+                b.keyDetectionReminder =
+                        key.optInt("detectionReminder", UNAVAILABLE);
+                b.smartKeyWarnState =
+                        key.optInt("smartKeyWarnState", UNAVAILABLE);
+            }
+            JSONObject extendedThermal =
+                    json.optJSONObject("extendedThermal");
+            if (extendedThermal != null) {
+                b.insideTempCelsius = extendedThermal.optDouble(
+                        "insideTempCelsius", NaN);
+            }
+            JSONObject extendedCharging =
+                    json.optJSONObject("extendedCharging");
+            if (extendedCharging != null) {
+                b.chargingRestTimeHours =
+                        extendedCharging.optInt("restTimeHours", UNAVAILABLE);
+                b.chargingRestTimeMinutes =
+                        extendedCharging.optInt("restTimeMinutes", UNAVAILABLE);
+                b.chargingPercent =
+                        extendedCharging.optInt("chargingPercent", UNAVAILABLE);
+                b.chargingType =
+                        extendedCharging.optInt("chargingType", UNAVAILABLE);
+                b.vtolCharging =
+                        extendedCharging.optBoolean("vtolCharging", false);
+                b.chargingCapacityKwh = extendedCharging.optDouble(
+                        "chargingCapacityKwh", NaN);
+                b.wirelessChargingLeftState = extendedCharging.optInt(
+                        "wirelessChargingLeftState", UNAVAILABLE);
+                b.wirelessChargingRightState = extendedCharging.optInt(
+                        "wirelessChargingRightState", UNAVAILABLE);
+            }
+            JSONObject extendedDriving =
+                    json.optJSONObject("extendedDriving");
+            if (extendedDriving != null) {
+                b.drivingTimeHours =
+                        extendedDriving.optDouble("drivingTimeHours", NaN);
+                b.last50KmConsumption =
+                        extendedDriving.optDouble("last50KmConsumption", NaN);
+                b.steeringAngleDegrees = extendedDriving.optDouble(
+                        "steeringAngleDegrees", NaN);
+                b.autoSystemState =
+                        extendedDriving.optInt("autoSystemState", UNAVAILABLE);
+            }
+            JSONObject extendedTrip = json.optJSONObject("extendedTrip");
+            if (extendedTrip != null) {
+                b.currentTripMileageKm = extendedTrip.optDouble(
+                        "currentTripMileageKm", NaN);
+                b.currentTripTimeHours = extendedTrip.optDouble(
+                        "currentTripTimeHours", NaN);
+                b.currentTripConsumptionKwh = extendedTrip.optDouble(
+                        "currentTripConsumptionKwh", NaN);
+            }
+            JSONObject extendedEngine = json.optJSONObject("extendedEngine");
+            if (extendedEngine != null) {
+                b.engineCoolantLevel = extendedEngine.optInt(
+                        "engineCoolantLevel", UNAVAILABLE);
+                b.oilLevel = extendedEngine.optInt("oilLevel", UNAVAILABLE);
+                b.engineCode = extendedEngine.optString("engineCode", null);
+            }
+            JSONObject extendedBodywork =
+                    json.optJSONObject("extendedBodywork");
+            if (extendedBodywork != null) {
+                b.wiperState =
+                        extendedBodywork.optInt("wiperState", UNAVAILABLE);
+                b.autoWiperState =
+                        extendedBodywork.optInt("autoWiperState", UNAVAILABLE);
+                b.lightAutoStatus =
+                        extendedBodywork.optInt("lightAutoStatus", UNAVAILABLE);
+                b.sunroofState =
+                        extendedBodywork.optInt("sunroofState", UNAVAILABLE);
+                b.sunroofPosition =
+                        extendedBodywork.optInt("sunroofPosition", UNAVAILABLE);
+                b.sunshadePercent =
+                        extendedBodywork.optInt("sunshadePercent", UNAVAILABLE);
+                b.wirelessChargingStatus = extendedBodywork.optInt(
+                        "wirelessChargingStatus", UNAVAILABLE);
+                if (extendedBodywork.has("driftModeEnabled")
+                        && !extendedBodywork.isNull("driftModeEnabled")) {
+                    b.driftModeEnabled =
+                            extendedBodywork.optBoolean("driftModeEnabled", false);
+                    b.driftModeKnown = true;
+                }
+            }
+            JSONObject extendedSafety =
+                    json.optJSONObject("extendedSafety");
+            if (extendedSafety != null) {
+                JSONArray occupants =
+                        extendedSafety.optJSONArray("passengerDetection");
+                if (occupants != null) b.passengerDetection = intArray(occupants);
+            }
+            JSONObject extendedAir = json.optJSONObject("extendedAir");
+            if (extendedAir != null) {
+                b.pm25Inside =
+                        extendedAir.optInt("pm25Inside", UNAVAILABLE);
+                b.pm25Outside =
+                        extendedAir.optInt("pm25Outside", UNAVAILABLE);
+            }
+            JSONObject meta = json.optJSONObject("_snapshotMeta");
+            if (meta != null) {
+                b.insideTempC = meta.optDouble("insideTempC", b.insideTempC);
+                b.insideTempCelsius =
+                        meta.optDouble("insideTempCelsius", b.insideTempCelsius);
+                b.insideTempReadAt =
+                        meta.optLong("insideTempReadAt", b.insideTempReadAt);
+                b.enginePowerAtMs =
+                        meta.optLong("enginePowerAtMs", b.enginePowerAtMs);
+                b.clusterChargePowerAtMs =
+                        meta.optLong("clusterChargePowerAtMs",
+                                b.clusterChargePowerAtMs);
+                b.chargingStateAtMs =
+                        meta.optLong("chargingStateAtMs", b.chargingStateAtMs);
+                b.chargingPowerKw =
+                        meta.optDouble("chargingPowerKw", b.chargingPowerKw);
+                b.chargingPowerAtMs =
+                        meta.optLong("chargingPowerAtMs", b.chargingPowerAtMs);
+                b.chargingPowerChangedAtMs =
+                        meta.optLong("chargingPowerChangedAtMs",
+                                b.chargingPowerChangedAtMs);
+                b.externalChargingPowerKw =
+                        meta.optDouble("externalChargingPowerKw",
+                                b.externalChargingPowerKw);
+                b.externalChargingPowerAtMs =
+                        meta.optLong("externalChargingPowerAtMs",
+                                b.externalChargingPowerAtMs);
+                b.externalChargingPowerChangedAtMs =
+                        meta.optLong("externalChargingPowerChangedAtMs",
+                                b.externalChargingPowerChangedAtMs);
+                b.chargePowerKw =
+                        meta.optDouble("chargePowerKw", b.chargePowerKw);
+                b.chargePowerAtMs =
+                        meta.optLong("chargePowerAtMs", b.chargePowerAtMs);
+                b.chargePowerChangedAtMs =
+                        meta.optLong("chargePowerChangedAtMs",
+                                b.chargePowerChangedAtMs);
+                b.clusterChargePowerKw =
+                        meta.optDouble("clusterChargePowerKw",
+                                b.clusterChargePowerKw);
+                b.clusterChargePowerChangedAtMs =
+                        meta.optLong("clusterChargePowerChangedAtMs",
+                                b.clusterChargePowerChangedAtMs);
+                b.chargingPowerLastObservedKw =
+                        meta.optDouble("chargingPowerLastObservedKw",
+                                b.chargingPowerLastObservedKw);
+                b.externalChargingPowerLastObservedKw =
+                        meta.optDouble("externalChargingPowerLastObservedKw",
+                                b.externalChargingPowerLastObservedKw);
+                b.chargePowerLastObservedKw =
+                        meta.optDouble("chargePowerLastObservedKw",
+                                b.chargePowerLastObservedKw);
+                b.clusterChargePowerLastObservedKw =
+                        meta.optDouble("clusterChargePowerLastObservedKw",
+                                b.clusterChargePowerLastObservedKw);
+                b.lightKnownMask = meta.optInt(
+                        "lightKnownMask", b.lightKnownMask);
+                JSONArray unavailable = meta.optJSONArray("unavailableDevices");
+                if (unavailable != null) {
+                    b.unavailableDevices = stringArray(unavailable);
+                }
+            }
+            return new BydVehicleData(b);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static int[] intArray(JSONArray values) throws org.json.JSONException {
+        int[] result = new int[values.length()];
+        for (int i = 0; i < result.length; i++) {
+            result[i] = values.isNull(i) ? UNAVAILABLE : values.getInt(i);
+        }
+        return result;
+    }
+
+    private static String[] stringArray(JSONArray values)
+            throws org.json.JSONException {
+        String[] result = new String[values.length()];
+        for (int i = 0; i < result.length; i++) {
+            result[i] = values.getString(i);
+        }
+        return result;
     }
 
     /** Create a new builder pre-filled with this snapshot's values */
@@ -937,6 +1427,8 @@ public class BydVehicleData {
         b.clusterChargePowerChangedAtMs = clusterChargePowerChangedAtMs;
         b.clusterChargePowerLastObservedKw = clusterChargePowerLastObservedKw;
         b.hvPackVoltage = hvPackVoltage;
+        b.hvPackCurrentAmps = hvPackCurrentAmps;
+        b.hvBatteryPowerKw = hvBatteryPowerKw;
         b.gearMode = gearMode; b.tyrePressure = tyrePressure;
         b.tyrePressureState = tyrePressureState; b.tyreAirLeakState = tyreAirLeakState;
         b.tyreSignalState = tyreSignalState; b.tyreTemperature = tyreTemperature;
@@ -946,13 +1438,17 @@ public class BydVehicleData {
         b.windowOpenPercent = windowOpenPercent; b.leftTurnState = leftTurnState;
         b.rightTurnState = rightTurnState; b.lowBeam = lowBeam; b.highBeam = highBeam;
         b.rearFog = rearFog; b.frontFog = frontFog; b.hazard = hazard;
-        b.dayTimeLight = dayTimeLight; b.seatbeltStatus = seatbeltStatus;
+        b.dayTimeLight = dayTimeLight; b.lightKnownMask = lightKnownMask;
+        b.seatbeltStatus = seatbeltStatus;
         b.ambientColour = ambientColour;
+        b.ambientColourKnown = ambientColourKnown;
         b.ambientEnabled = ambientEnabled;
         b.seatHeat = seatHeat; b.seatCool = seatCool;
+        b.seatVentilationSupport = seatVentilationSupport;
         b.steeringWheelHeat = steeringWheelHeat;
         b.seatClimateAtMs = seatClimateAtMs;
         b.speedLimitWarning = speedLimitWarning;
+        b.speedLimitWarningKnown = speedLimitWarningKnown;
         b.childPresenceDetection = childPresenceDetection;
         b.acStartState = acStartState; b.acCycleMode = acCycleMode; b.acWindMode = acWindMode; b.acFanLevel = acFanLevel;
         b.tempUnit = tempUnit; b.slopeDegrees = slopeDegrees; b.powerLevel = powerLevel;
@@ -985,6 +1481,7 @@ public class BydVehicleData {
         b.sunroofState = sunroofState; b.sunroofPosition = sunroofPosition;
         b.sunshadePercent = sunshadePercent; b.wirelessChargingStatus = wirelessChargingStatus;
         b.driftModeEnabled = driftModeEnabled;
+        b.driftModeKnown = driftModeKnown;
         b.passengerDetection = passengerDetection;
         b.pm25Inside = pm25Inside; b.pm25Outside = pm25Outside;
         return b;
@@ -1015,7 +1512,8 @@ public class BydVehicleData {
         int chargingState = UNAVAILABLE, chargingGunState = UNAVAILABLE, chargerWorkState = UNAVAILABLE;
         long chargingStateAtMs = 0L;
         int chargingMode = UNAVAILABLE;
-        double chargingPowerKw = NaN, externalChargingPowerKw = NaN, chargePowerKw = NaN, hvPackVoltage = NaN;
+        double chargingPowerKw = NaN, externalChargingPowerKw = NaN, chargePowerKw = NaN;
+        double hvPackVoltage = NaN, hvPackCurrentAmps = NaN, hvBatteryPowerKw = NaN;
         long chargingPowerAtMs = 0L, externalChargingPowerAtMs = 0L, chargePowerAtMs = 0L;
         long chargingPowerChangedAtMs = 0L, externalChargingPowerChangedAtMs = 0L;
         long chargePowerChangedAtMs = 0L, clusterChargePowerChangedAtMs = 0L;
@@ -1026,17 +1524,20 @@ public class BydVehicleData {
         double clusterChargePowerKw = NaN;
         int gearMode = UNAVAILABLE;
         int[] tyrePressure, doorLockStatus, windowOpenPercent, seatbeltStatus, radarDistances;
-        int[] seatHeat, seatCool;
+        int[] seatHeat, seatCool, seatVentilationSupport;
         int steeringWheelHeat = UNAVAILABLE;
         long seatClimateAtMs = 0L;
         int[] tyrePressureState, tyreAirLeakState, tyreSignalState, tyreTemperature;
         int tyreSystemState = UNAVAILABLE, tyreTemperatureState = UNAVAILABLE;
         int leftTurnState = UNAVAILABLE, rightTurnState = UNAVAILABLE;
         boolean lowBeam, highBeam, rearFog, frontFog, hazard, dayTimeLight;
+        int lightKnownMask = LIGHT_KNOWN_ALL;
         int ambientColour = 1;
+        boolean ambientColourKnown;
         int ambientEnabled = UNAVAILABLE;
         boolean speedLimitWarning;
-        int childPresenceDetection;
+        boolean speedLimitWarningKnown;
+        int childPresenceDetection = UNAVAILABLE;
         int acStartState = UNAVAILABLE, acCycleMode = UNAVAILABLE, acWindMode = UNAVAILABLE, acFanLevel = UNAVAILABLE, tempUnit = UNAVAILABLE;
         int acSetpointDriver = UNAVAILABLE, acSetpointPassenger = UNAVAILABLE;
         double slopeDegrees = NaN;
@@ -1082,6 +1583,7 @@ public class BydVehicleData {
         int sunshadePercent = UNAVAILABLE;
         int wirelessChargingStatus = UNAVAILABLE;
         boolean driftModeEnabled;
+        boolean driftModeKnown;
         int[] passengerDetection;
         int pm25Inside = UNAVAILABLE;
         int pm25Outside = UNAVAILABLE;
@@ -1267,6 +1769,8 @@ public class BydVehicleData {
             return this;
         }
         public Builder hvPackVoltage(double v) { hvPackVoltage = v; return this; }
+        public Builder hvPackCurrentAmps(double v) { hvPackCurrentAmps = v; return this; }
+        public Builder hvBatteryPowerKw(double v) { hvBatteryPowerKw = v; return this; }
         public Builder gearMode(int v) { gearMode = v; return this; }
         public Builder tyrePressure(int[] v) { tyrePressure = v; return this; }
         public Builder tyrePressureState(int[] v) { tyrePressureState = v; return this; }
@@ -1285,13 +1789,41 @@ public class BydVehicleData {
         public Builder frontFog(boolean v) { frontFog = v; return this; }
         public Builder hazard(boolean v) { hazard = v; return this; }
         public Builder dayTimeLight(boolean v) { dayTimeLight = v; return this; }
-        public Builder ambientColour(int v) { ambientColour = v; return this; }
+        public Builder lightKnownMask(int v) {
+            lightKnownMask = v & LIGHT_KNOWN_ALL;
+            return this;
+        }
+        Builder markLightKnown(int v) {
+            lightKnownMask |= v & LIGHT_KNOWN_ALL;
+            return this;
+        }
+        public Builder ambientColour(int v) {
+            ambientColour = v;
+            ambientColourKnown = true;
+            return this;
+        }
+        public Builder ambientColourKnown(boolean v) {
+            ambientColourKnown = v;
+            return this;
+        }
         public Builder ambientEnabled(int v) { ambientEnabled = v; return this; }
-        public Builder speedLimitWarning(boolean v) { speedLimitWarning = v; return this; }
+        public Builder speedLimitWarning(boolean v) {
+            speedLimitWarning = v;
+            speedLimitWarningKnown = true;
+            return this;
+        }
+        public Builder speedLimitWarningKnown(boolean v) {
+            speedLimitWarningKnown = v;
+            return this;
+        }
         public Builder childPresenceDetection(int v) { childPresenceDetection = v; return this; }
         public Builder seatbeltStatus(int[] v) { seatbeltStatus = v; return this; }
         public Builder seatHeat(int[] v) { seatHeat = v; return this; }
         public Builder seatCool(int[] v) { seatCool = v; return this; }
+        public Builder seatVentilationSupport(int[] v) {
+            seatVentilationSupport = v;
+            return this;
+        }
         public Builder steeringWheelHeat(int v) { steeringWheelHeat = v; return this; }
         public Builder seatClimateAtMs(long v) { seatClimateAtMs = v; return this; }
         public Builder acStartState(int v) { acStartState = v; return this; }
@@ -1345,7 +1877,15 @@ public class BydVehicleData {
         public Builder sunroofPosition(int v) { sunroofPosition = v; return this; }
         public Builder sunshadePercent(int v) { sunshadePercent = v; return this; }
         public Builder wirelessChargingStatus(int v) { wirelessChargingStatus = v; return this; }
-        public Builder driftModeEnabled(boolean v) { driftModeEnabled = v; return this; }
+        public Builder driftModeEnabled(boolean v) {
+            driftModeEnabled = v;
+            driftModeKnown = true;
+            return this;
+        }
+        public Builder driftModeKnown(boolean v) {
+            driftModeKnown = v;
+            return this;
+        }
         public Builder passengerDetection(int[] v) { passengerDetection = v; return this; }
         public Builder pm25Inside(int v) { pm25Inside = v; return this; }
         public Builder pm25Outside(int v) { pm25Outside = v; return this; }
@@ -1377,6 +1917,10 @@ public class BydVehicleData {
 
         public BydVehicleData build() {
             timestamp = System.currentTimeMillis();
+            return new BydVehicleData(this);
+        }
+
+        BydVehicleData buildPreservingTimestamp() {
             return new BydVehicleData(this);
         }
     }

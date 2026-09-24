@@ -58,6 +58,7 @@ public final class GenAiConfig {
     public final String insightMode;
     public final boolean insightDashboard;
     public final boolean insightNotifications;
+    public final boolean routineLearningEnabled;
 
     GenAiConfig(boolean enabled, String provider, String baseUrl, String model,
                 String realtimeModel, String apiKey, int maxOutputTokens) {
@@ -65,7 +66,7 @@ public final class GenAiConfig {
                 maxOutputTokens, INSIGHT_SCHEDULE_OFF,
                 DEFAULT_INSIGHT_HOUR, DEFAULT_INSIGHT_MINUTE,
                 DEFAULT_INSIGHT_DAY,
-                DEFAULT_INSIGHT_MODE, false, false);
+                DEFAULT_INSIGHT_MODE, false, false, false);
     }
 
     GenAiConfig(boolean enabled, String provider, String baseUrl, String model,
@@ -73,6 +74,18 @@ public final class GenAiConfig {
                 String insightSchedule, int insightHour, int insightMinute,
                 int insightDay, String insightMode,
                 boolean insightDashboard, boolean insightNotifications) {
+        this(enabled, provider, baseUrl, model, realtimeModel, apiKey,
+                maxOutputTokens, insightSchedule, insightHour, insightMinute,
+                insightDay, insightMode, insightDashboard,
+                insightNotifications, false);
+    }
+
+    GenAiConfig(boolean enabled, String provider, String baseUrl, String model,
+                String realtimeModel, String apiKey, int maxOutputTokens,
+                String insightSchedule, int insightHour, int insightMinute,
+                int insightDay, String insightMode,
+                boolean insightDashboard, boolean insightNotifications,
+                boolean routineLearningEnabled) {
         this.enabled = enabled;
         this.provider = normalizeProvider(provider);
         this.baseUrl = normalizeBaseUrlOrDefault(baseUrl, this.provider);
@@ -87,6 +100,7 @@ public final class GenAiConfig {
         this.insightMode = normalizeInsightMode(insightMode);
         this.insightDashboard = insightDashboard;
         this.insightNotifications = insightNotifications;
+        this.routineLearningEnabled = routineLearningEnabled;
     }
 
     /** Load and decrypt the current configuration. */
@@ -121,7 +135,8 @@ public final class GenAiConfig {
                 section.optInt("insightDay", DEFAULT_INSIGHT_DAY),
                 section.optString("insightMode", DEFAULT_INSIGHT_MODE),
                 section.optBoolean("insightDashboard", false),
-                section.optBoolean("insightNotifications", false)
+                section.optBoolean("insightNotifications", false),
+                section.optBoolean("routineLearningEnabled", false)
         );
     }
 
@@ -208,6 +223,12 @@ public final class GenAiConfig {
                                     "insightNotifications", false)
                             : existing.optBoolean(
                                     "insightNotifications", false);
+            boolean routineLearningEnabled =
+                    input.has("routineLearningEnabled")
+                            ? input.optBoolean(
+                                    "routineLearningEnabled", false)
+                            : existing.optBoolean(
+                                    "routineLearningEnabled", false);
             boolean enabled = input.has("enabled")
                     ? input.optBoolean("enabled", false)
                     : existing.optBoolean("enabled", false);
@@ -242,7 +263,8 @@ public final class GenAiConfig {
                     enabled, provider, baseUrl, model, realtimeModel,
                     plainKey, maxOutputTokens, insightSchedule,
                     insightHour, insightMinute, insightDay, insightMode,
-                    insightDashboard, insightNotifications);
+                    insightDashboard, insightNotifications,
+                    routineLearningEnabled);
             String validationError = candidate.validationError();
             if (validationError != null) return SaveResult.error(validationError);
 
@@ -264,6 +286,9 @@ public final class GenAiConfig {
             section.put(
                     "insightNotifications",
                     candidate.insightNotifications);
+            section.put(
+                    "routineLearningEnabled",
+                    candidate.routineLearningEnabled);
 
             if (!UnifiedConfigManager.updateSection(SECTION, section)) {
                 return SaveResult.error("Could not save GenAI settings.");
@@ -314,6 +339,7 @@ public final class GenAiConfig {
             json.put("insightMode", insightMode);
             json.put("insightDashboard", insightDashboard);
             json.put("insightNotifications", insightNotifications);
+            json.put("routineLearningEnabled", routineLearningEnabled);
             json.put("insightScheduleActive",
                     enabled && !INSIGHT_SCHEDULE_OFF.equals(
                             insightSchedule));

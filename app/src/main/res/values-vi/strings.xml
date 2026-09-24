@@ -118,8 +118,6 @@
     <string name="camera_dilink4_tweaks_subtitle">Điều chỉnh theo từng xe cho đường DiLink 4. Chỉ có hiệu lực khi chọn chế độ DiLink 4 ở trên.</string>
     <string name="camera_dilink4_save">Áp dụng</string>
     <string name="camera_dilink4_hint">Chỉ bật các tùy chọn này nếu HAL vẽ một lớp \"calibration failed\" màu đỏ lên khung hình. Khởi động lại daemon để áp dụng thay đổi.</string>
-    <string name="camera_dilink4_passive_apa_label">Dùng cổng APA thụ động 0</string>
-    <string name="camera_dilink4_passive_apa_subtitle">Giữ nguyên đầu ra toàn cảnh OEM và ghi cổng xem trước 0 như được cung cấp. Dùng khi việc điều khiển toàn cảnh cưỡng bức mở màn hình hiệu chỉnh đỏ. Một số mẫu xe chỉ có hai chế độ xem thay vì bốn.</string>
     <string name="camera_dilink4_red_mask_label">Chặn lớp phủ hiệu chỉnh màu đỏ (GL)</string>
     <string name="camera_dilink4_red_mask_subtitle">Thêm một lượt fragment-shader phát hiện các điểm ảnh \"calibration failed\" màu đỏ tươi của HAL và thay thế bằng mẫu lân cận (hoặc màu xám độ sáng khi biểu ngữ quá lớn để vá). Chỉ mang tính thẩm mỹ — không ảnh hưởng đến trạng thái hiệu chỉnh bên dưới.</string>
     <!-- dialog_camera_selection -->
@@ -186,9 +184,6 @@
     <string name="setup_autostart_title">Tắt hạn chế tự khởi động</string>
     <string name="setup_autostart_body">Nhấn bên dưới để mở BYD Auto-Start. Tìm OverDrive trong danh sách và bỏ chọn ô. BYD xóa cài đặt này ở mỗi lần cài đặt — bạn sẽ phải làm lại sau khi cập nhật.</string>
     <string name="setup_autostart_button">Mở BYD Auto-Start</string>
-    <string name="setup_autostart_enabling">Đang bật tự khởi động…</string>
-    <string name="setup_autostart_enabled">Đã bật tự khởi động ✓</string>
-    <string name="setup_autostart_failed">Không thể tự động bật tự khởi động — đang mở BYD Auto-Start để bạn tự làm.</string>
     <string name="setup_overlay_title">Cho phép hiển thị trên các ứng dụng khác</string>
     <string name="setup_overlay_body">Bật tùy chọn này để hiển thị một chỉ báo trạng thái nổi cho ghi hình và theo dõi chuyến đi trên các ứng dụng khác.</string>
     <string name="setup_overlay_button">Mở cài đặt quyền hiển thị</string>
@@ -309,7 +304,6 @@
     <string name="recording_lib_type_oem">OEM</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
     <string name="toast_share_recordings">Đang chia sẻ %1$d bản ghi</string>
-    <string name="toast_share_failed">Chia sẻ thất bại</string>
     <!-- fragment_sentry_config -->
     <!-- fragment_video_player -->
     <string name="player_title_recording">Bản ghi</string>
@@ -439,7 +433,6 @@
     <string name="toast_select_at_least_one_category">Chọn ít nhất một danh mục</string>
     <string name="toast_reset_failed_with_error">Đặt lại không thành công: %1$s</string>
     <string name="toast_traffic_monitor_changing">%1$s giám sát giao thông…</string>
-    <string name="toast_traffic_monitor_persist_failed">Đã áp dụng, nhưng không thể lưu tùy chọn — nó sẽ không tồn tại sau khi cập nhật firmware.</string>
     <string name="dialog_close">Đóng</string>
     <string name="dialog_reset">Đặt lại</string>
     <string name="dialog_delete">Xoá</string>
@@ -604,7 +597,6 @@
     <string name="nav_page_abrp">ABRP</string>
     <string name="nav_page_mqtt">MQTT</string>
     <string name="nav_page_byd_cloud">BYD Cloud</string>
-    <string name="nav_page_assistant">Trợ lý</string>
     <!-- StatusOverlayService persistent notification (foreground service) -->
     <string name="status_overlay_notif_title">Trạng thái OverDrive</string>
     <string name="status_overlay_notif_text">Lớp phủ trạng thái đang hoạt động</string>
@@ -622,12 +614,12 @@
     <!-- ============================================================== -->
     <!-- Top-level destinations (navigation rail labels) -->
     <string name="rail_dashboard">Bảng điều khiển</string>
-    <string name="rail_assistant">Trợ lý</string>
     <string name="rail_live">Trực tiếp</string>
     <string name="rail_recordings">Bản ghi</string>
     <string name="rail_vehicle">Xe</string>
     <string name="rail_projection">Chiếu hình</string>
     <string name="rail_trips">Chuyến đi</string>
+    <string name="rail_parking">Đỗ xe</string>
     <string name="rail_integrations">Tích hợp</string>
     <string name="rail_diagnostics">Chẩn đoán</string>
     <string name="rail_settings">Cài đặt</string>
@@ -658,23 +650,6 @@
     <string name="settings_about_title">Về OverDrive</string>
     <string name="settings_about_version_label">Phiên bản</string>
     <string name="settings_about_package_label">Bản dựng</string>
-    <string name="settings_about_vehicle_title">Xe &amp; màn hình</string>
-    <string name="settings_about_vehicle_subtitle">Thông tin phiên bản do màn hình BYD này cung cấp.</string>
-    <string name="settings_about_vehicle_firmware_label">Firmware</string>
-    <string name="settings_about_vehicle_dsp_label">DSP</string>
-    <string name="settings_about_vehicle_mcu_label">MCU</string>
-    <string name="settings_about_vehicle_android_label">Android</string>
-    <string name="settings_about_vehicle_security_patch_label">Bản vá bảo mật Android</string>
-    <string name="settings_about_vehicle_head_unit_label">Màn hình</string>
-    <string name="settings_about_vehicle_vin_label">VIN</string>
-    <string name="settings_about_vehicle_vin_hint">Mã định danh nhạy cảm; ẩn theo mặc định.</string>
-    <string name="settings_about_vehicle_vin_show">Hiện</string>
-    <string name="settings_about_vehicle_vin_hide">Ẩn</string>
-    <string name="settings_about_vehicle_vin_show_a11y">Hiện VIN</string>
-    <string name="settings_about_vehicle_vin_hide_a11y">Ẩn VIN</string>
-    <string name="settings_about_vehicle_vin_hidden_a11y">VIN đã ẩn</string>
-    <string name="settings_about_vehicle_loading">Đang tải…</string>
-    <string name="settings_about_vehicle_unavailable">Không khả dụng</string>
     <string name="settings_about_check_update_value">Kiểm tra bản phát hành GitHub mới nhất và cài đặt nếu mới hơn.</string>
     <!-- Support-development section: tiered options, low-cost first.
          star → spread → coffee, in that visual order. Copy aims for
@@ -707,7 +682,6 @@
     <string name="settings_language_label">Ngôn ngữ</string>
     <!-- Recordings page (header + segmented control + page actions) -->
     <string name="recordings_title">Bản ghi</string>
-    <string name="recordings_segment_all">Tất cả</string>
     <string name="recordings_segment_dashcam">Dashcam</string>
     <string name="recordings_segment_surveillance">Giám sát</string>
     <string name="recordings_action_settings">Cài đặt</string>
@@ -716,34 +690,11 @@
     <!-- Per-segment label with running count, e.g. "Dashcam · 118". -->
     <string name="recordings_segment_dashcam_count">Dashcam · %d</string>
     <string name="recordings_segment_surveillance_count">Giám sát · %d</string>
-    <string name="recordings_segment_all_count">Tất cả · %d</string>
     <!-- Layout-time placeholder for the counts subtitle before the scan completes. -->
     <string name="recordings_summary_pending">—</string>
     <!-- Landscape recordings preview placeholder (right pane). -->
     <string name="recordings_preview_placeholder_title">Chọn một bản ghi</string>
     <string name="recordings_preview_placeholder_body">Nhấn bất kỳ mục nào ở bên trái để chơi nó.</string>
-    <string name="recording_preview_detected">Đã phát hiện</string>
-    <string name="recording_preview_no_detection">Không phát hiện</string>
-    <string name="recording_preview_not_available">—</string>
-    <string name="recording_preview_distance">Khoảng cách</string>
-    <string name="recording_preview_recorded">Đã ghi</string>
-    <string name="recording_preview_duration">Thời lượng</string>
-    <string name="recording_preview_storage">Bộ nhớ</string>
-    <string name="recording_preview_file_size">Kích thước tệp</string>
-    <string name="recording_preview_storage_internal">Bộ nhớ trong</string>
-    <string name="recording_preview_storage_sd">Thẻ SD</string>
-    <string name="recording_preview_storage_usb">USB</string>
-    <string name="recording_preview_storage_unknown">Không rõ</string>
-    <string name="recording_headline_activity">Phát hiện hoạt động</string>
-    <string name="recording_headline_motion">Phát hiện chuyển động</string>
-    <string name="recording_headline_dashcam">Bản ghi hành trình</string>
-    <string name="recording_headline_forward_camera">Bản ghi camera trước</string>
-    <string name="recording_headline_replay">Phát lại tức thì</string>
-    <string name="recording_distance_very_close">Rất gần</string>
-    <string name="recording_distance_close">Gần</string>
-    <string name="recording_distance_mid">Tầm trung</string>
-    <string name="recording_distance_far">Xa</string>
-    <string name="cd_recording_more_actions">Thêm thao tác bản ghi</string>
     <!-- Diagnostics page -->
     <string name="diagnostics_section_adb_console">Bảng điều khiển ADB</string>
     <string name="diagnostics_section_traffic">Kiểm tra giao thông</string>
@@ -807,7 +758,6 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Đang canh chừng</string>
-    <string name="dashboard_modern_vehicle_status">Trạng thái xe</string>
     <string name="dashboard_subtitle_all_systems">Tất cả hệ thống trực tuyến</string>
     <string name="dashboard_subtitle_some_offline">%1$d trên %2$d dịch vụ trực tuyến</string>
     <string name="dashboard_subtitle_no_tunnel">Truy cập từ xa offline</string>
@@ -827,18 +777,14 @@
     <string name="vehicle_dialog_title">Đặt dung lượng pin</string>
     <string name="vehicle_dialog_capacity_label">Dung lượng</string>
     <string name="vehicle_dialog_capacity_suffix">kWh</string>
-    <string name="vehicle_dialog_capacity_helper">15 đến 120 kWh. Để trống để dùng mặc định theo mẫu xe.</string>
+    <string name="vehicle_dialog_capacity_helper">5 đến 120 kWh. Để trống để dùng mặc định theo mẫu xe.</string>
     <string name="vehicle_dialog_model_label">Mô hình</string>
     <string name="vehicle_dialog_save">Lưu</string>
     <string name="vehicle_dialog_reset">Đặt lại để tự phát hiện</string>
-    <string name="vehicle_dialog_detection">Phát hiện: %1$s</string>
-    <string name="vehicle_dialog_detection_auto">Tự động</string>
-    <string name="vehicle_dialog_detection_manual">Thủ công</string>
-    <string name="vehicle_dialog_invalid_capacity">Dung lượng phải từ 15 - 120 kWh</string>
+    <string name="vehicle_dialog_invalid_capacity">Dung lượng phải từ 5 - 120 kWh</string>
     <string name="vehicle_dialog_summary_effective">Hiệu dụng: %1$.1f kWh</string>
     <string name="vehicle_dialog_summary_calibration">Hiệu chỉnh lần cuối: %1$.1f%% vào %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">không có sẵn</string>
-    <string name="vehicle_dialog_value_pending">—</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
     <string name="dashboard_metric_storage_chip">đã dùng %1$s · còn %2$s</string>
     <string name="dashboard_metric_storage_chip_pending">Bộ nhớ —</string>
@@ -1205,19 +1151,6 @@
     <!-- Place-action sheet (long-press the map or a search result to save/navigate) -->
     <string name="roadsense_map_dropped_pin">Ghim đã thả</string>
     <string name="roadsense_map_navigate_here">Điều hướng đến đây</string>
-    <string name="carnav_section_header">Gửi tới dẫn đường trên xe</string>
-    <string name="carnav_navigate">Dẫn đường</string>
-    <string name="carnav_menu_navigate_here">Dẫn đường đến đây (thay tuyến)</string>
-    <string name="carnav_menu_add_stop">Thêm làm điểm dừng</string>
-    <string name="carnav_deferred_prompt_title">Đã đề nghị dẫn đường</string>
-    <string name="carnav_deferred_yes">Chấp nhận</string>
-    <string name="carnav_deferred_cancel">Từ chối</string>
-    <string name="carnav_save_favourite">Lưu vào Yêu thích</string>
-    <string name="carnav_sending">Đang gửi tới dẫn đường trên xe…</string>
-    <string name="carnav_navigate_ok">Đã bắt đầu dẫn đường</string>
-    <string name="carnav_navigate_fail">Dẫn đường trên xe đã từ chối yêu cầu</string>
-    <string name="carnav_saved_ok">Đã lưu vào yêu thích</string>
-    <string name="carnav_failed">Không thể kết nối dẫn đường trên xe: %1$s</string>
     <!-- Shown after tapping an unset Home/Work chip: search picks the place to save. -->
     <string name="roadsense_map_search_to_save">Tìm kiếm một địa điểm để đặt làm %1$s</string>
     <!-- Shown when re-entering the map with a previously-set trip restored. -->
@@ -1281,7 +1214,7 @@
     <string name="settings_backup_restore_confirm_title">Khôi phục cài đặt?</string>
     <string name="settings_backup_exporting">Đang tạo bản sao lưu…</string>
     <string name="settings_backup_export_failed">Xuất bản sao lưu thất bại</string>
-    <string name="onboarding_vehicle_body">Chọn model của bạn và chúng tôi sẽ điền kWh, hoặc tự nhập (15–120). Điều này giúp ước tính quãng đường và sạc chính xác. Bạn có thể bỏ qua và đặt sau.</string>
+    <string name="onboarding_vehicle_body">Chọn model của bạn và chúng tôi sẽ điền kWh, hoặc tự nhập (5–120). Điều này giúp ước tính quãng đường và sạc chính xác. Bạn có thể bỏ qua và đặt sau.</string>
     <string name="onboarding_expert_vehicle_title">Hồ sơ xe</string>
     <string name="onboarding_done_primary">Xong</string>
     <string name="settings_backup_export_title">Xuất cài đặt</string>
@@ -1427,23 +1360,15 @@
     <string name="recording_lib_index_down_title">Không có chỉ mục bản ghi</string>
     <string name="recording_lib_index_down_body">Các bản ghi của bạn vẫn an toàn trên đĩa, nhưng chỉ mục thư viện đang gặp sự cố. Đang tự động thử lại…</string>
     <string name="recording_lib_type_replay">PHÁT LẠI</string>
-    <string name="daemons_wifi_auto_enable_title">Tự động bật Wi&#8209;Fi</string>
-    <string name="daemons_wifi_auto_enable_subtitle">OverDrive khôi phục Wi&#8209;Fi khi đỗ xe và khi các dịch vụ nền khởi động. Tắt tùy chọn này để trạng thái Wi&#8209;Fi hiện tại do xe kiểm soát.</string>
-    <string name="daemons_wifi_auto_enable_save_failed">Không thể lưu cài đặt tự động bật Wi&#8209;Fi.</string>
+    <string name="daemons_wifi_auto_enable_title">Wi&#8209;Fi</string>
+    <string name="daemons_wifi_auto_enable_subtitle">Bật hoặc tắt Wi&#8209;Fi ngay. Khi tắt, các daemon giám sát của OverDrive sẽ không tự bật lại.</string>
+    <string name="daemons_wifi_auto_enable_save_failed">Không thể thay đổi trạng thái Wi&#8209;Fi.</string>
     <string name="dashboard_tunnel_failed">Lỗi đường hầm</string>
     <string name="dashboard_tunnel_stopping">Đang dừng đường hầm…</string>
     <string name="dialog_tailscale_adb_enable_title">Cho phép ADB từ xa?</string>
     <string name="dialog_tailscale_adb_enable_message">Thao tác này mở rộng phạm vi tailnet cho ADB (cổng 5555) để bạn có thể gỡ lỗi màn hình này từ xa.\n\nTrước khi bật:\n• ADB cấp TOÀN QUYỀN truy cập shell — một thiết bị tailnet có khóa được ủy quyền có thể đọc dữ liệu, cài ứng dụng và thay đổi cài đặt hệ thống\n• Thao tác này thêm tailnet của bạn làm một tuyến; nó không phơi ADB ra internet công cộng\n• ADB vốn đã chấp nhận kết nối từ mạng nội bộ, nên tắt tùy chọn này không đóng hoàn toàn ADB\n• Máy tính kết nối vẫn cần một khóa ADB được ủy quyền\n• Bật điểm phát Wi-Fi sẽ ngắt kết nối Wi-Fi, nên khi đó truy cập từ xa phụ thuộc vào dữ liệu di động\n\nChỉ bật trên tailnet mà bạn kiểm soát. Bạn có thể tắt bất cứ lúc nào.</string>
     <string name="rail_expand">Hiện nhãn điều hướng</string>
     <string name="rail_collapse">Ẩn nhãn điều hướng</string>
-    <string name="rail_collapse_label">Thu gọn</string>
-
-    <!-- Rail category headers -->
-    <string name="rail_section_cameras">Camera</string>
-    <string name="rail_section_controls">Điều khiển</string>
-    <string name="rail_section_driving">Lái xe</string>
-    <string name="rail_section_automation">Tự động hóa</string>
-    <string name="rail_section_system">Hệ thống</string>
     <string name="settings_overlay_replay_title">Chỉ báo phát lại tức thì</string>
     <string name="settings_overlay_replay_subtitle">Hiển thị huy hiệu CLIP: xanh lá khi đang ghi bản phát lại, xanh dương trong 5 giây sau khi lưu, đỏ khi lỗi. Chỉ xuất hiện khi có liên kết hoặc tự động hóa phát lại.</string>
     <string name="settings_overlay_roadsense_title">Lớp phủ RoadSense</string>
@@ -1456,12 +1381,6 @@
     <string name="settings_remote_communication_title">Liên lạc từ xa</string>
     <string name="settings_remote_communication_subtitle">Bật khả năng truyền giọng nói, nghe khoang lái và gửi tin nhắn từ bảng điều khiển web. Nếu mục Quyền hiển thị trên ứng dụng khác báo Cần cấp quyền, hãy nhấn vào đó và cấp quyền trong cài đặt hệ thống.</string>
     <string name="settings_remote_voice_title">Bật giọng nói từ xa</string>
-    <string name="settings_remote_listener_title">Bật nghe khoang lái</string>
-    <string name="settings_remote_listener_subtitle">Cho phép các phiên Xem trực tiếp và Liên lạc đã xác thực nghe micrô khoang lái khi xe đang bật.</string>
-    <string name="settings_remote_audio_channel_title">Tương thích giọng nói</string>
-    <string name="settings_remote_audio_channel_subtitle">Media giữ nguyên đường loa và micrô hiện có. Navigation khớp với định tuyến Di+ và thu micrô 8 kHz.</string>
-    <string name="settings_remote_audio_channel_media">Media</string>
-    <string name="settings_remote_audio_channel_navigation">Dẫn đường</string>
     <string name="settings_remote_output_override_title">Dùng mức âm lượng giọng nói tùy chỉnh</string>
     <string name="settings_remote_output_override_subtitle">Tắt sẽ theo âm lượng xe của kênh âm thanh đã chọn.</string>
     <string name="settings_remote_output_level">Mức giọng nói tùy chỉnh</string>
@@ -1480,9 +1399,6 @@
     <string name="settings_remote_emergency_title">Tắt khẩn cấp</string>
     <string name="settings_remote_emergency_subtitle">Ngay lập tức dừng và chặn giọng nói từ xa, nghe khoang lái và tin nhắn.</string>
     <string name="settings_remote_save_failed">Không thể lưu cài đặt liên lạc từ xa</string>
-    <string name="cabin_audio_notification_channel">Nghe khoang lái</string>
-    <string name="cabin_audio_notification_title">Nghe khoang lái đang hoạt động</string>
-    <string name="cabin_audio_notification_text">Bảng điều khiển web đang nhận âm thanh micrô khoang lái.</string>
     <string name="settings_about_tier_diamond">Kim cương</string>
     <string name="settings_about_tier_platinum">Bạch kim</string>
     <string name="settings_about_tier_gold">Vàng</string>
@@ -1510,10 +1426,6 @@
     <string name="settings_privacy_log_level_error_desc">Chỉ ghi lại lỗi. Mọi thứ dẫn đến lỗi đều bị loại bỏ.</string>
     <string name="settings_privacy_log_level_note_verbose">Đang bật ghi nhật ký chi tiết — lịch sử nhật ký cũ bị loại bỏ sớm hơn.</string>
     <string name="settings_privacy_log_level_note_quiet">Hầu hết nhật ký bị chặn — sự cố sau này sẽ khó chẩn đoán hơn.</string>
-    <string name="settings_privacy_overline_developer_tools">CÔNG CỤ NHÀ PHÁT TRIỂN</string>
-    <string name="settings_screenshot_privacy_title">Chế độ riêng tư ảnh chụp màn hình</string>
-    <string name="settings_screenshot_privacy_body">Thêm lớp che mờ lên địa chỉ IP, URL, tọa độ, vị trí, mã QR, ảnh thu nhỏ bản ghi và bản xem trước camera trong giao diện gốc và web. Đây chỉ là hỗ trợ trực quan; luôn kiểm tra ảnh chụp màn hình trước khi chia sẻ.</string>
-    <string name="settings_screenshot_privacy_save_failed">Không thể lưu chế độ riêng tư ảnh chụp màn hình.</string>
     <string name="rail_key_mapping">Gán phím</string>
     <string name="rail_seat_positions">Vị trí ghế</string>
     <string name="projection_window_title">Cửa sổ cụm đồng hồ</string>
@@ -1577,4 +1489,92 @@
     <string name="network_warn_body">Màn hình này chỉ có một ăng-ten WiFi, nên không thể vừa phát điểm truy cập vừa ở trên một mạng WiFi cùng lúc. Khi điểm phát bật, xe ngắt kết nối WiFi và dùng dữ liệu di động của SIM tích hợp cho chính nó và cho mọi thiết bị đã kết nối. WiFi sẽ trở lại khi bạn tắt điểm phát.</string>
     <string name="network_warn_continue">Bật điểm phát</string>
     <string name="network_warn_cancel">Hủy</string>
+    <string name="dashboard_modern_vehicle_status">Trạng thái xe</string>
+    <string name="vehicle_dialog_detection">Phát hiện: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Tự động</string>
+    <string name="vehicle_dialog_detection_manual">Thủ công</string>
+    <string name="rail_collapse_label">Thu gọn</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Camera</string>
+    <string name="rail_section_controls">Điều khiển</string>
+    <string name="rail_section_driving">Lái xe</string>
+    <string name="rail_section_automation">Tự động hóa</string>
+    <string name="rail_section_system">Hệ thống</string>
+    <string name="camera_dilink4_passive_apa_label">Dùng cổng APA thụ động 0</string>
+    <string name="camera_dilink4_passive_apa_subtitle">Giữ nguyên đầu ra toàn cảnh OEM và ghi cổng xem trước 0 như được cung cấp. Dùng khi việc điều khiển toàn cảnh cưỡng bức mở màn hình hiệu chỉnh đỏ. Một số mẫu xe chỉ có hai chế độ xem thay vì bốn.</string>
+    <string name="setup_autostart_enabling">Đang bật tự khởi động…</string>
+    <string name="setup_autostart_enabled">Đã bật tự khởi động ✓</string>
+    <string name="setup_autostart_failed">Không thể tự động bật tự khởi động — đang mở BYD Auto-Start để bạn tự làm.</string>
+    <string name="toast_share_failed">Chia sẻ thất bại</string>
+    <string name="toast_traffic_monitor_persist_failed">Đã áp dụng, nhưng không thể lưu tùy chọn — nó sẽ không tồn tại sau khi cập nhật firmware.</string>
+    <string name="nav_page_assistant">Trợ lý</string>
+    <string name="rail_assistant">Trợ lý</string>
+    <string name="settings_about_vehicle_title">Xe &amp; màn hình</string>
+    <string name="settings_about_vehicle_subtitle">Thông tin phiên bản do màn hình BYD này cung cấp.</string>
+    <string name="settings_about_vehicle_firmware_label">Firmware</string>
+    <string name="settings_about_vehicle_dsp_label">DSP</string>
+    <string name="settings_about_vehicle_mcu_label">MCU</string>
+    <string name="settings_about_vehicle_android_label">Android</string>
+    <string name="settings_about_vehicle_security_patch_label">Bản vá bảo mật Android</string>
+    <string name="settings_about_vehicle_head_unit_label">Màn hình</string>
+    <string name="settings_about_vehicle_vin_label">VIN</string>
+    <string name="settings_about_vehicle_vin_hint">Mã định danh nhạy cảm; ẩn theo mặc định.</string>
+    <string name="settings_about_vehicle_vin_show">Hiện</string>
+    <string name="settings_about_vehicle_vin_hide">Ẩn</string>
+    <string name="settings_about_vehicle_vin_show_a11y">Hiện VIN</string>
+    <string name="settings_about_vehicle_vin_hide_a11y">Ẩn VIN</string>
+    <string name="settings_about_vehicle_vin_hidden_a11y">VIN đã ẩn</string>
+    <string name="settings_about_vehicle_loading">Đang tải…</string>
+    <string name="settings_about_vehicle_unavailable">Không khả dụng</string>
+    <string name="recordings_segment_all">Tất cả</string>
+    <string name="recordings_segment_all_count">Tất cả · %d</string>
+    <string name="recording_preview_detected">Đã phát hiện</string>
+    <string name="recording_preview_no_detection">Không phát hiện</string>
+    <string name="recording_preview_not_available">—</string>
+    <string name="recording_preview_distance">Khoảng cách</string>
+    <string name="recording_preview_recorded">Đã ghi</string>
+    <string name="recording_preview_duration">Thời lượng</string>
+    <string name="recording_preview_storage">Bộ nhớ</string>
+    <string name="recording_preview_file_size">Kích thước tệp</string>
+    <string name="recording_preview_storage_internal">Bộ nhớ trong</string>
+    <string name="recording_preview_storage_sd">Thẻ SD</string>
+    <string name="recording_preview_storage_usb">USB</string>
+    <string name="recording_preview_storage_unknown">Không rõ</string>
+    <string name="recording_headline_activity">Phát hiện hoạt động</string>
+    <string name="recording_headline_motion">Phát hiện chuyển động</string>
+    <string name="recording_headline_dashcam">Bản ghi hành trình</string>
+    <string name="recording_headline_forward_camera">Bản ghi camera trước</string>
+    <string name="recording_headline_replay">Phát lại tức thì</string>
+    <string name="recording_distance_very_close">Rất gần</string>
+    <string name="recording_distance_close">Gần</string>
+    <string name="recording_distance_mid">Tầm trung</string>
+    <string name="recording_distance_far">Xa</string>
+    <string name="cd_recording_more_actions">Thêm thao tác bản ghi</string>
+    <string name="vehicle_dialog_value_pending">—</string>
+    <string name="carnav_section_header">Gửi tới dẫn đường trên xe</string>
+    <string name="carnav_navigate">Dẫn đường</string>
+    <string name="carnav_menu_navigate_here">Dẫn đường đến đây (thay tuyến)</string>
+    <string name="carnav_menu_add_stop">Thêm làm điểm dừng</string>
+    <string name="carnav_deferred_prompt_title">Đã đề nghị dẫn đường</string>
+    <string name="carnav_deferred_yes">Chấp nhận</string>
+    <string name="carnav_deferred_cancel">Từ chối</string>
+    <string name="carnav_save_favourite">Lưu vào Yêu thích</string>
+    <string name="carnav_sending">Đang gửi tới dẫn đường trên xe…</string>
+    <string name="carnav_navigate_ok">Đã bắt đầu dẫn đường</string>
+    <string name="carnav_navigate_fail">Dẫn đường trên xe đã từ chối yêu cầu</string>
+    <string name="carnav_saved_ok">Đã lưu vào yêu thích</string>
+    <string name="carnav_failed">Không thể kết nối dẫn đường trên xe: %1$s</string>
+    <string name="settings_remote_listener_title">Bật nghe khoang lái</string>
+    <string name="settings_remote_listener_subtitle">Cho phép các phiên Xem trực tiếp và Liên lạc đã xác thực nghe micrô khoang lái khi xe đang bật.</string>
+    <string name="settings_remote_audio_channel_title">Tương thích giọng nói</string>
+    <string name="settings_remote_audio_channel_subtitle">Media giữ nguyên đường loa và micrô hiện có. Navigation khớp với định tuyến Di+ và thu micrô 8 kHz.</string>
+    <string name="settings_remote_audio_channel_media">Media</string>
+    <string name="settings_remote_audio_channel_navigation">Dẫn đường</string>
+    <string name="cabin_audio_notification_channel">Nghe khoang lái</string>
+    <string name="cabin_audio_notification_title">Nghe khoang lái đang hoạt động</string>
+    <string name="cabin_audio_notification_text">Bảng điều khiển web đang nhận âm thanh micrô khoang lái.</string>
+    <string name="settings_privacy_overline_developer_tools">CÔNG CỤ NHÀ PHÁT TRIỂN</string>
+    <string name="settings_screenshot_privacy_title">Chế độ riêng tư ảnh chụp màn hình</string>
+    <string name="settings_screenshot_privacy_body">Thêm lớp che mờ lên địa chỉ IP, URL, tọa độ, vị trí, mã QR, ảnh thu nhỏ bản ghi và bản xem trước camera trong giao diện gốc và web. Đây chỉ là hỗ trợ trực quan; luôn kiểm tra ảnh chụp màn hình trước khi chia sẻ.</string>
+    <string name="settings_screenshot_privacy_save_failed">Không thể lưu chế độ riêng tư ảnh chụp màn hình.</string>
 </resources>

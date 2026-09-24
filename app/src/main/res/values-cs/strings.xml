@@ -1,39 +1,42 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <resources>
-    <string name="app_name">Nadměrný disk</string>
-    <!-- Accessibility Service -->
-    <string name="accessibility_service_description">Udržuje monitorování vozidla při přetížení na pozadí. Tato služba nečte ani nekomunikuje s obsahem obrazovky.</string>
-    <!-- Recording Mode Labels -->
-    <!-- Proximity Guard Settings Labels -->
-    <!-- Quality Settings Labels -->
-    <!-- Storage Labels -->
-    <!-- Recording Status Labels -->
-    <!-- Event Types -->
-    <!-- Filter Labels -->
-    <!-- Storage Breakdown -->
-    <!-- Recording Controls -->
-    <!-- Slider Range Labels -->
-    <!-- ============================================================
-         i18n string extraction (Step 1: Layouts)
-         ============================================================ -->
-    <!-- Drawer menu -->
-    <!-- Common buttons / labels -->
+    <!-- Reviewed Czech core UI; missing keys fall back to values/strings.xml. -->
     <string name="action_cancel">Zrušit</string>
-    <string name="action_clear_plain">Vyčistit</string>
+    <string name="action_clear_plain">Vymazat</string>
     <string name="action_select_all">Vybrat vše</string>
     <string name="action_select_all_short">Vše</string>
-    <string name="action_delete">Vymazat</string>
+    <string name="action_delete">Smazat</string>
     <string name="action_share">Sdílet</string>
-    <string name="action_done">DONE</string>
-    <string name="action_remind_me_later">ODEBRAT MŮŽE</string>
-    <string name="action_retry">Opakovat</string>
+    <string name="action_create_evidence_pack">Vytvořit balíček důkazů</string>
+    <string name="action_share_evidence_pack">Sdílet balíček důkazů</string>
+    <string name="action_done">HOTOVO</string>
+    <string name="action_remind_me_later">PŘIPOMENOUT POZDĚJI</string>
+    <string name="action_retry">Zkusit znovu</string>
     <string name="action_run">Spustit</string>
     <string name="action_clear_output">Vymazat výstup</string>
-    <!-- Nav header -->
-    <!-- Common content descriptions -->
-    <string name="cd_camera">Fotoaparát</string>
+    <string name="cd_close">Zavřít</string>
+    <string name="language_picker_title">Jazyk</string>
+    <string name="language_picker_subtitle_fmt">%1$d jazyků k dispozici</string>
+    <string name="language_picker_subtitle_pending">Vyberte jazyk</string>
+    <string name="language_auto_title">Automaticky</string>
+    <string name="language_auto_subtitle">Podle systému · %1$s</string>
+    <string name="language_label_auto_fmt">%1$s · Automaticky</string>
+    <string name="setup_language_title">Vyberte jazyk</string>
+    <string name="setup_language_body">Nastavení začíná výběrem jazyka. Klepnutím zvolíte jiný jazyk pro aplikaci OverDrive a webové rozhraní.</string>
+    <string name="setup_language_button">Vybrat jazyk</string>
+    <string name="settings_hero_title">Nastavení</string>
+    <string name="settings_hero_subtitle">Upravte vzhled, nahrávání, dohled a data uložená v zařízení.</string>
+    <string name="nav_page_video_player">Přehrávač videa</string>
+    <string name="nav_page_assistant">Asistent</string>
+    <string name="camera_mode_subtitle">Vyberte režim odpovídající vaší hlavní jednotce. Výchozí režim je určen pro starší panoramatické kamery; DiLink 4 používá cestu AVM SurfaceTexture; DiLink 5 používá můstek qcarcam_test pro SA8155P.</string>
+    <string name="vehicle_dialog_capacity_helper">5 až 120 kWh. Pro hodnoty pod 15 je vyžadován PHEV.</string>
+    <string name="vehicle_dialog_invalid_capacity">Kapacita musí být 5 až 120 kWh</string>
+    <!-- PR #299 reviewed Czech strings; changed/newer keys fall back to English. -->
+    <string name="app_name">OverDrive</string>
+    <string name="accessibility_service_description">Udržuje aktivní sledování vozidla aplikací OverDrive na pozadí. Tato služba nečte obsah obrazovky ani s ním nijak nepracuje.</string>
+    <string name="cd_camera">Kamera</string>
     <string name="cd_qr">QR</string>
-    <string name="cd_qr_code">QR Code</string>
+    <string name="cd_qr_code">QR kód</string>
     <string name="cd_show_hide_token">Zobrazit/skrýt token</string>
     <string name="cd_copy_token">Kopírovat token</string>
     <string name="cd_copy_url">Kopírovat URL</string>
@@ -43,14 +46,14 @@
     <string name="cd_trip_tracking_status">Stav sledování jízdy</string>
     <string name="cd_mic_status">Stav snímání mikrofonu</string>
     <string name="cd_video_thumbnail">Náhled videa</string>
-    <string name="cd_play">Hrát</string>
+    <string name="cd_play">Přehrát</string>
     <string name="cd_back">Zpět</string>
     <string name="cd_play_pause">Přehrát/pozastavit</string>
-    <string name="cd_player_prev">Předchozí nahrávání</string>
-    <string name="cd_player_next">Další nahrávání</string>
-    <string name="cd_player_maximize">Maximalizovat přehrávač</string>
-    <string name="cd_player_minimize">Ukončit celou obrazovku</string>
-    <string name="cd_player_mute">Přepnout zvuk</string>
+    <string name="cd_player_prev">Předchozí nahrávka</string>
+    <string name="cd_player_next">Další nahrávka</string>
+    <string name="cd_player_maximize">Maximalizovat okno přehrávače</string>
+    <string name="cd_player_minimize">Ukončit režim celé obrazovky</string>
+    <string name="cd_player_mute">Zapnout nebo vypnout zvuk</string>
     <string name="cd_player_quadrant_all">Zobrazit všechny kamery</string>
     <string name="cd_player_quadrant_front">Zobrazit přední kameru</string>
     <string name="cd_player_quadrant_right">Zobrazit pravou kameru</string>
@@ -61,147 +64,97 @@
     <string name="cd_expand">Rozbalit</string>
     <string name="cd_configure">Konfigurace</string>
     <string name="cd_download_log">Stáhnout log</string>
-    <string name="cd_reset">Reset</string>
+    <string name="cd_reset">Resetovat</string>
     <string name="cd_battery">Baterie</string>
     <string name="cd_step_completed">Krok dokončen</string>
     <string name="cd_permission_granted">Oprávnění uděleno</string>
-    <!-- overlay_status -->
     <string name="overlay_rec_inactive_label">REC</string>
-    <string name="overlay_trip_inactive_label">JÍZDY</string>
+    <string name="overlay_trip_inactive_label">TRIP</string>
     <string name="overlay_mic_inactive_label">MIC</string>
-    <!-- Quick-action chips revealed by tapping the REC pill: switch
-         recording mode without opening the app. Short labels read fine
-         cross-locale (matches existing REC/MIC/TRIP precedent), so
-         translatable=false to avoid bloating the i18n catalog. The
-         _cd content-descriptions are real prose and ARE translatable —
-         they go through the NLLB pipeline like every other a11y string. -->
     <string name="overlay_mode_off_cd">Zastavit nahrávání</string>
-    <string name="overlay_mode_continuous_cd">Průběžné nahrávání</string>
-    <string name="overlay_mode_drive_cd">Záznam v pohotovostním režimu</string>
-    <string name="overlay_mode_proximity_cd">Záznam na ochranu proti přiblížení</string>
-    <!-- item_log_entry placeholders (timestamp/tag/message are runtime, but these are
-         placeholder/preview text used at design time and visible in some empty states) -->
+    <string name="overlay_mode_continuous_cd">Neustálé nahrávání</string>
+    <string name="overlay_mode_drive_cd">Záznam během jízdy</string>
+    <string name="overlay_mode_proximity_cd">Záznam na základě přiblížení objektu</string>
     <string name="log_entry_default_timestamp">12:34:56</string>
     <string name="log_entry_default_tag">[TAG]</string>
-    <string name="log_entry_default_message">Zaznamenat zprávu zde</string>
-    <!-- item_safe_location -->
-    <!-- item_daemon_card -->
-    <string name="daemon_card_default_name">Jméno Démona</string>
+    <string name="log_entry_default_message">Doplnit zprávu zde</string>
+    <string name="daemon_card_default_name">Jméno služby</string>
     <string name="daemon_card_default_status">Stavová zpráva</string>
-    <string name="daemon_card_subprocesses">SUBPROCESSES</string>
-    <!-- item_time_window -->
-    <!-- fragment_logs_panel -->
+    <string name="daemon_card_subprocesses">PODPROCESY</string>
     <string name="logs_panel_title">Logy</string>
-    <!-- activity_main_new / activity_main-land -->
     <string name="url_connecting">Připojování…</string>
-    <!-- Shown when an external link can't open (no browser on the head unit):
-         the URL is copied to the clipboard instead. %1$s = the URL. -->
     <string name="url_copied_no_browser">Nebyl nalezen žádný prohlížeč. Odkaz zkopírován: %1$s</string>
-    <!-- dialog_tailscale_settings -->
     <string name="tailscale_generate_login_url">Vygenerovat přihlašovací URL</string>
     <string name="tailscale_scan_to_login">Skenovat pro přihlášení</string>
     <string name="tailscale_qr_waiting">Čekání na přihlášení URL…</string>
-    <string name="tailscale_enable_proxy">Povolit proxy ve stupních</string>
-    <string name="tailscale_proxy_explainer">Trasy MQTT přes poštovní stupnici, takže se můžete obrátit na soukromý makléř bez přesměrování portu.</string>
-    <string name="tailscale_proxy_warning">Pokud je povoleno, MQTT veřejným makléřům (HiveMQ, AWS IoT atd.) selže — pouze cesty do ocasu. Uložení bude démona restartováno.</string>
-    <!-- Camera ingestion mode selector (Default vs DiLink 4) -->
-    <string name="camera_mode_title">Režim přetížení</string>
-    <string name="camera_mode_subtitle">Vyberte cestu, která odpovídá vaší hlavičce. Výchozí nastavení nejvíce BYD modelů; DiLink 4 je vyžadován na novějších trims (Han / Tang 2024+), kde AVM HAL vypouští předsunutou mozaiku 2x2.</string>
-    <string name="camera_mode_option_default">Standardní – práce na pečeti, Atto, Dolphin (většina automobilů)</string>
+    <string name="tailscale_enable_proxy">Povolit Tailscale proxy</string>
+    <string name="tailscale_proxy_explainer">Směruje MQTT přes Tailscale, takže se můžete připojit k soukromému brokerovi ve své tailnet síti bez přesměrování portů.</string>
+    <string name="tailscale_proxy_warning">Pokud je povoleno, MQTT na veřejné brokery (HiveMQ, AWS IoT atd.) přestane fungovat — Tailscale směruje pouze do vaší tailnet sítě. Uložení nastavení restartuje službu.</string>
+    <string name="camera_mode_title">Režim zpracování kamer</string>
+    <string name="camera_mode_option_default">Výchozí – funguje na Seal, Atto, Dolphin (většina vozů)</string>
     <string name="camera_mode_option_dilink4">DiLink 4 – novější varianty Han / Tang</string>
     <string name="camera_mode_current_default">Aktuální: Výchozí</string>
     <string name="camera_mode_current_dilink4">Aktuální: DiLink 4</string>
     <string name="camera_mode_save">Použít &amp; restartovat</string>
-    <string name="camera_mode_hint">Změna režimu restartuje daemon kamery. Pokud video vypadá špatně (squished, chybí kvadranty, červené potahy), zkuste jiný režim.</string>
-    <!-- DiLink 4 quadrant tweaks (only effective when cameraMode = DiLink 4) -->
+    <string name="camera_mode_hint">Změna režimu restartuje službu kamery. Pokud je obraz deformovaný, chybějí kvadranty nebo se zobrazuje červené překrytí, zkuste druhý režim.</string>
     <string name="camera_dilink4_tweaks_title">Úpravy kvadrantu DiLink 4</string>
-    <string name="camera_dilink4_tweaks_subtitle">Přizpůsobení jednotlivých vozidel pro cestu DiLink 4. Účinné pouze v případě, že je výše vybrán režim DiLink 4.</string>
+    <string name="camera_dilink4_tweaks_subtitle">Přizpůsobení jednotlivých vozidel pro systém DiLink 4. Účinné pouze v případě, že je výše vybrán režim DiLink 4.</string>
     <string name="camera_dilink4_save">Použít</string>
-    <string name="camera_dilink4_hint">Zapni pouze v případě, že HAL vykresluje červený \"kalibrace\" chrome přes kanál. Daemon restartuje, aplikuje změnu.</string>
+    <string name="camera_dilink4_hint">Povolte pouze možnosti kompatibility, které toto vozidlo potřebuje. Změna se použije po restartu služby.</string>
     <string name="camera_dilink4_red_mask_label">Potlačit červené kalibrační překrytí (GL)</string>
-    <string name="camera_dilink4_red_mask_subtitle">Přidá fragmentový stínovací průkaz, který detekuje jasně červené HAL \"kalibrace\" pixelů a nahradí je sousedním vzorkem (nebo šedou svítivostí, pokud je banner příliš velký na nebolest). Pouze kosmetika – nemá vliv na základní kalibrační stav.</string>
-    <!-- dialog_camera_selection -->
+    <string name="camera_dilink4_red_mask_subtitle">Přidá vrstvu fragment shaderu, která detekuje jasně červené pixely hlášky HAL „calibration failed“ a nahradí je okolním vzorkem (nebo šedou barvou, pokud je plocha příliš velká na domalování). Pouze kosmetická úprava – nemá vliv na skutečný stav kalibrace.</string>
     <string name="camera_selection_title">Výběr kamery</string>
     <string name="camera_selection_subtitle">Vyberte zdroj panoramatické kamery</string>
     <string name="camera_current_auto">Aktuální: Automaticky</string>
     <string name="camera_option_auto">Automaticky (detekovat při spuštění)</string>
-    <string name="camera_option_0">Kamera 0 – Zkrývky</string>
-    <string name="camera_option_1">Fotoaparát 1 – pečetě (výchozí)</string>
-    <string name="camera_option_2">Fotoaparát 2</string>
-    <string name="camera_option_3">Fotoaparát 3</string>
-    <string name="camera_option_4">Fotoaparát 4</string>
-    <string name="camera_option_5">Fotoaparát 5</string>
-    <string name="camera_selection_hint">Automaticky vybere správnou kameru pro oříznutí při každém spuštění. Fotoaparát 1 = BYD Seal, Kamera 0 = Oříznutí. Po změně ID kamery restartujte démon.</string>
-    <!-- OEM Dashcam camera ID picker (Phase 5: separate forward-sensor pipeline) -->
-    <string name="camera_oem_dashcam_title">ID OEM Dashcam kamery</string>
-    <string name="camera_oem_dashcam_hint">Vyberte AVMCamera ID, který míří na snímač dashcamu. Dashcam je OPPOZITE panle: Se/Han pano = 1 → dashcam = 0; Atto / Tang pano = 0 → dashcam = 1. Ponechte na autu a nechte Disk vybrat.</string>
+    <string name="camera_option_0">Kamera 0 – Atto</string>
+    <string name="camera_option_1">Kamera 1 – Seal (výchozí)</string>
+    <string name="camera_option_2">Kamera 2</string>
+    <string name="camera_option_3">Kamera 3</string>
+    <string name="camera_option_4">Kamera 4</string>
+    <string name="camera_option_5">Kamera 5</string>
+    <string name="camera_selection_hint">Auto vybere správnou kameru pro váš vůz při každém spuštění. Kamera 1 = BYD Seal, Kamera 0 = Atto. Po změně ID kamery restartujte službu, aby se nastavení projevilo.</string>
+    <string name="camera_oem_dashcam_title">ID OEM kamery (dashcam)</string>
+    <string name="camera_oem_dashcam_hint">Vyberte ID AVMCamera, které odpovídá přednímu snímači palubní kamery. Palubní kamera používá OPAČNÉ ID než panorama: Seal/Han panorama = 1 → palubní kamera = 0; Atto/Tang panorama = 0 → palubní kamera = 1. Ponechte možnost Automaticky, aby ID vybral OverDrive.</string>
     <string name="camera_oem_dashcam_auto_resolved">Automatické použití id %1$d (pano je id %2$d)</string>
     <string name="camera_oem_dashcam_auto_unavailable">Auto — pano id je %1$d, nelze odvodit dashcam</string>
     <string name="camera_oem_dashcam_save">Uložit</string>
-    <string name="camera_concurrent_probe_label">Testovat podporu duální kamery při příštím startu</string>
-    <string name="camera_concurrent_probe_subtitle">Jednorázová kontrola, která otevře obě kamery najednou, aby bylo potvrzeno, že toto vozidlo může současně spustit pano + dashcam. Spustí jednou při příštím restartu při zaparkování. Ponechte vypnuté, pokud se nahrávky nezdaří — není to nutné a může krátce přerušit nahrávání, pokud je aktivní při jeho spuštění.</string>
-    <!-- Dashcam-side camera labels — REVERSE of the pano labels above. The
-         OEM dashcam id is the opposite of the pano id, so the helpful
-         "this is what your trim should pick" hint flips between the two
-         dialogs. Without these strings the dashcam picker re-used the pano
-         labels and told Seal owners to pick "Camera 1 — Seal" for their
-         dashcam, which is the pano camera, not the dashcam. -->
-    <string name="camera_oem_option_0">Fotoaparát 0 – tulení/Han (výchozí)</string>
-    <string name="camera_oem_option_1">Fotoaparát 1 – Atto / Tang</string>
-    <!-- Camera mapping dialog (multi-vehicle role-to-slice routing) -->
-    <string name="camera_mapping_title">Mapování kamery</string>
-    <string name="camera_role_label">Mapování rolí</string>
+    <string name="camera_concurrent_probe_label">Otestovat podporu duální kamery při příštím startu</string>
+    <string name="camera_concurrent_probe_subtitle">Jednorázová kontrola otevře obě kamery současně a ověří, zda toto vozidlo dokáže používat panoramatickou a palubní kameru zároveň. Spustí se jednou při příštím restartu, když vozidlo stojí. Ponechte ji vypnutou, pokud záznamy nevypadají chybně; kontrola není nutná a může krátce přerušit aktivní nahrávání.</string>
+    <string name="camera_oem_option_0">Kamera 0 – Seal / Han (výchozí)</string>
+    <string name="camera_oem_option_1">Kamera 1 – Atto / Tang</string>
+    <string name="camera_mapping_title">Přiřazení kamery</string>
+    <string name="camera_role_label">Přiřazení role</string>
     <string name="camera_candidate_previous">Předchozí</string>
     <string name="camera_candidate_next">Další</string>
-    <string name="camera_preview_unavailable">Náhled zatím není dostupný. Zkuste jiného kandidáta nebo obnovte znovuotevření dialogového okna po restartu daemonu.</string>
+    <string name="camera_preview_unavailable">Náhled kamery zatím není dostupný. Zkuste jinou nebo po restartu služby obnovte zobrazení znovuotevřením dialogového okna.</string>
     <string name="camera_mapping_save">Uložit</string>
     <string name="camera_mapping_clear">Vymazat roli</string>
-    <string name="camera_mapping_saved">Mapování kamery uloženo.</string>
-    <string name="camera_mapping_cleared">Mapování role kamery vymazáno.</string>
-    <string name="camera_mapping_summary_format">Panoramic stream: Camera %1$d · %2$dx%3$d</string>
-    <string name="camera_mapping_summary_probing">Panoramatický stream: Automatická starší detekce / probování</string>
-    <string name="camera_mapping_current_format">Aktuální mapování: %1$s</string>
-    <string name="camera_mapping_current_none">Aktuální mapování: Automatické / výchozí</string>
-    <string name="camera_mapping_hint">Překrytý disk udržuje starší startovací chování ve výchozím nastavení, ale nyní umožňuje správně kalibrovat sloučený panoramatický pás. Náhled každého syrového sloučeného řezu, namapovat logické 360 role na řez, který skutečně ukazuje před/vpravo/dozadu/doleva/doleva na vašem vozidle, a daemon bude po restartu znovu používat toto rozložení pro nahrávání, streamování a AI.</string>
-    <!-- fragment_dashboard -->
-    <string name="dashboard_scan_to_connect">Skenovat připojení</string>
+    <string name="camera_mapping_saved">Přiřazení kamery uloženo.</string>
+    <string name="camera_mapping_cleared">Přiřazení role kamery vymazáno.</string>
+    <string name="camera_mapping_summary_format">Panoramatický stream: Kamera %1$d · %2$d×%3$d</string>
+    <string name="camera_mapping_summary_probing">Panoramatický stream: Automatická starší detekce / testování</string>
+    <string name="camera_mapping_current_format">Aktuální přiřazení: %1$s</string>
+    <string name="camera_mapping_current_none">Aktuální přiřazení: Automatické / výchozí</string>
+    <string name="camera_mapping_hint">OverDrive ve výchozím nastavení zachovává po startu obvyklé rozložení, ale nyní umožňuje správně kalibrovat sloučený panoramatický pohled. Prohlédněte si každý sloučený pohled, namapujte logické role na 360° pohled, který na vašem vozidle skutečně ukazuje vpředu/vpravo/vzadu/vlevo, a služba použije toto rozložení po restartu pro nahrávání, streamování i AI.</string>
+    <string name="dashboard_scan_to_connect">Naskenujte pro připojení</string>
     <string name="dashboard_qr_waiting">Čekání na tunel…</string>
     <string name="dashboard_daemons_running_default">0/5 běží</string>
     <string name="dashboard_device_id_loading">…</string>
     <string name="dashboard_access_code">Přístupový kód</string>
     <string name="dashboard_token_masked">••••••••</string>
     <string name="dashboard_regenerate_token">Obnovit token</string>
-    <!-- fragment_recording_controls -->
-    <!-- dialog_setup_guide -->
-    <string name="setup_guide_title">Začněme</string>
-    <string name="setup_guide_subtitle">Tři rychlé kroky k získání nejlepších zkušeností:</string>
+    <string name="setup_guide_title">První kroky</string>
+    <string name="setup_guide_subtitle">Tři rychlé kroky k získání nejlepších výsledků:</string>
     <string name="setup_step_one_label">1</string>
     <string name="setup_step_two_label">2</string>
     <string name="setup_step_three_label">3</string>
-    <string name="setup_language_title">Vyberte si svůj jazyk</string>
-    <string name="setup_language_body">Výchozí nastavení je jazyk. Klepnutím vyberte jiný jazyk pro aplikaci OverDrive a webový tunel.</string>
-    <string name="setup_language_button">Vyberte jazyk</string>
     <string name="setup_autostart_title">Zakázat omezení automatického spuštění</string>
-    <string name="setup_autostart_body">Klepnutím níže otevřete BYD Auto-Start. Najděte Překrytý disk v seznamu a zrušte zaškrtnutí políčka. BYD to vymaže při každé instalaci - po aktualizacích to znovu uděláte.</string>
-    <string name="setup_autostart_button">Otevřít BYD automatické spuštění</string>
+    <string name="setup_autostart_body">Klepnutím níže otevřete BYD Auto-Start. Najděte OverDrive v seznamu a zrušte zaškrtnutí políčka. BYD toto nastavení maže při každé instalaci – po aktualizacích to budete muset zopakovat.</string>
+    <string name="setup_autostart_button">Otevřít BYD Auto-Start</string>
     <string name="setup_overlay_title">Povolit zobrazení přes ostatní aplikace</string>
     <string name="setup_overlay_body">Povolením zobrazíte plovoucí indikátor stavu pro nahrávání a sledování jízdy nad jinými aplikacemi.</string>
-    <string name="setup_overlay_button">Otevřít nastavení potahů</string>
-    <!-- Language picker (drawer footer + bottom sheet) -->
-    <string name="cd_close">Zavřít</string>
-    <string name="language_picker_title">Jazyk</string>
-    <!-- Subtitle on the language-picker bottom sheet. %1$d is the supported
-         language count (Auto adds an extra row but isn't counted). -->
-    <string name="language_picker_subtitle_fmt">%1$d jazyků k dispozici</string>
-    <!-- Subtitle placeholder while the count is being computed. -->
-    <string name="language_picker_subtitle_pending">Vyberte jazyk</string>
-    <string name="language_auto_title">Automaticky</string>
-    <!-- %1$s is the native-script name of the locale that "Auto" currently
-         resolves to, e.g. "Auto · English". -->
-    <string name="language_auto_subtitle">Sledovat systém · %1$s</string>
-    <!-- Drawer footer subtitle when on Auto, e.g. "English · Auto". -->
-    <string name="language_label_auto_fmt">%1$s · Automatické</string>
-    <!-- fragment_adb_console -->
+    <string name="setup_overlay_button">Otevřít nastavení překryvu</string>
     <string name="adb_prompt">$</string>
     <string name="adb_command_hint">Zadejte příkaz…</string>
     <string name="adb_preset_commands_header">Přednastavené příkazy</string>
@@ -209,17 +162,13 @@
     <string name="adb_output_ready">$ Připraveno na příkazy…</string>
     <string name="adb_console_hero_title">ADB konzole</string>
     <string name="adb_console_hero_subtitle">Spustit příkazy shell na zařízení</string>
-    <!-- fragment_webview -->
     <string name="webview_loading">Načítání…</string>
-    <string name="webview_camera_daemon_not_running">Daemon kamery není spuštěn</string>
-    <string name="webview_start_camera_daemon">Pro přístup na tuto stránku spusťte kameru Daemon z Démonu.</string>
-    <!-- dialog_roi_drawing -->
-    <!-- dialog_zrok_token -->
+    <string name="webview_camera_daemon_not_running">Služba kamery není spuštěna</string>
+    <string name="webview_start_camera_daemon">Pro přístup na tuto stránku spusťte služby kamery na obrazovce Služby.</string>
     <string name="zrok_enable_token_hint">Povolit token</string>
-    <string name="zrok_token_storage_note">Token je bezpečně uložen a sdílen mezi aplikacemi a démonovými procesy.</string>
+    <string name="zrok_token_storage_note">Token je bezpečně uložen a sdílen mezi aplikacemi a procesy služeb.</string>
     <string name="zrok_reset_environment">Obnovit Zrok prostředí</string>
-    <string name="zrok_reset_environment_desc">Odstraní prostředí a token. Budete muset znovu povolit s tokenem (používá slot zařízení).</string>
-    <!-- dialog_reset_data -->
+    <string name="zrok_reset_environment_desc">Odstraní prostředí a token. Budete tedy muset znovu povolit s vaším tokenem (využívá slot zařízení).</string>
     <string name="reset_title">Resetovat data</string>
     <string name="reset_subtitle">Vymazat shromážděná data podle kategorie</string>
     <string name="reset_warning">Tuto akci nelze vrátit zpět. Nahrávky, výjezdy a historie baterie budou trvale odstraněny.</string>
@@ -228,36 +177,33 @@
     <string name="reset_cat_soc_history">SoC &amp; 12V historie</string>
     <string name="reset_cat_soc_history_desc">Vzorky SoC, relace nabíjení, napěťové protokoly</string>
     <string name="reset_cat_soh">kalibrace SoH</string>
-    <string name="reset_cat_soh_desc">Znovu zjistí jmenovitou kapacitu, odhad opětovného osiva z BMS</string>
+    <string name="reset_cat_soh_desc">Znovu detekuje jmenovitou kapacitu a znovu inicializuje odhad na základě údajů z BMS</string>
     <string name="reset_cat_abrp_token">ABRP token</string>
     <string name="reset_cat_abrp_token_desc">Zakáže ABRP telemetrii, dokud nebude znovu spárována</string>
     <string name="reset_cat_byd_cloud">BYD Cloudové údaje</string>
     <string name="reset_cat_byd_cloud_desc">Uživatelské jméno, přihlašovací klíč, VIN – je nutné se znovu přihlásit</string>
     <string name="reset_cat_recordings">Nahrávky (videa)</string>
     <string name="reset_cat_recordings_desc">Všechny MP4 ve složce nahrávky</string>
-    <string name="reset_cat_sentry_events">Akce v oblasti dozoru</string>
-    <string name="reset_cat_sentry_events_desc">Upínače událostí v rámci dohledu a postranní vozíky JSON</string>
-    <string name="reset_cat_proximity">Záznam přiblížení</string>
+    <string name="reset_cat_sentry_events">Záznamy událostí</string>
+    <string name="reset_cat_sentry_events_desc">Záznamy událostí monitorování a přidružené soubory JSON</string>
+    <string name="reset_cat_proximity">Záznamy přiblížení</string>
     <string name="reset_cat_proximity_desc">Události MP4 vyvolané radarem</string>
-    <string name="reset_cat_trip_files">Jízdní telemetrické soubory</string>
-    <string name="reset_cat_trip_files_desc">Objednavka JSON telemetrie na disku</string>
-    <!-- fragment_abrp_settings -->
-    <!-- fragment_recording_library -->
-    <string name="recording_lib_chip_any">Jakýkoliv</string>
+    <string name="reset_cat_trip_files">Telemetrické soubory z jízdy</string>
+    <string name="reset_cat_trip_files_desc">Soubory telemetrie JSON pro každou cestu uložené na disku</string>
+    <string name="recording_lib_chip_any">Libovolný</string>
     <string name="recording_lib_chip_person">Osoba</string>
     <string name="recording_lib_chip_vehicle">Vozidlo</string>
     <string name="recording_lib_chip_bike">Kolo</string>
-    <string name="recording_lib_chip_animal">Zvířata</string>
+    <string name="recording_lib_chip_animal">Zvíře</string>
     <string name="recording_lib_chip_alert">Upozornění</string>
     <string name="recording_lib_chip_critical">Kritický</string>
     <string name="recording_lib_selected_count_zero">0 vybraných</string>
     <string name="recording_lib_no_recordings">Žádné nahrávky</string>
-    <!-- v4 redesign: collapsible filter bar + single-row date jump -->
     <string name="recording_lib_filter_button">Filtr</string>
     <string name="recording_lib_filter_button_active">Filtr · %1$d</string>
     <string name="recording_lib_filter_sheet_title">Filtrovat nahrávky</string>
     <string name="recording_lib_filter_apply">Použít</string>
-    <string name="recording_lib_filter_reset">Reset</string>
+    <string name="recording_lib_filter_reset">Obnovit</string>
     <string name="recording_lib_filter_section_what">Co</string>
     <string name="recording_lib_filter_section_severity">Závažnost</string>
     <string name="recording_lib_filter_section_type">Typ</string>
@@ -268,7 +214,7 @@
     <string name="recording_lib_date_today">Dnes</string>
     <string name="recording_lib_date_yesterday">Včera</string>
     <string name="recording_lib_clip_count">%1$d klipy</string>
-    <string name="recording_lib_clip_count_one">%1$d clip</string>
+    <string name="recording_lib_clip_count_one">%1$d klip</string>
     <string name="recording_lib_pick_date">Vyberte datum</string>
     <string name="recording_lib_date_all_days">Všechny dny</string>
     <string name="cd_clear_date_filter">Zobrazit všechny dny</string>
@@ -277,51 +223,32 @@
     <string name="recording_lib_section_evening">Večer</string>
     <string name="recording_lib_section_night">Noc</string>
     <string name="cd_previous_day">Předchozí den</string>
-    <string name="cd_next_day">Příští den</string>
+    <string name="cd_next_day">Následující den</string>
     <string name="cd_open_filters">Otevřít filtry</string>
     <string name="cd_clear_filter">Vymazat filtr</string>
-    <!-- v5 redesign: SOTA empty state with CTA + tile type badges -->
     <string name="recording_lib_empty_title">Žádné nahrávky neodpovídají</string>
-    <string name="recording_lib_empty_body">Zkuste upravit rozsah datumu nebo filtry čipů.</string>
+    <string name="recording_lib_empty_body">Zkuste upravit rozsah období nebo filtry.</string>
     <string name="recording_lib_empty_clear_filters">Vymazat filtry</string>
-    <!-- Shown on the empty-state body when there are zero clips on disk
-         (no filter is active). Sets a friendlier tone than "No recordings match". -->
     <string name="recording_lib_empty_disk_title">Zatím nic nezaznamenáno</string>
-    <string name="recording_lib_empty_disk_body">Snímání se objeví zde, jakmile dashcam nebo sledovací potrubí napíše klih.</string>
-    <!-- Shown while the daemon is warming the H2 recording index on cold
-         start. Includes a progress counter when the daemon reports done/total,
-         otherwise a static body. The library re-polls every 1.5s and
-         transitions out automatically once results land. -->
-    <string name="recording_lib_building_index_title">Index knihovny</string>
-    <string name="recording_lib_building_index_body">Jeden okamžik, zatímco daemon skenuje vaše nahrávky.</string>
-    <string name="recording_lib_building_index_progress">Indexované %1$d z %2$d klipů…</string>
-    <!-- Tile type badge labels — short, glanceable, mirrors the on-disk
-         filename prefix (cam_/event_/dvr_/proximity_) so power users can
-         map a tile back to its file group at a glance. -->
+    <string name="recording_lib_empty_disk_body">Zde se objeví záznamy, jakmile palubní kamera (dashcam) nebo kamerový systém nějaký vytvoří.</string>
+    <string name="recording_lib_building_index_title">Indexování knihovny</string>
+    <string name="recording_lib_building_index_body">Chvíli počkejte, služba prohledává vaše nahrávky.</string>
+    <string name="recording_lib_building_index_progress">Indexováno %1$d z %2$d klipů…</string>
     <string name="recording_lib_type_normal">CAM</string>
-    <string name="recording_lib_type_event">UDÁLOSTI</string>
+    <string name="recording_lib_type_event">UDÁLOST</string>
     <string name="recording_lib_type_proximity">PROX</string>
     <string name="recording_lib_type_oem">OEM</string>
-    <!-- Toast shown when a multi-select share is dispatched. -->
-    <string name="toast_share_recordings">Sdílení %1$d nahrávání</string>
-    <!-- fragment_sentry_config -->
-    <!-- fragment_video_player -->
+    <string name="toast_share_recordings">Sdílení %1$d nahrávek</string>
     <string name="player_title_recording">Nahrávání</string>
     <string name="player_time_zero">0:00</string>
     <string name="player_time_separator"> / </string>
-    <!-- fragment_daemons -->
-    <string name="daemons_hero_title">Služby v oblasti pozadí</string>
-    <!-- Subtitle on the Daemons hero header before the first state arrives. -->
+    <string name="daemons_hero_title">Služby na pozadí</string>
     <string name="daemons_count_pending">Načítání služeb…</string>
-    <!-- Subtitle on the Daemons hero header. %1$d running, %2$d total. -->
     <string name="daemons_count_fmt">%1$d z %2$d běží</string>
-    <!-- dialog_time_window -->
-    <!-- dialog_update_progress -->
     <string name="update_preparing">Příprava aktualizace…</string>
     <string name="update_percent_zero">0%</string>
-    <!-- dialog_battery_health -->
-    <string name="battery_health_title">Zdraví baterie</string>
-    <string name="battery_health_subtitle">Stav zdraví</string>
+    <string name="battery_health_title">Kondice baterie</string>
+    <string name="battery_health_subtitle">Stav baterie SOH</string>
     <string name="battery_health_dashes">--</string>
     <string name="battery_health_waiting">Čekání na data…</string>
     <string name="battery_health_source">Zdroj</string>
@@ -330,163 +257,143 @@
     <string name="battery_health_samples">Vzorky</string>
     <string name="battery_health_last_updated">Naposledy aktualizováno</string>
     <string name="battery_health_reset">Resetovat odhad SOH</string>
-    <string name="battery_health_reset_desc">Vymaže všechna data a přehodnocení od nuly. Používejte pokud byla baterie nahrazena nebo čtení se zdá být nesprávné.</string>
-    <string name="soh_dialog_model_label">Vzor</string>
-    <string name="soh_dialog_pack_capacity_label">Kapacita balení</string>
+    <string name="battery_health_reset_desc">Vymaže všechna data a znovu vypočítá stav baterie od začátku. Použijte po výměně baterie nebo pokud se odhad zdá být nepřesný.</string>
+    <string name="soh_dialog_model_label">Model</string>
+    <string name="soh_dialog_pack_capacity_label">Kapacita bateriového bloku</string>
     <string name="soh_dialog_estimated_capacity_label">Účinná kapacita</string>
     <string name="soh_dialog_calibration_anchor_label">Poslední kalibrované</string>
-    <string name="soh_dialog_source_user">uživatelská sada</string>
+    <string name="soh_dialog_source_user">nastavení uživatelem</string>
     <string name="soh_dialog_source_auto">automaticky detekováno</string>
     <string name="soh_dialog_model_not_selected">Nevybráno</string>
     <string name="soh_dialog_capacity_not_detected">Nezjištěno</string>
     <string name="soh_dialog_calibration_format">%1$.1f%% na %2$s</string>
-    <string name="soh_dialog_frame_anchor_label">Plně pozorovaný poplatek</string>
-    <string name="soh_dialog_frame_anchor_format">%1$.2f kWh pozorován v plném rozsahu (%2$d/%3$d vzorky)</string>
-    <string name="soh_dialog_frame_anchor_pending_format">%1$.2f kWh pozorován v plném rozsahu (sběr %2$d/%3$d vzorky)</string>
-    <string name="soh_dialog_frame_mismatch_title">Neshoda rámu balení a kapacity</string>
-    <string name="soh_dialog_frame_mismatch_format">Zpráva o vozidlech %1$.1f kWh při plném nabití, ale kapacita balení je nastavena na %2$.1f kWh. Výše uvedené číslo může odrážet nesoulad jednotek (jmenná tabulka v použitelném stavu), nikoli skutečné zhoršení. Zvažte vstup do %1$.1f kWh, aby odpovídal tomu, co vozidlo hlásí.</string>
+    <string name="soh_dialog_frame_anchor_label">Naměřeno při plném nabití</string>
+    <string name="soh_dialog_frame_anchor_format">%1$.2f kWh naměřeno v plném nabití (%2$d/%3$d vzorků)</string>
+    <string name="soh_dialog_frame_anchor_pending_format">%1$.2f kWh naměřeno při plném nabití (sběr %2$d/%3$d vzorků)</string>
+    <string name="soh_dialog_frame_mismatch_title">Neshoda údajů o kapacitě bateriového bloku</string>
+    <string name="soh_dialog_frame_mismatch_format">Vozidlo hlásí %1$.1f kWh při plném nabití, ale kapacita baterie je nastavena na %2$.1f kWh. Uvedený rozdíl může být způsoben rozdílem mezi jmenovitou a využitelnou kapacitou, nikoli skutečnou degradací baterie. Zvažte nastavení hodnoty %1$.1f kWh tak, aby odpovídala údajům vozidla.</string>
     <string name="soh_dialog_use_observed_value">Použít zjištěnou hodnotu</string>
     <string name="soh_dialog_use_observed_value_pending">Ukládání…</string>
-    <string name="toast_soh_observed_value_saved">Kapacita balíku byla aktualizována na %1$.1f kWh.</string>
-    <string name="toast_soh_observed_value_failed">Kapacitu balíčku nelze aktualizovat (%1$s).</string>
+    <string name="toast_soh_observed_value_saved">Kapacita bloku byla aktualizována na %1$.1f kWh.</string>
+    <string name="toast_soh_observed_value_failed">Kapacitu bloku nelze aktualizovat (%1$s).</string>
     <string name="diagnostics_battery_needs_review">Vyžaduje kontrolu</string>
-    <!-- ============================================================
-         Step 2: Kotlin / Java UI literal extraction
-         ============================================================ -->
-    <!-- Notifications -->
-    <!-- Toasts / dialogs -->
     <string name="dialog_ok">OK</string>
-    <!-- Dynamic format strings -->
-    <!-- Plurals -->
     <plurals name="recordings_deleted_count">
-        <item quantity="one">%d záznam smazán</item>
-        <item quantity="few">%d nahrávky odstraněny</item>
-        <item quantity="many">%d nahrávky odstraněny</item>
-        <item quantity="other">%d nahrávky odstraněny</item>
+        <item quantity="one">%d nahrávka smazána</item>
+        <item quantity="few">%d nahrávky smazány</item>
+        <item quantity="many">%d nahrávek smazáno</item>
+        <item quantity="other">%d nahrávek smazáno</item>
     </plurals>
     <plurals name="delete_recordings_title">
-        <item quantity="one">Delete %d Recording</item>
+        <item quantity="one">Smazat %d nahrávku</item>
         <item quantity="few">Smazat %d nahrávky</item>
-        <item quantity="many">Smazat %d nahrávky</item>
-        <item quantity="other">Smazat %d nahrávky</item>
+        <item quantity="many">Smazat %d nahrávek</item>
+        <item quantity="other">Smazat %d nahrávek</item>
     </plurals>
     <plurals name="delete_recordings_message">
-        <item quantity="one">Tímto bude trvale odstraněno nahrávání %d . Tuto akci nelze vrátit zpět.</item>
-        <item quantity="few">Tímto bude trvale odstraněno nahrávané %d . Tuto akci nelze vrátit zpět.</item>
-        <item quantity="many">Tímto bude trvale odstraněno nahrávané %d . Tuto akci nelze vrátit zpět.</item>
-        <item quantity="other">Tímto bude trvale odstraněno nahrávané %d . Tuto akci nelze vrátit zpět.</item>
+        <item quantity="one">%d nahrávka bude trvale smazána. Tuto akci nelze vrátit zpět.</item>
+        <item quantity="few">%d nahrávky budou trvale smazány. Tuto akci nelze vrátit zpět.</item>
+        <item quantity="many">%d nahrávek bude trvale smazáno. Tuto akci nelze vrátit zpět.</item>
+        <item quantity="other">%d nahrávek bude trvale smazáno. Tuto akci nelze vrátit zpět.</item>
     </plurals>
-    <!-- ============================================================
-         Step 2 (continued): MainActivity, fragments, dialogs
-         ============================================================ -->
-    <!-- MainActivity -->
     <string name="toast_updated_to">Aktualizováno na %1$s</string>
     <string name="toast_update_install_failed">Instalace aktualizace se nezdařila: %1$s</string>
     <string name="toast_checking_for_updates">Kontrola aktualizací…</string>
-    <string name="toast_app_up_to_date">App is up to date (%1$s)</string>
+    <string name="toast_app_up_to_date">Aplikace je aktuální (%1$s)</string>
     <string name="toast_update_check_failed">Kontrola aktualizací se nezdařila: %1$s</string>
-    <!-- Update dialog + version picker -->
     <string name="update_dialog_available_title">K dispozici je aktualizace</string>
-    <string name="update_dialog_subtitle">Novější sestavení je připraveno k instalaci</string>
+    <string name="update_dialog_subtitle">Novější verze je připravena k instalaci</string>
     <string name="update_dialog_current">Aktuální: v%1$s</string>
-    <string name="update_dialog_new">Nový: v%1$s</string>
+    <string name="update_dialog_new">Nová: v%1$s</string>
     <string name="update_dialog_current_label">Nainstalováno</string>
     <string name="update_dialog_new_label">Nová verze</string>
     <string name="update_dialog_whats_new">Co je nového</string>
     <string name="update_dialog_install_now">Instalovat nyní</string>
     <string name="update_dialog_later">Později</string>
     <string name="update_picker_title">Zvolte verzi</string>
-    <string name="update_picker_subtitle">Nainstalovat libovolné publikované sestavení – novější nebo starší</string>
+    <string name="update_picker_subtitle">Nainstalovat libovolnou verzi – novější nebo starší</string>
     <string name="update_picker_empty">Zatím nebyly zveřejněny žádné verze.</string>
-    <string name="update_picker_current_suffix">%1$s (nainstalováno)</string>
+    <string name="update_picker_current_suffix">%1$s (nainstalována)</string>
     <string name="update_picker_older_suffix">%1$s (starší)</string>
-    <!-- Update progress (title + per-step status; no emoji — state icon carries the cue) -->
-    <string name="update_progress_title">Aktualizace přepsání</string>
+    <string name="update_progress_title">Aktualizace OverDrive</string>
     <string name="update_step_downloading">Stahování aktualizace…</string>
-    <string name="update_step_verifying">Ověřování stahování…</string>
-    <string name="update_step_stopping">Zastavování démonů…</string>
+    <string name="update_step_verifying">Ověřování staženého souboru…</string>
+    <string name="update_step_stopping">Zastavování služeb…</string>
     <string name="update_step_installing">Instalace aktualizace…</string>
     <string name="update_step_installed">Aktualizace nainstalována</string>
     <string name="update_step_restarting">Restartuji aplikaci…</string>
     <string name="update_step_queued">Spouštění aktualizace…</string>
     <string name="update_error_title">Aktualizace se nezdařila</string>
-    <string name="update_error_daemon_down">Démon fotoaparátu není spuštěn. Spusťte jej z Démonovy obrazovky, poté zkuste aktualizovat znovu.</string>
-    <string name="update_error_start_failed">Aktualizace se nepodařilo spustit: %1$s</string>
-    <string name="update_error_lost_headunit">Ztracen kontakt s hlavou před ukončením instalace. V tunelu? Zkontrolujte Telegram pro novou URL, nebo použijte místní IP adresu.</string>
+    <string name="update_error_daemon_down">Služba kamery není spuštěna. Spusťte ji na obrazovce Služby a poté zkuste aktualizaci znovu.</string>
+    <string name="update_error_start_failed">Aktualizaci se nepodařilo spustit: %1$s</string>
+    <string name="update_error_lost_headunit">Ztraceno spojení s hlavní jednotkou před dokončením instalace. Jste v tunelu? Zkontrolujte Telegram, jestli tam není nová URL, nebo použijte lokální IP adresu.</string>
     <string name="update_hide">Skrýt</string>
-    <!-- Update channel selector (Settings → About) -->
-    <string name="settings_update_channel_title">Aktualizovat kanál</string>
-    <string name="settings_update_channel_alpha">Alfa</string>
-    <string name="settings_update_channel_braveheart">bubble raider</string>
-    <string name="settings_update_channel_alpha_desc">Stabilní vydání. Každá publikovaná verze je zachována — vyberte jakoukoliv instalaci (downgrades povolena). Doporučeno pro každodenní používání.</string>
-    <string name="settings_update_channel_braveheart_desc">Bleednové sestavy dodaly okamžik, kdy jsou publikovány. Nejdříve získáte nové funkce, ale mohou být nestabilní nebo chybové. Pokud se něco rozbije, otevřete Démonovu obrazovku, klepněte na Démonův protokol, vyberte \"Nahrát &amp; získat kód\" a sdílejte s námi kód na komunitních kanálech.</string>
-    <string name="settings_update_channel_save_failed">Nelze uložit aktualizační kanál</string>
-    <string name="settings_update_channel_braveheart_toast">Přepnuto do Braveheart. Sestavení může být nestabilní - pokud se něco rozbije, pošlete záznam daemonu a nahlaste ho na Discordu/GitHub/WhatsApp.</string>
-    <!-- Community / report-a-bug links -->
+    <string name="settings_update_channel_title">Kanál aktualizací</string>
+    <string name="settings_update_channel_alpha">Alpha</string>
+    <string name="settings_update_channel_braveheart">Braveheart</string>
+    <string name="settings_update_channel_alpha_desc">Stabilní vydání. Každá zveřejněná verze zůstává dostupná — můžete nainstalovat libovolnou z nich, včetně starší verze. Doporučeno pro každodenní používání.</string>
+    <string name="settings_update_channel_braveheart_desc">Vývojové verze jsou dostupné ihned po vydání. Nové funkce získáte jako první, ale verze mohou být nestabilní nebo obsahovat chyby. Pokud se něco pokazí, otevřete obrazovku Služby, klepněte na protokol služby, zvolte „Nahrát &amp; získat kód“ a sdílejte s námi kód v komunitních kanálech.</string>
+    <string name="settings_update_channel_save_failed">Nepodařilo se uložit kanál aktualizací</string>
+    <string name="settings_update_channel_braveheart_toast">Přepnuto na Braveheart. Verze mohou být nestabilní — pokud se něco pokazí, odešlete protokol služby a nahlaste problém na Discordu, GitHubu nebo WhatsAppu.</string>
     <string name="toast_storage_permission_required">Pro nahrávky je vyžadováno oprávnění k úložišti</string>
     <string name="toast_url_copied_short">URL zkopírováno!</string>
     <string name="toast_camera_set_to_auto">Kamera je nastavena na Auto</string>
     <string name="toast_failed_to_save_short">Uložení se nezdařilo</string>
     <string name="toast_failed_with_message">Nezdařilo: %1$s</string>
     <string name="toast_camera_id_set">Kamera %1$d nastavena — další ACC cyklus</string>
-    <string name="toast_clearing_camera_config">Vymazání konfigurace fotoaparátu…</string>
-    <string name="toast_restarting_camera_daemon">Restartuji daemon…</string>
-    <string name="toast_camera_daemon_restarting">Restartování daemonu kamery s plným sondou</string>
-    <string name="toast_camera_restart_failed">Konfigurace vymazána, ale restart daemonu se nezdařil. Restartujte prosím ručně.</string>
-    <string name="toast_camera_settings_saved_restarting">Nastavení kamery bylo uloženo - restartování daemonu…</string>
-    <string name="toast_camera_settings_restart_failed">Nastavení kamery bylo uloženo, ale restart daemonu se nezdařil. Restartujte jej prosím ručně.</string>
+    <string name="toast_clearing_camera_config">Vymazání konfigurace kamery…</string>
+    <string name="toast_restarting_camera_daemon">Restartuji službu kamery…</string>
+    <string name="toast_camera_daemon_restarting">Služba kamery se restartuje s úplnou detekcí hardwaru</string>
+    <string name="toast_camera_restart_failed">Konfigurace vymazána, ale restart služby se nezdařil. Restartujte prosím ručně.</string>
+    <string name="toast_camera_settings_saved_restarting">Nastavení kamery bylo uloženo - restartování služby…</string>
+    <string name="toast_camera_settings_restart_failed">Nastavení kamery bylo uloženo, ale restart služby se nezdařil. Restartujte jej prosím ručně.</string>
     <string name="toast_failed_with_message_x">Nezdařilo: %1$s</string>
     <string name="toast_soh_reset_success">Resetování odhadu SOH - bude přepočítáno z následujících dat</string>
-    <string name="toast_soh_reset_failed_no_daemon">Resetování selhalo - daemon neodpovídá a nelze zapisovat do souboru</string>
+    <string name="toast_soh_reset_failed_no_daemon">Resetování selhalo - služba neodpovídá a nelze zapisovat do souboru</string>
     <string name="toast_soh_reset_failed_with_message">Obnovení selhalo: %1$s</string>
     <string name="toast_select_at_least_one_category">Vyberte alespoň jednu kategorii</string>
     <string name="toast_reset_failed_with_error">Obnovení selhalo: %1$s</string>
-    <string name="toast_traffic_monitor_changing">%1$s monitor provozu…</string>
+    <string name="toast_traffic_monitor_changing">%1$s sledování provozu…</string>
     <string name="dialog_close">Zavřít</string>
-    <string name="dialog_reset">Reset</string>
+    <string name="dialog_reset">Resetovat</string>
     <string name="dialog_delete">Vymazat</string>
     <string name="dialog_save">Uložit</string>
     <string name="dialog_enable">Povolit</string>
     <string name="dialog_disable">Zakázat</string>
     <string name="dialog_keep_enabled">Ponechat povoleno</string>
     <string name="dialog_keep_disabled">Ponechat zakázáno</string>
-    <string name="dialog_regenerate">Regenerovat</string>
+    <string name="dialog_regenerate">Obnovit</string>
     <string name="dialog_reset_selected">Resetovat vybrané</string>
-    <string name="dialog_reset_soh_title">Obnovit SOH odhad?</string>
-    <string name="dialog_reset_soh_message">To vymaže všechna SOH data a vynutí si přehodnocení od nuly.\n\nPoužijte tuto možnost, jestliže:\n• Baterie byla nahrazena\n• SOH čtení se zdá být nesprávné\n• Chcete přepočítat\n\nSystém obnoví seed z dalšího dostupného zdroje dat (OEM, kalibrace nabíjení nebo okamžité čtení.</string>
+    <string name="dialog_reset_soh_title">Resetovat odhad SOH?</string>
+    <string name="dialog_reset_soh_message">Tímto se vymažou všechna data SOH a vynutí se přepočet od začátku.\n\nPoužijte tuto možnost, pokud:\n• byla vyměněna baterie\n• se hodnota SOH zdá nesprávná\n• chcete provést rekalibraci\n\nSystém znovu načte data z dalšího dostupného zdroje (OEM, kalibrace nabíjení nebo okamžité měření).</string>
     <string name="dialog_reset_following_title">Obnovit následující nastavení?</string>
     <string name="dialog_reset_following_message">Toto nelze vrátit zpět.\n\n%1$s</string>
-    <string name="dialog_reset_complete_title">Reset complete</string>
+    <string name="dialog_reset_complete_title">Reset dokončen</string>
     <string name="dialog_traffic_cannot_check_title">Stav nelze zkontrolovat</string>
     <string name="dialog_traffic_cannot_check_message">ADB připojení ještě není připraveno.\n\nAplikace potřebuje ADB přístup ke správě systémových balíčků. Zajistěte:\n\n• USB ladění je povoleno v Možnosti Vývojáře\n• ADB žádost o autorizaci byla přijata\n\nStav se po připojení automaticky aktualizuje.</string>
     <string name="dialog_traffic_disable_title">Zakázat BYD Traffic Monitor?</string>
-    <string name="dialog_traffic_disable_message">BYD Traffic Monitor (com.byd.trafficmonitor) je vestavěná systémová aplikace, která nepřetržitě monitoruje stav silničního provozu na pozadí.\n\nProč to zakázat?\n\n• Spotřebovává mobilní data (i když jsou zaparkována)\n• využívá CPU a baterie na pozadí\n• Není potřeba, pokud používáte samostatnou navigační aplikaci\n• Může zasahovat do využití sítě dashcamu\n\nToto je bezpečné pro vypnutí — ovlivňuje pouze vestavěný dopravní překryv na mapě. Vaše navigace, Bluetooth a všechny ostatní funkce aut zůstávají nedotčeny.\n\nPo vypnutí je vyžadován tvrdý restart (podržte tlačítko uprostřed konzole 5 sekund).</string>
+    <string name="dialog_traffic_disable_message">BYD Traffic Monitor (com.byd.trafficmonitor) je vestavěná systémová aplikace, která nepřetržitě sleduje stav silničního provozu na pozadí.\n\nProč ji vypnout?\n\n• Spotřebovává mobilní data (i když je vozidlo zaparkované)\n• Využívá CPU a baterii na pozadí\n• Není potřeba, pokud používáte samostatnou navigační aplikaci\n• Může zasahovat do síťového provozu kamer\n\nBez obav ji můžete vypnout. Změna ovlivní pouze zobrazení dopravy na mapě. Navigace, Bluetooth a ostatní funkce vozidla zůstanou beze změny.\n\nPo vypnutí je nutný tvrdý restart (podržte tlačítko na středové konzole po dobu 5 sekund).</string>
     <string name="dialog_traffic_enable_title">Znovu povolit BYD Traffic Monitor?</string>
-    <string name="dialog_traffic_enable_message">BYD Monitor provozu je v současné době zakázán.\n\nZnovu povolení obnoví vestavěný překrytí provozu na navigační mapě. Všimněte si, že bude spuštěn na pozadí a spotřebovává mobilní data.\n\nPo povolení je vyžadován tvrdý restart (podržte tlačítko uprostřed konzoly 5 sekund).</string>
+    <string name="dialog_traffic_enable_message">BYD Traffic Monitor je momentálně vypnutý.\n\nJeho opětovné zapnutí obnoví vestavěné zobrazení dopravy na navigační mapě. Poběží na pozadí a bude spotřebovávat mobilní data.\n\nPo zapnutí je nutný tvrdý restart (podržte tlačítko na středové konzole po dobu 5 sekund).</string>
     <string name="dialog_traffic_status_title">Monitor provozu %1$s</string>
-    <string name="dialog_traffic_reboot_message">Změna byla použita.\n\nProveďte tvrdý restart nyní:\nStiskněte a podržte na 5 vteřin.</string>
+    <string name="dialog_traffic_reboot_message">Změna byla použita.\n\nNyní proveďte tvrdý restart:\nStiskněte a podržte tlačítko na středové konzole po dobu 5 sekund.</string>
     <string name="traffic_monitor_loading">Monitor provozu: Kontrola…</string>
     <string name="traffic_monitor_tap_to_check">Monitor provozu (klepněte pro kontrolu)</string>
-    <!-- Reset categories -->
     <string name="reset_label_trips">Jízda</string>
-    <string name="reset_label_soc_history">SoC + 12V historie</string>
+    <string name="reset_label_soc_history">Historie SoC + 12V</string>
     <string name="reset_label_soh">kalibrace SoH</string>
     <string name="reset_label_abrp_token">ABRP token</string>
     <string name="reset_label_byd_cloud">BYD Cloudové údaje</string>
     <string name="reset_label_recordings">Nahrávky</string>
-    <string name="reset_label_sentry_events">Akce v oblasti dozoru</string>
-    <string name="reset_label_proximity">Záznam přiblížení</string>
-    <string name="reset_label_trip_files">Jízdní telemetrické soubory</string>
-    <!-- ROI dialog -->
-    <!-- Sentry config -->
-    <!-- Format helpers -->
-    <!-- Dashboard -->
+    <string name="reset_label_sentry_events">Události během dohledu</string>
+    <string name="reset_label_proximity">Záznamy při přiblížení</string>
+    <string name="reset_label_trip_files">Telemetrické záznamy jízd</string>
     <string name="toast_access_code_copied">Přístupový kód zkopírován</string>
     <string name="dialog_regenerate_token_title">Obnovit token</string>
     <string name="dialog_regenerate_token_message">Toto zneplatní aktuální token. Všechny aktivní relace budou odhlášeny. Pokračovat?</string>
     <string name="toast_token_regenerated_logged_out">Vygenerován nový token. Všechny relace byly odhlášeny.</string>
-    <string name="toast_token_regenerated_restart">Token vygenerován. Daemon může vyžadovat restartování pro aplikaci.</string>
-    <string name="toast_token_regenerated_no_notify">Token byl obnoven. Nelze oznámit daemon.</string>
+    <string name="toast_token_regenerated_restart">Token byl znovu vygenerován. Pro použití změny může být nutné restartovat službu.</string>
+    <string name="toast_token_regenerated_no_notify">Token byl obnoven, ale službu se nepodařilo informovat.</string>
     <string name="toast_token_regenerated">Token obnoven</string>
     <string name="dashboard_no_tunnel">Žádný tunel není spuštěn</string>
     <string name="dashboard_starting_zrok">Spouštění Zrok tunelu…</string>
@@ -494,46 +401,43 @@
     <string name="dashboard_starting_tailscale">Spouštění Tailscale tunelu…</string>
     <string name="dashboard_waiting_url">Čekání na URL tunelu…</string>
     <string name="dashboard_daemons_running">%1$d/%2$d Běží</string>
-    <string name="tunnel_label_cloudflared">Hloubka</string>
+    <string name="tunnel_label_cloudflared">Cloudflared</string>
     <string name="tunnel_label_zrok">Zrok</string>
-    <string name="tunnel_label_tailscale">Kuličková stupnice</string>
-    <!-- Daemon names — shown on the Daemons list and dashboard. -->
-    <string name="daemon_name_camera">Fotoaparát</string>
-    <string name="daemon_name_surveillance">Surveillance Daemon</string>
-    <string name="daemon_name_acc_surveillance">Dopravce ACC sleduje</string>
-    <string name="daemon_name_singbox">Proxy ze Sing-box</string>
-    <string name="daemon_name_cloudflared">Cloudový tunel</string>
+    <string name="tunnel_label_tailscale">Tailscale</string>
+    <string name="daemon_name_camera">Služba kamery</string>
+    <string name="daemon_name_surveillance">Služba monitorování</string>
+    <string name="daemon_name_acc_surveillance">ACC monitorování</string>
+    <string name="daemon_name_singbox">Sing-box proxy</string>
+    <string name="daemon_name_cloudflared">Cloudflared tunel</string>
     <string name="daemon_name_zrok">Zrok tunel</string>
-    <string name="daemon_name_tailscale">Kulatý tunel</string>
+    <string name="daemon_name_tailscale">Tailscale tunel</string>
     <string name="daemon_name_telegram">Telegram Bot</string>
     <string name="clip_label_access_code">Přístupový kód</string>
     <string name="clip_label_url">URL</string>
-    <!-- ABRP -->
-    <!-- Daemons fragment -->
     <string name="toast_no_config_needed">Pro %1$s není potřeba žádná konfigurace</string>
-    <string name="dialog_zrok_token_title">Zrok tunelový token</string>
-    <string name="dialog_zrok_token_message">Zadejte svůj Zrok povolit token.\nZískejte jeden na: zrok.io</string>
+    <string name="dialog_zrok_token_title">Zrok tunel token</string>
+    <string name="dialog_zrok_token_message">Zadejte aktivační token pro Zrok.\nZískejte ho na: zrok.io</string>
     <string name="toast_token_cannot_be_empty">Token nemůže být prázdný</string>
-    <string name="dialog_tailscale_settings_title">Nastavení kardiovaskulárního tunelu</string>
-    <string name="dialog_tailscale_settings_message">Configure tailscale</string>
+    <string name="dialog_tailscale_settings_title">Nastavení tunelu Tailscale</string>
+    <string name="dialog_tailscale_settings_message">Nastavit Tailscale</string>
     <string name="tailscale_failed_login_url">Nepodařilo se vygenerovat přihlašovací adresu</string>
     <string name="tailscale_logged_in_relogin">Přihlášeno. Klikněte pro přihlášení k jinému účtu</string>
-    <string name="dialog_tailscale_proxy_enable_title">Povolit proxy ve stupních kroužku?</string>
-    <string name="dialog_tailscale_proxy_enable_message">Toto směruje MQTT přes Tailscale takže můžete oslovit soukromého makléře na Vaší šachovnici bez přesměrování portu.\n\nPokud je povoleno:\n• MQTT pro makléř na výřezovou síť (např. Mosquitto na zařízení na vaší tailnet)\n• MQTT veřejným makléřům (HiveMQ, AWS IoT, atd. neuspěje — Otevírající cesty do sítě končetin\n• Démon se restartuje pro aplikaci změny\n• Ostatní provoz aplikací a zbytek zařízení není ovlivněn\n\nToto můžete kdykoliv vypnout.</string>
+    <string name="dialog_tailscale_proxy_enable_title">Povolit Tailscale proxy?</string>
+    <string name="dialog_tailscale_proxy_enable_message">Tímto se MQTT směruje přes Tailscale, takže se můžete připojit k soukromému brokerovi ve své tailnet síti bez přesměrování portů.\n\nPo zapnutí:\n• MQTT na broker v tailnet síti funguje (např. Mosquitto na zařízení ve vaší tailnet síti)\n• MQTT na veřejné brokery (HiveMQ, AWS IoT atd.) přestane fungovat — Tailscale směruje pouze do vaší tailnet sítě\n• Daemon Tailscale se restartuje, aby se změna projevila\n• Ostatní provoz aplikace a zbytek zařízení nejsou ovlivněny\n\nToto můžete kdykoli vypnout.</string>
     <string name="dialog_zrok_reset_title">Obnovit Zrok prostředí</string>
-    <string name="dialog_zrok_reset_message">Toto bude:\n• Zastavte zrok tunel, pokud je spuštěn\n• Odstranit zrok prostředí z tohoto zařízení\n• Odstranit uložený token\n\nBudete muset znovu zadat token a znovu povolit. Toto používá jeden z 5 slotů pro vaše zařízení na zrok.io.\n\nJste si jisti?</string>
+    <string name="dialog_zrok_reset_message">Tímto se:\n• zastaví tunel Zrok, pokud běží\n• odstraní prostředí Zrok z tohoto zařízení\n• odstraní uložený token\n\nBudete muset token znovu zadat a službu povolit. Tím se využije jeden z pěti slotů zařízení na zrok.io.\n\nOpravdu chcete pokračovat?</string>
     <string name="toast_resetting_zrok">Resetování zrok prostředí…</string>
-    <string name="toast_zrok_reset_success">Zrok prostředí resetuje. Zadejte nový token pro nové nastavení.</string>
-    <string name="toast_zrok_reset_partial">Resetování prostředí (token soubor může vyžadovat ruční čištění)</string>
+    <string name="toast_zrok_reset_success">Prostředí Zrok bylo resetováno. Zadejte nový token a proveďte nové nastavení.</string>
+    <string name="toast_zrok_reset_partial">Resetování prostředí (token soubor může vyžadovat ruční smazání)</string>
     <string name="toast_zrok_reset_warnings">Obnovení prostředí (s varováním: %1$s)</string>
     <string name="zrok_no_token_configured">Není nakonfigurován žádný token. Klepnutím nastavíte.</string>
-    <string name="dialog_tailscale_reset_title">Resetovat prostředí ve stupních kritiky</string>
-    <string name="dialog_tailscale_reset_message">Toto bude:\n• Zastavte šívací tunel, pokud je spuštěn\n• Odstraňte prostředí ve šívce z tohoto zařízení\n• Stále budete muset odebrat zařízení z konvence\n\nBudete se muset znovu přihlásit.\n\nJste si jisti?</string>
-    <string name="toast_resetting_tailscale">Resetování prostředí v zadním měřítku…</string>
-    <string name="toast_tailscale_reset_success">Okolní nastavení resetuje. Přihlaste se pro nové nastavení.</string>
-    <string name="toast_tailscale_reset_warnings">Obnovení prostředí ve stupních klapek (s varováním: %1$s)</string>
-    <string name="toast_tailscale_proxy_enabled">Povoleno proxy ve stupních</string>
-    <string name="toast_tailscale_proxy_disabled">Profil proxy zakázán</string>
+    <string name="dialog_tailscale_reset_title">Resetovat Tailscale prostředí</string>
+    <string name="dialog_tailscale_reset_message">Toto provede:\n• Zastaví tunel Tailscale, pokud běží\n• Odstraní prostředí Tailscale z tohoto zařízení\n• Zařízení budete muset stále ručně odebrat z konzole Tailscale\n\nBudete se muset znovu přihlásit.\n\nJste si jisti?</string>
+    <string name="toast_resetting_tailscale">Resetování prostředí Tailscale…</string>
+    <string name="toast_tailscale_reset_success">Tailscale vyresetován. Přihlaste se pro nové nastavení.</string>
+    <string name="toast_tailscale_reset_warnings">Obnovení prostředí Tailscale (s varováním: %1$s)</string>
+    <string name="toast_tailscale_proxy_enabled">Proxy Tailscale byla povolena</string>
+    <string name="toast_tailscale_proxy_disabled">Proxy Tailscale byla zakázána</string>
     <string name="toast_tailscale_proxy_save_failed">Nepodařilo se uložit nastavení proxy serveru</string>
     <string name="toast_zrok_token_saved">Token uložen</string>
     <string name="toast_zrok_token_save_failed">Nepodařilo se uložit token</string>
@@ -542,242 +446,184 @@
     <string name="toast_fetching_log">Načítání %1$s logu…</string>
     <string name="toast_log_empty_or_missing">Soubor protokolu je prázdný nebo nebyl nalezen</string>
     <string name="toast_log_empty">Soubor protokolu je prázdný</string>
-    <string name="toast_daemon_manager_unavailable">Démon manager není připraven, zkuste to znovu za okamžik</string>
+    <string name="toast_daemon_manager_unavailable">Manažer služby není připraven, zkuste to znovu za okamžik</string>
     <string name="toast_log_save_failed">Nepodařilo se uložit protokol: %1$s</string>
     <string name="toast_log_not_found">Soubor protokolu nebyl nalezen nebo není čitelný</string>
-    <string name="log_share_title">%1$s Log - %2$s</string>
+    <string name="log_share_title">%1$s log – %2$s</string>
     <string name="log_share_chooser">Sdílet protokol %1$s</string>
-    <string name="log_header_title">=== %1$s Log ===</string>
+    <string name="log_header_title">=== %1$s log ===</string>
     <string name="log_header_source">Zdroj: %1$s</string>
     <string name="log_header_exported">Exportováno: %1$s</string>
     <string name="log_header_truncated">POZNÁMKA: Log zkrácen na posledních 10000 řádků (celkem: %1$d řádků)</string>
-    <!-- Braveheart log send (upload to Cloudflare or share-sheet) -->
-    <string name="logs_send_title">Odeslat protokol %1$s</string>
-    <string name="logs_send_title_plain">Odeslat deník</string>
-    <string name="logs_send_subtitle">%1$s · zvolte, jak nám to poslat</string>
+    <string name="logs_send_title">Odeslat protokol (log) %1$s</string>
+    <string name="logs_send_title_plain">Odeslat protokol (log) služby</string>
+    <string name="logs_send_subtitle">%1$s · zvolte, jak nám ho pošlete</string>
     <string name="logs_send_upload">Nahrát &amp; získat kód</string>
-    <string name="logs_send_upload_desc">Odešle nám log a zadá vám krátký kód. Nejjednodušší pro podporu.</string>
+    <string name="logs_send_upload_desc">Odešle nám protokol (log) a vygeneruje kód. Nejjednodušší způsob.</string>
     <string name="logs_send_share">Sdílet soubor…</string>
-    <string name="logs_send_share_desc">Uložit nebo odeslat log sami prostřednictvím sdíleného listu.</string>
+    <string name="logs_send_share_desc">Uložte nebo odešlete log sami přes nabídku sdílení.</string>
     <string name="logs_uploading_title">Nahrávání logu…</string>
     <string name="logs_uploading_subtitle">Odstraňování tajných informací a bezpečné odesílání</string>
     <string name="logs_uploaded_title">Log nahrán</string>
-    <string name="logs_uploaded_instructions">Sdílejte tento kód s námi, spolu s poznámkou o tom, co jste dělali, když se rozbije. Zveřejni to na Discordu, GitHub Problémy nebo WhatsApp – odkazy jsou na obrazovce O sobě.</string>
-    <string name="logs_uploaded_privacy">Secrets opraveno · log automaticky vyprší</string>
+    <string name="logs_uploaded_instructions">Sdílejte s námi tento kód spolu s poznámkou, co jste dělali, když k chybě došlo. Zveřejněte ho na Discordu, v GitHub Issues nebo na WhatsAppu — odkazy najdete na obrazovce O aplikaci.</string>
+    <string name="logs_uploaded_privacy">Citlivé údaje odstraněny · protokol bude automaticky smazán</string>
     <string name="logs_copy_code">Kopírovat kód</string>
     <string name="logs_done">Hotovo</string>
     <string name="placeholder_dash">—</string>
     <string name="errors_network">Chyba sítě</string>
-    <!-- Recording controls -->
-    <!-- Recording library -->
     <string name="toast_cannot_play_video">Nelze přehrát video: %1$s</string>
     <string name="dialog_delete_recording_title">Odstranit záznam</string>
     <string name="dialog_delete_recording_message">Odstranit %1$s?\nTuto akci nelze vrátit zpět.</string>
-    <string name="toast_recording_deleted">Nahrávání smazáno</string>
+    <string name="toast_recording_deleted">Nahrávka smazána</string>
     <string name="toast_recording_delete_failed">Nepodařilo se odstranit záznam</string>
     <string name="toast_batch_delete_partial">%1$d odstraněno, %2$d se nezdařilo</string>
     <string name="play_with_chooser">Hrát s</string>
-    <!-- Setup guide -->
-    <string name="setup_version_banner">Updated to %1$s — re-confirm autostart, BYD wipes it on every install</string>
+    <string name="setup_version_banner">Aktualizováno na %1$s — znovu potvrďte automatické spuštění, BYD ho maže při každé instalaci</string>
     <string name="setup_overlay_already_granted">Již uděleno</string>
-    <!-- Setup guide — post-setup tips section -->
     <string name="setup_tips_header">Tipy &amp; řešení problémů</string>
     <string name="setup_traffic_title">Zakázat BYD Monitor provozu</string>
     <string name="setup_traffic_body">BYD Traffic Monitor blokuje aplikace třetích stran v přístupu k internetu. Zakázání umožňuje OverDrive a všem dalším aplikacím, které skutečně instalujete, používat síť. Poté je nutný tvrdý restart.</string>
     <string name="setup_traffic_button">Otevřít sledování provozu</string>
-    <string name="setup_camera_fix_title">Kamera je černá nebo nesprávná?</string>
-    <string name="setup_camera_fix_body">Sonda kamery, nastavte ID kamery na 0, klepněte na Uložit, poté restartujte daemon. Pokud jsou zdroje stále špatné, opakujte s ID kamery 1. Nechte sekci mapování nedotčeno.</string>
-    <!-- Recording storage path -->
-    <!-- MainActivity status -->
-    <string name="camera_current_manual">Aktuální: Kamera %1$d (Manual)</string>
+    <string name="setup_camera_fix_title">Obraz z kamer se nezobrazuje správně nebo je černý?</string>
+    <string name="setup_camera_fix_body">Spusťte detekci kamer, nastavte ID kamery na 0, klepněte na Uložit a poté restartujte službu kamer. Pokud obraz stále není správný, zopakujte postup s ID kamery 1. Sekci mapování ponechte beze změny.</string>
+    <string name="camera_current_manual">Aktuální: Kamera %1$d (Manuálně)</string>
     <string name="camera_current_auto_label">Aktuální: Automaticky</string>
     <string name="soh_estimation_active">Odhad je aktivní</string>
-    <string name="soh_no_estimate_yet">Zatím žádný odhad – čeká na údaje</string>
-    <!-- Recording tabs -->
-    <!-- Misc -->
+    <string name="soh_no_estimate_yet">Zatím žádný odhad – čeká se na údaje</string>
     <string name="recording_lib_selected_count">%1$d vybráno</string>
     <string name="video_player_playback_error">Chyba při přehrávání</string>
     <string name="video_player_no_events">Žádné události</string>
     <string name="daemon_configuration_required">Je vyžadována konfigurace</string>
     <string name="daemon_configuration_message">%1$s</string>
-    <!-- Navigation graph fragment labels (shown as toolbar/ActionBar titles) -->
-    <string name="nav_page_video_player">Video přehrávač</string>
     <string name="nav_page_telegram">Telegram</string>
     <string name="nav_page_abrp">ABRP</string>
     <string name="nav_page_mqtt">MQTT</string>
     <string name="nav_page_byd_cloud">BYD Cloud</string>
-    <!-- StatusOverlayService persistent notification (foreground service) -->
-    <string name="status_overlay_notif_title">Stav nadměrného disku</string>
-    <string name="status_overlay_notif_text">Status overlay active</string>
-    <!-- DaemonKeepaliveService persistent notification (foreground service)
-         and the group-summary row that collapses Overdrive's three FGS
-         notifications into one shade entry. The summary text is intentionally
-         generic so it stays accurate whether all three services are running
-         or only the keepalive survived an OOM respawn. -->
-    <string name="daemon_keepalive_notif_title">Aktivní přetížení</string>
-    <string name="daemon_keepalive_notif_text">Monitorovací systémy vozidel</string>
-    <string name="overdrive_status_summary_title">Přepínač</string>
+    <string name="status_overlay_notif_title">Stav OverDrive</string>
+    <string name="status_overlay_notif_text">Překryvné zobrazení stavu aktivní</string>
+    <string name="daemon_keepalive_notif_title">OverDrive aktivní</string>
+    <string name="daemon_keepalive_notif_text">Sledování systémů vozidla</string>
+    <string name="overdrive_status_summary_title">OverDrive</string>
     <string name="overdrive_status_summary_text">Služby na pozadí běží</string>
-    <!-- ============================================================== -->
-    <!-- M3 Revamp: navigation rail + settings sub-rail + theme picker  -->
-    <!-- ============================================================== -->
-    <!-- Top-level destinations (navigation rail labels) -->
-    <string name="rail_dashboard">Nástěnka</string>
-    <string name="rail_live">Živé</string>
+    <string name="rail_dashboard">Hlavní panel</string>
+    <string name="rail_live">Živě</string>
     <string name="rail_recordings">Nahrávky</string>
     <string name="rail_vehicle">Vozidlo</string>
-    <string name="rail_trips">Jízda</string>
+    <string name="rail_trips">Trasy</string>
     <string name="rail_integrations">Integrace</string>
     <string name="rail_diagnostics">Diagnostika</string>
     <string name="rail_settings">Nastavení</string>
-    <!-- Settings sub-rail -->
     <string name="settings_section_appearance">Vzhled</string>
     <string name="settings_section_recording">Nahrávání</string>
-    <string name="settings_section_surveillance">Dozor</string>
-    <string name="settings_section_daemons">Daemons</string>
+    <string name="settings_section_surveillance">Monitorování</string>
+    <string name="settings_section_daemons">Služby</string>
     <string name="settings_section_privacy">Soukromí &amp; data</string>
-    <string name="settings_section_overlay">Status overlay</string>
+    <string name="settings_section_overlay">Překryvné zobrazení</string>
     <string name="settings_section_security">Zabezpečení</string>
-    <string name="settings_overlay_subtitle">Vyberte si, které segmenty plovoucího stavu pilulky jsou vidět.</string>
+    <string name="settings_overlay_subtitle">Vyberte, které stavové indikátory se mají zobrazovat.</string>
     <string name="settings_overlay_camera_title">Indikátor kamery</string>
     <string name="settings_overlay_camera_subtitle">Zobrazit REC / PROX odznak při nahrávání.</string>
     <string name="settings_overlay_trip_title">Indikátor jízdy</string>
     <string name="settings_overlay_trip_subtitle">Zobrazit TRIP odznak během detekce jízdy.</string>
-    <!-- Was "About & updates" — Check for Updates row was removed from
-         the About page, so the menu / rail label is now just "About". -->
     <string name="settings_section_about">O aplikaci</string>
-    <!-- Settings sub-rail (landscape) — overline + a11y -->
     <string name="settings_subrail_overline">NASTAVENÍ</string>
-    <string name="cd_settings_subrail">Nastavení podželezniční sítě</string>
-    <!-- Settings → Vehicle data placeholder pane -->
-    <!-- Settings → Privacy pane copy -->
+    <string name="cd_settings_subrail">Postranní panel nastavení</string>
     <string name="settings_privacy_title">Soukromí &amp; data</string>
-    <string name="settings_privacy_body">Resetuje index nahrávek, uložená data, stav daemon a nastavení na zařízení. Akce nelze vrátit zpět.</string>
-    <!-- Settings → About pane copy -->
-    <string name="settings_about_title">O přebytečném disku</string>
+    <string name="settings_privacy_body">Reset vymaže index nahrávek, uložené přihlašovací údaje, stav služeb a nastavení uložená v zařízení. Tuto akci nelze vrátit zpět.</string>
+    <string name="settings_about_title">O aplikaci OverDrive</string>
     <string name="settings_about_version_label">Verze</string>
-    <string name="settings_about_package_label">Postavit</string>
-    <string name="settings_about_check_update_value">Zkontrolujte nejnovější verzi GitHub a nainstalujte ji pokud je novější.</string>
-    <!-- Support-development section: tiered options, low-cost first.
-         star → spread → coffee, in that visual order. Copy aims for
-         personality without being corny — short, warm, specific. -->
-    <string name="settings_about_support_section">Poháněn lidmi jako vy</string>
-    <string name="settings_about_support_share_title">Řekněte kolegovi</string>
+    <string name="settings_about_package_label">Sestavení</string>
+    <string name="settings_about_check_update_value">Zkontroluje nejnovější verzi na GitHubu a nainstaluje ji, pokud je novější.</string>
+    <string name="settings_about_support_section">Tvořeno lidmi jako vy</string>
+    <string name="settings_about_support_share_title">Doporučte to ostatním majitelům</string>
     <string name="settings_about_support_share_value">Každý sdílený odkaz pomáhá jinému majiteli BYD objevit Overdrive.</string>
     <string name="settings_about_support_share_message">Podívejte se na Overdrive — open-source sledování &amp; dashcam pro BYD: https://overdrive-5lc.pages.dev/</string>
-    <string name="settings_about_support_share_chooser">Sdílet přetažení</string>
+    <string name="settings_about_support_share_chooser">Sdílet OverDrive</string>
     <string name="settings_about_open_link_failed">Nelze otevřít odkaz.</string>
     <string name="settings_about_open_link_copied">Nebyl nalezen žádný prohlížeč. URL zkopírováno: %1$s</string>
-    <string name="settings_about_support_kofi_title">Palivujte další vydání</string>
-    <string name="settings_about_support_kofi_value">The hotel is in the heart of Ko-fi.</string>
+    <string name="settings_about_support_kofi_title">Přispějte k vývoji příští verze</string>
+    <string name="settings_about_support_kofi_value">Káva přes Ko-fi udržuje naše noční vývojářské maratony v chodu.</string>
     <string name="settings_about_license_title">Licence</string>
     <string name="settings_about_license_value">MIT — open source. Klepnutím zobrazíte celý text.</string>
     <string name="settings_about_source_title">Zdrojový kód</string>
     <string name="settings_about_source_value">github.com/yash-srivastava/Overdrive-release</string>
-    <string name="settings_about_star_title">Star us on GitHub</string>
+    <string name="settings_about_star_title">Ohodnoťte nás hvězdičkou na GitHubu</string>
     <string name="settings_about_star_value">Zabere vteřinu. Znamená hodně.</string>
     <string name="settings_about_thanks_title">Děkujeme</string>
     <string name="settings_about_thanks_subtitle">Vytvořeno za pomoci přispěvatelů a příznivců.</string>
     <string name="settings_about_contributors_title">Přispěvatelé</string>
     <string name="settings_about_supporters_title">Podporovatelé</string>
-    <string name="settings_about_thanks_empty">Seznam je populární, protože lidé jsou na hřišti.</string>
-    <!-- Settings → General -->
+    <string name="settings_about_thanks_empty">Seznam se automaticky rozrůstá s každým příspěvkem.</string>
     <string name="settings_theme_label">Téma</string>
-    <string name="settings_theme_auto">Automaticky (postupujte podle systému)</string>
+    <string name="settings_theme_auto">Automaticky (podle systému)</string>
     <string name="settings_theme_light">Světlý</string>
     <string name="settings_theme_dark">Tmavý</string>
     <string name="settings_language_label">Jazyk</string>
-    <!-- Recordings page (header + segmented control + page actions) -->
     <string name="recordings_title">Nahrávky</string>
-    <string name="recordings_segment_dashcam">Nákladní kamera</string>
-    <string name="recordings_segment_surveillance">Dozor</string>
+    <string name="recordings_segment_dashcam">Kamera (dashcam)</string>
+    <string name="recordings_segment_surveillance">Monitorování</string>
     <string name="recordings_action_settings">Nastavení</string>
-    <!-- Hero subtitle: "%1$d today · %2$d total · %3$s" where %3$s is a pre-formatted size like "42 GB". -->
     <string name="recordings_summary_format">%1$d dnes · %2$d celkem · %3$s</string>
-    <!-- Per-segment label with running count, e.g. "Dashcam · 118". -->
     <string name="recordings_segment_dashcam_count">Dashcam · %d</string>
-    <string name="recordings_segment_surveillance_count">Surveillance · %d</string>
-    <!-- Layout-time placeholder for the counts subtitle before the scan completes. -->
+    <string name="recordings_segment_surveillance_count">Monitorování · %d</string>
     <string name="recordings_summary_pending">—</string>
-    <!-- Landscape recordings preview placeholder (right pane). -->
     <string name="recordings_preview_placeholder_title">Vyberte záznam</string>
-    <string name="recordings_preview_placeholder_body">Klepnutím na libovolnou položku vlevo ji hrajete.</string>
-    <!-- Diagnostics page -->
+    <string name="recordings_preview_placeholder_body">Klepnutím na libovolnou položku vlevo ji přehrajete.</string>
     <string name="diagnostics_section_adb_console">ADB konzole</string>
-    <string name="diagnostics_section_traffic">Monitor provozu</string>
-    <string name="diagnostics_section_camera_probe">Sonda kamery</string>
+    <string name="diagnostics_section_traffic">Sledování provozu</string>
+    <string name="diagnostics_section_camera_probe">Detekce kamer</string>
     <string name="diagnostics_section_battery">Zdraví baterie</string>
-    <!-- Sub-label used on diagnostics utility cards in landscape (hint to tap). -->
-    <!-- SOTA Diagnostics dashboard -->
     <string name="diagnostics_hero_title">Systémová diagnostika</string>
-    <string name="diagnostics_hero_subtitle">Živé zdraví, logy a sondy zařízení.</string>
+    <string name="diagnostics_hero_subtitle">Stav zařízení v reálném čase, logy a diagnostika.</string>
     <string name="diagnostics_health_clear">Všechno vyčistit</string>
-    <string name="diagnostics_health_section">Zdraví</string>
+    <string name="diagnostics_health_section">Stav</string>
     <string name="diagnostics_health_network">Síť</string>
     <string name="diagnostics_health_storage">Úložiště</string>
-    <string name="diagnostics_health_camera">Fotoaparát</string>
+    <string name="diagnostics_health_camera">Kamera</string>
     <string name="diagnostics_health_battery">Baterie</string>
     <string name="diagnostics_metric_pending">—</string>
     <string name="diagnostics_metric_online">Online</string>
-    <!-- Network tile: bottom line tunnel state (e.g. "Tunnel · Online"). %1$s is one of
-         tunnel_state_online / tunnel_state_offline / tunnel_state_connecting. -->
     <string name="diagnostics_network_tunnel_label">Tunel · %1$s</string>
     <string name="diagnostics_tunnel_state_online">Online</string>
     <string name="diagnostics_tunnel_state_offline">Offline</string>
     <string name="diagnostics_tunnel_state_connecting">Připojování</string>
-    <!-- Network top-line fallbacks when no Wi-Fi SSID is available. -->
-    <string name="diagnostics_network_mobile">Mobil</string>
+    <string name="diagnostics_network_mobile">Mobilní</string>
     <string name="diagnostics_network_ethernet">Ethernet</string>
     <string name="diagnostics_network_offline">Offline</string>
-    <!-- Storage tile lines. %1$d clip count, %2$s human-readable used size. -->
     <string name="diagnostics_storage_used_line">%1$d klipy · %2$s použito</string>
-    <!-- Storage tile bottom line. %1$s human-readable free size. -->
     <string name="diagnostics_storage_free_line">%1$s zdarma</string>
     <string name="diagnostics_logs_card_title">Živé záznamy událostí</string>
     <string name="diagnostics_logs_card_subtitle">Streamování výstupu ze spuštěných služeb.</string>
-    <string name="diagnostics_tools_section">Nástroje a nářadí</string>
-    <string name="diagnostics_traffic_subtitle">Sledujte obsah živé sítě.</string>
-    <string name="diagnostics_camera_probe_subtitle">Zkontrolovat připojené proudy kamery.</string>
-    <string name="diagnostics_adb_subtitle">Otevřete terminál na zařízení.</string>
-    <string name="diagnostics_battery_subtitle">Prozkoumejte SOH a statistiky balíčku.</string>
-    <string name="diagnostics_settings_subtitle">Nastavení aplikací, šablona a jazyk.</string>
-    <!-- SOTA Integrations page -->
+    <string name="diagnostics_tools_section">Nástroje</string>
+    <string name="diagnostics_traffic_subtitle">Sledujte přenosovou rychlost sítě v reálném čase.</string>
+    <string name="diagnostics_camera_probe_subtitle">Zkontrolovat obrazové streamy připojených kamer.</string>
+    <string name="diagnostics_adb_subtitle">Spustit terminál v zařízení.</string>
+    <string name="diagnostics_battery_subtitle">Prozkoumejte SOH článků a statistiky baterie.</string>
+    <string name="diagnostics_settings_subtitle">Nastavení aplikace, motivu a jazyka.</string>
     <string name="integrations_hero_title">Integrace</string>
     <string name="integrations_hero_subtitle">Připojit Overdrive ke svým službám.</string>
     <string name="integrations_status_unknown">Klepnutím nastavíte</string>
     <string name="integrations_status_configured">Konfigurováno</string>
     <string name="integrations_status_not_set_up">Není nastaveno</string>
-    <string name="integrations_telegram_desc">Posílejte shrnutí disku, upozornění na pohyb a SOS upozornění na váš soukromý Telegram bot.</string>
-    <string name="integrations_abrp_desc">Stiskněte živou baterii a data trasy do Lepšího plánovače tratí pro nabíjení předpovědí.</string>
-    <string name="integrations_mqtt_desc">Publikujte telemetrii vozidla do domovského asistenta nebo jakéhokoli makléře MQTT.</string>
-    <string name="integrations_byd_cloud_desc">Připojte svůj BYD účet pro povolení vzdálených příkazů, jako jsou zámky dveří, blesková světla a houkačky.</string>
+    <string name="integrations_telegram_desc">Odesílejte souhrny jízd, pohybová upozornění a SOS notifikace do svého soukromého bota na Telegramu.</string>
+    <string name="integrations_abrp_desc">Posílejte živá data o baterii a trase do ABRP pro odhad nabíjení.</string>
+    <string name="integrations_mqtt_desc">Publikujte telemetrii vozidla do Home Assistant nebo libovolného MQTT brokera.</string>
+    <string name="integrations_byd_cloud_desc">Připojte svůj účet aplikace BYD a povolte vzdálené příkazy jako zamykání dveří, bliknutí světly a houkání klaksonem.</string>
     <string name="integrations_configure_button">Konfigurace</string>
-    <!-- Settings → About / Privacy actions (rows) -->
     <string name="settings_action_check_update">Zkontrolovat aktualizace</string>
     <string name="settings_action_reset_data">Obnovit data…</string>
-    <!-- Content descriptions for rail / segmented controls -->
-    <string name="cd_brand_logo">Nadměrný disk</string>
-    <!-- ============================================================== -->
-    <!-- Dashboard SOTA revamp                                            -->
-    <!-- ============================================================== -->
-    <!-- Hero card -->
-    <!-- SOTA hero headline. Static identity statement (not a time-of-day
-         greeting) — pairs with the OVERDRIVE overline above and the live
-         status row of chips below. Locale catalogs auto-translate. -->
-    <string name="dashboard_hero_headline">Na hodinkách</string>
+    <string name="cd_brand_logo">OverDrive</string>
+    <string name="dashboard_hero_headline">Sledováno</string>
     <string name="dashboard_modern_vehicle_status">Stav vozidla</string>
     <string name="dashboard_subtitle_all_systems">Všechny systémy online</string>
     <string name="dashboard_subtitle_some_offline">%1$d služeb %2$d online</string>
     <string name="dashboard_subtitle_no_tunnel">Vzdálený přístup offline</string>
-    <!-- Metric tiles -->
     <string name="dashboard_metric_recordings">Dnešní nahrávky</string>
     <string name="dashboard_metric_storage">Použité úložiště</string>
     <string name="dashboard_metric_tunnel">Vzdálený přístup</string>
-    <string name="dashboard_metric_services">Služby v oblasti pozadí</string>
+    <string name="dashboard_metric_services">Služby na pozadí</string>
     <string name="dashboard_metric_value_pending">—</string>
     <string name="dashboard_metric_vehicle">Vozidlo</string>
-    <!-- Hero chips: at-a-glance pills under the greeting that summarize the
-         three most important live signals (tunnel, services, recording). -->
     <string name="dashboard_chip_recording_active">Nahrávání</string>
     <string name="dashboard_chip_recording_idle">Nečinný</string>
     <string name="dashboard_vehicle_tap_to_set">Klepnutím nastavíte</string>
@@ -785,90 +631,62 @@
     <string name="vehicle_dialog_title">Nastavit kapacitu baterie</string>
     <string name="vehicle_dialog_capacity_label">Kapacita</string>
     <string name="vehicle_dialog_capacity_suffix">kWh</string>
-    <string name="vehicle_dialog_capacity_helper">15 až 120 kWh. Nechte použít výchozí nastavení modelu.</string>
-    <string name="vehicle_dialog_model_label">Vzor</string>
+    <string name="vehicle_dialog_model_label">Model</string>
     <string name="vehicle_dialog_save">Uložit</string>
     <string name="vehicle_dialog_reset">Obnovit automatické rozpoznání</string>
-    <string name="vehicle_dialog_detection">Rozpoznání: %1$s</string>
+    <string name="vehicle_dialog_detection">Rozpoznávání: %1$s</string>
     <string name="vehicle_dialog_detection_auto">Automatické</string>
     <string name="vehicle_dialog_detection_manual">Ruční</string>
-    <string name="vehicle_dialog_invalid_capacity">Kapacita musí být 15–120 kWh</string>
     <string name="vehicle_dialog_summary_effective">Efektní: %1$.1f kWh</string>
     <string name="vehicle_dialog_summary_calibration">Poslední kalibrace: %1$.1f%% na %2$s</string>
-    <string name="vehicle_dialog_soh_unavailable">unavailable</string>
-    <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
-    <string name="dashboard_metric_storage_chip">%1$s použil · %2$s zdarma</string>
-    <string name="dashboard_metric_storage_chip_pending">Skladování –</string>
+    <string name="vehicle_dialog_soh_unavailable">nedostupné</string>
+    <string name="dashboard_metric_storage_chip">%1$s využito · %2$s volné</string>
+    <string name="dashboard_metric_storage_chip_pending">Úložiště –</string>
     <string name="dashboard_tunnel_offline">Offline</string>
     <string name="dashboard_tunnel_online">Online</string>
     <string name="dashboard_tunnel_connecting">Připojování…</string>
-    <!-- Quick actions (now rendered as same-size tiles, not chips) -->
-    <string name="dashboard_action_live">Živé</string>
-    <string name="dashboard_action_live_subtitle">Otevřít fotoaparát</string>
+    <string name="dashboard_action_live">Živě</string>
+    <string name="dashboard_action_live_subtitle">Otevřít náhled kamer</string>
     <string name="dashboard_action_recordings">Nahrávky</string>
     <string name="dashboard_action_settings">Nastavení</string>
     <string name="dashboard_action_settings_subtitle">Předvolby a informace</string>
-    <!-- ============================================================ -->
-    <!-- Settings — SOTA portrait hub + section pages                  -->
-    <!-- ============================================================ -->
-    <!-- Hero -->
-    <string name="settings_hero_title">Nastavení</string>
-    <string name="settings_hero_overline">PŘEHLED</string>
-    <string name="settings_hero_subtitle">Vyladit vzhled, záznam, dohled a data v zařízení.</string>
-    <!-- Section overlines -->
-    <string name="settings_overline_preferences">PREFERENČNÍ HODNOTY</string>
-    <string name="settings_overline_about_data">ÚDAJE</string>
-    <!-- Quick toggles -->
+    <string name="settings_hero_overline">OVERDRIVE</string>
+    <string name="settings_overline_preferences">PŘEDVOLBY</string>
+    <string name="settings_overline_about_data">DATA</string>
     <string name="settings_quick_theme_label">Téma</string>
     <string name="settings_quick_language_label">Jazyk</string>
-    <!-- Section row subtitles (portrait) -->
     <string name="settings_section_recording_subtitle">Před/po: vyrovnávací paměť, kodek, limity úložného prostoru.</string>
-    <string name="settings_section_surveillance_subtitle">Detekční zóny, rozvrh, citlivost pohybu.</string>
-    <string name="settings_section_daemons_subtitle">Cloudflared, Zrok, Telegram, MQTT běžci.</string>
-    <!-- About / data row subtitles -->
-    <string name="settings_about_row_title">O přebytečném disku</string>
+    <string name="settings_section_surveillance_subtitle">Detekční zóny, harmonogram, citlivost pohybu.</string>
+    <string name="settings_section_daemons_subtitle">Cloudflared, Zrok, Telegram, MQTT moduly.</string>
+    <string name="settings_about_row_title">O aplikaci OverDrive</string>
     <string name="settings_about_row_subtitle">Verze, licence, podpora vývoje.</string>
-    <string name="settings_reset_row_subtitle">Vymazat záznamy, události nebo všechny keše.</string>
-    <!-- Footer -->
-    <string name="settings_footer_format">Překrytý disk %1$s · %2$s</string>
-    <!-- ============================================================ -->
-    <!-- Appearance pane — SOTA visual theme picker                    -->
-    <!-- ============================================================ -->
+    <string name="settings_reset_row_subtitle">Vymazat záznamy, události nebo všechny mezipaměti.</string>
+    <string name="settings_footer_format">OverDrive %1$s · %2$s</string>
     <string name="settings_appearance_subtitle">Motivy, jazyky a vizuální preference.</string>
-    <string name="settings_theme_active_auto_caption">Automaticky se řídí šablonou systému.</string>
+    <string name="settings_theme_active_auto_caption">Automaticky se řídit motivem systému.</string>
     <string name="settings_theme_active_light_caption">Světlý motiv je vždy zapnutý.</string>
     <string name="settings_theme_active_dark_caption">Tmavý motiv je vždy zapnutý.</string>
     <string name="settings_language_count_format">%1$d z %2$d jazyků k dispozici</string>
     <string name="settings_language_card_title">Zobrazit jazyk</string>
-    <!-- ============================================================ -->
-    <!-- Vehicle data pane — manifest permissions + integrations       -->
-    <!-- ============================================================ -->
-    <!-- ============================================================ -->
-    <!-- Privacy pane — stance + storage summary + reset               -->
-    <!-- ============================================================ -->
     <string name="settings_privacy_stance_title">Ve výchozím nastavení zapnout zařízení</string>
-    <string name="settings_privacy_stance_body">Přepínač běží zcela na hlavičce. Žádné telemetrie neopustí vaše vozidlo kromě tunelů a integrací, které výslovně konfigurováte.</string>
-    <string name="settings_privacy_overline_storage">MÍSTNÍ SKLADOVÁNÍ</string>
+    <string name="settings_privacy_stance_body">OverDrive běží zcela na hlavní jednotce. Žádná telemetrie neopustí vaše vozidlo kromě tunelů a integrací, které si výslovně nastavíte.</string>
+    <string name="settings_privacy_overline_storage">MÍSTNÍ ÚLOŽIŠTĚ</string>
     <string name="settings_privacy_overline_reset">OBNOVENÍ ÚDAJŮ</string>
-    <string name="settings_privacy_storage_clips_label">Klipy na disku</string>
+    <string name="settings_privacy_storage_clips_label">Záznamy na disku</string>
     <string name="settings_privacy_storage_size_label">Celková velikost</string>
-    <string name="settings_privacy_storage_unavailable">Unavailable</string>
-    <string name="settings_privacy_storage_count_format">%1$d clip</string>
-    <string name="settings_privacy_storage_count_format_plural">%1$d klipy</string>
-    <string name="settings_privacy_reset_subtitle">Vyberte kategorie: nahrávky, události, démonové konfigurace, uložené telemetrie…</string>
-    <!-- Settings → Security pane copy + PIN unlock screen.
-         The lock guards the OverDrive UI only. Cam daemon, AccSentry,
-         surveillance, recording, Telegram alerts, status overlay, and the
-         deterrent screen all run independently regardless of this state. -->
+    <string name="settings_privacy_storage_unavailable">Nedostupné</string>
+    <string name="settings_privacy_storage_count_format">%1$d záznam</string>
+    <string name="settings_privacy_storage_count_format_plural">%1$d záznamů</string>
+    <string name="settings_privacy_reset_subtitle">Vyberte kategorie: nahrávky, události, konfigurace služeb, uložená telemetrie…</string>
     <string name="settings_security_title">Zabezpečení</string>
-    <string name="settings_security_subtitle">Uzamkněte aplikaci OverDrive tak, aby ji cestující a valety nemohly otevřít bez vašeho PINu.</string>
-    <string name="settings_security_stance_title">Pouze UI zámek</string>
-    <string name="settings_security_stance_body">Průzkum, nahrávání, odstrašování, upozornění a služby na pozadí stále běží, když je aplikace uzamčena. PIN brány přebytečného disku, nic jiného.</string>
+    <string name="settings_security_subtitle">Chraňte aplikaci OverDrive PINem před přístupem cestujících a pracovníků valet parkingu.</string>
+    <string name="settings_security_stance_title">Pouze zámek rozhraní</string>
+    <string name="settings_security_stance_body">Monitorování, nahrávání, odstrašení, upozornění a služby na pozadí běží i při uzamčení aplikace. PIN chrání pouze rozhraní OverDrive, nic dalšího.</string>
     <string name="settings_security_overline_lock">Zámek aplikace</string>
     <string name="settings_security_overline_recovery">Pokud zapomenete svůj PIN</string>
     <string name="settings_security_toggle_title">Vyžadovat PIN</string>
-    <string name="settings_security_toggle_subtitle_off">Vypnuto — kdokoliv může otevřít přetížení.</string>
-    <string name="settings_security_toggle_subtitle_on">Zapnuto – PIN je vyžadován k otevření Přepínače přetížení.</string>
+    <string name="settings_security_toggle_subtitle_off">Vypnuto — OverDrive může otevřít kdokoliv.</string>
+    <string name="settings_security_toggle_subtitle_on">Zapnuto – k otevření OverDrive je vyžadován PIN.</string>
     <string name="settings_security_change_title">Změnit PIN</string>
     <string name="settings_security_change_subtitle">Potvrďte aktuální kód PIN, poté nastavte nový.</string>
     <string name="settings_security_autolock_title">Automatické uzamčení</string>
@@ -876,120 +694,82 @@
     <string name="settings_security_autolock_1min">Po 1 minutě</string>
     <string name="settings_security_autolock_5min">Po 5 minutách</string>
     <string name="settings_security_autolock_15min">Po 15 minutách</string>
-    <string name="settings_security_autolock_never">Nikdy automaticky nezamknout podle času</string>
+    <string name="settings_security_autolock_never">Neuzamykat automaticky po určité době.</string>
     <string name="settings_security_recovery_title">ADB zotavení</string>
     <string name="settings_security_recovery_body">Zapomenutý PIN může být vymazán z hostitelského počítače přes USB ladění bez obnovení továrního nastavení. Spusťte tento příkaz a znovu otevřete aplikaci.</string>
-    <!-- Verbatim ADB command. translatable=false so the i18n pipeline
-         doesn't localize the literal path/command — translators following
-         Crowdin would otherwise risk breaking the only recovery path. -->
     <string name="settings_security_dialog_set_title">Nastavit PIN</string>
-    <string name="settings_security_dialog_set_body">Vyberte 4místný kód PIN. Potřebuješ to pokaždé, když otevříš aplikaci.</string>
+    <string name="settings_security_dialog_set_body">Zvolte PIN o délce 4 až 8 číslic. Budete ho potřebovat při každém otevření aplikace.</string>
     <string name="settings_security_dialog_disable_title">Vypnout zámek PIN?</string>
     <string name="settings_security_dialog_disable_body">Potvrďte svůj současný PIN pro vypnutí zámku aplikace.</string>
-    <string name="settings_security_dialog_change_step1_title">Potvrdit aktuální PIN</string>
-    <string name="settings_security_dialog_change_step1_body">Zadejte svůj aktuální PIN, pak nastavíte nový.</string>
+    <string name="settings_security_dialog_change_step1_title">Potvrďte aktuální PIN</string>
+    <string name="settings_security_dialog_change_step1_body">Zadejte svůj aktuální PIN, pak nastavte nový.</string>
     <string name="settings_security_action_set">Nastavit PIN</string>
     <string name="settings_security_action_disable">Vypnout zámek</string>
     <string name="settings_security_action_continue">Pokračovat</string>
     <string name="settings_security_pin_hint">PIN</string>
     <string name="settings_security_pin_confirm_hint">Potvrdit PIN</string>
-    <string name="settings_security_error_length">PIN musí být 4 až 8 číslic</string>
+    <string name="settings_security_error_length">PIN musí mít 4 až 8 číslic</string>
     <string name="settings_security_error_numeric">Pouze číslice</string>
     <string name="settings_security_error_mismatch">Kódy PIN se neshodují</string>
     <string name="settings_security_error_wrong">Špatný PIN</string>
     <string name="settings_security_error_locked_out">Příliš mnoho pokusů. Zkuste to znovu za chvíli.</string>
     <string name="settings_security_error_persist">Nelze uložit PIN. Zkuste to znovu.</string>
     <string name="settings_security_toast_set_ok">PIN nastaven. Zámek aplikace je zapnutý.</string>
-    <string name="settings_security_toast_disable_ok">Zámek aplikací je vypnut.</string>
-    <!-- PIN unlock screen (PinLockActivity). Shown over MainActivity when
-         the app lock is enabled and the session isn\'t fresh. -->
+    <string name="settings_security_toast_disable_ok">Zámek aplikace je vypnutý.</string>
     <string name="pin_lock_title">Zadejte PIN</string>
     <string name="pin_lock_title_unlocked">Odemknuto</string>
-    <string name="pin_lock_subtitle_default">Odemkněte přebytečný disk pro pokračování.</string>
+    <string name="pin_lock_subtitle_default">Odemkněte OverDrive pro pokračování.</string>
     <string name="pin_lock_subtitle_wrong">Nesprávný PIN. Zkuste to znovu.</string>
     <string name="pin_lock_subtitle_locked_out">Příliš mnoho pokusů. Zkuste to za chvíli znovu.</string>
-    <!-- %1$s is a formatted countdown like "30s" or "2:45". -->
     <string name="pin_lock_subtitle_locked_out_countdown">Uzamčeno. Zkuste to znovu v %1$s.</string>
     <string name="pin_lock_lockout_seconds">%1$ds</string>
     <string name="pin_lock_lockout_minutes">%1$d:%2$02d</string>
-    <!-- Lock-screen recovery hint. Two-part: a translatable prose prefix
-         and a translatable=false literal command (reuses the same
-         settings_security_recovery_command resource so a future edit to
-         the command stays in sync across both surfaces). The lock screen
-         concatenates them at runtime via String.format. -->
     <string name="pin_lock_recovery_hint_prefix">Zapomněli jste svůj PIN? Spusťte z připojeného počítače:\n%1$s</string>
-    <string name="pin_lock_backspace_cd">Pozadí</string>
+    <string name="pin_lock_backspace_cd">Vymazat</string>
     <plurals name="pin_lock_dot_a11y">
-        <item quantity="one">%1$d digit entered</item>
-        <item quantity="few">%1$d zadaných číslic</item>
-        <item quantity="many">%1$d zadaných číslic</item>
-        <item quantity="other">%1$d zadaných číslic</item>
+        <item quantity="zero">Nejsou zadány žádné číslice</item>
+        <item quantity="one">%1$d číslice zadána</item>
+        <item quantity="few">%1$d číslice zadány</item>
+        <item quantity="many">%1$d číslic zadáno</item>
+        <item quantity="other">%1$d číslic zadáno</item>
     </plurals>
-    <!-- Place tagging (reverse geocoding) — recording row chip fallback. -->
-    <string name="recording_unknown_location">Žádná poloha</string>
-    <!-- ============================================================== -->
-    <!-- Diagnostics health-tile values (Camera + Battery)                -->
-    <!-- ============================================================== -->
-    <!-- Camera tile primary value: %1$d is the probed camera id (0..N). -->
+    <string name="recording_unknown_location">Neznámá poloha</string>
     <string name="diagnostics_camera_value_camera_n">Kamera %1$d</string>
-    <!-- Camera tile primary value when manual override is active. -->
     <string name="diagnostics_camera_value_camera_n_manual">Kamera %1$d (manuální)</string>
-    <string name="diagnostics_camera_value_probing">Probíhá…</string>
+    <string name="diagnostics_camera_value_probing">Detekuji…</string>
     <string name="diagnostics_camera_value_offline">Offline</string>
-    <!-- Battery tile primary value: %1$.0f is the SOH percent (0..100). -->
     <string name="diagnostics_battery_value_soh">%1$.0f%%</string>
-    <string name="diagnostics_battery_value_pending">Nevyřízené údaje</string>
-    <!-- Dashboard recordings tile: live-record indicator prefix.
-         %1$d is today's clip count. The leading bullet is the red dot. -->
+    <string name="diagnostics_battery_value_pending">Čekám na údaje</string>
     <string name="dashboard_recordings_value_live">● %1$d</string>
-    <!-- ============================================================== -->
-    <!-- Dashboard hero subtitle — auto-rotating insights carousel        -->
-    <!-- ============================================================== -->
-    <!-- Each line replaces the static subtitle for ~5s, then cross-fades
-         to the next available insight. Numbers are bolded + tinted in the
-         provider, so translators should keep numeric placeholders intact
-         (do not spell out the digits). -->
-    <!-- First-launch welcome — only shown on the very first dashboard visit. -->
-    <string name="dashboard_insight_welcome">Welcome — Overdrive je nyní váš druhý pár očí.</string>
-    <!-- Parking delta. %1$s = absolute SOC delta string ("8%"); %2$s = absolute kWh string ("4 kWh"). -->
-    <string name="dashboard_insight_parked_charged_kwh">Vyzvednuto %1$s (&lt;unk&gt;%2$s) během zaparkování</string>
-    <string name="dashboard_insight_parked_charged">Zvednuto %1$s během zaparkování</string>
-    <string name="dashboard_insight_parked_drained_kwh">Používá se %1$s (&lt;unk&gt;%2$s) od zaparkování</string>
-    <string name="dashboard_insight_parked_drained">Používá se %1$s od zaparkování</string>
-    <!-- Most recent surveillance clip. %1$s = relative time, e.g. "2 hr. ago" / "yesterday". -->
-    <string name="dashboard_insight_last_alert">Poslední upozornění na sledování: %1$s</string>
-    <!-- Most recent completed charging session in the last 24h.
-         %1$s = energy added (e.g. "12.4 kWh"); %2$s = duration (e.g. "1 hr 45 min"). -->
-    <string name="dashboard_insight_last_charge">Poslední poplatek: +%1$s v %2$s</string>
-    <!-- Storage milestone. %1$d = clip count; %2$s = total size (e.g. "42 GB"). -->
-    <string name="dashboard_insight_storage_milestone">%1$d klipy · %2$s zaznamenány</string>
-    <!-- Number formatters used inside other insights. Translators may localize
-         the unit suffix (e.g. "키와트" / "квт·ч") but should leave the float
-         placeholder shape so the bold-ifier still finds the digits. -->
+    <string name="dashboard_insight_welcome">Vítejte — OverDrive je nyní vaším druhým párem očí.</string>
+    <string name="dashboard_insight_parked_charged_kwh">Získáno %1$s (≈%2$s) během parkování</string>
+    <string name="dashboard_insight_parked_charged">Získáno %1$s během parkování</string>
+    <string name="dashboard_insight_parked_drained_kwh">Spotřebováno %1$s (≈%2$s) od zaparkování</string>
+    <string name="dashboard_insight_parked_drained">Spotřebováno %1$s od zaparkování</string>
+    <string name="dashboard_insight_last_alert">Poslední událost monitorování: %1$s</string>
+    <string name="dashboard_insight_last_charge">Poslední nabíjení: +%1$s za %2$s</string>
+    <string name="dashboard_insight_storage_milestone">Klipy: %1$d · uloženo %2$s</string>
     <string name="dashboard_insight_kwh_format">%1$.1f kWh</string>
     <string name="dashboard_insight_percent_format">%1$.1f%%</string>
     <string name="dashboard_insight_hours_minutes">%1$d h %2$d min</string>
-    <!-- Today's clips. -->
     <plurals name="dashboard_insight_today_clips">
         <item quantity="one">%1$d klip zaznamenán dnes</item>
-        <item quantity="few">%1$d klipy zaznamenané dnes</item>
-        <item quantity="many">%1$d klipy zaznamenané dnes</item>
-        <item quantity="other">%1$d klipy zaznamenané dnes</item>
+        <item quantity="few">%1$d klipy zaznamenány dnes</item>
+        <item quantity="many">%1$d klipů zaznamenáno dnes</item>
+        <item quantity="other">%1$d klipů zaznamenáno dnes</item>
     </plurals>
-    <!-- Process uptime. Days form takes (days, hours); hours form takes hours only. -->
     <plurals name="dashboard_insight_uptime_days_hours">
-        <item quantity="one">Přepsat online pro %1$d den, %2$d h</item>
-        <item quantity="few">Přepsat online na %1$d dní, %2$d h</item>
-        <item quantity="many">Přepsat online na %1$d dní, %2$d h</item>
-        <item quantity="other">Přepsat online na %1$d dní, %2$d h</item>
+        <item quantity="one">OverDrive je online %1$d den, %2$d h</item>
+        <item quantity="few">OverDrive je online %1$d dny, %2$d h</item>
+        <item quantity="many">OverDrive je online %1$d dní, %2$d h</item>
+        <item quantity="other">OverDrive je online %1$d dní, %2$d h</item>
     </plurals>
     <plurals name="dashboard_insight_uptime_hours">
-        <item quantity="one">Přepsat online na %1$d hodinu</item>
-        <item quantity="few">Přepsat online na %1$d hodin</item>
-        <item quantity="many">Přepsat online na %1$d hodin</item>
-        <item quantity="other">Přepsat online na %1$d hodin</item>
+        <item quantity="one">OverDrive je online %1$d hodinu</item>
+        <item quantity="few">OverDrive je online %1$d hodiny</item>
+        <item quantity="many">OverDrive je online %1$d hodin</item>
+        <item quantity="other">OverDrive je online %1$d hodin</item>
     </plurals>
-    <!-- Duration helpers used inside insights (last_charge etc.). -->
     <plurals name="dashboard_insight_minutes">
         <item quantity="one">%1$d min</item>
         <item quantity="few">%1$d min</item>
@@ -1002,89 +782,64 @@
         <item quantity="many">%1$d h</item>
         <item quantity="other">%1$d h</item>
     </plurals>
-    <!-- ============================================================
-         RoadSense — road-hazard detection feature
-         ============================================================ -->
-    <string name="rail_roadsense">Silnice</string>
+    <string name="rail_roadsense">RoadSense</string>
     <string name="rail_hazard_map">Mapa</string>
-    <string name="roadsense_title">Silnice</string>
+    <string name="roadsense_title">RoadSense</string>
     <string name="roadsense_pill_scanning">Skenování</string>
-    <string name="roadsense_pill_idle">Silnice</string>
+    <string name="roadsense_pill_idle">RoadSense</string>
     <string name="roadsense_status_idle">Nečinný</string>
-    <!-- VEHICLE calibration (suspension-learning) — the green/orange/red dot. Worded
-         about the car, not the route, since that's what maturity actually measures. -->
-    <string name="roadsense_cal_learning">Učení vašeho vozidla</string>
+    <string name="roadsense_cal_learning">Shromažďování dat o vozidle</string>
     <string name="roadsense_cal_ready">Vozidlo kalibrováno</string>
     <string name="roadsense_cal_partial">Zlepšení kalibrace</string>
-    <!-- Idle caption — ROUTE coverage (distinct from vehicle calibration). "Clear
-         ahead" only when we've actually mapped this stretch; "New road" when we
-         haven't, so an unsurveyed road isn't mistaken for confirmed-safe. -->
-    <string name="roadsense_clear_ahead">Vyčistit vpřed</string>
-    <string name="roadsense_road_mapped">Cesta mapována · vyčistit</string>
+    <string name="roadsense_clear_ahead">Volno před vámi</string>
+    <string name="roadsense_road_mapped">Cesta zmapována · bez překážek</string>
     <string name="roadsense_road_new">Nová cesta · učení</string>
     <string name="roadsense_unit_meters">m</string>
     <string name="roadsense_dash_distance">—</string>
-    <string name="roadsense_warn_label">Varovat</string>
+    <string name="roadsense_warn_label">Varování</string>
     <string name="roadsense_toggle_audio">Zvuk</string>
     <string name="roadsense_toggle_visual">Vizuální</string>
-    <!-- severity / type readouts (formatted at runtime) -->
-    <string name="roadsense_sev_minor">Menší</string>
-    <string name="roadsense_sev_moderate">Mírný</string>
-    <string name="roadsense_sev_severe">Těžká</string>
-    <string name="roadsense_type_breaker">Vypínač rychlosti</string>
-    <string name="roadsense_type_pothole">Poštovník</string>
+    <string name="roadsense_sev_minor">Nízká</string>
+    <string name="roadsense_sev_moderate">Střední</string>
+    <string name="roadsense_sev_severe">Vysoká</string>
+    <string name="roadsense_type_breaker">Silniční retardér</string>
+    <string name="roadsense_type_pothole">Výmol</string>
     <string name="roadsense_type_hazard">Nebezpečí</string>
-    <string name="roadsense_type_rough">Hrubý řez</string>
-    <!-- "Moderate · Pothole" style line -->
+    <string name="roadsense_type_rough">Špatný povrch</string>
     <string name="roadsense_hazard_format">%1$s · %2$s</string>
-    <!-- Zone readouts (D-032): cluster of hazards announced as one. -->
-    <!-- "3 bumps ahead" — %1$d = count -->
-    <string name="roadsense_zone_count">%1$d skákát vpřed</string>
-    <!-- "Rough section · 40 m" — %1$d = length in metres -->
-    <string name="roadsense_zone_rough">Hrubá sekce · %1$d m</string>
-    <!-- Calibration-Mode confirm card (R-OVL-6) -->
-    <string name="roadsense_confirm_prompt">Bylo to nebezpečí?</string>
-    <string name="roadsense_confirm_reject">Nenebezpečnost</string>
+    <string name="roadsense_zone_count">Nerovnosti před vámi: %1$d</string>
+    <string name="roadsense_zone_rough">Špatný povrch · %1$d m</string>
+    <string name="roadsense_confirm_prompt">Šlo o nebezpečí?</string>
+    <string name="roadsense_confirm_reject">Nejedná se o nebezpečí</string>
     <string name="roadsense_confirm_accept">Potvrdit</string>
-    <!-- content descriptions -->
-    <string name="roadsense_cd_cal_level">Úroveň kalibrace trasy</string>
+    <string name="roadsense_cd_cal_level">Stav kalibrace vozidla</string>
     <string name="roadsense_cd_direction">Směr k dalšímu nebezpečí</string>
-    <!-- Blind Spot overlay labels (native overlay window). -->
-    <string name="blindspot_overlay_left">LEFT</string>
-    <string name="blindspot_overlay_right">PRÁVO</string>
-    <!-- ============================================================== -->
-    <!-- RoadSense Map (native MapLibre map view + tap-to-verify sheet). -->
-    <!-- ============================================================== -->
+    <string name="blindspot_overlay_left">VLEVO</string>
+    <string name="blindspot_overlay_right">VPRAVO</string>
     <string name="roadsense_map_title">Mapa</string>
     <string name="roadsense_map_route_clear">Vyčistit</string>
-    <string name="roadsense_map_route_unmapped">Zatím nemapováno</string>
+    <string name="roadsense_map_route_unmapped">Zatím nezmapováno</string>
     <string name="roadsense_map_back">Zpět</string>
-    <string name="roadsense_map_recenter">Zopakovat na mé poloze</string>
-    <!-- Tap-to-verify bottom sheet -->
+    <string name="roadsense_map_recenter">Vycentrovat na moji polohu</string>
     <string name="roadsense_map_severity_label">Závažnost</string>
     <string name="roadsense_map_type_label">Typ</string>
     <string name="roadsense_map_type_unknown">Neznámý</string>
     <string name="roadsense_map_confirm">Potvrdit</string>
     <string name="roadsense_map_delete">Vymazat</string>
-    <!-- Status chip labels: candidate / on-device / shared with fleet -->
-    <string name="roadsense_map_status_candidate">Kandidát</string>
-    <string name="roadsense_map_status_local">Na zařízení</string>
+    <string name="roadsense_map_status_candidate">Návrh</string>
+    <string name="roadsense_map_status_local">V zařízení</string>
     <string name="roadsense_map_status_cloud">Sdíleno</string>
-    <!-- Meta line: "Moderate · 82% confidence · 3 reports" -->
-    <string name="roadsense_map_meta_format">%1$s · %2$d%% důvěra · %3$s</string>
-    <!-- "3 reports" / "1 report" -->
+    <string name="roadsense_map_meta_format">%1$s · %2$d%% spolehlivost · %3$s</string>
     <plurals name="roadsense_map_reports">
-        <item quantity="one">%1$d report</item>
-        <item quantity="few">%1$d reports</item>
-        <item quantity="many">%1$d reports</item>
-        <item quantity="other">%1$d reports</item>
+        <item quantity="one">%1$d hlášení</item>
+        <item quantity="few">%1$d hlášení</item>
+        <item quantity="many">%1$d hlášení</item>
+        <item quantity="other">%1$d hlášení</item>
     </plurals>
-    <!-- Snackbar / toast confirmations -->
     <string name="roadsense_map_confirmed_toast">Nebezpečí bylo potvrzeno</string>
-    <string name="roadsense_map_deleted_toast">Odstraněno nebezpečí</string>
-    <string name="roadsense_map_action_failed">Nepodařilo se dosáhnout RoadSense. Zkuste to znovu.</string>
-    <string name="roadsense_map_no_location">Čekání na opravu GPS…</string>
-    <!-- Navigation: search + routing + turn-by-turn -->
+    <string name="roadsense_map_deleted_toast">Nebezpečí odstraněno</string>
+    <string name="roadsense_map_action_failed">Nepodařilo se připojit k RoadSense. Zkuste to znovu.</string>
+    <string name="roadsense_map_no_location">Čekání na určení polohy GPS…</string>
     <string name="roadsense_map_search_hint">Hledat cíl</string>
     <string name="roadsense_map_search_action">Hledat</string>
     <string name="roadsense_map_searching">Vyhledávání…</string>
@@ -1092,113 +847,94 @@
     <string name="roadsense_map_pick_destination">Vyberte cíl</string>
     <string name="roadsense_map_routing">Hledání trasy…</string>
     <string name="roadsense_map_route_failed">Nelze najít trasu. Zkuste to znovu.</string>
-    <string name="roadsense_map_need_key">Přidejte klíč směrování v nastavení RoadSense pro navigaci.</string>
-    <string name="roadsense_map_rerouting">Mimo trať – přepočítání…</string>
-    <string name="roadsense_map_arrived">Přijel jste.</string>
-    <string name="roadsense_map_nav_started">Navigace do %1$s</string>
+    <string name="roadsense_map_need_key">Pro navigaci přidejte v nastavení RoadSense směrovací klíč.</string>
+    <string name="roadsense_map_rerouting">Mimo trasu – přepočítávám…</string>
+    <string name="roadsense_map_arrived">Dorazili jste.</string>
+    <string name="roadsense_map_nav_started">Navigace do %1$s zahájena</string>
     <string name="roadsense_map_nav_ended">Navigace ukončena</string>
     <string name="roadsense_map_end_nav">Ukončit navigaci</string>
     <string name="roadsense_map_zoom_in">Přiblížit</string>
     <string name="roadsense_map_zoom_out">Oddálit</string>
-    <!-- Hazard visibility filter -->
     <string name="roadsense_map_hazards_filter">Viditelnost nebezpečí</string>
     <string name="roadsense_map_hazards_all">Zobrazit všechna nebezpečí</string>
-    <string name="roadsense_map_hazards_moderate">Mírný a silný</string>
-    <string name="roadsense_map_hazards_severe">Pouze těžká</string>
+    <string name="roadsense_map_hazards_moderate">Střední a vysoká</string>
+    <string name="roadsense_map_hazards_severe">Pouze vysoká</string>
     <string name="roadsense_map_hazards_hidden">Skrýt nebezpečí</string>
-    <!-- POI along route (EV charging / fuel) -->
-    <string name="roadsense_map_poi_toggle">Nabíjení a palivo</string>
-    <!-- 2D / 3D buildings toggle -->
+    <string name="roadsense_map_poi_toggle">Nabíjení a tankování</string>
     <string name="roadsense_map_dimension_toggle">Budovy 2D / 3D</string>
-    <string name="roadsense_map_3d_on">Budovy 3D na</string>
-    <string name="roadsense_map_3d_off">3D budovy mimo</string>
-    <string name="roadsense_map_poi_loading">Zjišťování nabíjení a zastavení paliva…</string>
+    <string name="roadsense_map_3d_on">3D budovy zapnuty</string>
+    <string name="roadsense_map_3d_off">3D budovy vypnuty</string>
+    <string name="roadsense_map_poi_loading">Vyhledávání nabíječek a čerpacích stanic…</string>
     <string name="roadsense_map_poi_none">V okolí nebyly nalezeny žádné stanice</string>
     <string name="roadsense_map_poi_need_route">Nejprve vyberte cíl</string>
-    <!-- POI tap action sheet -->
-    <string name="roadsense_map_stop_added">Zastavit přidání</string>
+    <string name="roadsense_map_stop_added">Zastávka přidána</string>
     <string name="roadsense_map_remove_stop_action">Odstranit zastávku</string>
-    <string name="roadsense_map_poi_navigate">Navigovat zde</string>
+    <string name="roadsense_map_poi_navigate">Navigovat sem</string>
     <string name="roadsense_map_poi_kind_charging">Nabíjecí stanice</string>
-    <string name="roadsense_map_poi_kind_fuel">Palivová stanice</string>
+    <string name="roadsense_map_poi_kind_fuel">Čerpací stanice</string>
     <string name="roadsense_map_poi_charging_generic">Nabíjecí stanice</string>
-    <string name="roadsense_map_poi_fuel_generic">Palivová stanice</string>
-    <string name="roadsense_map_route_switched">Přepnutá trasa</string>
-    <!-- "then <next maneuver>" preview shown in the maneuver banner -->
+    <string name="roadsense_map_poi_fuel_generic">Čerpací stanice</string>
+    <string name="roadsense_map_route_switched">Trasa byla změněna</string>
     <string name="roadsense_map_then">pak</string>
-    <!-- Roundabout exit ordinal in the maneuver banner (%1$d = exit number) -->
-    <string name="roadsense_map_exit_n">opustit %1$d</string>
-    <!-- Hazards-along-route pills (%1$d = count) -->
-    <string name="roadsense_map_pill_severe">%1$d těžký</string>
-    <string name="roadsense_map_pill_moderate">%1$d mírné</string>
-    <string name="roadsense_map_pill_minor">%1$d nezletilý</string>
-    <!-- Shown briefly if the basemap can\'t be reached. -->
-    <string name="roadsense_map_offline">Mapová data jsou nedostupná offline</string>
-    <!-- Navigation: autocomplete + route options -->
+    <string name="roadsense_map_exit_n">výjezd %1$d</string>
+    <string name="roadsense_map_pill_severe">Vysoká: %1$d</string>
+    <string name="roadsense_map_pill_moderate">Střední: %1$d</string>
+    <string name="roadsense_map_pill_minor">Nízká: %1$d</string>
+    <string name="roadsense_map_offline">Mapová data nejsou dostupná offline</string>
     <string name="roadsense_map_clear_search">Vymazat hledání</string>
-    <!-- Route-options sheet -->
     <string name="roadsense_map_routes_title">Vyberte trasu</string>
-    <string name="roadsense_map_routes_to">Cesty do %1$s</string>
+    <string name="roadsense_map_routes_to">Trasy do %1$s</string>
     <string name="roadsense_map_routes_cancel">Zrušit</string>
-    <!-- Per-route row label, %1$d is the 1-based route number. -->
     <string name="roadsense_map_route_option">Trasa %1$d</string>
     <string name="roadsense_map_fastest">Nejrychlejší</string>
     <string name="roadsense_map_start">Začít</string>
-    <!-- Stops / waypoints in the route-options sheet -->
     <string name="roadsense_map_your_location">Vaše poloha</string>
     <string name="roadsense_map_add_stop">Přidat zastávku</string>
-    <string name="roadsense_map_add_stop_hint">Vyhledejte stop pro přidání</string>
-    <string name="roadsense_map_stop_removed">Zastavit odebrán</string>
+    <string name="roadsense_map_add_stop_hint">Vyhledat zastávku pro přidání</string>
+    <string name="roadsense_map_stop_removed">Zastávka odebrána</string>
     <string name="roadsense_map_remove_stop">Odstranit zastávku</string>
-    <string name="roadsense_map_move_stop_up">Přesunout zastavení nahoru</string>
-    <string name="roadsense_map_move_stop_down">Přesunout zastavení dolů</string>
-    <!-- %1$d is the maximum number of stops allowed. -->
-    <string name="roadsense_map_max_stops">Až %1$d povoleny zastávky</string>
-    <!-- Map day/night override (Auto → Light → Dark) -->
-    <string name="roadsense_map_theme_toggle">Téma mapy</string>
+    <string name="roadsense_map_move_stop_up">Přesunout zastávku nahoru</string>
+    <string name="roadsense_map_move_stop_down">Přesunout zastávku dolů</string>
+    <string name="roadsense_map_max_stops">Povoleno až %1$d zastávek</string>
+    <string name="roadsense_map_theme_toggle">Motiv mapy</string>
     <string name="roadsense_map_theme_auto">Motiv mapy: Auto</string>
-    <string name="roadsense_map_theme_light">Mapový motiv: slabý</string>
+    <string name="roadsense_map_theme_light">Motiv mapy: Světlý</string>
     <string name="roadsense_map_theme_dark">Motiv mapy: Tmavý</string>
-    <!-- Saved places (Home / Work / custom favourites) -->
-    <string name="roadsense_map_saved_home">Domů</string>
+    <string name="roadsense_map_saved_home">Domov</string>
     <string name="roadsense_map_saved_work">Práce</string>
     <string name="roadsense_map_saved_set_home">Nastavit domov</string>
     <string name="roadsense_map_saved_set_work">Nastavit práci</string>
-    <!-- Short action label for the "save as a custom favourite" button. -->
-    <string name="roadsense_map_saved_favourite">Oblíbená</string>
+    <string name="roadsense_map_saved_favourite">Oblíbené</string>
     <string name="roadsense_map_save_place">Uložit místo</string>
-    <string name="roadsense_map_save_as_home">Uložit jako Domů</string>
+    <string name="roadsense_map_save_as_home">Uložit jako domov</string>
     <string name="roadsense_map_save_as_work">Uložit jako práci</string>
     <string name="roadsense_map_save_as_custom">Uložit jako oblíbené…</string>
     <string name="roadsense_map_saved_added">Uloženo</string>
-    <string name="roadsense_map_saved_removed">Odstraněno z uloženého</string>
+    <string name="roadsense_map_saved_removed">Odebráno z uložených</string>
     <string name="roadsense_map_saved_remove">Odebrat</string>
-    <string name="roadsense_map_recent_remove">Odstranit z nedávných aplikací</string>
-    <string name="roadsense_map_recent_removed">Odebráno z nedávných aplikací</string>
-    <string name="roadsense_map_custom_label_hint">Štítek (např. Gym, Mum\'s)</string>
-    <string name="roadsense_map_custom_label_title">Název tohoto místa</string>
+    <string name="roadsense_map_recent_remove">Odebrat z nedávných</string>
+    <string name="roadsense_map_recent_removed">Odebráno z nedávných</string>
+    <string name="roadsense_map_custom_label_hint">Štítek (např. Posilovna, Maminka)</string>
+    <string name="roadsense_map_custom_label_title">Pojmenujte toto místo</string>
     <string name="roadsense_map_save">Uložit</string>
     <string name="roadsense_map_cancel">Zrušit</string>
-    <!-- Place-action sheet (long-press the map or a search result to save/navigate) -->
-    <string name="roadsense_map_dropped_pin">Odstraněný pin</string>
-    <string name="roadsense_map_navigate_here">Navigovat zde</string>
-    <!-- Shown after tapping an unset Home/Work chip: search picks the place to save. -->
-    <string name="roadsense_map_search_to_save">Hledat místo, které chcete nastavit jako %1$s</string>
-    <!-- Shown when re-entering the map with a previously-set trip restored. -->
-    <string name="roadsense_map_trip_restored">Jízda obnovena</string>
-    <!-- dialog_cloudflared_settings -->
-    <string name="cloudflared_token_storage_note">Token je bezpečně uložen a sdílen mezi aplikací a procesy démona.</string>
-    <string name="cloudflared_token_hint">Zadejte token cloudflared</string>
+    <string name="roadsense_map_dropped_pin">Umístěný bod</string>
+    <string name="roadsense_map_navigate_here">Navigovat sem</string>
+    <string name="roadsense_map_search_to_save">Najděte místo, které chcete nastavit jako %1$s</string>
+    <string name="roadsense_map_trip_restored">Trasa obnovena</string>
+    <string name="cloudflared_token_storage_note">Token je uložen šifrovaně a sdílen mezi aplikací a procesy služby.</string>
+    <string name="cloudflared_token_hint">Zadejte token Cloudflared</string>
     <string name="cloudflare_paid_version">Placená verze Cloudflare</string>
     <string name="dialog_cloudflared_settings_title">🌐 Nastavení Cloudflared</string>
     <string name="dialog_cloudflared_settings_message">Definujte, zda používáte placený Cloudflare nebo trycloudflare. Pokud používáte placený Cloudflare, zadejte svůj token tunelu.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Pokud je nastavena placená verze, token nemůže být prázdný</string>
     <string name="toast_cloudflared_saved_settings">Nastavení Cloudflared uloženo</string>
-    <!-- Rail category headers -->
     <string name="rail_section_cameras">Kamery</string>
     <string name="rail_section_controls">Ovládání</string>
     <string name="rail_section_driving">Jízda</string>
     <string name="rail_section_automation">Automatizace</string>
     <string name="rail_section_system">Systém</string>
     <string name="rail_collapse_label">Sbalit</string>
+    <string name="settings_overlay_roadsense_title">Překryv RoadSense</string>
+    <string name="settings_overlay_roadsense_subtitle">Zobrazit plovoucí štítek RoadSense a kartu s nebezpečími, když je funkce RoadSense zapnutá.</string>
 </resources>

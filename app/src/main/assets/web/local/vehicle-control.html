@@ -10,7 +10,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=6"></script>
+    <script src="../shared/theme.js?v=8"></script>
     <script src="../shared/skeleton.js?v=4"></script>
     <!-- View-mode bootstrap. Runs before first paint so the lite/immersive
          chrome renders without flicker. 'lite' (default) boots controls-only:
@@ -30,9 +30,9 @@
             }
         })();
     </script>
-    <script src="../shared/app-shell.js?v=5"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=32">
-    <link rel="stylesheet" href="../shared/vehicle-control.css?v=42">
+    <script src="../shared/app-shell.js?v=7"></script>
+    <link rel="stylesheet" href="../shared/styles.css?v=34">
+    <link rel="stylesheet" href="../shared/vehicle-control.css?v=47">
 </head>
 <body>
     <div class="app-layout">
@@ -70,7 +70,7 @@
                     <div class="vc-status-bar">
                         <div class="vc-status-slot vc-status-slot--start">
                             <div class="vc-pill compact-status-pill is-sk">
-                                <span class="dot grey compact-status-pill__dot"></span><span id="lockStatus">NO DATA</span>
+                                <span class="dot grey compact-status-pill__dot"></span><span id="lockStatus" data-i18n="vehicle.tyre_no_data">NO DATA</span>
                                 <div class="sk sk-cover vc-sk-pill" data-sk-group="vcLock"></div>
                             </div>
                         </div>
@@ -100,7 +100,7 @@
                         </div>
                         <div class="vc-status-slot vc-status-slot--end">
                             <div class="vc-pill compact-status-pill is-sk" id="cloudStatus">
-                                <span class="dot amber compact-status-pill__dot"></span><span id="cloudStatusText">Checking...</span>
+                                <span class="dot amber compact-status-pill__dot"></span><span id="cloudStatusText" data-i18n="vehicle.checking">Checking...</span>
                                 <div class="sk sk-cover vc-sk-pill" data-sk-group="vcCloud"></div>
                             </div>
                         </div>
@@ -125,19 +125,26 @@
                         </div>
                     </div>
 
-                    <!-- Custom paint picker. Presets plus a hex field, because
-                         <input type="color"> opens the OS picker, which arrives
-                         with its own unstyleable chrome. -->
+                    <!-- Custom paint picker. Phones get their native colour
+                         surface; the hex field remains the head-unit fallback. -->
                     <div class="vc-modal-overlay" id="colorModal">
                         <div class="vc-modal" role="dialog" aria-modal="true" aria-labelledby="colorModalTitle">
                             <div class="vc-modal-title" id="colorModalTitle" data-i18n="vehicle.color_custom">Custom color</div>
-                            <div class="vc-color-grid" id="colorModalGrid"></div>
+                            <div class="vc-color-spectrum" id="colorModalSpectrum"
+                                 role="slider" tabindex="0" aria-labelledby="colorModalTitle"
+                                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                                <span class="vc-color-spectrum-thumb" id="colorModalSpectrumThumb" aria-hidden="true"></span>
+                            </div>
+                            <input type="range" class="vc-color-hue" id="colorModalHue"
+                                   min="0" max="360" step="1" value="0"
+                                   aria-labelledby="colorModalTitle" />
                             <div class="vc-color-hex-row">
-                                <span class="vc-color-preview" id="colorModalPreview"></span>
+                                <span class="vc-color-preview" id="colorModalPreview" aria-hidden="true"></span>
                                 <input type="text" class="vc-color-hex" id="colorModalHex"
                                        maxlength="7" spellcheck="false" autocomplete="off"
                                        value="#E8E8EC" aria-labelledby="colorModalTitle" />
                             </div>
+                            <div class="vc-color-grid" id="colorModalGrid"></div>
                             <div class="vc-modal-actions">
                                 <button class="vc-modal-btn" id="colorModalCancel" data-i18n="common.cancel">Cancel</button>
                                 <button class="vc-modal-btn primary" id="colorModalApply" data-i18n="common.apply">Apply</button>
@@ -351,6 +358,20 @@
                                 <span data-i18n="vehicle.avas_unavailable">Exterior speaker unavailable — enable AVAS in vehicle settings and wake the car.</span>
                             </div>
                         </div>
+                        <!-- Head-unit system controls. Reboot is confirmed client-side and
+                             independently rejected server-side unless the vehicle is parked. -->
+                        <div class="vc-panel-row" id="panelSystem" style="display:none;">
+                            <button class="vc-tile" id="btnIviReboot"
+                                    title="Reboot IVI (parked only)"
+                                    style="color:var(--status-danger);border-color:var(--status-danger);">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M20 11a8.1 8.1 0 1 1-2.3-5.7"/>
+                                    <path d="M20 4v7h-7"/>
+                                </svg>
+                                <span>Reboot IVI</span>
+                            </button>
+                        </div>
                         <!-- Seats controls -->
                         <div class="vc-panel-row" id="panelSeats" style="display:none;">
                             <button class="vc-tile heat" id="btnSeatHeat1" title="Left seat heat" data-i18n-attr="title:vehicle.driver_heat">
@@ -440,9 +461,9 @@
                                 <div class="vc-window-presets">
                                     <button class="vc-preset" id="btnWinAllClose" title="All Windows Closed">0%</button>
                                     <button class="vc-preset" id="btnWinAllOpen" title="All Windows Open">100%</button>
-                                    <!-- Cloud-only: BYD's OPENWINDOW has no SDK equivalent, so this
-                                         preset carries the cloud marker its neighbours don't. -->
-                                    <button class="vc-preset" id="btnWinAllVent" title="Vent all windows" data-i18n-attr="title:vehicle.vent_all_windows" data-requires-cloud="true" data-i18n="vehicle.vent">Vent</button>
+                                    <!-- Hybrid vent: local closed-loop 15% while awake, BYD
+                                         OPENWINDOW through cloud when the vehicle is remote. -->
+                                    <button class="vc-preset" id="btnWinAllVent" title="Vent all windows" data-i18n-attr="title:vehicle.vent_all_windows" data-i18n="vehicle.vent">Vent</button>
                                 </div>
                             </div>
                             <div class="vc-window-row" data-area="sunroof" data-area-num="5">
@@ -555,7 +576,7 @@
                                         <button class="vc-seg" data-state="2" disabled>8 A</button>
                                         <button class="vc-seg" data-state="3" disabled>10 A</button>
                                         <button class="vc-seg" data-state="4" disabled>16 A</button>
-                                        <button class="vc-seg" data-state="5" disabled>Max</button>
+                                        <button class="vc-seg" data-state="5" disabled data-i18n="vehicle_control.ac_max">Max</button>
                                     </div>
                                 </section>
                             </div>
@@ -610,6 +631,16 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
                             <span data-i18n="vehicle.tab_sound">Sound</span>
                         </button>
+                        <button class="vc-tab" data-panel="panelSystem"
+                                onclick="VC.togglePanel('panelSystem', this)">
+                            <span class="tab-dot"></span>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M20 11a8.1 8.1 0 1 1-2.3-5.7"/>
+                                <path d="M20 4v7h-7"/>
+                            </svg>
+                            <span>System</span>
+                        </button>
                     </div>
                     </div>
                 </div>
@@ -656,7 +687,7 @@
                 '../shared/vendor/gsap.min.js?v=12'
             ];
             var chain = window.VC_LITE ? [] : window.VC_VENDOR_CHAIN.slice();
-            chain.push('../shared/vehicle-control.js?v=vclite26');
+            chain.push('../shared/vehicle-control.js?v=vclite31');
             for (var i = 0; i < chain.length; i++) {
                 var s = document.createElement('script');
                 s.src = chain[i];

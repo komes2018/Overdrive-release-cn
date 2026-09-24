@@ -5,6 +5,7 @@ import com.overdrive.app.logging.DaemonLogger;
 import java.io.RandomAccessFile;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
@@ -13,7 +14,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * Daemon-side bridge that dispatches mirror-fold / HUD to {@code VehicleActuatorService} and
  * powertrain mode to its isolated {@code EnergyModeActuatorService}, so each write uses a real app
  * Context (UID 10xxx) — the environment where the OEM {@code setMirrorFoldState} /
- * {@code setHUDBrightness} calls (and the HUD-switch feature-id write) actually actuate.
+ * {@code setHudBrightness} calls (and the HUD-switch feature-id write) actually actuate.
  * The daemon's own mirror/HUD attempts (see {@link BydDataCollector#setMirrorsFolded}
  * / {@link BydDataCollector#setHudBrightness}) run independently; whichever environment the
  * HAL honours wins. Powertrain launches are synchronous and serialized so launch acceptance is
@@ -30,6 +31,28 @@ public final class VehicleActuatorBridge {
             "com.overdrive.app/.services.VehicleActuatorService";
     private static final String ENERGY_SERVICE =
             "com.overdrive.app/.services.EnergyModeActuatorService";
+    private static final long DILINK5_BRIDGE_TIMEOUT_MS = 10_000L;
+    public static final String DILINK5_BRIDGE_ACTION = "dilink5_bridge";
+    public static final String DILINK5_BRIDGE_OPERATION = "bridge_operation";
+    public static final String DILINK5_BRIDGE_RESULT = "bridge_result";
+    public static final String DILINK5_BRIDGE_DEADLINE = "bridge_deadline";
+    public static final String DILINK5_MODE_GENERATION = "bridge_mode_generation";
+    public static final String DILINK5_ACC_AUTHORITATIVE = "bridge_acc_authoritative";
+    public static final String DILINK5_ACC_ON = "bridge_acc_on";
+    public static final String DILINK5_VEHICLE_COMMAND = "vehicle_command";
+    public static final String DILINK5_POSITION_READ = "position_read";
+    public static final String DILINK5_POSITION_APPLY = "position_apply";
+    public static final String DILINK5_POSITION_WRITE = "position_write";
+    public static final String DILINK5_POSITION_OVERRIDES = "position_overrides";
+    public static final String DILINK5_POSITION_IDS = "position_ids";
+    public static final String DILINK5_POSITION_VALUES = "position_values";
+    public static final String DILINK5_AMBIENT_READ = "ambient_read";
+    public static final String DILINK5_AMBIENT_APPLY = "ambient_apply";
+    public static final String DILINK5_AMBIENT_COLOUR_MAX = "ambient_colour_max";
+    public static final String DILINK5_AMBIENT_STATE = "ambient_state";
+    public static final String DILINK5_RESULT_SETPOINT = "result_setpoint";
+    private static final ThreadLocal<DiLink5RequestScope> DILINK5_REQUEST_SCOPE =
+            new ThreadLocal<>();
     private static final EnergyGenerationGate ENERGY_GENERATIONS = new EnergyGenerationGate();
     private static final long ENERGY_LAUNCH_TIMEOUT_MS = 1500L;
     private static final long ENERGY_STANDALONE_TIMEOUT_MS = 6000L;
@@ -87,8 +110,377 @@ public final class VehicleActuatorBridge {
 
     private VehicleActuatorBridge() {}
 
+    public static <T> T runDiLink5Request(
+            long deadlineElapsedMs,
+            String modeGeneration,
+            boolean accAuthoritative,
+            boolean accOn,
+            Callable<T> action)
+            throws Exception {
+        DiLink5RequestScope previous = DILINK5_REQUEST_SCOPE.get();
+        DILINK5_REQUEST_SCOPE.set(
+                new DiLink5RequestScope(
+                        deadlineElapsedMs,
+                        modeGeneration,
+                        accAuthoritative,
+                        accOn));
+        try {
+            if (isDiLink5RequestExpired()) {
+                throw new IllegalStateException("vehicle mode changed or request expired");
+            }
+            return action.call();
+        } finally {
+            if (previous == null) {
+                DILINK5_REQUEST_SCOPE.remove();
+            } else {
+                DILINK5_REQUEST_SCOPE.set(previous);
+            }
+        }
+    }
+
+    public static boolean isDiLink5RequestExpired() {
+        DiLink5RequestScope scope = DILINK5_REQUEST_SCOPE.get();
+        return scope != null
+                && (scope.modeGeneration == null
+                    || scope.modeGeneration.isEmpty()
+                    || isDiLink5RequestExpired(scope.deadlineElapsedMs)
+                    || !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                    || !com.overdrive.app.camera.dilink5.DiLink5Platform
+                            .matchesActiveModeGeneration(scope.modeGeneration));
+    }
+
+    public static boolean isDiLink5RequestExpired(long deadlineElapsedMs) {
+        return deadlineElapsedMs > 0L
+                && android.os.SystemClock.elapsedRealtime() >= deadlineElapsedMs;
+    }
+
+    public static long currentDiLink5RequestDeadline() {
+        DiLink5RequestScope scope = DILINK5_REQUEST_SCOPE.get();
+        return scope != null ? scope.deadlineElapsedMs : 0L;
+    }
+
+    public static boolean hasDiLink5RequestScope() {
+        return DILINK5_REQUEST_SCOPE.get() != null;
+    }
+
+    public static Boolean currentDiLink5RequestAccOn() {
+        DiLink5RequestScope scope = DILINK5_REQUEST_SCOPE.get();
+        return scope != null && scope.accAuthoritative
+                ? Boolean.valueOf(scope.accOn) : null;
+    }
+
+    private static final class DiLink5RequestScope {
+        final long deadlineElapsedMs;
+        final String modeGeneration;
+        final boolean accAuthoritative;
+        final boolean accOn;
+
+        DiLink5RequestScope(
+                long deadlineElapsedMs,
+                String modeGeneration,
+                boolean accAuthoritative,
+                boolean accOn) {
+            this.deadlineElapsedMs = deadlineElapsedMs;
+            this.modeGeneration = modeGeneration;
+            this.accAuthoritative = accAuthoritative;
+            this.accOn = accOn;
+        }
+    }
+
+    public static boolean dispatchDiLink5Command(
+            android.content.Context context,
+            com.overdrive.app.byd.routing.VehicleCommandRouter.VehicleCommand command) {
+        if (command == null) return false;
+        android.content.Intent intent = newDiLink5BridgeIntent(DILINK5_VEHICLE_COMMAND);
+        intent.putExtra(DILINK5_VEHICLE_COMMAND, command);
+        android.os.Bundle result = dispatchDiLink5Request(context, intent);
+        if (result != null) {
+            applyDiLink5CommandResult(
+                    command,
+                    result.getInt(
+                            DILINK5_RESULT_SETPOINT,
+                            com.overdrive.app.byd.BydVehicleData.UNAVAILABLE));
+        }
+        return result != null && result.getBoolean("success", false);
+    }
+
+    static void applyDiLink5CommandResult(
+            com.overdrive.app.byd.routing.VehicleCommandRouter.VehicleCommand command,
+            int resultSetpoint) {
+        if (command
+                instanceof com.overdrive.app.byd.routing.VehicleCommandRouter
+                        .ClimateStepTempCommand) {
+            ((com.overdrive.app.byd.routing.VehicleCommandRouter.ClimateStepTempCommand) command)
+                    .resultSetpoint = resultSetpoint;
+        }
+    }
+
+    public static org.json.JSONObject readDiLink5Position(android.content.Context context) {
+        return dispatchDiLink5Json(
+                context, newDiLink5BridgeIntent(DILINK5_POSITION_READ));
+    }
+
+    public static org.json.JSONObject applyDiLink5Position(
+            android.content.Context context, java.util.Map<String, Float> overrides) {
+        android.content.Intent intent = newDiLink5BridgeIntent(DILINK5_POSITION_APPLY);
+        intent.putExtra(
+                DILINK5_POSITION_OVERRIDES,
+                new java.util.HashMap<>(overrides != null
+                        ? overrides : java.util.Collections.emptyMap()));
+        return dispatchDiLink5Json(context, intent);
+    }
+
+    public static org.json.JSONObject writeDiLink5Position(
+            android.content.Context context, int[] ids, float[] values) {
+        android.content.Intent intent = newDiLink5BridgeIntent(DILINK5_POSITION_WRITE);
+        intent.putExtra(DILINK5_POSITION_IDS, ids);
+        intent.putExtra(DILINK5_POSITION_VALUES, values);
+        return dispatchDiLink5Json(context, intent);
+    }
+
+    public static org.json.JSONObject readDiLink5Ambient(
+            android.content.Context context) {
+        return dispatchDiLink5Json(
+                context, newDiLink5BridgeIntent(DILINK5_AMBIENT_READ));
+    }
+
+    public static org.json.JSONObject applyDiLink5Ambient(
+            android.content.Context context, org.json.JSONObject ambient) {
+        android.content.Intent intent = newDiLink5BridgeIntent(DILINK5_AMBIENT_APPLY);
+        intent.putExtra(
+                DILINK5_AMBIENT_STATE,
+                ambient != null ? ambient.toString() : null);
+        org.json.JSONObject result = dispatchDiLink5Json(context, intent);
+        if (!result.has("applied")) {
+            try {
+                result.put("applied", false);
+            } catch (org.json.JSONException ignored) {
+            }
+        }
+        return result;
+    }
+
+    public static int readDiLink5AmbientColourMax(
+            android.content.Context context) {
+        android.os.Bundle result = dispatchDiLink5Request(
+                context, newDiLink5BridgeIntent(DILINK5_AMBIENT_COLOUR_MAX));
+        return result != null && result.getBoolean("success", false)
+                ? result.getInt(DILINK5_AMBIENT_COLOUR_MAX, 31)
+                : 31;
+    }
+
+    private static android.content.Intent newDiLink5BridgeIntent(String operation) {
+        android.content.Intent intent = new android.content.Intent();
+        intent.setComponent(new android.content.ComponentName(
+                "com.overdrive.app",
+                "com.overdrive.app.services.VehicleActuatorService"));
+        intent.putExtra("action", DILINK5_BRIDGE_ACTION);
+        intent.putExtra(DILINK5_BRIDGE_OPERATION, operation);
+        return intent;
+    }
+
+    private static org.json.JSONObject dispatchDiLink5Json(
+            android.content.Context context, android.content.Intent intent) {
+        android.os.Bundle result = dispatchDiLink5Request(context, intent);
+        if (result != null) {
+            String json = result.getString("json");
+            if (json != null) {
+                try {
+                    return new org.json.JSONObject(json);
+                } catch (org.json.JSONException ignored) {
+                }
+            }
+        }
+        try {
+            return new org.json.JSONObject()
+                    .put("accepted", false)
+                    .put("error", "app-process vehicle bridge unavailable");
+        } catch (org.json.JSONException impossible) {
+            return new org.json.JSONObject();
+        }
+    }
+
+    private static android.os.Bundle dispatchDiLink5Request(
+            android.content.Context context, android.content.Intent intent) {
+        com.overdrive.app.camera.dilink5.DiLink5Platform.refreshActiveMode();
+        if (context == null
+                || !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            return null;
+        }
+        String modeGeneration =
+                com.overdrive.app.camera.dilink5.DiLink5Platform
+                        .currentActiveModeGeneration();
+        if (modeGeneration == null) {
+            logger.warn("DI5 app-process vehicle request refused: active mode marker unavailable");
+            return null;
+        }
+        android.content.Context startContext = context.getApplicationContext();
+        if (startContext == null) startContext = context;
+        CountDownLatch done = new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicReference<android.os.Bundle> response =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        long bridgeDeadline;
+        boolean accAuthoritative;
+        boolean accOn;
+        synchronized (com.overdrive.app.monitor.AccMonitor.class) {
+            long nowElapsedMs = android.os.SystemClock.elapsedRealtime();
+            bridgeDeadline =
+                    nowElapsedMs + DILINK5_BRIDGE_TIMEOUT_MS - 500L;
+            long accFreshUntil =
+                    com.overdrive.app.monitor.AccMonitor
+                            .accStateFreshUntilForSafety();
+            accAuthoritative =
+                    com.overdrive.app.monitor.AccMonitor.isAccStateAuthoritative()
+                            && nowElapsedMs < accFreshUntil;
+            accOn = accAuthoritative
+                    && com.overdrive.app.monitor.AccMonitor.isAccOn();
+            bridgeDeadline = capDeadlineToAccFreshness(
+                    bridgeDeadline, accAuthoritative, accFreshUntil);
+        }
+        intent.putExtra(DILINK5_BRIDGE_DEADLINE, bridgeDeadline);
+        intent.putExtra(DILINK5_MODE_GENERATION, modeGeneration);
+        intent.putExtra(DILINK5_ACC_AUTHORITATIVE, accAuthoritative);
+        intent.putExtra(DILINK5_ACC_ON, accOn);
+        intent.putExtra(DILINK5_BRIDGE_RESULT, new android.os.ResultReceiver(null) {
+            @Override protected void onReceiveResult(
+                    int resultCode, android.os.Bundle resultData) {
+                response.set(resultData);
+                done.countDown();
+            }
+        });
+        try {
+            android.content.ComponentName started = null;
+            Throwable directFailure = null;
+            try {
+                started = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O
+                        ? startContext.startForegroundService(intent)
+                        : startContext.startService(intent);
+            } catch (Throwable directStart) {
+                directFailure = directStart;
+            }
+            if (started == null) {
+                // Field evidence (on-car log, 16:05): AMS rejects the daemon's
+                // synthetic-context start with "Unable to find app for caller
+                // ... when starting service" — the forged IApplicationThread
+                // has no ProcessRecord. The `am` command succeeds on the same
+                // firmware because it calls IActivityManager.startService with
+                // a NULL caller and shell attribution. Mirror exactly that
+                // call so the live ResultReceiver and Parcelable extras stay
+                // intact (they cannot be marshalled through `am` string
+                // extras). UID-2000 only; a real app process never takes it.
+                started = startDiLink5ServiceAsShell(startContext, intent);
+                if (started != null) {
+                    logger.info("DI5 app-process vehicle request started via "
+                            + "shell-identity ActivityManager fallback");
+                } else if (directFailure != null) {
+                    logger.warn("DI5 app-process vehicle request failed: "
+                            + directFailure.getMessage());
+                    return null;
+                }
+            }
+            if (started == null
+                    || !done.await(DILINK5_BRIDGE_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                logger.warn("DI5 app-process vehicle request timed out");
+                return null;
+            }
+            return response.get();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (Throwable failure) {
+            logger.warn("DI5 app-process vehicle request failed: " + failure.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Shell-identity ActivityManager start for the synchronous DI5 bridge.
+     *
+     * <p>Replicates the working half of the {@code am start-foreground-service}
+     * path this class already uses for mirror/HUD/energy launches: a NULL
+     * {@code IApplicationThread} caller (AMS treats the start as a non-app
+     * caller and skips the ProcessRecord lookup that rejects the daemon's
+     * synthetic context) with {@code com.android.shell} attribution, which is
+     * the package UID 2000 actually owns — the same identity rule
+     * {@link #callExternalGlobalSetting} relies on. Unlike the subprocess
+     * path, the original Intent object crosses untouched, so the
+     * ResultReceiver response channel and Parcelable command extras keep
+     * working. Fails soft: any signature mismatch or rejection returns null
+     * and the caller degrades exactly as before this fallback existed.
+     */
+    private static android.content.ComponentName startDiLink5ServiceAsShell(
+            android.content.Context context, android.content.Intent intent) {
+        if (android.os.Process.myUid() != ANDROID_SHELL_UID) return null;
+        try {
+            try {
+                com.overdrive.app.shell.HiddenApiBypass.INSTANCE.bypass();
+            } catch (Throwable ignored) {
+                // The daemon normally enables this during bootstrap.
+            }
+            Class<?> activityManagerClass = Class.forName("android.app.ActivityManager");
+            Object activityManager =
+                    activityManagerClass.getMethod("getService").invoke(null);
+            if (activityManager == null) return null;
+            String resolvedType =
+                    intent.resolveTypeIfNeeded(context.getContentResolver());
+            int userId = userIdForUid(ANDROID_SHELL_UID);
+            for (java.lang.reflect.Method candidate
+                    : activityManager.getClass().getMethods()) {
+                if (!"startService".equals(candidate.getName())) continue;
+                Class<?>[] parameters = candidate.getParameterTypes();
+                Object[] arguments;
+                if (parameters.length == 7
+                        && parameters[1] == android.content.Intent.class
+                        && parameters[2] == String.class
+                        && parameters[3] == boolean.class
+                        && parameters[4] == String.class
+                        && parameters[5] == String.class
+                        && parameters[6] == int.class) {
+                    // Android 11 / API 30: startService(caller, intent, resolvedType,
+                    // requireForeground, callingPackage, callingFeatureId, userId)
+                    arguments = new Object[]{null, intent, resolvedType, Boolean.TRUE,
+                            "com.android.shell", null, userId};
+                } else if (parameters.length == 6
+                        && parameters[1] == android.content.Intent.class
+                        && parameters[2] == String.class
+                        && parameters[3] == boolean.class
+                        && parameters[4] == String.class
+                        && parameters[5] == int.class) {
+                    // Android 8-10: startService(caller, intent, resolvedType,
+                    // requireForeground, callingPackage, userId)
+                    arguments = new Object[]{null, intent, resolvedType, Boolean.TRUE,
+                            "com.android.shell", userId};
+                } else {
+                    continue;
+                }
+                Object component = candidate.invoke(activityManager, arguments);
+                return component instanceof android.content.ComponentName
+                        ? (android.content.ComponentName) component : null;
+            }
+            logger.warn("DI5 shell-identity start unavailable: no matching "
+                    + "IActivityManager.startService signature on this firmware");
+            return null;
+        } catch (java.lang.reflect.InvocationTargetException invocation) {
+            Throwable cause = invocation.getCause() != null
+                    ? invocation.getCause() : invocation;
+            logger.warn("DI5 shell-identity start rejected: " + cause.getMessage());
+            return null;
+        } catch (Throwable failed) {
+            logger.warn("DI5 shell-identity start failed: " + failed.getMessage());
+            return null;
+        }
+    }
+
+    static long capDeadlineToAccFreshness(
+            long requestDeadline, boolean accAuthoritative, long accFreshUntil) {
+        return accAuthoritative
+                ? Math.min(requestDeadline, accFreshUntil)
+                : requestDeadline;
+    }
+
     /** Also fold/unfold the mirrors from the app process (the OEM's environment). */
     public static void dispatchMirror(boolean fold) {
+        if (hasDiLink5RequestScope()) return;
         exec("am start-foreground-service -n " + SERVICE
                 + " --es action mirror"
                 + " --ez fold " + fold);
@@ -97,6 +489,7 @@ public final class VehicleActuatorBridge {
 
     /** Retry the persistent OEM auto mirror follow-up setting from the app process. */
     public static void dispatchAutoExternalRearMirrorFollowUp(boolean enabled) {
+        if (hasDiLink5RequestScope()) return;
         exec("am start-foreground-service -n " + SERVICE
                 + " --es action mirror_auto_follow_up"
                 + " --ez enabled " + enabled);
@@ -106,7 +499,7 @@ public final class VehicleActuatorBridge {
 
     /** Also set HUD brightness level (0..100) from the app process. */
     public static void dispatchHud(int level) {
-        if (level < 0 || level > 100) return;
+        if (hasDiLink5RequestScope() || level < 0 || level > 100) return;
         exec("am start-foreground-service -n " + SERVICE
                 + " --es action hud"
                 + " --ei level " + level);
@@ -116,6 +509,7 @@ public final class VehicleActuatorBridge {
     /** Set the dedicated HUD power switch (on/off) from the app process — distinct from
      *  brightness. The service writes SET_HUD_SWITCH_SET (1=on/2=off) where it actuates. */
     public static void dispatchHudPower(boolean on) {
+        if (hasDiLink5RequestScope()) return;
         exec("am start-foreground-service -n " + SERVICE
                 + " --es action hud_power"
                 + " --ez on " + on);
@@ -130,7 +524,8 @@ public final class VehicleActuatorBridge {
      * covers firmware that accepts Setting-device calls from UID 2000 without actuating them.
      */
     public static void dispatchAcChargeCurrentLimit(int state) {
-        if (state < BydDataCollector.AC_CHARGE_CURRENT_6A
+        if (hasDiLink5RequestScope()
+                || state < BydDataCollector.AC_CHARGE_CURRENT_6A
                 || state > BydDataCollector.AC_CHARGE_CURRENT_MAX) {
             return;
         }
@@ -161,6 +556,7 @@ public final class VehicleActuatorBridge {
      */
     public static boolean dispatchEnergyMode(
             android.content.Context context, int mode, long generation) {
+        if (hasDiLink5RequestScope()) return false;
         android.content.Context appContext =
                 context != null ? context.getApplicationContext() : null;
         if (appContext == null) appContext = context;
@@ -202,7 +598,7 @@ public final class VehicleActuatorBridge {
 
     private static boolean dispatchStandaloneMode(
             android.content.Context context, String command, String tag, boolean fenced) {
-        if (command == null || context == null) return false;
+        if (hasDiLink5RequestScope() || command == null || context == null) return false;
         String classpath;
         try {
             classpath = context.getApplicationInfo().sourceDir;
@@ -326,8 +722,10 @@ public final class VehicleActuatorBridge {
         try (RandomAccessFile lockFile = openEnergyStateLockFile();
              FileChannel lockChannel = lockFile.getChannel()) {
             FileLock stateLock = acquireEnergyStateLock(lockChannel, null);
-            if (stateLock == null) return null;
-              try {
+            if (stateLock == null) {
+                return null;
+            }
+            try {
                   long now = android.os.SystemClock.elapsedRealtimeNanos();
                   CoordinateRead coordinate = readCoordinateEnergyMarkerUnlocked(boot);
                   if (coordinate.status == CoordinateStatus.INACCESSIBLE) return null;
@@ -1697,8 +2095,10 @@ public final class VehicleActuatorBridge {
         try (RandomAccessFile lockFile = openEnergyStateLockFile();
              FileChannel lockChannel = lockFile.getChannel()) {
               FileLock stateLock = acquireEnergyStateLock(lockChannel, null);
-              if (stateLock == null) return CoordinateRead.unreadable();
-                try {
+              if (stateLock == null) {
+                  return CoordinateRead.unreadable();
+              }
+              try {
                     CoordinateRead current = readCoordinateEnergyMarkerUnlocked(boot);
                     if (current.status == CoordinateStatus.INACCESSIBLE) return current;
                     if (fence.exact) {
@@ -1973,24 +2373,26 @@ public final class VehicleActuatorBridge {
         return mode == 1 || mode == 3;
     }
 
-    /** Map the public EV/HEV command to the OEM selector used by the vehicle's own UI. */
-    public static int mandatoryElectricStateForEnergyMode(int mode) {
-        if (mode == 1) return 2; // EV -> mandatory electric
-        if (mode == 3) return 1; // HEV -> intelligent
+    /** Raw ENERGY_MODE_SET encoding used below the public setEnergyMode(int) wrapper. */
+    public static int rawEnergyModeValue(int mode) {
+        if (mode == 1) return 1; // EV
+        if (mode == 3) return 2; // HEV; the public wrapper remaps API value 3 to raw value 2
         return -1;
     }
 
-    /** Convert the OEM selector readback to the public EV/HEV command domain. */
+    /** Map the legacy EV/HEV command to its persistent preference selector. */
+    public static int mandatoryElectricStateForEnergyMode(int mode) {
+        if (mode == 1) return 2;
+        if (mode == 3) return 1;
+        return -1;
+    }
+
     public static int energyModeForMandatoryElectricState(int state) {
         if (state == 2) return 1;
         if (state == 1) return 3;
         return -1;
     }
 
-    /**
-     * Read the OEM EV/HEV selector. Feature IDs are device-scoped: on the Energy device,
-     * 2665/2667 are the mandatory-electric read/write pair.
-     */
     public static int readMandatoryElectricState(Object energyDevice) {
         if (energyDevice == null) return -1;
         try {
@@ -2002,14 +2404,13 @@ public final class VehicleActuatorBridge {
                 if (state == 1 || state == 2) return state;
             }
         } catch (Throwable unavailable) {
-            // Older runtime wrappers expose this selector only through generic feature IDs.
+            // Older wrappers expose this selector only through generic feature IDs.
         }
         Object value = BydDeviceHelper.callGet(energyDevice, 2665, Integer.TYPE);
         int state = BydDeviceHelper.getIntValue(value);
         return state == 1 || state == 2 ? state : -1;
     }
 
-    /** Write the OEM selector through both supported SDK surfaces; readback remains authoritative. */
     public static int writeMandatoryElectricState(Object energyDevice, int state) {
         if (energyDevice == null || state < 1 || state > 2) return Integer.MIN_VALUE;
         int namedResult = Integer.MIN_VALUE;
@@ -2021,10 +2422,25 @@ public final class VehicleActuatorBridge {
                     ? ((Number) result).intValue()
                     : result instanceof Boolean && !((Boolean) result) ? -1 : 0;
         } catch (Throwable unavailable) {
-            // The generic Energy feature is the actual path on older runtime wrappers.
+            // The generic feature remains the compatibility path.
         }
-        int genericResult = BydDeviceHelper.sendSetCommandRaw(energyDevice, 2667, state);
+        int genericResult = BydDeviceHelper.sendSetCommandRaw(
+                energyDevice, 2667, state);
         return genericResult != Integer.MIN_VALUE ? genericResult : namedResult;
+    }
+
+    /**
+     * Write the exact Energy feature used by the public SDK, without the unsupported 2665/2667
+     * selector guess. Physical success is still determined by getEnergyMode() readback.
+     */
+    public static int writeEnergyModeRaw(Object energyDevice, int mode) {
+        int rawValue = rawEnergyModeValue(mode);
+        if (energyDevice == null || rawValue < 0
+                || !BydFeatureIds.isResolved(BydFeatureIds.ENERGY_MODE_SET)) {
+            return Integer.MIN_VALUE;
+        }
+        return BydDeviceHelper.sendSetCommandRaw(
+                energyDevice, BydFeatureIds.ENERGY_MODE_SET, rawValue);
     }
 
     static boolean isPlausibleEnergyGeneration(long generation, long nowNanos) {

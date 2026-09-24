@@ -11,6 +11,7 @@ import android.opengl.GLES20;
 import android.os.Handler;
 import android.os.HandlerThread;
 
+import com.overdrive.app.camera.dilink5.DiLink5Platform;
 import com.overdrive.app.logging.DaemonLogger;
 
 import java.io.ByteArrayOutputStream;
@@ -68,13 +69,21 @@ public final class HighResPreviewSampler {
             "    vTexCoord = (uTexMatrix * vec4(src, 0.0, 1.0)).xy;\n" +
             "}\n";
 
-    private static String buildMosaicShader(float[] offsets) {
+    private static String buildMosaicShader(
+            float[] offsets,
+            boolean isTexture2D) {
         // Layout 1 = full-frame passthrough. Layout 3 = four-corner DiLink 4
         // output with the configured inset. Layout 0 = legacy 4-strip.
+        String extension = isTexture2D
+            ? ""
+            : "#extension GL_OES_EGL_image_external : require\n";
+        String cameraSampler = isTexture2D
+            ? "uniform sampler2D uCameraTex;\n"
+            : "uniform samplerExternalOES uCameraTex;\n";
         return String.format(Locale.US,
-                "#extension GL_OES_EGL_image_external : require\n" +
+                extension +
                 "precision mediump float;\n" +
-                "uniform samplerExternalOES uCameraTex;\n" +
+                cameraSampler +
                 "uniform float uApaMode;\n" +
                 "uniform float uRedMaskStrength;\n" +
                 "uniform float uApaCenterInset;\n" +
@@ -114,10 +123,16 @@ public final class HighResPreviewSampler {
     //   uApaMode >  2.5 → DiLink 4 2x2: 0.5×0.5 corner at uCorner.
     // uTexMatrix in the vertex shader is applied to the sampled UV
     // regardless, so the HAL's transform matrix still crops out chrome.
-    private static final String QUADRANT_SHADER =
-            "#extension GL_OES_EGL_image_external : require\n" +
+    private static String buildQuadrantShader(boolean isTexture2D) {
+        String extension = isTexture2D
+            ? ""
+            : "#extension GL_OES_EGL_image_external : require\n";
+        String cameraSampler = isTexture2D
+            ? "uniform sampler2D uCameraTex;\n"
+            : "uniform samplerExternalOES uCameraTex;\n";
+        return extension +
             "precision mediump float;\n" +
-            "uniform samplerExternalOES uCameraTex;\n" +
+            cameraSampler +
             "uniform float uStripOffsetX;\n" +
             "uniform vec2 uCorner;\n" +
             "uniform vec2 uFlip;\n" +
@@ -143,6 +158,7 @@ public final class HighResPreviewSampler {
             com.overdrive.app.camera.GlUtil.RED_MASK_GLSL +
             "    gl_FragColor = src;\n" +
             "}\n";
+    }
 
     private static final float[] VERTEX_COORDS = {
             -1.0f, -1.0f,
@@ -209,6 +225,18 @@ public final class HighResPreviewSampler {
     private ByteBuffer readBuffer;
     private byte[] scratchRgba;
     private int[] argbPixels;
+    private final boolean isTexture2D;
+    private volatile Object sourceLock;
+    private volatile SourceGuard sourceGuard;
+
+    /**
+     * Validates that a shared camera texture still belongs to the active
+     * producer. The guard runs on the sampler GL thread while sourceLock is
+     * held, immediately before any texture bind or draw.
+     */
+    public interface SourceGuard {
+        boolean isSourceValid(int textureId);
+    }
 
     /**
      * @param sharedContext EGL context owned by the camera GL thread. Pass
@@ -216,13 +244,25 @@ public final class HighResPreviewSampler {
      *     camera's OES texture from this thread.
      */
     public HighResPreviewSampler(EGLContext sharedContext) {
+        this(sharedContext, false);
+    }
+
+    public HighResPreviewSampler(
+            EGLContext sharedContext,
+            boolean isTexture2D) {
         this.sharedContext = sharedContext;
+        this.isTexture2D = isTexture2D;
         this.thread = new HandlerThread("HighResPreviewSampler");
         this.thread.start();
         this.handler = new Handler(thread.getLooper());
         // Initialize EGL on the sampler thread. Posted async — sample calls
         // will block on glReady internally.
         handler.post(this::initGl);
+    }
+
+    public void setSourceGuard(Object lock, SourceGuard guard) {
+        sourceLock = lock;
+        sourceGuard = guard;
     }
 
     private void initGl() {
@@ -338,7 +378,8 @@ public final class HighResPreviewSampler {
             try { GLES20.glDeleteProgram(mosaicProgram); } catch (Throwable ignored) {}
             mosaicProgram = 0;
         }
-        mosaicProgram = GlUtil.createProgram(VERTEX_SHADER, buildMosaicShader(offsets));
+        mosaicProgram = GlUtil.createProgram(
+            VERTEX_SHADER, buildMosaicShader(offsets, isTexture2D));
         if (mosaicProgram <= 0) return false;
         mosaicAPos = GLES20.glGetAttribLocation(mosaicProgram, "aPosition");
         mosaicATex = GLES20.glGetAttribLocation(mosaicProgram, "aTexCoord");
@@ -354,7 +395,8 @@ public final class HighResPreviewSampler {
 
     private boolean ensureQuadrantProgram() {
         if (quadProgram > 0) return true;
-        quadProgram = GlUtil.createProgram(VERTEX_SHADER, QUADRANT_SHADER);
+        quadProgram = GlUtil.createProgram(
+            VERTEX_SHADER, buildQuadrantShader(isTexture2D));
         if (quadProgram <= 0) return false;
         quadAPos = GLES20.glGetAttribLocation(quadProgram, "aPosition");
         quadATex = GLES20.glGetAttribLocation(quadProgram, "aTexCoord");
@@ -377,11 +419,18 @@ public final class HighResPreviewSampler {
     public byte[] sampleFullMosaicJpeg(int textureId, int stripWidth, int stripHeight,
                                        float[] offsets) {
         if (textureId == 0 || offsets == null || offsets.length != 4) return null;
-        int outW = cameraLayout == 1
-                ? PassiveApaGeometry.WIDTH : Math.max(1, stripWidth / 2);
-        int outH = cameraLayout == 1
-                ? PassiveApaGeometry.HEIGHT : Math.max(1, stripHeight * 2);
-        return runOnSamplerThread(() -> {
+        boolean dilink5 = cameraLayout == 1 && DiLink5Platform.isEnabled();
+        int outW = dilink5
+                ? Math.max(1, stripWidth)
+                : cameraLayout == 1
+                ? PassiveApaGeometry.WIDTH
+                : Math.max(1, stripWidth / 2);
+        int outH = dilink5
+                ? Math.max(1, stripHeight)
+                : cameraLayout == 1
+                ? PassiveApaGeometry.HEIGHT
+                : Math.max(1, stripHeight * 2);
+        return runOnSamplerThread(textureId, () -> {
             ensureFbo(outW, outH);
             if (fbo < 0 || !ensureMosaicProgram(offsets)) return null;
             return renderAndEncode(textureId, mosaicProgram, mosaicAPos, mosaicATex, mosaicUTex,
@@ -426,12 +475,11 @@ public final class HighResPreviewSampler {
         int outW;
         int outH;
         if (useCorner) {
-            // 2x2-native HAL: producer surface is stripWidth/2 × stripHeight*2,
-            // each quadrant is half on each axis → producerW/2 × producerH/2
-            // = stripWidth/4 × stripHeight, identical per-camera resolution
-            // to the legacy path.
-            outW = Math.max(1, stripWidth / 4);
-            outH = Math.max(1, stripHeight);
+            // DiLink 4 receives legacy strip geometry for a 2x2 producer.
+            // DiLink 5 is already configured with the producer's real size.
+            boolean dilink5 = DiLink5Platform.isEnabled();
+            outW = Math.max(1, dilink5 ? stripWidth / 2 : stripWidth / 4);
+            outH = Math.max(1, dilink5 ? stripHeight / 2 : stripHeight);
         } else {
             outW = Math.max(1, stripWidth / 4);
             outH = Math.max(1, stripHeight);
@@ -443,7 +491,7 @@ public final class HighResPreviewSampler {
         final float cy = useCorner ? cornerY : 0f;
         final float fx = useCorner ? xFlip : 0f;
         final float fy = useCorner ? yFlip : 0f;
-        return runOnSamplerThread(() -> {
+        return runOnSamplerThread(textureId, () -> {
             ensureFbo(finalW, finalH);
             if (fbo < 0 || !ensureQuadrantProgram()) return null;
             // Upload corner + flip uniforms if the program has them (silent
@@ -467,7 +515,7 @@ public final class HighResPreviewSampler {
         byte[] run();
     }
 
-    private byte[] runOnSamplerThread(GlJob job) {
+    private byte[] runOnSamplerThread(int textureId, GlJob job) {
         if (!glReady) {
             // GL might still be initializing — give it a brief moment.
             for (int i = 0; i < 20 && !glReady; i++) {
@@ -485,7 +533,19 @@ public final class HighResPreviewSampler {
         final AtomicReference<byte[]> result = new AtomicReference<>();
         handler.post(() -> {
             try {
-                result.set(job.run());
+                Object activeSourceLock = sourceLock;
+                SourceGuard activeSourceGuard = sourceGuard;
+                if (activeSourceLock != null) {
+                    synchronized (activeSourceLock) {
+                        if (activeSourceGuard == null
+                                || activeSourceGuard.isSourceValid(textureId)) {
+                            result.set(job.run());
+                        }
+                    }
+                } else if (activeSourceGuard == null
+                        || activeSourceGuard.isSourceValid(textureId)) {
+                    result.set(job.run());
+                }
             } catch (Throwable t) {
                 logger.warn("GL job failed: " + t.getMessage());
             } finally {
@@ -528,7 +588,10 @@ public final class HighResPreviewSampler {
 
             GLES20.glUseProgram(program);
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId);
+            GLES20.glBindTexture(
+                isTexture2D ? GLES20.GL_TEXTURE_2D
+                            : GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
+                textureId);
             GLES20.glUniform1i(uTexLoc, 0);
             if (uOffsetLoc >= 0) {
                 GLES20.glUniform1f(uOffsetLoc, offsetValue);
@@ -716,9 +779,10 @@ public final class HighResPreviewSampler {
             }
         });
         synchronized (lock) {
-            long deadline = System.currentTimeMillis() + 500;
+            long deadline = android.os.SystemClock.elapsedRealtime() + 500;
             while (!done[0]) {
-                long remaining = deadline - System.currentTimeMillis();
+                long remaining = deadline
+                        - android.os.SystemClock.elapsedRealtime();
                 if (remaining <= 0) break;
                 try { lock.wait(remaining); } catch (InterruptedException ignored) {
                     Thread.currentThread().interrupt();

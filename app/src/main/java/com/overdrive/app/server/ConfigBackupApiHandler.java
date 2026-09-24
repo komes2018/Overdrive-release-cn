@@ -110,10 +110,10 @@ public class ConfigBackupApiHandler {
         r.put("success", result.getSuccess());
         r.put("message", result.getMessage());
         r.put("warnings", new JSONArray(result.getWarnings()));
+        r.put("restartRequired", result.getRestartRequired());
         if (!preview && result.getSuccess()) {
-            // The webapp shows "restarting services" and re-polls /api/status;
-            // listeners already fired the single coordinated reload inside
-            // saveConfig. No daemon kill needed for a settings-only restore.
+            // Kept for older web clients. A restored vehicle-mode change is separately marked
+            // restartRequired and remains fenced to the old active mode until that restart.
             r.put("reloadRecommended", true);
         }
         HttpResponse.sendJson(out, r.toString());

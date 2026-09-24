@@ -51,18 +51,36 @@ enum class DaemonType(
  *  - `.disabled` persists until the user manually starts that daemon.
  *  - `.disabled` also means "the USER stopped this" — reusing it would make a parked
  *    car look permanently user-disabled.
- * This marker is NOT in CORE_DAEMONS, so clearStaleSentinels never touches it; it is
- * cleared explicitly on the ACC-on edge (or by a max-age fail-safe). It is honored by
- * BOTH the watchdog shell scripts (exit instead of respawn) AND the app-side
- * health-check / START_STICKY / BootReceiver rebuild paths. Written `chmod 666` so the
- * UID-2000 daemon family and the app UID can both read/write it; contents = epoch millis
- * of park (for the stale-age fail-safe).
+ * This marker is NOT in CORE_DAEMONS, so clearStaleSentinels never touches it. It is
+ * AUTHORITATIVE: while it exists, no automatic start may run, and no config read,
+ * Activity start, health-check tick, accessibility reconnect or elapsed time may erase
+ * it. It ends only when
+ *  - acc_sentry_daemon — the parked ACC judge, which the park reaper deliberately spares
+ *    — sees a definitive ACC-on and erases it,
+ *  - BootReceiver completes a VERIFIED erase on a direction-unambiguous recovery trigger
+ *    (com.byd.action.ACC_ON / IGN_ON, or head-unit boot), or
+ *  - the user presses Start explicitly (DaemonsViewModel.clearStartBlockers).
+ * It is honored by the camera/telegram/zrok watchdog shell scripts (exit instead of
+ * respawn — the acc_sentry watchdog only slows its respawn, since the judge must stay
+ * alive), by every app-side start chokepoint (startOnBoot, ifNotUserStopped,
+ * relaunchDaemon, the keepalive START_STICKY gate, the revival alarm) and by the plain
+ * SentryDaemon itself. Written `chmod 666` so the UID-2000 daemon family and the app UID
+ * can both read it; contents = epoch millis of park (diagnostic only).
  */
 object ParkedShutdown {
     const val MARKER_PATH = "/data/local/tmp/overdrive_parked_shutdown"
-    /** Max age before the marker is treated as stale and force-cleared (fail-safe so a
-     *  marker can never permanently suppress an active session). */
-    const val MAX_AGE_MS = 24L * 60 * 60 * 1000
+
+    /**
+     * Park-END breadcrumb, written (epoch millis, `chmod 666`) by acc_sentry_daemon at
+     * the moment it erases [MARKER_PATH] on a definitive ACC-on. The app process is kept
+     * resident across a park and its process-lifetime `bootStarted` guard is still set
+     * from the pre-park session; when the judge ends the park with no app-side trigger
+     * in flight (driving-telemetry ACC-on on DiLink 5, or the BYD broadcast losing the
+     * race to the HAL edge), this is how the next startOnBoot learns that a rebuild is
+     * due. Consumed by epoch value, so a stale breadcrumb can never trigger twice; the
+     * park reaper removes it when it plants the next marker.
+     */
+    const val ENDED_PATH = "/data/local/tmp/overdrive_parked_shutdown.ended"
 }
 
 fun DaemonType.localizedName(context: Context): String = context.getString(when (this) {

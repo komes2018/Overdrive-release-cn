@@ -76,7 +76,13 @@ public final class BydApaViewpointHelper {
         1329598480,   // PANORAMA_OUTPUT_STATE             (verified 0x4f401010)
         1329598482,   // PANORAMA_OUTPUT_STATE_SET         (INFERRED — sget in APK)
         1329598492,   // PANORAMA_ROTATION_SET             (INFERRED — sget in APK)
-        1329598484,   // PANORAMA_WORK_MODE_SET            (INFERRED — sget in APK)
+        // PANORAMA_WORK_MODE_SET is 0x4DE01014 = 1306529812 per the DiCarServer
+        // feature catalog (dev/byd-property-bus/dicarserver_feature_catalog.txt);
+        // 1329598484 (0x4F401014) is PANORAMA_WORK_MODE, the GETTER. The previous
+        // even-slot guess pointed this listener entry at the getter. It is also the
+        // id PANO_VIEWPOINT_SET_FEATURES already carries. resolveListenerFeatures()
+        // still replaces it with the platform constant on a real head unit.
+        1306529812,   // PANORAMA_WORK_MODE_SET            (catalog 0x4DE01014; platform-resolved on device)
         1329598486,   // PANORAMA_APA_AVM_MODE             (INFERRED — sget in APK)
         1329598494,   // PANORAMA_APA_TRANSPARENT_SWITCH   (verified 0x4f40101e)
         1329598496,   // PANORAMA_BACK_LINE_CONFIG         (verified 0x4f401020)
@@ -624,11 +630,8 @@ public final class BydApaViewpointHelper {
 
     private static boolean isDilink4CameraMode() {
         try {
-            org.json.JSONObject camera = com.overdrive.app.config.UnifiedConfigManager
-                .loadConfig().optJSONObject("camera");
-            return camera != null
-                && Di4AvcViewpointPolicy.isEnabledForCameraMode(
-                    camera.optString("cameraMode", "default"));
+            return com.overdrive.app.camera.dilink5.DiLink5Platform
+                    .isDiLink4Selected();
         } catch (Throwable ignored) {
             return false;
         }

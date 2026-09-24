@@ -32,6 +32,23 @@ class ProcessRevivalReceiver : BroadcastReceiver() {
         val appContext = context.applicationContext
         Log.i(TAG, "Revival alarm fired (data=${intent.dataString})")
 
+        // ABSOLUTE parked gate: while the "Vehicle ON only" parked-shutdown marker exists
+        // the stack was deliberately terminated and this wake-alarm must not resurrect it
+        // — regardless of what the (fail-open) config read below says. Cancel the chain;
+        // the ACC-on recovery re-arms it via BootReceiver → schedule().
+        try {
+            if (java.io.File(com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).exists()) {
+                Log.i(TAG, "parked-shutdown marker present — cancelling revival chain, not re-arming")
+                com.overdrive.app.ui.daemon.DaemonStartupManager.noteParkObserved()
+                try { cancel(appContext) } catch (e: Exception) {
+                    Log.w(TAG, "cancel failed: ${e.message}")
+                }
+                return
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "parked-marker check failed (${e.message}) — falling through to mode gate")
+        }
+
         // GATE (G6): in "Vehicle ON only" mode the out-of-process revival chain must
         // stand down — its whole purpose is to WAKE the head unit (RTC_WAKEUP) every
         // ~5 min to resurrect the parked daemon stack, which is exactly the post-OFF

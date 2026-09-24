@@ -248,7 +248,12 @@ class DaemonManager private constructor(
                 "/api/surveillance/prepare-restart", "POST", 3000, 10000)
             connection = conn
             conn.doOutput = true
-            conn.outputStream.use { it.write(byteArrayOf()) }
+            conn.setRequestProperty("Content-Type", "application/json")
+            val requestBody = org.json.JSONObject()
+                .put("reason", "app_daemon_stop")
+                .toString()
+                .toByteArray(Charsets.UTF_8)
+            conn.outputStream.use { it.write(requestBody) }
             val code = conn.responseCode
             if (code in 200..299) null else "prepare-restart returned HTTP $code"
         } catch (e: Exception) {

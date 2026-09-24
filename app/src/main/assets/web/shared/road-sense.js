@@ -127,10 +127,58 @@ BYD.roadSense = {
         // while this is set prompts to hand the cluster over (see toggleClusterAuto).
         projectionAutoStart: false
     },
+    _hydrated: false,
+    _writing: false,
+    _writesPending: 0,
+    _writeQueue: Promise.resolve(),
+    _configWriteVersion: 0,
+    _routingWriteVersion: 0,
+    _routingWritesPending: 0,
+    _clusterProjectVersion: 0,
+    _clusterProjectPending: false,
+
+    _enqueueWrite(task) {
+        const run = () => task();
+        const next = this._writeQueue.then(run, run);
+        this._writeQueue = next.catch(() => {});
+        return next;
+    },
+
+    async _saveSection(section, delta) {
+        if (!this._hydrated) return null;
+        this._configWriteVersion++;
+        this._writesPending++;
+        this._writing = true;
+        try {
+            return await this._enqueueWrite(async () => {
+                try {
+                    const resp = await fetch('/api/settings/unified', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ section: section, data: delta })
+                    });
+                    const data = await resp.json();
+                    if (!resp.ok || !data) return null;
+                    return data;
+                } catch (e) {
+                    console.warn(section + ': save failed:', e);
+                    return null;
+                }
+            });
+        } finally {
+            this._writesPending--;
+            this._writing = this._writesPending > 0;
+        }
+    },
 
     async init() {
         await this.loadConfig();
-        this.updateUI();
+        this.updateUI(false);
+        await Promise.all([this.loadRoutingStatus(), this.loadClusterStatus()]);
+        this._hydrated = true;
+        if (BYD.utils && BYD.utils.unlockSettingsHydration) {
+            BYD.utils.unlockSettingsHydration();
+        }
 
         // Re-read config when the user switches back to the tab (unless a
         // write is mid-flight). Cheap and keeps the page in sync with the
@@ -174,14 +222,17 @@ BYD.roadSense = {
     },
 
     async reload() {
-        await this.loadConfig();
-        this.updateUI();
+        if (await this.loadConfig()) this.updateUI();
     },
 
     async loadConfig() {
+        if (this._writesPending > 0) return false;
+        const writeVersion = this._configWriteVersion;
         try {
             const resp = await fetch('/api/settings/unified');
             const data = await resp.json();
+            if (this._writesPending > 0
+                    || writeVersion !== this._configWriteVersion) return false;
             if (data && data.success && data.config && data.config.roadSense) {
                 const rs = data.config.roadSense;
                 const c = this.config;
@@ -333,6 +384,7 @@ BYD.roadSense = {
                 const pj = data.config.projection;
                 if (typeof pj.autoStartOnAcc === 'boolean') this.config.projectionAutoStart = pj.autoStartOnAcc;
             }
+            return !!(data && data.success && data.config);
         } catch (e) {
             console.warn('RoadSense: failed to load config:', e);
             // The speed window is the only control written as an ATOMIC PAIR, so a
@@ -342,6 +394,7 @@ BYD.roadSense = {
             // other. Mark the pair unknown so bsApplySpeedWindow refuses to commit
             // until a successful load establishes the real values.
             this._bsSpeedLoaded = false;
+            return false;
         }
     },
 
@@ -353,26 +406,14 @@ BYD.roadSense = {
      * a successful write so callers can revert the control on failure.
      */
     async _save(delta) {
-        this._writing = true;
-        try {
-            const resp = await fetch('/api/settings/unified', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ section: 'roadSense', data: delta })
-            });
-            const data = await resp.json();
-            return !!(data && data.success);
-        } catch (e) {
-            console.warn('RoadSense: save failed:', e);
-            return false;
-        } finally {
-            this._writing = false;
-        }
+        const data = await this._saveSection('roadSense', delta);
+        return !!(data && data.success);
     },
 
     // ==================== UI sync ====================
 
-    updateUI() {
+    updateUI(loadLiveStatus) {
+        if (loadLiveStatus == null) loadLiveStatus = true;
         const c = this.config;
 
         this._setChecked('rsEnabled', c.enabled);
@@ -399,7 +440,7 @@ BYD.roadSense = {
         var routingCard = document.getElementById('rsRoutingCard');
         if (routingCard) {
             routingCard.style.display = '';
-            this.loadRoutingStatus();
+            if (loadLiveStatus) this.loadRoutingStatus();
         }
 
         // Cluster projection drives an on-car native projection via daemon HTTP.
@@ -410,7 +451,7 @@ BYD.roadSense = {
         if (clusterCard) {
             clusterCard.style.display = '';
             this._setChecked('rsClusterAuto', c.autoProjectCluster);
-            this.loadClusterStatus();
+            if (loadLiveStatus) this.loadClusterStatus();
         }
 
         this._setChecked('rsWarnEnabled', c.warnEnabled);
@@ -1098,10 +1139,37 @@ BYD.roadSense = {
     //   POST /api/navmap/routing/clear
     // All POSTs use fetch() (never XHR — the WebView drops XHR POST bodies).
 
+    async _postRouting(url, body) {
+        this._routingWriteVersion++;
+        this._routingWritesPending++;
+        try {
+            return await this._enqueueWrite(async () => {
+                try {
+                    const resp = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body || {})
+                    });
+                    const data = await resp.json();
+                    return resp.ok && data ? data : null;
+                } catch (e) {
+                    console.warn('RoadSense: routing write failed:', e);
+                    return null;
+                }
+            });
+        } finally {
+            this._routingWritesPending--;
+        }
+    },
+
     async loadRoutingStatus() {
+        if (this._routingWritesPending > 0) return;
+        const writeVersion = this._routingWriteVersion;
         try {
             const resp = await fetch('/api/navmap/routing/status');
             const data = await resp.json();
+            if (this._routingWritesPending > 0
+                    || writeVersion !== this._routingWriteVersion) return;
             if (!data || !data.success) { this._setRoutingBadge(false); return; }
             const endpointInput = document.getElementById('rsRoutingEndpoint');
             if (endpointInput && !endpointInput.value) {
@@ -1121,7 +1189,10 @@ BYD.roadSense = {
             this._setRoutingBadge(!!data.hasKey);
         } catch (e) {
             console.warn('RoadSense: routing status failed:', e);
-            this._setRoutingBadge(false);
+            if (writeVersion === this._routingWriteVersion
+                    && this._routingWritesPending === 0) {
+                this._setRoutingBadge(false);
+            }
         }
     },
 
@@ -1174,17 +1245,15 @@ BYD.roadSense = {
         const btn = document.getElementById('rsRoutingSaveBtn');
         if (btn) btn.disabled = true;
         try {
-            const resp = await fetch('/api/navmap/routing/setup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ endpoint: endpoint, apiKey: apiKey })
-            });
-            const data = await resp.json();
+            const data = await this._postRouting(
+                '/api/navmap/routing/setup',
+                { endpoint: endpoint, apiKey: apiKey }
+            );
             if (data && data.success) {
                 // Don't keep the secret in the DOM after a successful save.
                 if (keyInput) keyInput.value = '';
                 this._toastSaved();
-                this.loadRoutingStatus();
+                await this.loadRoutingStatus();
             } else {
                 this._toastFailed();
             }
@@ -1200,12 +1269,7 @@ BYD.roadSense = {
         const btn = document.getElementById('rsRoutingClearBtn');
         if (btn) btn.disabled = true;
         try {
-            const resp = await fetch('/api/navmap/routing/clear', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({})
-            });
-            const data = await resp.json();
+            const data = await this._postRouting('/api/navmap/routing/clear', {});
             if (data && data.success) {
                 const keyInput = document.getElementById('rsRoutingKey');
                 if (keyInput) {
@@ -1215,7 +1279,7 @@ BYD.roadSense = {
                         ? ph : 'Paste your routing API key';
                 }
                 this._toast('road_sense.routing_cleared', 'Routing key cleared', 'success');
-                this.loadRoutingStatus();
+                await this.loadRoutingStatus();
             } else {
                 this._toastFailed();
             }
@@ -1244,16 +1308,23 @@ BYD.roadSense = {
         // mirrored into config.bsClusterLayout on load) into the map-tab selector.
         var layoutSel = document.getElementById('rsClusterLayout');
         if (layoutSel) layoutSel.value = String(this.config.bsClusterLayout || 31);
+        if (this._clusterProjectPending) return;
+        const writeVersion = this._clusterProjectVersion;
         try {
             const resp = await fetch('/api/navmap/cluster/status');
             const data = await resp.json();
+            if (this._clusterProjectPending
+                    || writeVersion !== this._clusterProjectVersion) return;
             const projecting = !!(data && data.success && data.projecting);
             this._setChecked('rsClusterProject', projecting);
             this._setClusterBadge(projecting);
         } catch (e) {
             console.warn('RoadSense: cluster status failed:', e);
-            this._setChecked('rsClusterProject', false);
-            this._setClusterBadge(false);
+            if (writeVersion === this._clusterProjectVersion
+                    && !this._clusterProjectPending) {
+                this._setChecked('rsClusterProject', false);
+                this._setClusterBadge(false);
+            }
         }
     },
 
@@ -1264,21 +1335,26 @@ BYD.roadSense = {
     // projection re-lays-out immediately. Saved immediately (no staged Apply here).
     async mapSetClusterLayout(v) {
         var n = parseInt(v, 10);
-        if (n !== 29 && n !== 30 && n !== 31) return;
+        if (!this._hydrated || (n !== 29 && n !== 30 && n !== 31)) return;
+        var mapSel = document.getElementById('rsClusterLayout');
+        var previous = this.config.bsClusterLayout;
         this.config.bsClusterLayout = n;
         // Keep the blind-spot tab's dropdown in sync if it's in the DOM.
         var bsSel = document.getElementById('bsClusterLayout');
         if (bsSel) bsSel.value = String(n);
+        if (mapSel) mapSel.disabled = true;
         try {
-            const resp = await fetch('/api/settings/unified', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ section: 'blindspot', data: { clusterSizeProfile: n } })
-            });
-            const data = await resp.json();
-            if (data && data.success) this._toastSaved(); else this._toastFailed();
-        } catch (e) {
-            this._toastFailed();
+            const ok = await this._bsSave({ clusterSizeProfile: n });
+            if (ok) {
+                this._toastSaved();
+            } else {
+                this.config.bsClusterLayout = previous;
+                if (mapSel) mapSel.value = String(previous);
+                if (bsSel) bsSel.value = String(previous);
+                this._toastFailed();
+            }
+        } finally {
+            if (mapSel) mapSel.disabled = false;
         }
     },
 
@@ -1295,8 +1371,11 @@ BYD.roadSense = {
 
     async toggleClusterProject() {
         const el = document.getElementById('rsClusterProject');
-        if (!el) return;
+        if (!el || !this._hydrated || el.disabled) return;
         const on = el.checked;
+        this._clusterProjectVersion++;
+        this._clusterProjectPending = true;
+        el.disabled = true;
         try {
             const resp = await fetch(on ? '/api/navmap/cluster/start' : '/api/navmap/cluster/stop', {
                 method: 'POST',
@@ -1318,53 +1397,49 @@ BYD.roadSense = {
             console.warn('RoadSense: cluster project toggle failed:', e);
             el.checked = !on;
             this._toastFailed();
+        } finally {
+            this._clusterProjectPending = false;
+            el.disabled = false;
         }
     },
 
     async toggleClusterAuto() {
         const el = document.getElementById('rsClusterAuto');
-        if (!el) return;
+        if (!el || !this._hydrated || el.disabled) return;
         const on = el.checked;
-        // The driver cluster is a single surface — the map auto-project and the
-        // Projection feature's auto-cast can't both own it on ACC-on. When turning
-        // this ON while Projection auto-cast is set, confirm handing the cluster
-        // over. On confirm we clear projection.autoStartOnAcc FIRST, then set our
-        // own flag. Turning OFF is unconditional (frees the cluster, no sibling
-        // write). No conflict / turning off → straight through, no dialog.
-        const conflict = on && this.config.projectionAutoStart === true;
-        if (conflict) {
-            const t = (BYD.i18n && BYD.i18n.t) ? BYD.i18n.t.bind(BYD.i18n) : null;
-            if (BYD.utils && BYD.utils.confirmDialog) {
-                const ok = await BYD.utils.confirmDialog({
-                    title: (t && t('road_sense.map_cluster_auto_conflict_title')) || 'Projection is using the cluster',
-                    body: (t && t('road_sense.map_cluster_auto_conflict_body')) || 'The Projection screen is set to auto-cast an app to the driver cluster on startup. The cluster can only show one thing at a time. Turn that off and auto-project the map instead?',
-                    confirmLabel: (t && t('road_sense.map_cluster_auto_conflict_confirm')) || 'Use the map',
-                    cancelLabel: (t && t('common.cancel')) || 'Cancel'
-                });
-                if (!ok) { el.checked = false; return; }
-            }
-        }
+        el.disabled = true;
         try {
+            // The driver cluster is a single surface — the map auto-project and the
+            // Projection feature's auto-cast can't both own it on ACC-on. When turning
+            // this ON while Projection auto-cast is set, confirm handing the cluster
+            // over. On confirm we clear projection.autoStartOnAcc FIRST, then set our
+            // own flag. Turning OFF is unconditional (frees the cluster, no sibling
+            // write). No conflict / turning off → straight through, no dialog.
+            const conflict = on && this.config.projectionAutoStart === true;
+            if (conflict) {
+                const t = (BYD.i18n && BYD.i18n.t) ? BYD.i18n.t.bind(BYD.i18n) : null;
+                if (BYD.utils && BYD.utils.confirmDialog) {
+                    const ok = await BYD.utils.confirmDialog({
+                        title: (t && t('road_sense.map_cluster_auto_conflict_title')) || 'Projection is using the cluster',
+                        body: (t && t('road_sense.map_cluster_auto_conflict_body')) || 'The Projection screen is set to auto-cast an app to the driver cluster on startup. The cluster can only show one thing at a time. Turn that off and auto-project the map instead?',
+                        confirmLabel: (t && t('road_sense.map_cluster_auto_conflict_confirm')) || 'Use the map',
+                        cancelLabel: (t && t('common.cancel')) || 'Cancel'
+                    });
+                    if (!ok) { el.checked = false; return; }
+                }
+            }
             // Free the cluster from Projection FIRST so the two auto-starts never
             // both fire — only needed when there was a conflict.
             if (conflict) {
-                const pjResp = await fetch('/api/settings/unified', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ section: 'projection', data: { autoStartOnAcc: false } })
-                });
-                const pjData = await pjResp.json();
+                const pjData = await this._saveSection(
+                    'projection', { autoStartOnAcc: false });
                 if (!(pjData && pjData.success)) { el.checked = !on; this._toastFailed(); return; }
+                this.config.projectionAutoStart = false;
             }
-            const resp = await fetch('/api/settings/unified', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ section: 'navMap', data: { autoProjectCluster: on } })
-            });
-            const data = await resp.json();
+            const data = await this._saveSection(
+                'navMap', { autoProjectCluster: on });
             if (data && data.success) {
                 this.config.autoProjectCluster = on;
-                if (conflict) this.config.projectionAutoStart = false;
                 this._toastSaved();
             }
             else { el.checked = !on; this._toastFailed(); }
@@ -1372,6 +1447,8 @@ BYD.roadSense = {
             console.warn('RoadSense: cluster auto toggle failed:', e);
             el.checked = !on;
             this._toastFailed();
+        } finally {
+            el.disabled = false;
         }
     },
 
@@ -1507,26 +1584,13 @@ BYD.roadSense = {
 
     /** Persist only the blindspot section (NOT roadSense — separate top-level). */
     async _bsSave(delta) {
-        this._writing = true;
-        try {
-            const resp = await fetch('/api/settings/unified', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ section: 'blindspot', data: delta })
-            });
-            const data = await resp.json();
-            // Stash the server's reason so a caller can show it instead of the generic
-            // "Save failed" — the daemon rejects e.g. an inverted speed window with a
-            // localized explanation that would otherwise be dropped here.
-            this._bsLastError = (data && !data.success && data.error) ? String(data.error) : null;
-            return !!(data && data.success);
-        } catch (e) {
-            console.warn('BlindSpot: save failed:', e);
-            this._bsLastError = null;
-            return false;
-        } finally {
-            this._writing = false;
-        }
+        const data = await this._saveSection('blindspot', delta);
+        // Stash the server's reason so a caller can show it instead of the generic
+        // "Save failed" — the daemon rejects e.g. an inverted speed window with a
+        // localized explanation that would otherwise be dropped here.
+        this._bsLastError = (data && !data.success && data.error)
+            ? String(data.error) : null;
+        return !!(data && data.success);
     },
 
     async bsToggleEnabled() {

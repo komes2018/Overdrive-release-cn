@@ -28,6 +28,23 @@ public class BydCloudApiHandlerContractTest {
                 "VehicleCommandRouter.getInstance().clearRemoteClimateSession()"));
     }
 
+    @Test
+    public void cloudMergeWriteReportsPersistenceFailure() throws IOException {
+        String source = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/server/BydCloudApiHandler.java");
+
+        int settings = source.indexOf("private static void handleSettings");
+        int setup = source.indexOf("private static void handleSetup", settings);
+        assertTrue(settings >= 0);
+        assertTrue(setup > settings);
+        String body = source.substring(settings, setup);
+        assertTrue(body.contains(
+                "boolean persisted = UnifiedConfigManager.updateSection(\"bydCloud\", delta);"));
+        assertTrue(body.contains("JSONObject delta = new JSONObject();"));
+        assertTrue(body.contains("if (!persisted)"));
+        assertTrue(body.contains("Could not save BYD Cloud settings"));
+    }
+
     private static String readRepositoryFile(String relativePath) throws IOException {
         Path current = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
         while (current != null) {

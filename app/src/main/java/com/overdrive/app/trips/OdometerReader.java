@@ -32,6 +32,9 @@ public class OdometerReader {
     // odometer: null = not yet decided, TRUE/FALSE = decided for this process.
     // Deliberately NOT re-decided per read — see readFineRaw.
     private volatile Boolean fineUsable = null;
+    // Consecutive disagreements seen while still undecided. Guarded by readFineRaw's
+    // monitor, like the verdict itself.
+    private int fineDisagreements = 0;
 
     // Argument to getMileageNumber() believed to select the cumulative
     // total-distance register, and its unit scale (0.1 km per count). Both are
@@ -44,9 +47,15 @@ public class OdometerReader {
     // agreement and anything outside it is a different quantity. Counted in raw
     // cluster units, never converted km — see readFineRaw.
     private static final double FINE_AGREEMENT_TOLERANCE_COUNTS = 1.0;
-    // A raw total-distance register above this is being reported in a finer unit
-    // than whole km (no production odometer legitimately reaches 1,000,000 km).
-    private static final int COARSE_UNIT_THRESHOLD = 1_000_000;
+    // Consecutive disagreements required before the fine register is rejected for the life of
+    // the process. Two, not one, because the caller that gets here FIRST is now the MQTT
+    // telemetry cycle a few seconds after daemon start, not a warm trip edge — and a verdict
+    // latched from one transient skew at boot would silently cost every later trip its sub-km
+    // resolution. A register that is genuinely a different quantity disagrees on every read,
+    // so it still latches on the second one. Agreement still decides on the FIRST read:
+    // landing within one count of the authoritative value is not something a wrong register
+    // or a 10x scale error does by accident.
+    private static final int FINE_DISAGREEMENTS_TO_REJECT = 2;
 
     private OdometerReader() {}
 
@@ -87,9 +96,9 @@ public class OdometerReader {
      * <p>Sources, in the order they are consulted:
      * <ol>
      *   <li>{@code getTotalMileageValue()} — the authoritative total-distance
-     *       register, one whole cluster unit per count. A value at or above
-     *       {@link #COARSE_UNIT_THRESHOLD} indicates a finer raw unit and is
-     *       rescaled.</li>
+     *       register, one whole cluster unit per count, normalized by
+     *       {@code BydDataCollector.normalizeRawTotalMileage} so a trim reporting
+     *       0.1 units is rescaled the same way the collector rescales it.</li>
      *   <li>{@code getMileageNumber(2)} — a REFINEMENT of the above to 0.1 units,
      *       which is what makes a sub-km trip measurable. Applied only once it has
      *       been calibrated against the authoritative reading, because its identity
@@ -114,8 +123,8 @@ public class OdometerReader {
                 if (raw instanceof Number) {
                     double value = ((Number) raw).doubleValue();
                     if (value > 0) {
-                        if (value >= COARSE_UNIT_THRESHOLD) value = value / 10.0;
-                        coarseRaw = value;
+                        coarseRaw = com.overdrive.app.byd.BydDataCollector
+                                .normalizeRawTotalMileage(value);
                     }
                 }
             } catch (Exception e) {
@@ -173,13 +182,17 @@ public class OdometerReader {
      *       the answer can flip as the coarse value rolls over between two reads —
      *       and a trip whose start came from one register and end from the other
      *       produces a delta that is pure garbage yet passes as exact. Decided
-     *       once, then honoured for the life of the process.</li>
+     *       once, then honoured for the life of the process. REJECTION additionally
+     *       needs {@link #FINE_DISAGREEMENTS_TO_REJECT} consecutive disagreements;
+     *       while undecided this returns -1 so the caller uses the authoritative
+     *       coarse value.</li>
      * </ul>
      *
      * <p>Synchronized so the check-then-set on the sticky verdict cannot be run
-     * concurrently by the trip-start and trip-end reads: two threads deciding
-     * independently could reach opposite conclusions, which is the very tier split
-     * this is meant to prevent. Contention is nil — two calls per trip.
+     * concurrently by its callers — the trip edges and the MQTT telemetry cycle. Two
+     * threads deciding independently could reach opposite conclusions, which is the
+     * very tier split this is meant to prevent. Contention is negligible: the MQTT
+     * cycle is floored at its min publish interval, and trips add two calls each.
      */
     private synchronized double readFineRaw(double coarseRaw) {
         if (getMileageNumberMethod == null || fineUsable == Boolean.FALSE) return -1;
@@ -191,14 +204,20 @@ public class OdometerReader {
             double candidate = counts * MILEAGE_NUMBER_SCALE;
 
             if (fineUsable == null) {
-                // First read decides, once, for this process.
-                boolean agrees = Math.abs(candidate - coarseRaw) <= FINE_AGREEMENT_TOLERANCE_COUNTS;
-                fineUsable = agrees;
-                if (!agrees) {
+                if (Math.abs(candidate - coarseRaw) <= FINE_AGREEMENT_TOLERANCE_COUNTS) {
+                    fineUsable = Boolean.TRUE;
+                    fineDisagreements = 0;
+                } else if (++fineDisagreements >= FINE_DISAGREEMENTS_TO_REJECT) {
+                    fineUsable = Boolean.FALSE;
                     logger.info("Ignoring getMileageNumber(" + MILEAGE_KIND_TOTAL + ")="
                             + String.format("%.1f", candidate) + " — disagrees with odometer "
                             + String.format("%.1f", coarseRaw)
-                            + " (raw units), so it is not the same register");
+                            + " (raw units) on " + fineDisagreements
+                            + " consecutive reads, so it is not the same register");
+                    return -1;
+                } else {
+                    // Still undecided: fall back to the authoritative coarse value for this
+                    // read rather than trusting an uncalibrated register.
                     return -1;
                 }
             }
@@ -216,13 +235,11 @@ public class OdometerReader {
      * the same register with its own feature-ID fallback, which is why this tier
      * can answer when the direct reflection above fails.
      *
-     * <p>The collector scaled that value by the DISPLAY-preference factor, which
-     * is not necessarily the raw register's unit — selecting a miles display on a
-     * km cluster inflates it ~1.6x. Tiers 1-2 use the hardware factor, so the
-     * snapshot is re-based here onto the same footing; otherwise a start read from
-     * one tier and an end read from another would not share a scale, and (worse) a
-     * trip served entirely from this tier would book an inflated distance as the
-     * exact hardware figure.
+     * <p>Tiers 1-2 use the raw-distance contract, so the snapshot is re-based here onto the
+     * same footing; otherwise a start read from one tier and an end read from another would
+     * not share a scale. The factor un-applied here is the one the collector ACTUALLY used on
+     * the statistic register — {@code getAppliedStatisticDistanceFactor()}, not the display
+     * factor, which on DiLink 5 is not what the statistic path applied.
      */
     private double snapshotOdometerKm() {
         try {
@@ -231,8 +248,8 @@ public class OdometerReader {
             com.overdrive.app.byd.BydVehicleData vd = collector.getData();
             if (vd != null && vd.totalMileageKm != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE
                     && vd.totalMileageKm > 0) {
-                double applied = collector.getDistanceToKmFactor();
-                // Undo the display-preference factor, then apply the hardware one.
+                double applied = collector.getAppliedStatisticDistanceFactor();
+                // Undo the collector's applied factor, then apply the raw-register one.
                 // Guard the divisor so a pathological 0 can't produce Infinity.
                 if (applied > 0) {
                     return vd.totalMileageKm / applied * unitFactor();
@@ -249,9 +266,9 @@ public class OdometerReader {
      * Unit factor for a RAW register read.
      *
      * <p>The raw reading's unit is fixed by the cluster HARDWARE, so this uses the
-     * hardware-detected factor. The display-preference factor is wrong here: it is
-     * driven by the user's km/mi choice, which says nothing about the raw unit, so
-     * a km cluster with a miles display preference inflated the odometer ~1.6x.
+     * collector's dedicated raw-distance factor. It must not reuse the speed factor:
+     * unit=2 firmware reports distance in miles while {@code getCurrentSpeed()} remains
+     * km/h.
      *
      * <p><b>Known limit.</b> When hardware detection never succeeded (no instrument
      * device, or {@code getMileageUnit} returned nothing usable), this necessarily
@@ -259,15 +276,11 @@ public class OdometerReader {
      * unit available. On a miles cluster that defaults to km, distances then read
      * ~38% short until the user selects miles in Trip Settings, which routes through
      * {@code setDistanceUnitOverride} and corrects this path too.
-     *
-     * <p>Deliberately NOT cross-checked against the trip recorder to detect that
-     * case: the recorder's own speed is scaled by this very factor, so it is skewed
-     * identically and cannot witness the error (see the note in
-     * {@code TripDetector.finalizeActiveTrip}).
      */
     private static double unitFactor() {
         try {
-            return com.overdrive.app.byd.BydDataCollector.getInstance().getSpeedToKmhFactor();
+            return com.overdrive.app.byd.BydDataCollector.getInstance()
+                    .getRawDistanceToKmFactor();
         } catch (Exception e) {
             return 1.0;
         }

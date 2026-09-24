@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title data-i18n="app.performance_title">Performance - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
-    <script src="../shared/theme.js?v=6"></script>
-    <script src="../shared/app-shell.js?v=5"></script>
+    <script src="../shared/theme.js?v=8"></script>
+    <script src="../shared/app-shell.js?v=7"></script>
     <!--
       Bottom-tab manifest — performance dashboard splits into 4 tabs
       so the long single-scroll page stops being a wall of charts:
@@ -27,7 +27,7 @@
         ];
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=24">
+    <link rel="stylesheet" href="../shared/styles.css?v=34">
     <style>
         /* Performance Dashboard Specific Styles */
         .metrics-grid {
@@ -191,7 +191,7 @@
         }
 
         /* Data-usage toggle switch (in-card header) */
-        .du-toggle { display: inline-flex; align-items: center; cursor: pointer; user-select: none; }
+        .du-toggle { display: inline-flex; align-items: center; min-height: 48px; padding: 0 4px; cursor: pointer; user-select: none; }
         .du-toggle > * + * { margin-left: 8px; }
         .du-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
         .du-toggle-track {
@@ -205,6 +205,7 @@
         }
         .du-toggle input:checked + .du-toggle-track { background: var(--brand-secondary); }
         .du-toggle input:checked + .du-toggle-track .du-toggle-thumb { transform: translateX(16px); }
+        .du-toggle input:focus + .du-toggle-track { outline: 2px solid var(--primary); outline-offset: 2px; }
         .du-toggle-label { font-size: 13px; color: var(--text-muted); }
         .du-hint { padding: 18px 4px; }
         .du-hint p { font-size: 13px; color: var(--text-muted); line-height: 1.5; margin: 0; }
@@ -984,7 +985,7 @@
                         <h3 id="sohCapacityModalTitle" class="soh-modal-title" data-i18n="soh.modal_title">Set battery capacity</h3>
 
                         <label class="soh-modal-label" for="sohCapacityModalInput" data-i18n="soh.modal_capacity_label">Capacity (kWh)</label>
-                        <input id="sohCapacityModalInput" class="soh-modal-input soh-modal-input-num" type="number" min="8" max="120" step="0.1" />
+                        <input id="sohCapacityModalInput" class="soh-modal-input soh-modal-input-num" type="number" min="5" max="120" step="0.1" />
 
                         <label class="soh-modal-label" for="sohCapacityModalModel" data-i18n="soh.modal_model_label">Model</label>
                         <select id="sohCapacityModalModel" class="soh-modal-input soh-modal-select"></select>
@@ -992,7 +993,7 @@
                         <div class="soh-modal-actions">
                             <button class="btn btn-secondary" onclick="BYD.performance.resetSohCapacityToAuto()" data-i18n="soh.modal_reset">Reset to auto-detect</button>
                             <button class="btn btn-secondary" onclick="BYD.performance.closeSohCapacityModal()" data-i18n="common.cancel">Cancel</button>
-                            <button class="btn btn-primary" onclick="BYD.performance.saveSohCapacity()" data-i18n="soh.modal_save">Save</button>
+                            <button id="sohCapacityModalSave" class="btn btn-primary" onclick="BYD.performance.saveSohCapacity()" data-i18n="soh.modal_save">Save</button>
                         </div>
                     </div>
                 </div>
@@ -1155,18 +1156,19 @@
                     <div class="process-monitor-header">
                         <div>
                             <div class="process-monitor-title">
-                                <h2>Live Processes</h2>
-                                <span class="process-live-badge" id="topLiveBadge">Paused</span>
+                                <h2 data-i18n="performance.live_processes">Live Processes</h2>
+                                <span class="process-live-badge" id="topLiveBadge" data-i18n="performance.paused">Paused</span>
                             </div>
                             <div class="process-monitor-meta">
                                 <span id="topSource">top -b -n 1</span>
                                 <span aria-hidden="true"> · </span>
-                                <span id="topUpdated">Waiting</span>
+                                <span id="topUpdated" data-i18n="performance.waiting">Waiting</span>
                             </div>
                         </div>
                         <button class="process-refresh" id="topRefreshButton"
                                 type="button" title="Refresh process snapshot"
                                 aria-label="Refresh process snapshot"
+                                data-i18n-attr="title:performance.refresh_snapshot;aria-label:performance.refresh_snapshot"
                                 onclick="BYD.performance.refreshTopNow()">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1178,38 +1180,38 @@
 
                     <div class="process-summary">
                         <div class="process-summary-item">
-                            <div class="process-summary-label">CPU activity</div>
+                            <div class="process-summary-label" data-i18n="performance.cpu_activity">CPU activity</div>
                             <div class="process-summary-value" id="topCpuBusy">--%</div>
                             <div class="process-summary-detail" id="topCpuDetail">--</div>
                         </div>
                         <div class="process-summary-item">
-                            <div class="process-summary-label">Tasks</div>
+                            <div class="process-summary-label" data-i18n="performance.tasks">Tasks</div>
                             <div class="process-summary-value" id="topTasks">--</div>
                             <div class="process-summary-detail" id="topTasksDetail">--</div>
                         </div>
                         <div class="process-summary-item">
-                            <div class="process-summary-label">RAM</div>
+                            <div class="process-summary-label" data-i18n="performance.ram">RAM</div>
                             <div class="process-summary-value" id="topMemory">--</div>
                             <div class="process-summary-detail" id="topMemoryDetail">--</div>
                         </div>
                         <div class="process-summary-item">
-                            <div class="process-summary-label">Swap</div>
+                            <div class="process-summary-label" data-i18n="performance.swap">Swap</div>
                             <div class="process-summary-value" id="topSwap">--</div>
                             <div class="process-summary-detail" id="topSwapDetail">--</div>
                         </div>
                     </div>
 
-                    <div class="process-table" role="table" aria-label="Android processes">
+                    <div class="process-table" role="table" aria-label="Android processes" data-i18n-attr="aria-label:performance.live_processes">
                         <div class="process-table-header" role="row">
-                            <span role="columnheader">Process</span>
-                            <span role="columnheader" style="text-align:right;">CPU</span>
-                            <span role="columnheader" style="text-align:right;">Memory</span>
-                            <span role="columnheader" style="text-align:right;">Resident</span>
-                            <span role="columnheader" style="text-align:right;">User</span>
-                            <span role="columnheader" style="text-align:right;">PID</span>
+                            <span role="columnheader" data-i18n="performance.col_process">Process</span>
+                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_cpu">CPU</span>
+                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_memory">Memory</span>
+                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_resident">Resident</span>
+                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_user">User</span>
+                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_pid">PID</span>
                         </div>
                         <div id="topProcessRows" role="rowgroup">
-                            <div class="process-empty">Waiting for a process snapshot</div>
+                            <div class="process-empty" data-i18n="performance.waiting_snapshot">Waiting for a process snapshot</div>
                         </div>
                     </div>
                 </section>
@@ -1414,7 +1416,7 @@
     <script src="../shared/auth.js"></script>
     <script src="../shared/core.js?v=20"></script>
     <script src="../shared/update-flow.js"></script>
-    <script src="../shared/performance.js?v=11"></script>
+    <script src="../shared/performance.js?v=13"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

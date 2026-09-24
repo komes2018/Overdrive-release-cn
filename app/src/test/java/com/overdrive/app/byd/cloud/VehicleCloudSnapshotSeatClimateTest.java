@@ -86,4 +86,30 @@ public class VehicleCloudSnapshotSeatClimateTest {
         assertTrue(snapshot.hasSteeringWheelHeatState());
         assertEquals(1, snapshot.steeringWheelHeatWireState());
     }
+
+    @Test
+    public void windowFallbackRequiresFreshOnlineSourceState() throws Exception {
+        long now = System.currentTimeMillis();
+        VehicleCloudSnapshot fresh = VehicleCloudSnapshot.fromVehicleInfo(new JSONObject()
+                .put("onlineState", VehicleCloudSnapshot.ONLINE)
+                .put("time", now)
+                .put("leftFrontWindow", 1)
+                .put("rightFrontWindow", 2))
+                .build();
+        assertTrue(fresh.isWindowStateFresh());
+        assertEquals(1, fresh.leftFrontWindow);
+        assertEquals(2, fresh.rightFrontWindow);
+
+        VehicleCloudSnapshot stale = VehicleCloudSnapshot.fromVehicleInfo(new JSONObject()
+                .put("onlineState", VehicleCloudSnapshot.ONLINE)
+                .put("time", now - VehicleCloudSnapshot.CONNECTION_HEALTH_MAX_AGE_MS - 1))
+                .build();
+        assertFalse(stale.isWindowStateFresh());
+
+        VehicleCloudSnapshot offline = VehicleCloudSnapshot.fromVehicleInfo(new JSONObject()
+                .put("onlineState", VehicleCloudSnapshot.OFFLINE)
+                .put("time", now))
+                .build();
+        assertFalse(offline.isWindowStateFresh());
+    }
 }

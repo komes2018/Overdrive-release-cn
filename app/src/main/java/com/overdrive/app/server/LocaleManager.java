@@ -1,5 +1,8 @@
 package com.overdrive.app.server;
 
+import android.content.Context;
+import android.content.SharedPreferences;
+
 import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.daemon.CameraDaemon;
 
@@ -10,7 +13,9 @@ import java.io.FileInputStream;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Cross-process locale persistence for the Overdrive daemon.
@@ -43,7 +48,7 @@ public final class LocaleManager {
     /** All locales we ship translations for. en is the base. */
     public static final List<String> SUPPORTED = Arrays.asList(
             "en", "zh-CN", "zh-TW", "pt-BR", "es", "de", "fr", "it",
-            "nb", "nl", "ja", "ko", "th", "vi", "hi", "tr", "ru", "ar", "he"
+            "nb", "nl", "ja", "ko", "th", "vi", "hi", "tr", "ru", "ar", "cs", "he"
     );
 
     private static final Set<String> SUPPORTED_SET = new HashSet<>(SUPPORTED);
@@ -51,6 +56,15 @@ public final class LocaleManager {
 
     /** Section + key inside {@link UnifiedConfigManager}. */
     private static final String K_LOCALE = "locale";
+    private static final String PREFS_NAME = "overdrive_locale";
+    private static final String PREF_LOCALE = "locale";
+    private static final String PREF_PENDING = "pending_unified_write";
+    private static volatile Context appContext;
+    private static final Object LOCAL_STATE_LOCK = new Object();
+    private static final AtomicBoolean pendingReplayRunning = new AtomicBoolean(false);
+    private static final long[] PENDING_REPLAY_DELAYS_MS = {
+            0L, 2_000L, 10_000L, 30_000L, 55_000L, 120_000L, 300_000L
+    };
 
     /**
      * Legacy file from before locale moved to {@link UnifiedConfigManager}.
@@ -66,54 +80,178 @@ public final class LocaleManager {
     private static volatile long cachedAt;
     private static final long CACHE_TTL_MS = 5_000L;
 
-    /**
-     * App-process Context for the private SharedPreferences fallback. The unified
-     * config lives at {@code /data/local/tmp/overdrive_config.json}, which the app
-     * UID cannot create on a phone (no shell daemon). Without this fallback the
-     * language picker looks like it stuck while {@link #getRaw()} is still null
-     * and the next cold start resets AppCompat to the system locale.
-     */
-    private static volatile android.content.Context appContext;
-    private static final String PREFS = "overdrive_locale";
-    private static final String PREF_KEY = "locale";
-
     private LocaleManager() {}
 
-    /** Bind the app process so locale survives on devices without the daemon. */
-    public static void attach(android.content.Context ctx) {
-        if (ctx != null) appContext = ctx.getApplicationContext();
+    /**
+     * Attach app-private storage before the first Activity is created.
+     *
+     * <p>The unified config remains authoritative across the app and daemon.
+     * SharedPreferences is only a durability fallback for an app-side locale
+     * pick made while the daemon IPC writer is unavailable during an update.
+     */
+    public static void attach(Context context) {
+        if (context != null) {
+            appContext = context.getApplicationContext();
+        }
+    }
+
+    private static SharedPreferences preferences() {
+        Context context = appContext;
+        return context == null
+                ? null
+                : context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+    }
+
+    private static String validStoredTag(String raw) {
+        if (raw == null || raw.isEmpty()) return null;
+        if (AUTO_TAG.equalsIgnoreCase(raw)) return AUTO_TAG;
+        return resolveOrNull(raw);
+    }
+
+    private static String readLocalFallback() {
+        synchronized (LOCAL_STATE_LOCK) {
+            try {
+                SharedPreferences prefs = preferences();
+                return prefs == null ? null : validStoredTag(prefs.getString(PREF_LOCALE, null));
+            } catch (Exception e) {
+                CameraDaemon.log("LocaleManager.readLocalFallback: " + e.getMessage());
+                return null;
+            }
+        }
+    }
+
+    private static boolean hasPendingLocalWrite() {
+        synchronized (LOCAL_STATE_LOCK) {
+            try {
+                SharedPreferences prefs = preferences();
+                return prefs != null && prefs.getBoolean(PREF_PENDING, false);
+            } catch (Exception e) {
+                return false;
+            }
+        }
+    }
+
+    private static void persistLocalFallback(String tag, boolean pending) {
+        synchronized (LOCAL_STATE_LOCK) {
+            try {
+                SharedPreferences prefs = preferences();
+                if (prefs == null) return;
+                String current = prefs.getString(PREF_LOCALE, null);
+                boolean currentPending = prefs.getBoolean(PREF_PENDING, false);
+                if (tag.equals(current) && pending == currentPending) return;
+                // commit() is intentional: the locale must survive an immediate
+                // AppCompat recreation or process death after the picker closes.
+                prefs.edit()
+                        .putString(PREF_LOCALE, tag)
+                        .putBoolean(PREF_PENDING, pending)
+                        .commit();
+            } catch (Exception e) {
+                CameraDaemon.log("LocaleManager.persistLocalFallback: " + e.getMessage());
+            }
+        }
     }
 
     /**
-     * Tags for {@code AppCompatDelegate.setApplicationLocales}. Hebrew must
-     * list both {@code he} (BCP-47) and {@code iw} (Java/Android legacy):
-     * AppCompat already ships a sparse {@code values-iw}, so a lone {@code iw}
-     * match skips our {@code values-he} strings and the UI stays English.
+     * Clear the pending marker only if the write we just acknowledged still
+     * represents the user's latest choice. A newer picker action may arrive
+     * while the daemon IPC round-trip is in flight.
      */
-    public static String androidLanguageTags(String tag) {
-        if ("he".equals(tag)) return "he,iw";
-        return tag;
+    private static boolean clearPendingLocalWriteIfCurrent(String writtenTag) {
+        synchronized (LOCAL_STATE_LOCK) {
+            try {
+                SharedPreferences prefs = preferences();
+                if (prefs == null) return true;
+                String current = validStoredTag(prefs.getString(PREF_LOCALE, null));
+                if (!writtenTag.equals(current)) return false;
+                if (!prefs.getBoolean(PREF_PENDING, false)) return true;
+                return prefs.edit().putBoolean(PREF_PENDING, false).commit();
+            } catch (Exception e) {
+                CameraDaemon.log("LocaleManager.clearPending: " + e.getMessage());
+                return false;
+            }
+        }
     }
 
-    private static void persistLocal(String tag) {
-        try {
-            android.content.Context ctx = appContext;
-            if (ctx == null) return;
-            ctx.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
-                    .edit().putString(PREF_KEY, tag).apply();
-        } catch (Exception ignored) {}
+    /**
+     * Drop daemon-side locale/message caches after another process commits a
+     * nativeShell.locale update. This is intentionally O(1) and runs only on
+     * an actual locale mutation, never on the status polling path.
+     */
+    public static void invalidateCaches() {
+        cachedLocale = null;
+        cachedAt = 0L;
+        Messages.invalidate();
     }
 
-    private static String readLocal() {
-        try {
-            android.content.Context ctx = appContext;
-            if (ctx == null) return null;
-            String tag = ctx.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
-                    .getString(PREF_KEY, null);
-            if (tag == null || tag.isEmpty()) return null;
-            if (AUTO_TAG.equals(tag) || isSupported(tag)) return tag;
-        } catch (Exception ignored) {}
-        return null;
+    /**
+     * Replay an app-private locale choice that could not reach the daemon.
+     *
+     * <p>One daemon thread is created only while a write is pending. Attempts
+     * are sparse and bounded so daemon startup/update windows are covered
+     * without adding steady-state polling or blocking Android's main thread.
+     */
+    public static void replayPendingWriteAsync() {
+        if (!hasPendingLocalWrite()
+                || !pendingReplayRunning.compareAndSet(false, true)) {
+            return;
+        }
+        Thread replay = new Thread(() -> {
+            boolean completed = false;
+            long startedAt = System.currentTimeMillis();
+            try {
+                for (long delayMs : PENDING_REPLAY_DELAYS_MS) {
+                    long waitMs = startedAt + delayMs - System.currentTimeMillis();
+                    if (waitMs > 0L) {
+                        try {
+                            Thread.sleep(waitMs);
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                    }
+                    if (replayPendingWrite()) {
+                        completed = true;
+                        return;
+                    }
+                }
+            } finally {
+                pendingReplayRunning.set(false);
+                // Close the tiny race where a newer selection is persisted
+                // after the final successful check but before the guard clears.
+                if (completed && hasPendingLocalWrite()) {
+                    replayPendingWriteAsync();
+                }
+            }
+        }, "LocalePersistenceReplay");
+        replay.setDaemon(true);
+        replay.start();
+    }
+
+    /**
+     * Returns true once no pending choice remains. If the user changes the
+     * locale during an acknowledged write, immediately replay the newer value
+     * (bounded burst) instead of clearing its pending marker.
+     */
+    private static boolean replayPendingWrite() {
+        for (int burst = 0; burst < 3; burst++) {
+            String tag = readLocalFallback();
+            if (tag == null || !hasPendingLocalWrite()) return true;
+            try {
+                JSONObject delta = new JSONObject();
+                delta.put(K_LOCALE, tag);
+                if (!UnifiedConfigManager.updateSection("nativeShell", delta)) {
+                    return false;
+                }
+                if (clearPendingLocalWriteIfCurrent(tag)) {
+                    invalidateCaches();
+                    return true;
+                }
+            } catch (Exception e) {
+                CameraDaemon.log("LocaleManager.replayPending: " + e.getMessage());
+                return false;
+            }
+        }
+        return !hasPendingLocalWrite();
     }
 
     /**
@@ -135,8 +273,8 @@ public final class LocaleManager {
                 byte[] buf = new byte[16];
                 int n = fis.read(buf);
                 if (n <= 0) return;
-                String tag = new String(buf, 0, n, "UTF-8").trim();
-                if (!AUTO_TAG.equals(tag) && !isSupported(tag)) return;
+                String tag = validStoredTag(new String(buf, 0, n, "UTF-8").trim());
+                if (tag == null) return;
                 JSONObject delta = new JSONObject();
                 delta.put(K_LOCALE, tag);
                 UnifiedConfigManager.updateSection("nativeShell", delta);
@@ -151,28 +289,33 @@ public final class LocaleManager {
      * Resolve any tag (e.g. "zh-Hans-CN", "pt", "no") to one of {@link #SUPPORTED}.
      * Mirrors the JS-side {@code resolveLang} so server and client agree.
      */
-    public static String resolve(String raw) {
-        if (raw == null || raw.isEmpty()) return DEFAULT_LANG;
-        String lower = raw.toLowerCase();
+    public static String resolveOrNull(String raw) {
+        if (raw == null || raw.isEmpty()) return null;
+        String lower = raw.toLowerCase(Locale.ROOT);
+        if (lower.equals("iw") || lower.startsWith("iw-")) return "he";
         // Exact match first
         for (String s : SUPPORTED) {
-            if (s.toLowerCase().equals(lower)) return s;
+            if (s.toLowerCase(Locale.ROOT).equals(lower)) return s;
         }
         // Common region/script aliases
         if (lower.startsWith("zh-hans") || lower.equals("zh-cn") || lower.equals("zh")) return "zh-CN";
         if (lower.startsWith("zh-hant") || lower.equals("zh-tw") || lower.equals("zh-hk")) return "zh-TW";
         if (lower.startsWith("pt")) return "pt-BR";
         if (lower.startsWith("no") || lower.startsWith("nn")) return "nb";
-        if (lower.equals("iw") || lower.startsWith("iw-")) return "he";
         // Bare-language fallback
         int dash = lower.indexOf('-');
         String bare = dash > 0 ? lower.substring(0, dash) : lower;
         for (String s : SUPPORTED) {
-            String b = s.toLowerCase();
+            String b = s.toLowerCase(Locale.ROOT);
             int d = b.indexOf('-');
             if ((d > 0 ? b.substring(0, d) : b).equals(bare)) return s;
         }
-        return DEFAULT_LANG;
+        return null;
+    }
+
+    public static String resolve(String raw) {
+        String resolved = resolveOrNull(raw);
+        return resolved == null ? DEFAULT_LANG : resolved;
     }
 
     public static boolean isSupported(String tag) {
@@ -194,14 +337,21 @@ public final class LocaleManager {
      */
     public static String getRaw() {
         migrateLegacyIfNeeded();
+        String local = readLocalFallback();
+        if (local != null && hasPendingLocalWrite()) {
+            return local;
+        }
         try {
             JSONObject section = UnifiedConfigManager.getNativeShell();
-            String tag = section.optString(K_LOCALE, "");
-            if (!tag.isEmpty() && (AUTO_TAG.equals(tag) || isSupported(tag))) return tag;
+            String tag = validStoredTag(section.optString(K_LOCALE, ""));
+            if (tag != null) {
+                persistLocalFallback(tag, false);
+                return tag;
+            }
         } catch (Exception e) {
             CameraDaemon.log("LocaleManager.getRaw: " + e.getMessage());
         }
-        return readLocal();
+        return local;
     }
 
     /**
@@ -219,17 +369,17 @@ public final class LocaleManager {
      * resolve via the device default each call (cache invalidated on write).
      */
     public static void setAuto() {
+        boolean saved = false;
         try {
             JSONObject delta = new JSONObject();
             delta.put(K_LOCALE, AUTO_TAG);
-            UnifiedConfigManager.updateSection("nativeShell", delta);
+            saved = UnifiedConfigManager.updateSection("nativeShell", delta);
         } catch (Exception e) {
             CameraDaemon.log("LocaleManager.setAuto: " + e.getMessage());
         }
-        persistLocal(AUTO_TAG);
-        cachedLocale = null;
-        cachedAt = 0L;
-        Messages.invalidate();
+        persistLocalFallback(AUTO_TAG, !saved);
+        invalidateCaches();
+        if (!saved) replayPendingWriteAsync();
     }
 
     /**
@@ -249,7 +399,8 @@ public final class LocaleManager {
             String resolved = resolve(tag);
             // resolve() returns 'en' both for "I want English" and "I want
             // something we don't support"; only treat the latter as a miss.
-            if (!resolved.equals(DEFAULT_LANG) || tag.toLowerCase().startsWith("en")) {
+            if (!resolved.equals(DEFAULT_LANG)
+                    || tag.toLowerCase(Locale.ROOT).startsWith("en")) {
                 return resolved;
             }
         }
@@ -309,19 +460,21 @@ public final class LocaleManager {
             return get();
         }
         String resolved = resolve(tag);
+        boolean saved = false;
         try {
             JSONObject delta = new JSONObject();
             delta.put(K_LOCALE, resolved);
-            UnifiedConfigManager.updateSection("nativeShell", delta);
+            saved = UnifiedConfigManager.updateSection("nativeShell", delta);
         } catch (Exception e) {
             CameraDaemon.log("LocaleManager.set: " + e.getMessage());
         }
-        persistLocal(resolved);
+        persistLocalFallback(resolved, !saved);
         cachedLocale = resolved;
         cachedAt = System.currentTimeMillis();
         // Drop any cached Messages catalog so the next server-side
         // i18n lookup loads the new locale's JSON.
         Messages.invalidate();
+        if (!saved) replayPendingWriteAsync();
         return resolved;
     }
 }

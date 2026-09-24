@@ -41,12 +41,16 @@ object MapNetworking {
     /**
      * A [okhttp3.ProxySelector] that defers to [ProxyHelper] on EVERY request, so
      * a proxy that appears or disappears mid-session is picked up without
-     * rebuilding the client. Returns the sing-box/Tailscale proxy when available,
-     * else a direct connection.
+     * rebuilding the client. Returns the sing-box/Tailscale proxy when available
+     * — followed by a DIRECT fallback leg, because the loopback probe cannot
+     * tell a general-egress proxy from the tailnet-only Tailscale SOCKS
+     * listener (through which public tile/routing/geocoding hosts are
+     * unreachable while the listener itself stays healthy). OkHttp falls
+     * through to direct in the same call and remembers the dead leg.
      */
     private val dynamicProxySelector = object : java.net.ProxySelector() {
         override fun select(uri: java.net.URI?): MutableList<java.net.Proxy> =
-            mutableListOf(ProxyHelper.getHttpProxy())  // NO_PROXY when unavailable
+            ProxyHelper.proxyRouteChain(ProxyHelper.getHttpProxy()).toMutableList()
 
         override fun connectFailed(
             uri: java.net.URI?, sa: java.net.SocketAddress?, ioe: java.io.IOException?

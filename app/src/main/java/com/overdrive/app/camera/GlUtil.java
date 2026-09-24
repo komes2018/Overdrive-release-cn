@@ -117,6 +117,35 @@ public class GlUtil {
         
         return textureId;
     }
+
+    /** Creates a standard texture for the isolated DiLink 5 CPU upload path. */
+    public static int create2DTexture() {
+        int[] textures = new int[1];
+        GLES20.glGenTextures(1, textures, 0);
+        checkGlError("glGenTextures");
+
+        int textureId = textures[0];
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId);
+        checkGlError("glBindTexture");
+        GLES20.glTexParameteri(
+                GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_MIN_FILTER,
+                GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(
+                GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_MAG_FILTER,
+                GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(
+                GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_WRAP_S,
+                GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(
+                GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_WRAP_T,
+                GLES20.GL_CLAMP_TO_EDGE);
+        checkGlError("glTexParameteri");
+        return textureId;
+    }
     
     /**
      * Creates an OpenGL program from vertex and fragment shader source code.

@@ -2,12 +2,15 @@ package com.overdrive.app.ui.util
 
 import android.util.Log
 import com.overdrive.app.ui.model.RecordingFile
+import com.overdrive.app.util.DaemonHttpClient
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.InterruptedIOException
 import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 
 /**
@@ -31,6 +34,8 @@ import java.util.concurrent.TimeUnit
  */
 object RecordingsApiClient {
     private const val TAG = "RecordingsApiClient"
+    private val RECORDING_ID = Regex("^[0-9a-f]{32}$")
+    private val PACK_ID = Regex("^[0-9a-f-]{36}$")
 
     // Confirmed via CameraDaemon.java:54 — `public static final int HTTP_PORT = 8080;`.
     // We don't reference CameraDaemon.HTTP_PORT directly to keep the UI
@@ -60,7 +65,7 @@ object RecordingsApiClient {
      * Mirror of {@link com.overdrive.app.server.RecordingsIndex.Filter}.
      * Empty sets / null fields disable that narrowing dimension.
      */
-    data class Filter(
+    data class Filter @JvmOverloads constructor(
         /**
          * Single type: "normal" / "sentry" / "proximity" / "oemDashcam" / null=all.
          * Server auto-folds oemDashcam under "normal" for compat with web
@@ -97,7 +102,13 @@ object RecordingsApiClient {
          * volumes (default; the index already spans every storage location).
          * Sent to the server as `storage=a,b` CSV.
          */
-        val storages: Set<String> = emptySet()
+        val storages: Set<String> = emptySet(),
+        /**
+         * Parking Intelligence: only clips stamped with this parking session
+         * ("park_yyyyMMdd_HHmmss"). Sent as `parkingSessionId=`; the server
+         * ignores anything that is not a plain token.
+         */
+        val parkingSessionId: String? = null
     ) {
         /**
          * Build the query string for /api/recordings. CSV joins to match
@@ -124,6 +135,7 @@ object RecordingsApiClient {
             if (!placeContains.isNullOrEmpty()) sb.append("&placeContains=").append(enc(placeContains))
             if (!country.isNullOrEmpty()) sb.append("&country=").append(enc(country))
             if (storages.isNotEmpty()) sb.append("&storage=").append(enc(storages.joinToString(",")))
+            if (!parkingSessionId.isNullOrEmpty()) sb.append("&parkingSessionId=").append(enc(parkingSessionId))
             return sb.toString()
         }
 
@@ -139,6 +151,7 @@ object RecordingsApiClient {
             if (!placeContains.isNullOrEmpty()) appendParam(sb, "placeContains", placeContains)
             if (!country.isNullOrEmpty()) appendParam(sb, "country", country)
             if (storages.isNotEmpty()) appendParam(sb, "storage", storages.joinToString(","))
+            if (!parkingSessionId.isNullOrEmpty()) appendParam(sb, "parkingSessionId", parkingSessionId)
             return sb.toString()
         }
 
@@ -188,6 +201,11 @@ object RecordingsApiClient {
          * payload is zero and NOT authoritative — render "unknown", never "0".
          */
         val indexUnavailable: Boolean = false
+    )
+
+    data class IncidentPackDownload(
+        val file: File? = null,
+        val error: String? = null
     )
 
     /** /api/recordings/places row. */
@@ -476,6 +494,151 @@ object RecordingsApiClient {
             Log.w(TAG, "fetchTimelineForVideo failed: ${t.message}")
             null
         }
+    }
+
+    /**
+     * Create and download the same incident pack used by events.html.
+     * The ZIP is streamed to disk because it can contain the source video.
+     */
+    fun createIncidentPack(
+        recordingId: String,
+        destinationDir: File
+    ): IncidentPackDownload {
+        if (!RECORDING_ID.matches(recordingId)) {
+            return IncidentPackDownload(error = "This recording is not indexed yet.")
+        }
+
+        var create: java.net.HttpURLConnection? = null
+        return try {
+            val connection = DaemonHttpClient.open(
+                "/api/genai/incidents", "POST",
+                connectTimeoutMs = 3_000,
+                readTimeoutMs = 120_000
+            )
+            create = connection
+            val payload = JSONObject()
+                .put("recordingId", recordingId)
+                .toString()
+                .toByteArray(StandardCharsets.UTF_8)
+            connection.doOutput = true
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setFixedLengthStreamingMode(payload.size)
+            connection.outputStream.use { it.write(payload) }
+
+            val createCode = connection.responseCode
+            val createBody = responseText(connection, createCode)
+            if (createCode !in 200..299) {
+                return IncidentPackDownload(
+                    error = apiError(createBody, "Could not create evidence pack.")
+                )
+            }
+
+            val packId = JSONObject(createBody).optString("id")
+            if (!PACK_ID.matches(packId)) {
+                return IncidentPackDownload(
+                    error = "The daemon returned an invalid evidence-pack id."
+                )
+            }
+            downloadIncidentPack(packId, destinationDir)
+        } catch (t: Throwable) {
+            Log.w(TAG, "createIncidentPack failed: ${t.message}")
+            IncidentPackDownload(error = t.message ?: "Could not create evidence pack.")
+        } finally {
+            create?.disconnect()
+        }
+    }
+
+    private fun downloadIncidentPack(
+        packId: String,
+        destinationDir: File
+    ): IncidentPackDownload {
+        if ((!destinationDir.isDirectory && !destinationDir.mkdirs()) ||
+            !destinationDir.canWrite()
+        ) {
+            return IncidentPackDownload(error = "Could not prepare evidence-pack storage.")
+        }
+
+        val target = File(destinationDir, "OverDrive-Incident-$packId.zip")
+        val partial = File(destinationDir, "${target.name}.part")
+        partial.delete()
+        var download: java.net.HttpURLConnection? = null
+        return try {
+            val connection = DaemonHttpClient.open(
+                "/api/genai/incidents/$packId/download", "GET",
+                connectTimeoutMs = 3_000,
+                readTimeoutMs = 300_000
+            )
+            download = connection
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                return IncidentPackDownload(
+                    error = apiError(
+                        responseText(connection, code),
+                        "Could not download evidence pack."
+                    )
+                )
+            }
+            connection.inputStream.use { input ->
+                partial.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        if (Thread.currentThread().isInterrupted) {
+                            throw InterruptedIOException("Evidence-pack download cancelled.")
+                        }
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                    }
+                }
+            }
+            if (!isZip(partial)) {
+                return IncidentPackDownload(error = "The downloaded evidence pack is invalid.")
+            }
+            if (target.exists() && !target.delete()) {
+                return IncidentPackDownload(error = "Could not replace the cached evidence pack.")
+            }
+            if (!partial.renameTo(target)) {
+                return IncidentPackDownload(error = "Could not finish the evidence-pack download.")
+            }
+            IncidentPackDownload(file = target)
+        } catch (t: Throwable) {
+            Log.w(TAG, "downloadIncidentPack failed: ${t.message}")
+            IncidentPackDownload(error = t.message ?: "Could not download evidence pack.")
+        } finally {
+            partial.delete()
+            download?.disconnect()
+        }
+    }
+
+    private fun responseText(
+        connection: java.net.HttpURLConnection,
+        responseCode: Int
+    ): String {
+        val stream = if (responseCode in 200..299) {
+            connection.inputStream
+        } else {
+            connection.errorStream
+        } ?: return ""
+        return stream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+    }
+
+    private fun apiError(body: String, fallback: String): String {
+        return try {
+            JSONObject(body).optString("error").takeIf(String::isNotBlank) ?: fallback
+        } catch (_: Throwable) {
+            fallback
+        }
+    }
+
+    private fun isZip(file: File): Boolean {
+        if (file.length() < 4) return false
+        val signature = ByteArray(4)
+        file.inputStream().use {
+            if (it.read(signature) != signature.size) return false
+        }
+        return signature.contentEquals(
+            byteArrayOf(0x50, 0x4b, 0x03, 0x04)
+        )
     }
 
     // -------------------------------------------------------------------

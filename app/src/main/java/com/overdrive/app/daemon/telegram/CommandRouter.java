@@ -23,6 +23,7 @@ public class CommandRouter {
         handlers.add(new UpdateCommandHandler());
         handlers.add(new BackupCommandHandler());
         handlers.add(new SendLogCommandHandler());
+        handlers.add(new WhereCommandHandler());
     }
     
     /**

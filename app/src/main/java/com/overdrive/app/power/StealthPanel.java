@@ -17,8 +17,7 @@ import java.lang.reflect.Method;
  * DiLink 4 parked-panel control: turn the screen genuinely OFF and verify it.
  *
  * <h3>Provenance — this mirrors the reference app</h3>
- * Reverse-engineered from the OEM dashcam app (the byd_apa / AVMCamera
- * reference app, {@code app_bydSofaProRelease}), classes
+ * Reverse-engineered from the platform camera implementation, classes
  * {@code BacklightController} and {@code DeviceWakeupMonitor}. The behaviour
  * copied here, verified against its decompiled bytecode:
  *
@@ -37,8 +36,9 @@ import java.lang.reflect.Method;
  *       at all.</li>
  *   <li><b>It verifies, and retries with the other tier.</b> Every transition is
  *       checked with {@code PowerManager.getPowerScreenStatus()} (0 = off,
- *       1 = on) rather than trusted. See {@link #turnOff}/{@link #turnOn}, which
- *       reproduce the reference app's exact check-call-check-call-check shape.</li>
+ *       1 = on) rather than trusted. See {@link #turnOff}, which reproduces the
+ *       reference app's exact check-call-check-call-check shape; {@link #turnOn}
+ *       deliberately diverges (second divergence below).</li>
  *   <li><b>It never calls {@code userActivity}.</b> Zero occurrences in the
  *       whole APK. It holds the AP awake with {@code PowerManager.wakeUp} on a
  *       60 s cadence plus {@code svc wifi enable}, and it darkens the panel
@@ -68,9 +68,23 @@ import java.lang.reflect.Method;
  * relit the panel (the 8-min wakeUp, a motion deterrent that ended without
  * cleaning up, a user who woke the screen and walked away).
  *
+ * <h3>Second divergence: a wake never trusts the status flag</h3>
+ * The reference app's {@code turnOnBacklight()} skips the tiers when
+ * {@code getPowerScreenStatus()} already reads on. We cannot: that flag reports
+ * PowerManagerService's screen POLICY, and {@code TurnBacklightOffWithLock} exists
+ * precisely to hold the rail dark while the policy says ON. So on the ACC-ON edge
+ * the flag can read 1 over a physically black panel, and a status-gated wake never
+ * issues the one call that releases the lock. Field symptom: cluster on, centre
+ * screen black for the whole drive, long-press volume (system_server restart) to
+ * recover. On any platform that may hold the lock, {@link #turnOn} therefore always
+ * fires tier 1 AND the tier-2 release — against every token variant, since the
+ * process that took the lock may be dead — and only then reads the status, for
+ * logging. Darkening keeps the status short-circuit; the 10 s keep-alive depends
+ * on it, and a redundant OFF is what flickers, not a redundant ON.
+ *
  * <h3>Scope</h3>
- * <b>{@link #turnOff} is a no-op unless {@code camera.cameraMode} is exactly
- * {@code dilink4}.</b> Legacy pano_h/pano_l units keep
+ * <b>{@link #turnOff} is a no-op unless DiLink 4 or explicitly selected,
+ * supported DiLink 5 is active.</b> Legacy pano_h/pano_l units keep
  * {@code AccSentryDaemon.setBacklightState()} untouched — this class only adds
  * the reference app's WithLock tier and status verification for dilink4.
  * {@link #turnOn} is intentionally NOT mode-gated: waking is always safe, and
@@ -92,20 +106,14 @@ public final class StealthPanel {
     // ── Mode gate ──────────────────────────────────────────────────────────
 
     /**
-     * True only on {@code cameraMode=dilink4}. Mirrors
-     * {@code AccSentryDaemon.isDilink4CameraMode()} exactly (same section, same
-     * key, same case-insensitive compare, same fail-closed default). Returns
-     * false on any failure — a config read error must never divert a legacy unit
-     * onto the dilink4 path.
+     * True on the panel-control-capable DiLink 4 path or explicitly selected,
+     * supported DiLink 5. Returns false on any failure so a config read error
+     * never diverts a legacy unit onto this path.
      */
     public static boolean isDilink4() {
         try {
-            if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
-                return true;
-            }
-            JSONObject c = UnifiedConfigManager.loadConfig().optJSONObject("camera");
-            if (c == null) return false;
-            return "dilink4".equalsIgnoreCase(c.optString("cameraMode", "default"));
+            return com.overdrive.app.camera.dilink5.DiLink5Platform
+                    .isPanelControlModeSelected();
         } catch (Throwable t) {
             return false;
         }
@@ -161,8 +169,9 @@ public final class StealthPanel {
     }
 
     /**
-     * Turn the panel ON, mirroring {@code BacklightController.turnOnBacklight()}.
-     * Same two-tier escalation and verification as {@link #turnOff}.
+     * Turn the panel ON. Same two tiers as {@link #turnOff}, but on a platform
+     * that may hold the tier-2 lock the wake is NOT status-gated: tier 1 and the
+     * lock release always run (see the class comment, "second divergence").
      *
      * <p>Deliberately NOT gated on {@link #isDilink4()}: if the user switches
      * {@code cameraMode} away from dilink4 while parked, the gate would flip
@@ -222,9 +231,24 @@ public final class StealthPanel {
         final int target = want ? SCREEN_STATUS_ON : SCREEN_STATUS_OFF;
         int status = screenStatus(ctx);
 
+        // A WAKE on a platform that ever takes the tier-2 lock must not trust the
+        // status flag. getPowerScreenStatus() reports PowerManagerService's screen
+        // policy state, not the backlight rail; TurnBacklightOffWithLock exists
+        // precisely to hold the rail dark while that policy says ON. On the
+        // ACC-ON edge the flag can therefore read 1 with the panel physically
+        // black, and "already on → return" skips the ONE call that can release
+        // the lock — the panel stays dark for the whole drive until a head-unit
+        // reboot clears system_server. Darkening keeps the short-circuit (the
+        // 10 s keep-alive depends on it); a wake is edge-driven and cheap.
+        final boolean forceWakeRelease = want && allowTier2;
+
         if (status == target) {
-            // Already where we want to be — no write, no further reads.
-            return true;
+            if (!forceWakeRelease) {
+                // Already where we want to be — no write, no further reads.
+                return true;
+            }
+            logger.info("turnOn: status flag already reads ON — not trusted while a "
+                + "vendor backlight lock may be held; asserting wake + lock release");
         }
 
         // An unrecognised value (not 0/1/-1 — e.g. a vendor dim/doze tier) is
@@ -304,18 +328,27 @@ public final class StealthPanel {
         setBacklightViaPowerManager(ctx, want);
         status = screenStatus(ctx);
 
-        // Tier 2 (the vendor lock-holding variant) only if tier 1 did not take.
-        // This is the escalation the reference app relies on and the reason a
-        // plain turnBacklightOff was not enough on this firmware.
-        //
-        // A post-write status that is UNKNOWN or unrecognised means we cannot tell
-        // whether tier 1 took, so escalating would be guesswork; treat the write as
-        // trusted instead. (The pre-tier normalisation above already routed a
-        // permanently-unrecognised firmware into the latched branch, so reaching
-        // here with a non-plausible value means the read went bad transiently — the
-        // next tick re-reads and completes the escalation if it is still needed.)
-        if (allowTier2 && status != target && isPlausibleStatus(status)
+        if (forceWakeRelease) {
+            // Wake: ALWAYS release the vendor lock. Whether tier 1 "took" says
+            // nothing about whether TurnBacklightOffWithLock is still held — by
+            // this process, by a previous instance that died holding it, or by
+            // the other daemon — and an unreleased OFF lock is the unrecoverable
+            // outcome. Releasing a lock nobody holds is a no-op or a caught throw.
+            setBacklightWithLock(ctx, true);
+            status = screenStatus(ctx);
+        } else if (allowTier2 && status != target && isPlausibleStatus(status)
                 && status != SCREEN_STATUS_UNKNOWN) {
+            // Darken: tier 2 (the vendor lock-holding variant) only if tier 1 did
+            // not take. This is the escalation the reference app relies on and the
+            // reason a plain turnBacklightOff was not enough on this firmware.
+            //
+            // A post-write status that is UNKNOWN or unrecognised means we cannot
+            // tell whether tier 1 took, so escalating would be guesswork; treat the
+            // write as trusted instead. (The pre-tier normalisation above already
+            // routed a permanently-unrecognised firmware into the latched branch,
+            // so reaching here with a non-plausible value means the read went bad
+            // transiently — the next tick re-reads and completes the escalation if
+            // it is still needed.)
             setBacklightWithLock(ctx, want);
             status = screenStatus(ctx);
         }
@@ -701,8 +734,11 @@ public final class StealthPanel {
                 // there would leave the real lock held — panel stuck dark for the
                 // returning driver, or an invisible intruder warning.
                 //
-                // So try EVERY token variant and stop at the first that doesn't
-                // throw, preferring the one this process is known to have used.
+                // So try EVERY token variant — and do not stop at the first that
+                // doesn't throw. A release the vendor accepts for a token that
+                // holds nothing (a no-op) must not shadow the variant holding the
+                // real lock; the process that took it may be dead and its Binder
+                // gone, so null is the only handle left for that lock.
                 // Releasing a lock we don't hold is harmless (the vendor either
                 // no-ops or throws, both caught); failing to release one that IS
                 // held is the unrecoverable outcome.
@@ -715,7 +751,6 @@ public final class StealthPanel {
                     try {
                         m.invoke(service, token, TAG);
                         released = true;
-                        break;
                     } catch (Throwable t) {
                         last = t;
                     }

@@ -1,5 +1,6 @@
 package com.overdrive.app.remote
 
+import android.app.ActivityManager
 import android.app.ActivityOptions
 import android.app.Application
 import android.content.Context
@@ -14,6 +15,7 @@ import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.Image
 import android.media.ImageReader
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
@@ -41,6 +43,7 @@ import java.util.concurrent.atomic.AtomicReference
  */
 object RemoteDevVirtualDisplay {
     const val BACKEND_NAME = "Virtual display"
+    const val COMPATIBILITY_BACKEND_NAME = "Physical window compatibility"
 
     private const val TAG = "RemoteDevVirtualDisplay"
     private const val DISPLAY_NAME = "Overdrive Remote Dev"
@@ -61,6 +64,8 @@ object RemoteDevVirtualDisplay {
         val success: Boolean,
         val displayId: Int = Display.INVALID_DISPLAY,
         val detail: String? = null,
+        val backend: String = BACKEND_NAME,
+        val compatibilityMode: Boolean = false,
     )
 
     data class CachedFrame(
@@ -75,14 +80,27 @@ object RemoteDevVirtualDisplay {
 
     private val lock = Any()
     @Volatile private var active: Session? = null
+    @Volatile private var physicalCompatibilityMode = false
 
     fun start(application: Application): StartResult = synchronized(lock) {
         if (!RemoteDevViewController.isAccessAllowed()) {
-            return StartResult(false, detail = RemoteDevViewController.ACCESS_LOCKED_DETAIL)
+            return StartResult(
+                false,
+                detail = RemoteDevViewController.ACCESS_LOCKED_DETAIL,
+                backend = currentBackendName(),
+                compatibilityMode = physicalCompatibilityMode,
+            )
         }
-        active?.takeIf { it.isUsable() }?.let {
-            it.launchActivity()
-            return StartResult(true, it.displayId)
+        if (physicalCompatibilityMode) {
+            return physicalCompatibilityResult()
+        }
+        active?.takeIf { it.isUsable() }?.let { session ->
+            return try {
+                session.launchActivity()
+                StartResult(true, session.displayId)
+            } catch (error: Throwable) {
+                handleLaunchFailure(session, error)
+            }
         }
 
         active?.close()
@@ -93,37 +111,79 @@ object RemoteDevVirtualDisplay {
             Log.e(TAG, "Unable to create private virtual display", error)
             return StartResult(false, detail = error.javaClass.simpleName + ": " + error.message)
         }
+        if (!session.isActivityLaunchAllowed()) {
+            session.close()
+            return physicalCompatibilityResult(
+                "Android rejected the Remote Dev View activity on display ${session.displayId}",
+            )
+        }
         active = session
         RemoteDevViewController.bindRemoteDisplay(session.displayId)
         return try {
             session.launchActivity()
             StartResult(true, session.displayId)
         } catch (error: Throwable) {
-            Log.e(TAG, "Unable to launch RemoteMainActivity", error)
-            active = null
-            RemoteDevViewController.unbindRemoteDisplay(session.displayId)
-            session.close()
-            StartResult(false, detail = error.javaClass.simpleName + ": " + error.message)
+            handleLaunchFailure(session, error)
         }
     }
 
     fun stop() {
         val session = synchronized(lock) {
+            physicalCompatibilityMode = false
             active.also { active = null }
-        } ?: return
-        RemoteDevViewController.unbindRemoteDisplay(session.displayId)
-        session.close()
+        }
+        if (session != null) {
+            RemoteDevViewController.unbindRemoteDisplay(session.displayId)
+            session.close()
+        }
     }
 
     fun isRunning(): Boolean = active?.isUsable() == true
 
-    fun displayId(): Int = active?.displayId ?: Display.INVALID_DISPLAY
+    fun isCompatibilityMode(): Boolean = physicalCompatibilityMode
+
+    fun currentBackendName(): String =
+        if (physicalCompatibilityMode) COMPATIBILITY_BACKEND_NAME else BACKEND_NAME
+
+    fun displayId(): Int = when {
+        physicalCompatibilityMode -> Display.DEFAULT_DISPLAY
+        else -> active?.displayId ?: Display.INVALID_DISPLAY
+    }
 
     fun latestFrame(): CachedFrame? =
         if (RemoteDevViewController.isAccessAllowed()) active?.latestFrame?.get() else null
 
     fun requestImmediateFrame() {
         active?.requestImmediateFrame()
+    }
+
+    private fun handleLaunchFailure(session: Session, error: Throwable): StartResult {
+        Log.e(TAG, "Unable to launch RemoteMainActivity", error)
+        active = null
+        RemoteDevViewController.unbindRemoteDisplay(session.displayId)
+        session.close()
+        return if (error is SecurityException) {
+            physicalCompatibilityResult(
+                "Android threw SecurityException for display ${session.displayId}",
+            )
+        } else {
+            StartResult(false, detail = error.javaClass.simpleName + ": " + error.message)
+        }
+    }
+
+    private fun physicalCompatibilityResult(reason: String? = null): StartResult {
+        physicalCompatibilityMode = true
+        if (reason != null) {
+            Log.w(TAG, "$reason; using the existing physical Overdrive window")
+        }
+        val status = RemoteDevViewController.physicalCompatibilityStatus()
+        return StartResult(
+            success = status.success,
+            displayId = if (status.success) Display.DEFAULT_DISPLAY else Display.INVALID_DISPLAY,
+            detail = if (status.success) null else status.detail,
+            backend = COMPATIBILITY_BACKEND_NAME,
+            compatibilityMode = true,
+        )
     }
 
     private class Session(private val application: Application) {
@@ -177,18 +237,37 @@ object RemoteDevVirtualDisplay {
 
         fun isUsable(): Boolean = !closed.get() && virtualDisplay.display.isValid
 
+        fun isActivityLaunchAllowed(): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
+            return try {
+                val activityManager = application.getSystemService(ActivityManager::class.java)
+                activityManager?.isActivityStartAllowedOnDisplay(
+                    application,
+                    displayId,
+                    launchIntent(),
+                ) ?: true
+            } catch (error: Throwable) {
+                // A missing or OEM-modified probe must not change behavior on
+                // devices where the existing virtual-display path works.
+                Log.w(TAG, "Unable to preflight activity launch on display $displayId", error)
+                true
+            }
+        }
+
         fun launchActivity() {
             check(isUsable()) { "Private virtual display is not available" }
             val options = ActivityOptions.makeBasic().apply { launchDisplayId = displayId }
-            val intent = Intent(application, RemoteMainActivity::class.java).apply {
+            application.startActivity(launchIntent(), options.toBundle())
+        }
+
+        private fun launchIntent() =
+            Intent(application, RemoteMainActivity::class.java).apply {
                 putExtra(MainActivity.EXTRA_REMOTE_DEV_SESSION, true)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                 addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
                 addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
             }
-            application.startActivity(intent, options.toBundle())
-        }
 
         fun requestImmediateFrame() {
             forceNextFrame.set(true)

@@ -114,24 +114,10 @@ class AdbDaemonLauncher(private val context: Context) {
         adbShellExecutor.shutdown()
     }
     
-    /**
-     * Check if ADB is available on the expected port.
-     */
-    fun checkAdbAvailable(callback: (Boolean, String) -> Unit) {
-        adbShellExecutor.execute(
-            command = "echo ok",
-            callback = object : AdbShellExecutor.ShellCallback {
-                override fun onSuccess(output: String) {
-                    callback(true, "ADB available")
-                }
-                
-                override fun onError(error: String) {
-                    callback(false, "ADB not available: $error")
-                }
-            }
-        )
-    }
-    
+    // NOTE: the old `checkAdbAvailable` helper (a bare `echo ok` round-trip)
+    // was deleted: it had no callers, and its command was byte-identical to
+    // the 21-byte OPEN implicated in the vendor adbd abort incident.
+
     // ==================== DAEMON LAUNCHING ====================
     
     /**
@@ -527,6 +513,32 @@ class AdbDaemonLauncher(private val context: Context) {
     fun executeShellCommand(command: String, callback: LaunchCallback) {
         adbShellExecutor.execute(
             command = command,
+            callback = object : AdbShellExecutor.ShellCallback {
+                override fun onSuccess(output: String) {
+                    callback.onLog(output)
+                    callback.onLaunched()
+                }
+
+                override fun onError(error: String) {
+                    callback.onError(error)
+                }
+            }
+        )
+    }
+
+    /**
+     * Execute a LONG-RUNNING shell command on the BULK lane: a dedicated,
+     * per-operation Dadb connection bounded by [deadlineMs], separate from the
+     * shared control connection. Use for anything that can stay output-silent
+     * longer than the control lane tolerates (updater download, `pm install`)
+     * so it can neither be severed by the shared lane's socket timeout nor
+     * monopolize/tear down the connection every other subsystem depends on.
+     * See AdbShellExecutor.executeBulk.
+     */
+    fun executeShellCommandBulk(command: String, deadlineMs: Long, callback: LaunchCallback) {
+        adbShellExecutor.executeBulk(
+            command = command,
+            deadlineMs = deadlineMs,
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     callback.onLog(output)

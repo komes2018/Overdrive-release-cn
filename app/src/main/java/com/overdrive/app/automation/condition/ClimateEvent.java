@@ -3,8 +3,9 @@ package com.overdrive.app.automation.condition;
 import com.overdrive.app.automation.Automations;
 
 /**
- * Publishes AC power, seat-heat / seat-cool (per seat), high/low beam, and the AC setpoint into
- * the automation state at a FAST cadence so climate/light changes fire promptly.
+ * Publishes AC power, seat-heat / seat-cool (per seat), steering-wheel heat, high/low beam,
+ * and the AC setpoint into the automation state at a FAST cadence so climate/light changes
+ * fire promptly.
  *
  * <p><b>Why a dedicated fast poll.</b> These signals otherwise ride the telemetry snapshot
  * ({@link BydEvent#bydEvent} → collectSettings / collectLight), built every ~5s. The settings
@@ -36,6 +37,7 @@ public final class ClimateEvent {
                 || Automations.isEventReferenced(BydEvent.SEAT_COOL_PASSENGER)
                 || Automations.isEventReferenced(BydEvent.SEAT_HEAT_DRIVER)
                 || Automations.isEventReferenced(BydEvent.SEAT_HEAT_PASSENGER)
+                || Automations.isEventReferenced(BydEvent.STEERING_HEAT)
                 || Automations.isEventReferenced(BydEvent.LIGHTS_HIGH_BEAM)
                 || Automations.isEventReferenced(BydEvent.LIGHTS_LOW_BEAM)
                 || Automations.isEventReferenced(BydEvent.LIGHTS_DRL)
@@ -47,5 +49,9 @@ public final class ClimateEvent {
 
     public static void refresh() {
         poller.refresh();
+    }
+
+    static boolean isScheduledForTest() {
+        return poller.isScheduledForTest();
     }
 }

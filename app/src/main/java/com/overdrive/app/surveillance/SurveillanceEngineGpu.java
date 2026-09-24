@@ -2098,6 +2098,39 @@ public class SurveillanceEngineGpu {
         if (fps > 0) this.cameraTargetFps = fps;
     }
 
+    // ==================== FROZEN-FEED DETECTOR (parked) ====================
+    //
+    // Field finding (DI5 default camera mode, 2026-09-21): minutes after ACC
+    // OFF the AVM HAL can keep queuing buffers whose CONTENT never changes
+    // (camera/ISP rail down, AVM SoC re-emits its last frame). The stall
+    // watchdog sees buffers flowing and the motion pipeline sees a still
+    // scene, so a whole night records one image. This detector hashes the
+    // downscaled CPU frame this engine already receives and flags
+    // bit-identical streaks — a live sensor never produces those (noise),
+    // a repeated buffer always does. Wired by PanoramicCameraGpu; the
+    // listener decides whether to log only or also reopen the camera.
+    private volatile com.overdrive.app.camera.FrozenFeedDetector frozenFeed;
+
+    /** Install the parked frozen-feed detector (null listener disables). */
+    public void setFrozenFeedListener(
+            com.overdrive.app.camera.FrozenFeedDetector.Listener listener) {
+        frozenFeed = listener == null
+                ? null
+                : new com.overdrive.app.camera.FrozenFeedDetector(listener);
+    }
+
+    /** True while the parked feed is currently flagged frozen (diagnostics). */
+    public boolean isFeedFrozen() {
+        com.overdrive.app.camera.FrozenFeedDetector d = frozenFeed;
+        return d != null && d.isFrozen();
+    }
+
+    /** Arm/disarm hygiene: a stale pre-session hash must never seed the next one. */
+    private void resetFrozenFeedDetector() {
+        com.overdrive.app.camera.FrozenFeedDetector d = frozenFeed;
+        if (d != null) d.reset();
+    }
+
     // cropOnGlThread() removed — foveated crops now run synchronously on the
     // GL thread inside serviceFoveatedRequestsOnGlThread() (called from
     // PanoramicCameraGpu.renderLoop). The AI worker uses the mailbox
@@ -2163,6 +2196,15 @@ public class SurveillanceEngineGpu {
                 downscaler.recycleBuffer(smallRgbFrame);
             }
             return;
+        }
+
+        // Frozen-feed detector (parked): cheap strided hash every ~2 s,
+        // BEFORE the continuous-mode return so both ACC-off modes are
+        // covered whenever CPU frames reach this method. Reads the buffer
+        // synchronously, never retains it.
+        com.overdrive.app.camera.FrozenFeedDetector frozenFeedLocal = frozenFeed;
+        if (frozenFeedLocal != null) {
+            frozenFeedLocal.observe(smallRgbFrame, System.currentTimeMillis());
         }
 
         // Continuous mode: encoder is fed by the GL→encoder surface chain
@@ -8592,9 +8634,11 @@ public class SurveillanceEngineGpu {
             worker.setDaemon(true);
             worker.start();
             synchronized (done) {
-                long deadline = System.currentTimeMillis() + 5_000L;
+                long deadline = android.os.SystemClock.elapsedRealtime()
+                        + 5_000L;
                 while (!finished[0]) {
-                    long remaining = deadline - System.currentTimeMillis();
+                    long remaining = deadline
+                            - android.os.SystemClock.elapsedRealtime();
                     if (remaining <= 0) break;
                     try { done.wait(remaining); }
                     catch (InterruptedException ie) {
@@ -8645,9 +8689,11 @@ public class SurveillanceEngineGpu {
         worker.setDaemon(true);
         worker.start();
         synchronized (done) {
-            long deadline = System.currentTimeMillis() + timeoutMs;
+            long deadline = android.os.SystemClock.elapsedRealtime()
+                    + timeoutMs;
             while (!finished[0]) {
-                long remaining = deadline - System.currentTimeMillis();
+                long remaining = deadline
+                        - android.os.SystemClock.elapsedRealtime();
                 if (remaining <= 0) break;
                 try { done.wait(remaining); }
                 catch (InterruptedException ie) {
@@ -11198,6 +11244,40 @@ public class SurveillanceEngineGpu {
             segmentActors = renormalized;
         }
 
+        // FINAL ACTOR ↔ THUMBNAIL RECONCILIATION.
+        //
+        // A slot captures the actor's peak frame early, when a coarse motion
+        // mask can call a parked vehicle "live" because a different moving
+        // object's pixels overlap its bbox. ActorTracker has more temporal
+        // evidence by segment finalization. If that latest verdict says the
+        // same non-person actor never moved, remove only its presentation slot:
+        // the MP4 remains untouched and the caller falls back to a plain MP4
+        // keyframe when no eligible boxed hero remains.
+        //
+        // PERSON is explicitly exempt in ThumbnailFinalizationPolicy. Missing
+        // or TTL-pruned actor state fails open and preserves the slot, so this
+        // cannot hide a mover merely because final state is unavailable.
+        final java.util.List<ThumbnailBuffer.Slot> reconciledSnap;
+        if (windowedSnap == null || windowedSnap.isEmpty()) {
+            reconciledSnap = windowedSnap;
+        } else {
+            java.util.List<ThumbnailBuffer.Slot> eligible =
+                    new java.util.ArrayList<>(windowedSnap.size());
+            for (ThumbnailBuffer.Slot slot : windowedSnap) {
+                if (slot == null || !ThumbnailFinalizationPolicy.shouldExcludeSlot(
+                        slot.actorId, segmentActors)) {
+                    eligible.add(slot);
+                }
+            }
+            if (eligible.size() != windowedSnap.size()) {
+                logger.info("Final thumbnail reconciliation: excluded "
+                        + (windowedSnap.size() - eligible.size())
+                        + " stationary non-person slot(s) for "
+                        + segmentMp4.getName());
+            }
+            reconciledSnap = eligible;
+        }
+
         // Compute the deterministic hero filename now (we don't yet know
         // whether ThumbnailBuffer will produce one, but the JSON sidecar
         // can record the filename it WILL have if produced).
@@ -11233,7 +11313,7 @@ public class SurveillanceEngineGpu {
         //      so the finalizer thread returns immediately.
         //   2. Per-actor JPEGs always go to the executor.
         ThumbnailBuffer bufferAtDispatch = thumbnailBuffer;
-        if (bufferAtDispatch != null && windowedSnap != null) {
+        if (bufferAtDispatch != null && reconciledSnap != null) {
             // Step 2: hero. Whether sync or async depends on the explicit
             // syncHero parameter. The publish path passes true; the
             // rotation listener passes false. Per-call argument means
@@ -11245,7 +11325,8 @@ public class SurveillanceEngineGpu {
                     // Window-gate the hero so it can't depict a peak frame evicted
                     // from the bounded pre-record ring (segmentStartMs is this
                     // segment's window start; open upper bound = still finalizing).
-                    heroFile = bufferAtDispatch.writeHeroFromSnapshot(windowedSnap, segmentMp4, segmentStartMs, 0L);
+                    heroFile = bufferAtDispatch.writeHeroFromSnapshot(
+                            reconciledSnap, segmentMp4, segmentStartMs, 0L);
                 } catch (Throwable t) {
                     logger.warn("Hero thumbnail sync write failed for "
                             + segmentMp4.getName() + ": " + t.getMessage());
@@ -11270,7 +11351,7 @@ public class SurveillanceEngineGpu {
                 // Async hero path (rotation listener — no publish blocking
                 // on this segment). Schedule on the executor so we return
                 // off the GpuSegmentFinalizer-N thread fast. ALWAYS scheduled
-                // (even when windowedSnap is empty) so the MP4-keyframe fallback
+                // (even when reconciledSnap is empty) so the MP4-keyframe fallback
                 // below can run: the sidecar records expectedHeroName for THIS
                 // segment unconditionally, so if no YOLO-derived hero is written
                 // the rotated segment's card would point at a non-existent
@@ -11283,7 +11364,7 @@ public class SurveillanceEngineGpu {
                 inFlightSegmentMetadata.incrementAndGet();
                 final ThumbnailBuffer bufFinal = bufferAtDispatch;
                 final long heroWindowStartMs = segmentStartMs;
-                final java.util.List<ThumbnailBuffer.Slot> heroSnap = windowedSnap;
+                final java.util.List<ThumbnailBuffer.Slot> heroSnap = reconciledSnap;
                 final String heroBase = base;
                 segmentMetadataExecutor.execute(() -> {
                     try {
@@ -11334,7 +11415,7 @@ public class SurveillanceEngineGpu {
             }
 
             // Step 3: per-actor JPEGs always async.
-            if (!windowedSnap.isEmpty()) {
+            if (!reconciledSnap.isEmpty()) {
                 inFlightSegmentMetadata.incrementAndGet();
                 final ThumbnailBuffer bufFinal = bufferAtDispatch;
                 segmentMetadataExecutor.execute(() -> {
@@ -11345,15 +11426,10 @@ public class SurveillanceEngineGpu {
                             if (tmpBase.endsWith(".mp4")) {
                                 tmpBase = tmpBase.substring(0, tmpBase.length() - 4);
                             }
-                            for (ThumbnailBuffer.Slot s : windowedSnap) {
-                                // Static scenery keeps its slot for HERO ranking (so a
-                                // clip whose only subject is stationary still gets a
-                                // real bbox hero instead of a bare keyframe) but must
-                                // NOT emit a per-actor thumbnail: thumb_<base>_a<id>.jpg
-                                // is served to the events UI, and before the
-                                // exclusion→demotion change these actors were dropped
-                                // from the pool entirely and produced no such file.
-                                // Preserves the prior user-visible behaviour here.
+                            for (ThumbnailBuffer.Slot s : reconciledSnap) {
+                                // Final ActorTracker statics were removed by the
+                                // reconciliation above. Retain this guard for slots
+                                // ThumbnailBuffer itself conclusively demoted.
                                 if (s.isStaticNonThreat()) continue;
                                 try {
                                     Long relBoxed = relMap.get(s.actorId);
@@ -11455,6 +11531,13 @@ public class SurveillanceEngineGpu {
         } catch (Exception e) {
             logger.warn("Timeline write failed for " + segmentMp4.getName() + ": " + e.getMessage());
         }
+        // Parking Intelligence observer (read-only, additive). A volatile null
+        // check when the feature is off; when on, the listener enqueues onto
+        // its own worker and returns — the final-segment call site holds
+        // recordingLifecycleLock, so nothing here may block. Never influences
+        // recording, discard or baseline decisions (FP-neutral by construction).
+        com.overdrive.app.parking.ParkingHooks.onEventFinalized(
+                segmentMp4, segmentActors, segmentStartMs, syncHero);
     }
 
     /**
@@ -11466,10 +11549,11 @@ public class SurveillanceEngineGpu {
      * partial state on disk is recoverable on next launch).
      */
     private boolean drainSegmentMetadata(long timeoutMs) {
-        long deadline = System.currentTimeMillis() + timeoutMs;
+        long deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs;
         synchronized (segmentMetadataDrainLock) {
             while (inFlightSegmentMetadata.get() > 0) {
-                long remaining = deadline - System.currentTimeMillis();
+                long remaining = deadline
+                        - android.os.SystemClock.elapsedRealtime();
                 if (remaining <= 0) {
                     logger.warn("drainSegmentMetadata timed out with "
                             + inFlightSegmentMetadata.get() + " in flight");
@@ -11578,6 +11662,7 @@ public class SurveillanceEngineGpu {
             // entirely. NativeMotion is not required, so don't gate on it.
             logger.info("Enabling surveillance engine (CONTINUOUS — no motion, no AI)");
             armEpoch++;  // new arm session (R3b Ext-2/Ext-6)
+            resetFrozenFeedDetector();
             active = true;
             try {
                 com.overdrive.app.storage.StorageManager.getInstance().setSurveillanceActive(true);
@@ -11811,6 +11896,7 @@ public class SurveillanceEngineGpu {
         // Publication LAST (audit R3b Ext-1): every reset and native init
         // above happens-before the frame lane's first isActive()==true read.
         armEpoch++;  // new arm session (see armEpoch field doc — R3b Ext-2)
+        resetFrozenFeedDetector();
         active = true;
 
         logger.info("Surveillance enabled (V2 per-quadrant pipeline)");
@@ -11873,6 +11959,7 @@ public class SurveillanceEngineGpu {
                 return;
             }
             active = false;
+            resetFrozenFeedDetector();
             synchronized (recordingLifecycleLock) {
                 // Epoch re-check under the lock (audit R11-3 / ExtD-4): a new
                 // continuous enable() committing between our active=false and
@@ -11911,6 +11998,7 @@ public class SurveillanceEngineGpu {
         // worker checks isActive() only before entry — hence the
         // motion-lane drain below.)
         active = false;
+        resetFrozenFeedDetector();
         // Drain any in-flight aiExecutor YOLO lambda BEFORE stopRecording() so it
         // finishes its native tracker writes (trackerStartTrack/RefreshTemplate)
         // and clears isAiRunning before stopRecording()'s dropAllTrackerLocks()

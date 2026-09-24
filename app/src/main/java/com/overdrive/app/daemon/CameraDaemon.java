@@ -78,6 +78,7 @@ public class CameraDaemon {
 
     // ==================== STATE ====================
     private static final AtomicBoolean running = new AtomicBoolean(true);
+    private static final long IMAGE_READER_PROBE_HARD_TIMEOUT_MS = 50_000L;
     private static final AtomicBoolean shutdownStarted = new AtomicBoolean(false);
     private static final AtomicBoolean forceTerminationStarted = new AtomicBoolean(false);
     private static final long TERMINAL_SHUTDOWN_BUDGET_MS = 20_000L;
@@ -302,6 +303,17 @@ public class CameraDaemon {
 
     /** Accessor for the IPC server's IMU_BATCH case. */
     public static com.overdrive.app.roadsense.RoadSenseController getRoadSense() { return roadSense; }
+
+    // ==================== PARKING INTELLIGENCE ====================
+    // Sessions / neighbour timeline / stills behind "where did I park, what
+    // happened around the car". Same attach()-not-start() posture as RoadSense:
+    // constructed always (so the API can answer "disabled"), started only when
+    // parking.enabled, and every daemon-side hook (ParkingHooks) is a null
+    // check while it is off.
+    private static volatile com.overdrive.app.parking.ParkingController parking;
+
+    /** Accessor for the HTTP API handler. May be null before daemon init. */
+    public static com.overdrive.app.parking.ParkingController getParkingController() { return parking; }
 
     // ==================== GENAI BYOK ====================
     // Daemon-owned so explicit requests can run while parked in onAndOff mode.
@@ -545,7 +557,7 @@ public class CameraDaemon {
 
     // Build stamp printed at startup so logs identify the running build.
     // BUMP THIS on every code change you intend to deploy + verify.
-    private static final String BUILD_TAG = "20260603-coldstart-recfix-1";
+    private static final String BUILD_TAG = "20260922-di5-mcupowerhold-frozenfeed-1";
 
     // Lock file for singleton enforcement
     private static final String LOCK_FILE = "/data/local/tmp/camera_daemon.lock";
@@ -562,6 +574,20 @@ public class CameraDaemon {
             return;
         }
 
+        // Resolve the durable selector before committing a cross-platform mode change. If the
+        // config cannot be initialized, startup fails without replacing the last active marker.
+        com.overdrive.app.config.UnifiedConfigManager.init();
+        final com.overdrive.app.camera.dilink5.DiLink5Platform.ModeActivation
+                vehicleModeActivation =
+                com.overdrive.app.camera.dilink5.DiLink5Platform
+                        .activateConfiguredMode();
+        final boolean leavingDiLink5 =
+                vehicleModeActivation != null
+                && !com.overdrive.app.camera.dilink5.DiLink5Platform
+                        .isSelected(vehicleModeActivation.activeMode, null)
+                && com.overdrive.app.camera.dilink5.DiLink5Platform
+                        .isSelected(vehicleModeActivation.previousMode, null);
+
         // Clear any stale screen-deterrent flags left from a previous unclean
         // exit (SIGKILL bypasses our shutdown hook). Without this, AccSentry
         // could see a future screenDeterrentActiveUntilMs and skip backlight
@@ -574,24 +600,21 @@ public class CameraDaemon {
                     "surveillance", reset);
         } catch (Exception ignored) {}
 
-        // SAFETY: if a previous daemon was SIGKILL'd while a driver-cluster
-        // blind-spot projection was open, the gauges were left blanked (the
-        // shutdown hook couldn't run). The leaked clusterProjection* gate flags
-        // tell us to blind-fire the projection-close opcodes (18→0) so the native
-        // gauges are restored on this respawn. Stateless / harmless if nothing
-        // leaked. Mirrors the screen-deterrent reset above.
-        try {
-            com.overdrive.app.surveillance.ClusterProjectionController.clearStaleGateAtBoot();
-        } catch (Exception ignored) {}
-
-        // SAFETY (companion to the gauge restore above): if that SIGKILL'd daemon was casting a
-        // 3rd-party app onto the cluster, the app is now stranded on the closed cluster display
-        // with cluster affinity (no stop() / shutdown ran to rehome it). Reparent it back to
-        // display 0. Best-effort, runs on its own thread (dumpsys+am can take seconds), and a
-        // no-op if nothing was stranded or AMS already reparented it. Reads via forceReload like
-        // clearStaleGateAtBoot, so it needs no UnifiedConfigManager.init() first.
+        // Arm/probe durable DI5 ownership BEFORE any legacy projection restore
+        // can issue 18→0. On a DI5→legacy transition (including later daemon
+        // restarts after the mode marker changed), this synchronously raises the
+        // cross-mode fence while stale DI5 compositor ownership is recovered.
         try {
             com.overdrive.app.launcher.ClusterCast.reparentStrandedCastAtBoot();
+        } catch (Exception ignored) {}
+
+        // SAFETY: if a previous legacy daemon was SIGKILL'd while its cluster
+        // projection was open, restore the gauges from the leaked gate flags.
+        // clearStaleGateAtBoot refuses to dispatch while the DI5 fence above is
+        // active; successful DI5 recovery re-invokes it after ownership is clear.
+        try {
+            com.overdrive.app.surveillance.ClusterProjectionController
+                    .clearStaleGateAtBootSynchronously();
         } catch (Exception ignored) {}
 
         // Enable daemon logging for StorageManager (uses DaemonLogger instead of android.util.Log).
@@ -606,19 +629,27 @@ public class CameraDaemon {
         // via `adb install -r` do NOT restart the in-memory daemon; this line
         // makes it trivial to confirm a restart actually loaded new code.)
         log("BUILD_TAG: " + BUILD_TAG);
+        if (vehicleModeActivation != null) {
+            log("Vehicle mode activation: "
+                    + vehicleModeActivation.previousMode + " -> "
+                    + vehicleModeActivation.activeMode
+                    + " (DI5 camera hardware="
+                    + com.overdrive.app.camera.dilink5.DiLink5Platform
+                            .hasDiLink5CameraHardware()
+                    + ")");
+        } else {
+            log("ERROR: Vehicle mode activation failed; continuing with active mode "
+                    + com.overdrive.app.camera.dilink5.DiLink5Platform
+                            .currentActiveMode()
+                    + " (DI5 camera hardware="
+                    + com.overdrive.app.camera.dilink5.DiLink5Platform
+                            .hasDiLink5CameraHardware()
+                    + ")");
+        }
         log("PID: " + android.os.Process.myPid() + ", UID: " + android.os.Process.myUid());
 
         // Grant all manifest permissions via shell (supplements PermissionBypassContext)
         PermissionGranter.grantAllPermissions(APP_PACKAGE_NAME());
-
-        // Deferred "navigate here": watch for ACC-on to offer a target that a phone/on-car
-        // Navigate queued while the car was off. Self-contained (own ACC watcher); guarded
-        // so it can never take the daemon down.
-        try {
-            com.overdrive.app.telenav.DeferredNavManager.start();
-        } catch (Throwable t) {
-            log("DeferredNavManager start failed: " + t.getMessage());
-        }
 
         // Global exception handler - NEVER let the daemon die from uncaught exceptions
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
@@ -641,14 +672,14 @@ public class CameraDaemon {
             }
         });
 
-        if (Looper.getMainLooper() == null) {
-            try {
+        if (Looper.myLooper() == null) {
+            if (Looper.getMainLooper() == null) {
                 Looper.prepareMainLooper();
-            } catch (Throwable ignored) {
-                if (Looper.myLooper() == null) Looper.prepare();
+            } else {
+                Looper.prepare();
             }
         }
-        mainHandler = new Handler(Looper.getMainLooper() != null ? Looper.getMainLooper() : Looper.myLooper());
+        mainHandler = new Handler(Looper.myLooper());
 
         // Parse arguments (sets outputDir if provided)
         parseArguments(args);
@@ -721,14 +752,19 @@ public class CameraDaemon {
         aacIngestServer = new com.overdrive.app.server.AacIngestServer();
         accMonitor = new AccMonitor();
 
-        // Initialize the unified config (migration from legacy + schema fill)
-        // BEFORE the IPC server starts accepting commands. The app process now
-        // forwards its config writes to us as UPDATE_SECTION/UPDATE_VALUES IPC
-        // commands; if the server accepted one before init() ran, the write
-        // could interleave with migrateFromLegacy()'s own save. Running init
-        // first makes the daemon a clean atomic writer from its first accepted
-        // command. (init() is fast — file read + optional one-shot migration.)
-        com.overdrive.app.config.UnifiedConfigManager.init();
+        // The unified config and active vehicle mode were committed before any mode-dependent
+        // startup work. Reconcile the long-lived app/ACC processes before accepting IPC writes.
+        if (vehicleModeActivation != null) {
+            SurveillanceIpcServer.requestAppVehicleModeSync(
+                    vehicleModeActivation.previousMode,
+                    vehicleModeActivation.activeMode);
+        } else {
+            log("Vehicle mode activation deferred because the active marker could not be updated"
+                    + " (runtime remains "
+                    + com.overdrive.app.camera.dilink5.DiLink5Platform
+                            .currentActiveMode()
+                    + ")");
+        }
 
         try {
             genAiRuntime = new com.overdrive.app.genai.GenAiRuntime();
@@ -743,6 +779,18 @@ public class CameraDaemon {
         new Thread(httpServer::start, "HttpServer").start();
         new Thread(ipcServer, "SurveillanceIPC").start();
         new Thread(aacIngestServer, "AacIngest").start();
+
+        if (leavingDiLink5) {
+            Thread avmCleanup = new Thread(() -> {
+                boolean stopped =
+                        com.overdrive.app.camera.dilink5.TsAvmCoordinator
+                                .requestStopInAppProcess();
+                log("DiLink 5 AVM mode-exit cleanup: "
+                        + (stopped ? "complete" : "not confirmed"));
+            }, "DiLink5AvmModeExit");
+            avmCleanup.setDaemon(true);
+            avmCleanup.start();
+        }
 
         // Init app context. This will break the app if run in a thread
         if (sharedAppContext == null) {
@@ -1038,25 +1086,11 @@ public class CameraDaemon {
         // correct regardless of how the build was installed.
 
 
-        // ImageReader FPS probe sentinel: when /data/local/tmp/run_imagereader_probe
-        // exists, run AvmImageReaderFpsProbe BEFORE initSurveillance so the probe
-        // has exclusive HAL access. Verifies whether replacing the live pipeline's
-        // SurfaceTexture consumer with an ImageReader unblocks the ~8.5 fps panoramic
-        // throttle (see CAMERA_FPS_INVESTIGATION.md). Sentinel is consumed (deleted)
-        // so the probe runs once per `touch` invocation.
-        try {
-            File irProbeSentinel = new File("/data/local/tmp/run_imagereader_probe");
-            if (irProbeSentinel.exists()) {
-                log("=== ImageReader probe sentinel detected — running probe ===");
-                File irProbeDir = new File("/data/local/tmp/imagereader_probe");
-                new com.overdrive.app.camera.AvmImageReaderFpsProbe(irProbeDir).run();
-                if (!irProbeSentinel.delete()) {
-                    log("WARN: Could not delete ImageReader probe sentinel " + irProbeSentinel);
-                }
-                log("=== ImageReader probe finished — continuing with normal startup ===");
-            }
-        } catch (Throwable t) {
-            log("ImageReader probe invocation failed: " + t.getMessage());
+        // Explicit diagnostic only. The helper consumes its sentinel before
+        // entering vendor code and hard-bounds the raw AVMCamera lifecycle, so
+        // a crash/wedge cannot repeat the probe on every daemon restart.
+        if (!runImageReaderProbeIfRequested()) {
+            return;
         }
 
         // Initialize surveillance module (will use loaded settings)
@@ -1116,6 +1150,20 @@ public class CameraDaemon {
             log("RoadSense controller attached (starts iff enabled)");
         } catch (Throwable t) {
             log("RoadSense attach failed: " + t.getMessage());
+        }
+
+        // Parking Intelligence: same posture. attach() reads parking.enabled and
+        // only then opens its store / worker / hooks; a disabled feature costs a
+        // config read here and a null check at each hook site afterwards.
+        try {
+            parking = new com.overdrive.app.parking.ParkingController(
+                new com.overdrive.app.parking.ParkingConfig.UnifiedSource(),
+                new com.overdrive.app.parking.DaemonParkingEnvironment(sharedAppContext),
+                com.overdrive.app.parking.ParkingStore::new);
+            parking.attach();
+            log("Parking controller attached (starts iff enabled)");
+        } catch (Throwable t) {
+            log("Parking attach failed: " + t.getMessage());
         }
 
         // Pre-warm the geocode cache so the first recording's place
@@ -1350,6 +1398,12 @@ public class CameraDaemon {
             } else if (accIsOff) {
                 log("RECOVERY: Hardware probe shows ACC OFF — entering sentry mode");
                 onObservedAccStateChanged(true, recoveryProbeGeneration, "startup-recovery");
+                // The ACC transition normally starts the heartbeat itself.
+                // Reconcile once more from the now-admitted state so a daemon
+                // restart cannot leave the provider idle if cloud startup and
+                // ACC recovery completed in the opposite order.
+                reconcileDi5CloudKeepAliveForCurrentState(
+                        "confirmed startup recovery");
             } else if (!hasPendingAccState(false)
                     && recordingModeManager != null
                     && !recordingModeManager.isAccOn()) {
@@ -1432,14 +1486,6 @@ public class CameraDaemon {
             com.overdrive.app.surveillance.ClusterViewMirrorService.register();
         } catch (Throwable t) {
             log("ClusterViewMirrorService register failed: " + t.getMessage());
-        }
-
-        try {
-            if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
-                com.overdrive.app.daemon.sentry.DiLink5PowerDiagnostics.start(getAppContext());
-            }
-        } catch (Throwable t) {
-            log("DiLink5PowerDiagnostics start failed: " + t.getMessage());
         }
 
         log("Daemon ready on TCP:" + TCP_PORT + " HTTP:" + HTTP_PORT);
@@ -1529,6 +1575,111 @@ public class CameraDaemon {
 
     // ==================== CAMERA MANAGEMENT ====================
 
+    private static final Object CAMERA_COMMAND_LOCK = new Object();
+    private static final long CAMERA_STOP_CONFIRM_TIMEOUT_MS = 20_000L;
+    private static final AtomicBoolean CAMERA_TERMINAL_STOP_IN_PROGRESS =
+            new AtomicBoolean();
+    private static final AtomicBoolean CAMERA_EXPLICITLY_STOPPED =
+            new AtomicBoolean();
+    private static final AtomicBoolean CAMERA_RESTART_PREPARED =
+            new AtomicBoolean();
+    private static final java.util.concurrent.atomic.AtomicLong CAMERA_START_GENERATION =
+            new java.util.concurrent.atomic.AtomicLong();
+    // A legacy /api/start or TCP START_CAMERA command is a real camera owner even
+    // when it asks for view-only mode. Keep every in-flight command as an
+    // independent claim, then latch ownership once any claim adopts a running
+    // pipeline. A single "latest token" is insufficient: if starts A and B overlap
+    // and B fails first, clearing B must not erase A's still-pending or already
+    // adopted ownership.
+    private static final java.util.concurrent.atomic.AtomicLong
+            CAMERA_EXPLICIT_OWNER_SEQUENCE =
+                    new java.util.concurrent.atomic.AtomicLong();
+    private static final Object CAMERA_EXPLICIT_OWNER_LOCK = new Object();
+    private static final java.util.Set<Long> CAMERA_EXPLICIT_PENDING_CLAIMS =
+            new java.util.HashSet<>();
+    private static boolean cameraExplicitCommandAdopted;
+
+    private static long claimExplicitCameraCommandOwner() {
+        long token = CAMERA_EXPLICIT_OWNER_SEQUENCE.incrementAndGet();
+        synchronized (CAMERA_EXPLICIT_OWNER_LOCK) {
+            CAMERA_EXPLICIT_PENDING_CLAIMS.add(token);
+        }
+        return token;
+    }
+
+    private static void abandonExplicitCameraCommandOwner(long token) {
+        boolean releasedLastUnadoptedClaim = false;
+        synchronized (CAMERA_EXPLICIT_OWNER_LOCK) {
+            if (CAMERA_EXPLICIT_PENDING_CLAIMS.remove(token)
+                    && !cameraExplicitCommandAdopted
+                    && CAMERA_EXPLICIT_PENDING_CLAIMS.isEmpty()) {
+                releasedLastUnadoptedClaim = true;
+            }
+        }
+        if (releasedLastUnadoptedClaim) {
+            try {
+                com.overdrive.app.surveillance.GpuSurveillancePipeline pipeline =
+                    gpuPipeline;
+                if (pipeline != null) {
+                    pipeline.auditOwnerlessPipelineAfterExternalRelease(
+                        "explicit camera command failed before adoption");
+                }
+            } catch (Throwable t) {
+                log("Explicit camera owner release audit failed: "
+                    + t.getMessage());
+            }
+        }
+    }
+
+    private static boolean adoptExplicitCameraCommandOwner(long token) {
+        synchronized (CAMERA_EXPLICIT_OWNER_LOCK) {
+            boolean claimWasCurrent =
+                    CAMERA_EXPLICIT_PENDING_CLAIMS.remove(token);
+            if (claimWasCurrent) {
+                cameraExplicitCommandAdopted = true;
+            }
+            return claimWasCurrent || cameraExplicitCommandAdopted;
+        }
+    }
+
+    private static void clearExplicitCameraCommandOwners() {
+        synchronized (CAMERA_EXPLICIT_OWNER_LOCK) {
+            cameraExplicitCommandAdopted = false;
+            CAMERA_EXPLICIT_PENDING_CLAIMS.clear();
+        }
+    }
+
+    public static boolean hasExplicitCameraCommandOwner() {
+        synchronized (CAMERA_EXPLICIT_OWNER_LOCK) {
+            return cameraExplicitCommandAdopted
+                    || !CAMERA_EXPLICIT_PENDING_CLAIMS.isEmpty();
+        }
+    }
+
+    /**
+     * Called at the exact point the active pano pipeline commits running=false.
+     * Any explicit view/record command it represented has ended. This is an
+     * atomic-only callback so it is safe from inside the pipeline state monitor.
+     */
+    public static void onGpuPipelineStopCommitted(
+            com.overdrive.app.surveillance.GpuSurveillancePipeline stoppedPipeline) {
+        if (stoppedPipeline != null && stoppedPipeline == gpuPipeline) {
+            clearExplicitCameraCommandOwners();
+        }
+    }
+
+    public static long captureCameraStartEpoch() {
+        return CAMERA_START_GENERATION.get();
+    }
+
+    public static boolean isCameraStartEpochCurrent(long startEpoch) {
+        return startEpoch == CAMERA_START_GENERATION.get()
+                && !CAMERA_TERMINAL_STOP_IN_PROGRESS.get()
+                && !CAMERA_EXPLICITLY_STOPPED.get()
+                && !CAMERA_RESTART_PREPARED.get()
+                && running.get();
+    }
+
     public static void startCamera(int viewId, boolean enableStreaming, boolean viewOnly) {
         if (viewId < 1 || viewId > 4) {
             log("ERROR: Invalid view ID: " + viewId);
@@ -1536,56 +1687,195 @@ public class CameraDaemon {
         }
 
         log("Starting camera " + viewId + " (GPU mosaic recording, viewOnly=" + viewOnly + ")");
+        long startGeneration;
+        long explicitOwnerToken;
+        synchronized (CAMERA_COMMAND_LOCK) {
+            if (CAMERA_RESTART_PREPARED.get()) {
+                log("Refusing camera start while process restart is prepared");
+                return;
+            }
+            if (CAMERA_EXPLICITLY_STOPPED.getAndSet(false)) {
+                CAMERA_START_GENERATION.incrementAndGet();
+            }
+            startGeneration = captureCameraStartEpoch();
+            explicitOwnerToken = claimExplicitCameraCommandOwner();
+        }
 
-        // GPU pipeline handles all cameras together
+        // Warmup stays outside the command lock; the generation check below prevents
+        // a delayed worker from undoing a later explicit stop.
         if (gpuPipeline != null && !gpuPipeline.isRunning()) {
-            // If ACC is ON, warm up the camera HAL first on a background thread
-            // to avoid blocking the HTTP/TCP handler thread for 4 seconds.
             if (AccMonitor.isAccOn() && avcHalWarmup != null) {
                 final boolean fViewOnly = viewOnly;
-                new Thread(() -> {
-                    avcHalWarmup.warmupAndWait();
-                    startPipelineInternal(viewId, fViewOnly);
-                }, "CameraWarmup").start();
+                Thread warmupWorker = new Thread(() -> {
+                    boolean handedToPipelineStart = false;
+                    try {
+                        // A stop/restart can supersede this queued worker before it
+                        // reaches AVC. Revalidate first so stale UI commands cannot
+                        // launch the factory camera Activity after camera intent was
+                        // withdrawn.
+                        if (!isCameraStartEpochCurrent(startGeneration)) {
+                            return;
+                        }
+                        if (!avcHalWarmup.warmupAndWait(
+                                () -> isCameraStartEpochCurrent(
+                                    startGeneration))) {
+                            return;
+                        }
+                        handedToPipelineStart = true;
+                        startPipelineInternal(
+                                viewId, fViewOnly, startGeneration,
+                                explicitOwnerToken);
+                    } catch (Throwable t) {
+                        log("ERROR: Camera warmup worker failed: "
+                                + t.getMessage());
+                    } finally {
+                        if (!handedToPipelineStart) {
+                            abandonExplicitCameraCommandOwner(
+                                    explicitOwnerToken);
+                        }
+                    }
+                }, "CameraWarmup");
+                warmupWorker.setDaemon(true);
+                try {
+                    warmupWorker.start();
+                } catch (Throwable t) {
+                    abandonExplicitCameraCommandOwner(explicitOwnerToken);
+                    log("ERROR: Could not start camera warmup worker: "
+                            + t.getMessage());
+                }
             } else {
-                startPipelineInternal(viewId, viewOnly);
+                startPipelineInternal(
+                        viewId, viewOnly, startGeneration,
+                        explicitOwnerToken);
             }
-        } else if (gpuPipeline != null && gpuPipeline.isRunning()) {
-            // Pipeline already running - start recording if requested (stops surveillance)
-            if (!viewOnly) {
-                log("Pipeline already running - starting normal recording (stops surveillance if active)");
-                gpuPipeline.startRecording();
-            } else {
-                log("Pipeline already running for camera " + viewId + " (view-only)");
-            }
+        } else {
+            startPipelineInternal(
+                    viewId, viewOnly, startGeneration,
+                    explicitOwnerToken);
         }
     }
 
     /**
      * Internal: starts the GPU pipeline after any warmup delay.
      */
-    private static void startPipelineInternal(int viewId, boolean viewOnly) {
-        if (gpuPipeline == null || gpuPipeline.isRunning()) return;
-        try {
-            gpuPipeline.start(!viewOnly);
-            log("GPU pipeline started for camera " + viewId);
+    private static void startPipelineInternal(
+            int viewId, boolean viewOnly, long startGeneration,
+            long explicitOwnerToken) {
+        synchronized (CAMERA_COMMAND_LOCK) {
+            boolean ownerAdopted = false;
+            try {
+                if (startGeneration != CAMERA_START_GENERATION.get()
+                        || gpuPipeline == null) {
+                    return;
+                }
+                if (gpuPipeline.isRunning()) {
+                    // The command has adopted an already-running pipeline before
+                    // any optional recording side effect. Even if startRecording
+                    // throws, the explicit view command still owns the live camera.
+                    ownerAdopted =
+                            adoptExplicitCameraCommandOwner(explicitOwnerToken);
+                    if (!viewOnly) {
+                        log("Pipeline already running - starting normal recording (stops surveillance if active)");
+                        gpuPipeline.startRecording();
+                    } else {
+                        log("Pipeline already running for camera " + viewId + " (view-only)");
+                    }
+                    return;
+                }
+                gpuPipeline.start(!viewOnly, startGeneration);
+                if (!gpuPipeline.isRunning()) {
+                    log("GPU pipeline did not reach running state for camera "
+                            + viewId + " — releasing explicit command ownership");
+                    return;
+                }
+                ownerAdopted =
+                        adoptExplicitCameraCommandOwner(explicitOwnerToken);
+                log("GPU pipeline started for camera " + viewId);
 
-            if (!viewOnly) {
-                log("Auto-recording enabled (will start when recorder ready)");
-            } else {
-                log("View-only mode - recording NOT started");
+                if (!viewOnly) {
+                    log("Auto-recording enabled (will start when recorder ready)");
+                } else {
+                    log("View-only mode - recording NOT started");
+                }
+
+                startAvcKeepAliveIfNeeded();
+            } catch (Exception e) {
+                log("ERROR: Failed to start GPU pipeline: " + e.getMessage());
+            } finally {
+                if (!ownerAdopted) {
+                    abandonExplicitCameraCommandOwner(explicitOwnerToken);
+                }
             }
-
-            // Start AVC keep-alive if ACC is ON
-            startAvcKeepAliveIfNeeded();
-
-        } catch (Exception e) {
-            log("ERROR: Failed to start GPU pipeline: " + e.getMessage());
         }
     }
 
-    public static void stopCamera(int viewId) {
-        stopCamera(viewId, false);
+    private static boolean stopCameraConsumerLocked() {
+        // Stop intent withdraws legacy explicit ownership even if teardown later
+        // reports an error; a failed stop must not leave a stale token protecting
+        // some unrelated future cold-start forever.
+        clearExplicitCameraCommandOwners();
+        if (gpuPipeline == null) return true;
+        try {
+            boolean stopped = gpuPipeline.stopAndConfirm(
+                    CAMERA_STOP_CONFIRM_TIMEOUT_MS);
+            stopAvcKeepAlive();
+            return stopped;
+        } catch (Exception e) {
+            log("ERROR: Failed to stop GPU pipeline: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public static boolean stopAllCamerasForExplicitUserStop() {
+        synchronized (CAMERA_COMMAND_LOCK) {
+            CAMERA_EXPLICITLY_STOPPED.set(true);
+            return stopAllCameraPipelinesLocked();
+        }
+    }
+
+    public static boolean stopAllCamerasForProcessRestart() {
+        synchronized (CAMERA_COMMAND_LOCK) {
+            CAMERA_RESTART_PREPARED.set(true);
+            return stopAllCameraPipelinesLocked();
+        }
+    }
+
+    public static void abortCameraRestartPreparation() {
+        synchronized (CAMERA_COMMAND_LOCK) {
+            if (CAMERA_RESTART_PREPARED.getAndSet(false)) {
+                CAMERA_START_GENERATION.incrementAndGet();
+            }
+        }
+    }
+
+    private static boolean stopAllCameraPipelinesLocked() {
+        CAMERA_TERMINAL_STOP_IN_PROGRESS.set(true);
+        try {
+            CAMERA_START_GENERATION.incrementAndGet();
+            boolean consumerStopped = stopCameraConsumerLocked();
+            boolean oemStopped =
+                    com.overdrive.app.server.OemDashcamApiHandler
+                            .stopPipelineBeforePanoTeardown();
+            boolean hardwareStopped = true;
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                    || com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                            .hasOwnedHardwareProcess()) {
+                hardwareStopped =
+                        com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                        .stopHardwareProcessForExit();
+            }
+            return consumerStopped && oemStopped && hardwareStopped;
+        } finally {
+            CAMERA_TERMINAL_STOP_IN_PROGRESS.set(false);
+        }
+    }
+
+    public static boolean isCameraTerminalStopInProgress() {
+        return CAMERA_TERMINAL_STOP_IN_PROGRESS.get();
+    }
+
+    public static boolean stopCamera(int viewId) {
+        return stopCamera(viewId, false);
     }
 
     /**
@@ -1593,19 +1883,17 @@ public class CameraDaemon {
      * @param viewId The view ID (1-4)
      * @param forceStop If true, stops even if recording. If false, only stops if not recording.
      */
-    public static void stopCamera(int viewId, boolean forceStop) {
+    public static boolean stopCamera(int viewId, boolean forceStop) {
+        if (viewId < 1 || viewId > 4 || !forceStop) return false;
         try {
             log("Stopping camera " + viewId + " (GPU pipeline)");
-
-            // GPU pipeline handles all cameras
-            // Only stop if forcing
-            if (forceStop && gpuPipeline != null) {
-                gpuPipeline.stop();
-                stopAvcKeepAlive();
-                log("GPU pipeline stopped");
+            synchronized (CAMERA_COMMAND_LOCK) {
+                CAMERA_START_GENERATION.incrementAndGet();
+                return stopCameraConsumerLocked();
             }
         } catch (Exception e) {
             log("ERROR: Exception in stopCamera(" + viewId + "): " + e.getMessage());
+            return false;
         }
     }
 
@@ -1617,19 +1905,20 @@ public class CameraDaemon {
         stopCamera(viewId, true);
     }
 
-    public static void stopAllCameras() {
-        stopAllCameras(true);
+    public static boolean stopAllCameras() {
+        return stopAllCameras(true);
     }
 
     /**
      * Stop all cameras.
      * @param forceStop If true, stops all cameras. If false, only stops non-recording cameras.
      */
-    public static void stopAllCameras(boolean forceStop) {
+    public static boolean stopAllCameras(boolean forceStop) {
         log("Stopping all cameras (GPU pipeline, force=" + forceStop + ")");
-        if (forceStop && gpuPipeline != null) {
-            gpuPipeline.stop();
-            stopAvcKeepAlive();
+        if (!forceStop) return false;
+        synchronized (CAMERA_COMMAND_LOCK) {
+            CAMERA_START_GENERATION.incrementAndGet();
+            return stopCameraConsumerLocked();
         }
     }
 
@@ -1653,6 +1942,10 @@ public class CameraDaemon {
      * race a fresh AVC reap.
      */
     public static void startAvcKeepAliveIfNeeded() {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            stopAvcKeepAliveForShutdown();
+            return;
+        }
         // Double-checked locking: cheap volatile read on the hot path,
         // synchronized init on the cold path. Prevents two concurrent
         // callers from each instantiating AvcHalWarmup and orphaning a
@@ -1809,6 +2102,27 @@ public class CameraDaemon {
     }
 
     /**
+     * Admission gate for diagnostics that directly open raw AVMCamera handles.
+     *
+     * <p>AccMonitor defaults to ACC-off until its first authoritative update,
+     * so a plain {@code !isAccOn()} check is unsafe during daemon boot. Require
+     * a clean bodywork power-level read and reject the result if a newer ACC
+     * observation races the probe. Destructive camera diagnostics call this
+     * again between opens so an ignition transition retires the probe before
+     * it attaches preview consumers.
+     */
+    public static boolean isAccConfirmedOffForCameraProbe() {
+        if (!running.get() || isProcessRestartPending()) return false;
+        final long observationGeneration = captureAccObservationGeneration();
+        final AccProbeResult probe =
+            probeAccStateWithBackoff("destructive-camera-probe");
+        return probe.trustworthy
+            && probe.accIsOff
+            && isAccObservationCurrent(observationGeneration)
+            && !isProcessRestartPending();
+    }
+
+    /**
      * Deferred lock/schedule effects must not trust AccMonitor's potentially stale cache.
      * The raw Binder read is isolated behind the existing bounded worker; an unavailable or
      * ambiguous read fails closed and leaves the periodic watchdog/retry path to try again.
@@ -1949,16 +2263,15 @@ public class CameraDaemon {
     }
 
     private static Integer readRawAccPowerLevel() throws Exception {
-        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
-            // DiLink 5.0 (Snapdragon SA8155P / Android Automotive 11)
-            // Uses dumpsys car_service Power Mute State or PowerManager/interactive
-            try {
-                if (com.overdrive.app.monitor.AccMonitor.probeAccState(sharedAppContext)) {
-                    return 0; // POWER_LEVEL_OFF (Standby/Sleep/Parked)
-                } else {
-                    return 2; // POWER_LEVEL_ON (Active)
-                }
-            } catch (Throwable ignored) {}
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            Boolean accOn = com.overdrive.app.monitor.AccMonitor
+                    .probeDiLink5AccOnForTransition(
+                            sharedAppContext,
+                            com.overdrive.app.monitor.AccMonitor
+                                    .isAccStateAuthoritative()
+                                    && com.overdrive.app.monitor.AccMonitor
+                                            .isAccOn());
+            return accOn == null ? null : Integer.valueOf(accOn ? 2 : 0);
         }
         if (!rawAccReflectionResolved && !rawAccReflectionFailed) {
             synchronized (CameraDaemon.class) {
@@ -1987,10 +2300,8 @@ public class CameraDaemon {
 
     private static boolean isDilink4ModeActive() {
         try {
-            org.json.JSONObject c = com.overdrive.app.config.UnifiedConfigManager
-                .loadConfig().optJSONObject("camera");
-            if (c == null) return false;
-            return "dilink4".equalsIgnoreCase(c.optString("cameraMode", "default"));
+            return com.overdrive.app.camera.dilink5.DiLink5Platform
+                    .isDiLink4Selected();
         } catch (Throwable t) {
             return false;
         }
@@ -2636,6 +2947,37 @@ public class CameraDaemon {
         }
     }
 
+    /**
+     * Operating mode switched to onAndOff. A parked-shutdown marker is only ever
+     * written by the onOnly park paths and every app-side startup gate honours it
+     * unconditionally (no config read, because those fail open), so a marker left
+     * behind by an earlier onOnly park would keep an onAndOff user's stack down
+     * until the next ACC-on edge. Erase it here, on the one path that changes the
+     * mode. A park that is committing right now is left alone: parkTerminate's
+     * post-drain mode re-check cancels itself when it sees onAndOff.
+     */
+    public static void clearParkedShutdownMarkerForOnAndOff() {
+        synchronized (parkMarkerIoLock) {
+            // The park-END breadcrumb belongs to onOnly too: a resident app with its
+            // start guard set would otherwise treat the leftover stamp as a fresh
+            // park-end on its next startOnBoot and rebuild its boot manager once.
+            try {
+                java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(
+                    com.overdrive.app.ui.model.ParkedShutdown.ENDED_PATH));
+            } catch (Throwable ignored) {}
+            if (!parkedShutdownMarkerExists()) return;
+            if (isParkShutdownCommitted()) {
+                log("Operating mode → onAndOff during a committing park; leaving marker to parkTerminate");
+                return;
+            }
+            boolean cleared = clearParkedShutdownMarker();
+            log("Operating mode → onAndOff: "
+                + (cleared
+                    ? "cleared stale parked-shutdown marker"
+                    : "WARNING: could not clear parked-shutdown marker"));
+        }
+    }
+
     private static boolean clearParkedShutdownMarker() {
         String path = com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH;
         try {
@@ -2689,6 +3031,12 @@ public class CameraDaemon {
             activeSurveillanceEnableThread = null;
             invalidateAccCompletionLocked();
         }
+        try {
+            com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance()
+                    .shutdownDi5ParkedKeepAlive("CameraDaemon shutdown");
+        } catch (Throwable t) {
+            log("DI5 cloud keep-alive shutdown error: " + t.getMessage());
+        }
         if (accOwner != null && accOwner != Thread.currentThread()) {
             accOwner.interrupt();
         }
@@ -2717,6 +3065,7 @@ public class CameraDaemon {
         // closing trips here, an active drive is checkpointed while its
         // telemetry monitors and database are still available.
         shutdownTripAnalyticsBeforeBlockingCleanup();
+        stopDiLink5HardwareForProcessExit("shutdown");
 
         try {
         // Stop the wrapper before service cleanup can block. The already-durable disable/park
@@ -2762,16 +3111,20 @@ public class CameraDaemon {
             com.overdrive.app.surveillance.ClusterViewMirrorService
                 .forceDetachIfActive("daemon-shutdown");
             com.overdrive.app.surveillance.ClusterMirrorController.shutdownIfActive();
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                if (!com.overdrive.app.launcher.DiLink5ClusterCast
+                        .shutdownIfActive()) {
+                    log("DI5 cluster shutdown incomplete; recovery marker retained");
+                }
+            }
             com.overdrive.app.surveillance.ClusterProjectionController.shutdownIfActive();
         } catch (Throwable t) {
             log("Cluster shutdown error: " + t.getMessage());
         }
         try {
-            com.overdrive.app.camera.OemDashcamPipeline oem = getOemDashcamPipeline();
-            if (oem != null && oem.isRunning()) {
-                try { oem.stopRecording(); } catch (Throwable ignored) {}
-                oem.stop();
-                setOemDashcamPipeline(null);
+            if (!com.overdrive.app.server.OemDashcamApiHandler
+                    .stopPipelineBeforePanoTeardown()) {
+                log("OEM dashcam shutdown was not confirmed");
             }
         } catch (Throwable t) {
             log("OEM dashcam shutdown error: " + t.getMessage());
@@ -2867,6 +3220,34 @@ public class CameraDaemon {
         }
     }
 
+    private static void stopDiLink5HardwareForProcessExit(String source) {
+        try {
+            if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                    && !com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                            .hasOwnedHardwareProcess()) {
+                return;
+            }
+            synchronized (CAMERA_COMMAND_LOCK) {
+                CAMERA_TERMINAL_STOP_IN_PROGRESS.set(true);
+                try {
+                    CAMERA_START_GENERATION.incrementAndGet();
+                    if (!stopCameraConsumerLocked()) {
+                        log("DiLink 5 camera consumer did not stop during " + source);
+                    }
+                    if (!com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                            .stopHardwareProcessForExit()) {
+                        log("DiLink 5 QCarCam did not stop during " + source);
+                    }
+                } finally {
+                    CAMERA_TERMINAL_STOP_IN_PROGRESS.set(false);
+                }
+            }
+        } catch (Throwable t) {
+            log("DiLink 5 QCarCam stop failed during " + source + ": "
+                    + t.getMessage());
+        }
+    }
+
     private static boolean armTerminalShutdownDeadline() {
         synchronized (TERMINAL_SHUTDOWN_GUARD_LOCK) {
             if (terminalShutdownHandlerCallback != null) {
@@ -2941,6 +3322,10 @@ public class CameraDaemon {
         if (roadSense != null) {
             try { roadSense.detach(); }
             catch (Throwable t) { log("RoadSense detach error: " + t.getMessage()); }
+        }
+        if (parking != null) {
+            try { parking.detach(); }
+            catch (Throwable t) { log("Parking detach error: " + t.getMessage()); }
         }
         recordingModeManagerPipelineOwner = null;
         if (recordingModeManager != null) {
@@ -3066,6 +3451,13 @@ public class CameraDaemon {
             Runtime.getRuntime().exec(new String[]{"pkill", "-9", "-f", "start_cam_daemon"});
             // Delete the script so it can't be accidentally re-run
             new java.io.File("/data/local/tmp/start_cam_daemon.sh").delete();
+            // SIGKILL bypasses the watchdog EXIT trap. Remove the exact
+            // directory-lock contents so a later start is not blocked by
+            // stale ownership.
+            java.io.File watchdogLock =
+                new java.io.File("/data/local/tmp/cam_watchdog.lock");
+            new java.io.File(watchdogLock, "pid").delete();
+            watchdogLock.delete();
         } catch (Exception e) {
             log("Watchdog wrapper kill error (non-fatal): " + e.getMessage());
         }
@@ -3204,8 +3596,25 @@ public class CameraDaemon {
             // the Adreno 610 runs out of GPU contexts and the hardware encoder exhausts
             // its codec instance limit, causing system-level freezes.
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                running.set(false);
                 markTripAnalyticsShutdownRequested();
                 log("Shutdown hook: cleaning up all resources...");
+                final boolean bridgeDi5KeepAlive =
+                        shouldBridgeDi5KeepAliveAcrossProcessRestart();
+                if (bridgeDi5KeepAlive) {
+                    log("Shutdown hook: retaining parked DI5 cloud keep-alive "
+                            + "through planned process-restart cleanup");
+                } else {
+                    try {
+                        com.overdrive.app.byd.cloud.BydCloudDataProvider
+                                .getInstance()
+                                .shutdownDi5ParkedKeepAlive(
+                                        "CameraDaemon shutdown hook");
+                    } catch (Throwable t) {
+                        log("Shutdown hook: DI5 cloud keep-alive error: "
+                                + t.getMessage());
+                    }
+                }
 
                 // -1. URGENT: quiesce active trip storage before anything that
                 //     might block. RESTART-AWARE: a trip-safe process restart
@@ -3222,6 +3631,7 @@ public class CameraDaemon {
                 } catch (Exception e) {
                     log("Shutdown hook: early trip teardown error: " + e.getMessage());
                 }
+                stopDiLink5HardwareForProcessExit("shutdown hook");
 
                 // 0. Tear down any in-progress ScreenDeterrent FIRST. The
                 //    deterrent owns SurfaceControl + UCM gate flags; if we
@@ -3276,8 +3686,17 @@ public class CameraDaemon {
 
                 // 0.5b THEN close the OEM cluster projection + restore gauges.
                 try {
+                    boolean diLink5ProjectionRestored = true;
+                    if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                        diLink5ProjectionRestored =
+                                com.overdrive.app.launcher.DiLink5ClusterCast
+                                        .shutdownIfActive();
+                    }
                     com.overdrive.app.surveillance.ClusterProjectionController.shutdownIfActive();
-                    log("Shutdown hook: cluster projection restore issued");
+                    log(diLink5ProjectionRestored
+                            ? "Shutdown hook: cluster projection restore issued"
+                            : "Shutdown hook: DI5 cluster restore incomplete; "
+                                    + "recovery marker retained");
                 } catch (Exception e) {
                     log("Shutdown hook: cluster projection cleanup error: " + e.getMessage());
                 }
@@ -3327,13 +3746,11 @@ public class CameraDaemon {
                 //     OEM MediaCodec, drainer, and AVMCamera handle until
                 //     daemon respawn. Tearing down here is unconditional.
                 try {
-                    com.overdrive.app.camera.OemDashcamPipeline oem =
-                        getOemDashcamPipeline();
-                    if (oem != null && oem.isRunning()) {
-                        try { oem.stopRecording(); } catch (Throwable ignored) {}
-                        oem.stop();
-                        setOemDashcamPipeline(null);
+                    if (com.overdrive.app.server.OemDashcamApiHandler
+                            .stopPipelineBeforePanoTeardown()) {
                         log("Shutdown hook: OEM dashcam pipeline stopped");
+                    } else {
+                        log("Shutdown hook: OEM dashcam stop was not confirmed");
                     }
                 } catch (Exception e) {
                     log("Shutdown hook: OEM cleanup error: " + e.getMessage());
@@ -3466,6 +3883,17 @@ public class CameraDaemon {
 
                 // 8. Release singleton lock (must be last)
                 releaseSingletonLock();
+                if (bridgeDi5KeepAlive) {
+                    try {
+                        com.overdrive.app.byd.cloud.BydCloudDataProvider
+                                .getInstance()
+                                .shutdownDi5ParkedKeepAlive(
+                                        "planned restart cleanup complete");
+                    } catch (Throwable t) {
+                        log("Shutdown hook: deferred DI5 cloud keep-alive "
+                                + "shutdown error: " + t.getMessage());
+                    }
+                }
                 log("Shutdown hook: cleanup complete");
             }, "DaemonShutdown"));
 
@@ -4118,8 +4546,8 @@ public class CameraDaemon {
 
             // Create GPU pipeline with resolved profile dimensions
             recordingModeManagerPipelineOwner = null;
-            gpuPipeline = new com.overdrive.app.surveillance.GpuSurveillancePipeline(
-                resolvedCamera.getPanoWidth(), resolvedCamera.getPanoHeight(), eventDir);
+            gpuPipeline = com.overdrive.app.surveillance.GpuPipelineFactory
+                .createDefault(eventDir);
 
             // Get AssetManager from the app's APK
             // Since we're running as app_process, load model from filesystem
@@ -4613,6 +5041,7 @@ public class CameraDaemon {
 
     private static boolean enableSurveillanceForAccGeneration(
             long expectedGeneration, String source) {
+        final long cameraStartEpoch = captureCameraStartEpoch();
         SurveillanceEnableLease lease =
             claimSurveillanceEnableLease(expectedGeneration);
         if (lease == null) {
@@ -4629,6 +5058,12 @@ public class CameraDaemon {
         // propagates out of the surveillance start path.
         try {
             if (stopStaleSurveillanceEnable(lease, source + " admission")) {
+                return false;
+            }
+            if (!com.overdrive.app.config.UnifiedConfigManager
+                    .isSurveillanceEnabled()) {
+                log("enableSurveillance() skipped (" + source
+                    + ") — master preference is disabled");
                 return false;
             }
             com.overdrive.app.surveillance.GpuSurveillancePipeline pipeline =
@@ -4676,7 +5111,7 @@ public class CameraDaemon {
             try {
                 if (!pipeline.isRunning()) {
                     log("Pipeline not running — starting...");
-                    pipeline.start();
+                    pipeline.start(false, cameraStartEpoch);
                     if (stopStaleSurveillanceEnable(
                             lease, source + " pipeline start")) {
                         return false;
@@ -4684,6 +5119,14 @@ public class CameraDaemon {
                 }
                 // Enable surveillance mode (motion detection)
                 pipeline.enableSurveillance();
+                // Storage preparation above can take several seconds. A later
+                // disable request must win even if this older enable finishes last.
+                if (!com.overdrive.app.config.UnifiedConfigManager
+                        .isSurveillanceEnabled()) {
+                    log("Surveillance enable was superseded while activation was in flight — rolling back");
+                    disableSurveillance();
+                    return false;
+                }
                 if (stopStaleSurveillanceEnable(
                         lease, source + " surveillance activation")) {
                     return false;
@@ -5190,6 +5633,10 @@ public class CameraDaemon {
                     if (!doorLockListenerArmed) return;
                     log("LOCK GATE [" + source
                         + "]: UNLOCKED — disarming surveillance (owner returning)");
+                    // Parking Intelligence: owner is back. Fired BEFORE the
+                    // teardown so its "returned" stills race ahead of the
+                    // camera stop; non-blocking hand-off, null check when off.
+                    com.overdrive.app.parking.ParkingHooks.onUnlockWhileParked();
                     disableSurveillance();
                     doorLockListenerArmed = false;
                     if (stopStaleAccTransition(
@@ -6609,6 +7056,112 @@ public class CameraDaemon {
         }
     }
 
+    /**
+     * Apply the DiLink 5 cloud-heartbeat setting to the currently admitted
+     * ACC state. Called after a settings/account change so disabling takes
+     * effect immediately and enabling can begin without another ACC cycle.
+     */
+    public static void reconcileDi5CloudKeepAliveFromConfig() {
+        reconcileDi5CloudKeepAliveForCurrentState("config changed");
+    }
+
+    /**
+     * A camera/EGL process restart is not a parked-session stop. Keep the
+     * already-running DI5 heartbeat alive while the shutdown hook releases
+     * camera resources, then let the replacement process re-arm it from the
+     * authoritative OFF IPC. Terminal/manual shutdowns still cancel at the
+     * beginning of cleanup.
+     */
+    private static boolean shouldBridgeDi5KeepAliveAcrossProcessRestart() {
+        if (!processRestartIntent) return false;
+        try {
+            return com.overdrive.app.camera.dilink5.DiLink5Platform
+                            .isSelected()
+                    && com.overdrive.app.monitor.AccMonitor
+                            .isAccStateAuthoritative()
+                    && !com.overdrive.app.monitor.AccMonitor.isAccOn()
+                    && !com.overdrive.app.config.UnifiedConfigManager
+                            .isVehicleOnOnlyMode()
+                    && com.overdrive.app.config.UnifiedConfigManager
+                            .isDi5CloudKeepAliveEnabled();
+        } catch (Throwable t) {
+            log("DI5 restart-bridge eligibility failed: "
+                    + t.getMessage());
+            return false;
+        }
+    }
+
+    private static void reconcileDi5CloudKeepAliveForCurrentState(
+            String reason) {
+        final Boolean accIsOff;
+        final long generation;
+        synchronized (parkTerminateLock) {
+            if (!running.get() || parkShutdownCommitted) {
+                accIsOff = null;
+                generation = -1L;
+            } else {
+                accIsOff = latestAccIsOff;
+                generation = accTransitionGeneration;
+            }
+        }
+        if (accIsOff == null) {
+            com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance()
+                    .stopDi5ParkedKeepAlive(
+                            "ACC state unavailable or daemon stopping");
+            return;
+        }
+        reconcileDi5CloudKeepAliveForAccState(
+                generation, accIsOff.booleanValue(), reason);
+    }
+
+    /**
+     * Reconcile the heartbeat without holding parkTerminateLock across cloud
+     * provider work. The provider also orders requests by this generation, so
+     * an older OFF callback arriving after a newer ON cannot restart it.
+     */
+    private static void reconcileDi5CloudKeepAliveForAccState(
+            long generation, boolean accIsOff, String reason) {
+        boolean current;
+        synchronized (parkTerminateLock) {
+            current = running.get()
+                    && !parkShutdownCommitted
+                    && generation == accTransitionGeneration
+                    && latestAccIsOff != null
+                    && latestAccIsOff.booleanValue() == accIsOff;
+        }
+
+        boolean desired = false;
+        if (current && accIsOff) {
+            try {
+                desired = com.overdrive.app.camera.dilink5.DiLink5Platform
+                                .isSelected()
+                        && !com.overdrive.app.config.UnifiedConfigManager
+                                .isVehicleOnOnlyMode()
+                        && com.overdrive.app.config.UnifiedConfigManager
+                                .isDi5CloudKeepAliveEnabled();
+            } catch (Throwable t) {
+                log("DI5 cloud keep-alive eligibility failed: "
+                        + t.getMessage());
+                desired = false;
+            }
+        }
+
+        try {
+            com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance()
+                    .reconcileDi5ParkedKeepAlive(
+                            generation,
+                            desired,
+                            reason + " (ACC "
+                                    + (accIsOff ? "OFF" : "ON")
+                                    + ", gen=" + generation + ")");
+        } catch (Throwable t) {
+            // Cloud keep-alive is best-effort and must never break the
+            // authoritative ACC transition state machine.
+            log("DI5 cloud keep-alive reconcile failed: "
+                    + t.getMessage());
+        }
+    }
+
     private static void requestTrustedAccHardwareRecovery(String reason) {
         log("ACC trusted hardware recovery requested after " + reason);
         trustedAccHardwareRecoveryRequested = true;
@@ -7424,6 +7977,7 @@ public class CameraDaemon {
 
     private static void applyAccTransitionEffects(
             boolean accIsOff, long transitionGeneration) {
+            final long cameraStartEpoch = captureCameraStartEpoch();
             if (stopStaleAccTransition(
                     transitionGeneration, accIsOff, "effect lease admission")) {
                 return;
@@ -7434,6 +7988,13 @@ public class CameraDaemon {
             com.overdrive.app.monitor.AccMonitor.setAccState(!accIsOff);
             if (stopStaleAccTransition(
                     transitionGeneration, accIsOff, "ACC cache publication")) {
+                return;
+            }
+            reconcileDi5CloudKeepAliveForAccState(
+                    transitionGeneration, accIsOff, "ACC transition");
+            if (stopStaleAccTransition(
+                    transitionGeneration, accIsOff,
+                    "DI5 cloud keep-alive reconciliation")) {
                 return;
             }
 
@@ -7611,6 +8172,18 @@ public class CameraDaemon {
         // repeated ACC-OFF heartbeat cannot finalize the same drive twice.
         notifyTripAnalyticsManager(accIsOff);
 
+        // Parking Intelligence observes the same leased edge. Null check when
+        // the feature is off; otherwise a hand-off to its own worker (never
+        // blocks this transition). Dedup by generation inside the controller,
+        // so the deferred-replay path below re-entering here is harmless.
+        // Must run BEFORE gpuPipeline.onAccOn() (surveillance exit) so the
+        // "returned" stills still find the camera pipeline up.
+        if (accIsOff) {
+            com.overdrive.app.parking.ParkingHooks.onAccOff(transitionGeneration);
+        } else {
+            com.overdrive.app.parking.ParkingHooks.onAccOn(transitionGeneration);
+        }
+
         if (gpuPipeline == null || recordingModeManager == null) {
             log("ACC " + (accIsOff ? "OFF" : "ON")
                 + " dependencies not ready (pipeline="
@@ -7637,6 +8210,7 @@ public class CameraDaemon {
         }
 
         log("ACC state changed: " + (accIsOff ? "OFF (entering sentry)" : "ON (exiting sentry)"));
+        com.overdrive.app.telenav.DeferredNavManager.onAccStateChanged(accIsOff);
 
         if (accIsOff) {
             // ACC OFF - Start pipeline for sentry mode
@@ -7902,7 +8476,9 @@ public class CameraDaemon {
                     }
                     if (!gpuPipeline.isRunning()) {
                         log("Starting pipeline for sentry mode...");
-                        try { gpuPipeline.start(); } catch (Exception e) {
+                        try {
+                            gpuPipeline.start(false, cameraStartEpoch);
+                        } catch (Exception e) {
                             log("Pipeline start failed: " + e.getMessage());
                             // FIX (cold-boot arming race): arming did NOT complete,
                             // but lastDispatchedAccIsOff was already set true at :3533.
@@ -7948,35 +8524,38 @@ public class CameraDaemon {
                                 transitionGeneration, true, "power-mode arm")) {
                             return;
                         }
-                        log("Pipeline started in sentry mode — arm mode=power (grace period 15s before arming)");
-                        // Grace period of 15s to allow passenger/driver exit before motion detection starts
-                        Thread powerArmThread = new Thread(() -> {
-                            try {
-                                Thread.sleep(15000);
-                                if (stopStaleAccTransition(
-                                        transitionGeneration, true, "power-mode grace-period arm")) {
-                                    return;
-                                }
-                                if (com.overdrive.app.monitor.AccMonitor.isAccOn()) {
-                                    log("Power arm cancelled: ACC is ON");
-                                    return;
-                                }
-                                log("Arming surveillance now (power mode grace period elapsed)");
-                                doorLockListenerArmed =
-                                    enableSurveillanceForAccGeneration(
-                                        transitionGeneration, "ACC OFF power arm");
-                                if (com.overdrive.app.monitor.AccMonitor.isAccOn()
-                                        || safeZoneSuppressed
-                                        || gpuPipeline == null || !gpuPipeline.isRunning()) {
-                                    log("Arm mode=power: pipeline not running after enable "
-                                        + "(safeZone=" + safeZoneSuppressed + ") — reverting armed flag");
-                                    doorLockListenerArmed = false;
-                                }
-                            } catch (InterruptedException ignored) {
-                                log("Power arm grace period interrupted");
+                        Runnable armPowerMode = () -> {
+                            if (stopStaleAccTransition(
+                                    transitionGeneration, true, "power-mode activation")) {
+                                return;
                             }
-                        }, "PowerArmGraceThread");
-                        powerArmThread.start();
+                            doorLockListenerArmed =
+                                enableSurveillanceForAccGeneration(
+                                    transitionGeneration, "ACC OFF power arm");
+                            if (com.overdrive.app.monitor.AccMonitor.isAccOn()
+                                    || safeZoneSuppressed
+                                    || gpuPipeline == null || !gpuPipeline.isRunning()) {
+                                log("Arm mode=power: pipeline not running after enable "
+                                    + "(safeZone=" + safeZoneSuppressed + ") — reverting armed flag");
+                                doorLockListenerArmed = false;
+                            }
+                        };
+                        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                            log("Pipeline started in sentry mode — DiLink 5 power arm waits 15s");
+                            Thread grace = new Thread(() -> {
+                                try {
+                                    Thread.sleep(15_000L);
+                                    armPowerMode.run();
+                                } catch (InterruptedException interrupted) {
+                                    Thread.currentThread().interrupt();
+                                }
+                            }, "PowerArmGraceThread");
+                            grace.setDaemon(true);
+                            grace.start();
+                        } else {
+                            log("Pipeline started in sentry mode — arm mode=power, arming immediately");
+                            armPowerMode.run();
+                        }
                         // Still need the ACC-ON disarm watchdog as the reverse
                         // fallback (ACC turns ON without an IPC reaching us).
                         startAccOnDisarmWatchdog(transitionGeneration);
@@ -8162,7 +8741,7 @@ public class CameraDaemon {
                     }
 
                     // Notify RecordingModeManager of current gear now that GearMonitor works
-                    if (recordingModeManager != null && gm.isRunning()) {
+                    if (recordingModeManager != null && gm.isActive()) {
                         recordingModeManager.onGearChanged(gm.getCurrentGear());
                         if (stopStaleAccTransition(
                                 transitionGeneration,
@@ -8375,6 +8954,14 @@ public class CameraDaemon {
         if (!redundant) {
             log("Gear changed to: " + gearName);
         }
+
+        // DiLink 5 deliberately does NOT arbitrate the cameras on gear changes.
+        // The Qualcomm AIS server multiplexes the QCarCam inputs to every
+        // client, so the OEM reverse/360 view and fast_cam_capture stream
+        // concurrently. The former R-gear "yield" (kill the producer, hand the
+        // AVM to the OEM, respawn 3 s after leaving R) raced every other
+        // lifecycle path and was the source of the release-guard exit-125
+        // storms and boot-long camera blocks; it has been removed.
 
         // Feed trip detection before recording-mode callbacks can block. A gear
         // edge arriving before the trip database finishes opening is dropped
@@ -8821,6 +9408,23 @@ public class CameraDaemon {
     public static void setOemDashcamPipeline(com.overdrive.app.camera.OemDashcamPipeline p) {
         oemDashcamPipeline = p;
         oemDashcamPipelineGeneration.incrementAndGet();
+        if (p == null) {
+            // OEM may have been the last independent camera owner keeping pano
+            // alive (pano stop cascades into OEM teardown because their EGL
+            // lifecycles can be shared). Re-audit after the release; a temporary
+            // quality/heal restart is safe because the delayed final verdict sees
+            // the replacement OEM owner or its lifecycle-in-flight flag.
+            com.overdrive.app.surveillance.GpuSurveillancePipeline pano =
+                    gpuPipeline;
+            if (pano != null) {
+                try {
+                    pano.auditOwnerlessPipelineAfterExternalRelease(
+                            "OEM dashcam released");
+                } catch (Throwable t) {
+                    log("OEM release owner audit failed: " + t.getMessage());
+                }
+            }
+        }
     }
 
     /** Read the current pipeline generation. Surveillance compares this
@@ -9263,6 +9867,14 @@ public class CameraDaemon {
             log("WARN: System lib warning: " + e.getMessage());
         }
 
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            boolean loaded =
+                    com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                            .ensureNativeLibrariesLoaded(nativeLibDir);
+            log("DiLink 5 camera native libraries: "
+                    + (loaded ? "loaded" : "NOT available"));
+        }
+
         // Load surveillance library - try default path first
         if (!com.overdrive.app.surveillance.NativeMotion.isLibraryLoaded()) {
             // Try explicit path using nativeLibDir
@@ -9370,6 +9982,74 @@ public class CameraDaemon {
         }
 
         log("--- END SCAN ---");
+    }
+
+    /**
+     * Runs the explicit ImageReader FPS diagnostic before normal camera init.
+     *
+     * @return false only after an indeterminate raw-camera lifecycle armed
+     *         terminal process retirement; callers must not initialize a
+     *         second camera stack in that state
+     */
+    private static boolean runImageReaderProbeIfRequested() {
+        File sentinel = new File("/data/local/tmp/run_imagereader_probe");
+        if (!sentinel.exists()) return true;
+
+        // Consume before touching AVMCamera. If the process dies or the HAL
+        // blocks, the wrapper's restart must not repeat the destructive probe.
+        if (!sentinel.delete()) {
+            log("WARN: ImageReader probe skipped because its one-shot sentinel "
+                + "could not be consumed: " + sentinel);
+            return true;
+        }
+        if (isProcessRestartPending()) {
+            log("ImageReader probe skipped because process retirement is pending");
+            return false;
+        }
+
+        log("=== ImageReader probe sentinel consumed — running bounded probe ===");
+        File probeDir = new File("/data/local/tmp/imagereader_probe");
+        Thread worker = new Thread(
+            () -> new com.overdrive.app.camera.AvmImageReaderFpsProbe(
+                probeDir).run(),
+            "AvmImageReaderProbe");
+        worker.setDaemon(true);
+        try {
+            worker.start();
+        } catch (Throwable spawnFailure) {
+            log("ImageReader probe worker could not start: "
+                + spawnFailure.getMessage());
+            return true;
+        }
+
+        long deadline = android.os.SystemClock.elapsedRealtime()
+            + IMAGE_READER_PROBE_HARD_TIMEOUT_MS;
+        boolean interrupted = false;
+        while (worker.isAlive()) {
+            long remaining =
+                deadline - android.os.SystemClock.elapsedRealtime();
+            if (remaining <= 0L) break;
+            try {
+                worker.join(Math.min(remaining, 250L));
+            } catch (InterruptedException waitInterrupted) {
+                interrupted = true;
+                break;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+        if (worker.isAlive()) {
+            String reason = "ImageReader AVMCamera probe blocked for "
+                + IMAGE_READER_PROBE_HARD_TIMEOUT_MS + "ms";
+            requestUrgentCameraReleaseRestart(reason);
+            log("ERROR: " + reason
+                + " — normal camera initialization suppressed");
+            return false;
+        }
+
+        log("=== ImageReader probe finished — continuing normal startup ===");
+        return true;
     }
 
     // ==================== LOGGING ====================
@@ -9617,7 +10297,9 @@ public class CameraDaemon {
                 return;
             }
 
-            com.overdrive.app.byd.dilink5.Dilink5SdkInjector.ensure(sharedAppContext);
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                com.overdrive.app.byd.dilink5.Dilink5SdkInjector.ensure(sharedAppContext);
+            }
 
             com.overdrive.app.monitor.VehicleDataMonitor vehicleMonitor =
                 com.overdrive.app.monitor.VehicleDataMonitor.getInstance();
@@ -9844,7 +10526,7 @@ public class CameraDaemon {
                 return createFallbackContext();
             }
 
-            String packageName = (android.os.Process.myUid() == 2000) ? "com.android.shell" : APP_PACKAGE_NAME();
+            String packageName = APP_PACKAGE_NAME();
             log("createAppContext: Creating package context for " + packageName);
             android.content.Context appContext = systemContext.createPackageContext(packageName,
                     android.content.Context.CONTEXT_INCLUDE_CODE | android.content.Context.CONTEXT_IGNORE_SECURITY);
@@ -9854,9 +10536,6 @@ public class CameraDaemon {
                 log("createAppContext: appContext is null, trying fallback...");
                 return createFallbackContext();
             }
-
-            com.overdrive.app.byd.BydDeviceHelper.fixContextImplForUid2000(appContext);
-            com.overdrive.app.byd.BydDeviceHelper.fixContextImplForUid2000(systemContext);
 
             PermissionBypassContext wrapped = new PermissionBypassContext(appContext);
             log("createAppContext: Success, returning PermissionBypassContext");
@@ -9966,12 +10645,7 @@ public class CameraDaemon {
             return this;
         }
         @Override public String getPackageName() {
-            if (android.os.Process.myUid() == 2000) return "com.android.shell";
             try { return super.getPackageName(); } catch (NullPointerException e) { return APP_PACKAGE_NAME(); }
-        }
-        @Override public String getOpPackageName() {
-            if (android.os.Process.myUid() == 2000) return "com.android.shell";
-            try { return super.getOpPackageName(); } catch (Throwable e) { return "com.android.shell"; }
         }
         @Override public Object getSystemService(String name) {
             try { return super.getSystemService(name); } catch (NullPointerException e) { return null; }

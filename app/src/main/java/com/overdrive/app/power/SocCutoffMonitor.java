@@ -196,23 +196,39 @@ public final class SocCutoffMonitor {
         logger.warn("performShutdown: SoC=" + finalSoc + "% — beginning voluntary exit");
 
         // 1. Stop the V2 monitor's wake-lock + handler.
-        try { BatteryVoltageMonitorV2.stopMonitor(); } catch (Throwable ignored) {}
-
-        // 1b. Re-arm the backlight BEFORE we tear everything down. On dilink4 the
-        // parked panel may currently be held off via TurnBacklightOffWithLock —
-        // a vendor lock-holding call. This method then force-stops every process
-        // in the package and calls Runtime.exit(0), so nothing is left alive to
-        // undo it. Waking the panel here means the state the device is left in
-        // is the platform's own (the goToSleep below then sleeps it normally),
-        // rather than a vendor backlight lock taken by a process that no longer
-        // exists.
-        //
-        // turnOn() self-skips when the screen already reads on, so this is a
-        // no-op on legacy units and whenever the panel was never darkened.
         try {
-            StealthPanel.turnOn(appContext);
-        } catch (Throwable t) {
-            logger.warn("Panel wake before shutdown failed: " + t.getMessage());
+            BatteryVoltageMonitorV2.stopMonitorForShutdown();
+        } catch (Throwable ignored) {}
+
+        // 1a. Release the DiLink 5 parked keep-alive lease (sentry flags,
+        // panorama heartbeat, AP token) while the HAL binders are still alive.
+        // The force-stop below does not run the daemon's shutdown hook, and a
+        // lease that outlives the process would defeat the whole point of this
+        // cutoff. No-op unless the lease is installed and holding.
+        try {
+            Di5ParkedPowerHold.releaseForProcessExit("SoC cutoff");
+        } catch (Throwable ignored) {}
+
+        // 1b. Release the verified stealth-panel lock BEFORE teardown, but only
+        // on platforms that can actually own that lock. Legacy Di3 darkening
+        // uses the ordinary backlight path; calling StealthPanel.turnOn there
+        // newly lights the panel immediately before goToSleep and can look like
+        // a random boot animation during the low-SoC shutdown edge.
+        boolean stealthPanelPlatform = false;
+        try {
+            stealthPanelPlatform =
+                    com.overdrive.app.camera.dilink5.DiLink5Platform
+                            .isDiLink4Selected()
+                    || com.overdrive.app.camera.dilink5.DiLink5Platform
+                            .isSelected();
+        } catch (Throwable ignored) {}
+        if (stealthPanelPlatform) {
+            try {
+                StealthPanel.turnOn(appContext);
+            } catch (Throwable t) {
+                logger.warn("Panel wake before shutdown failed: "
+                        + t.getMessage());
+            }
         }
 
         // 2. Ask the head unit to enter sleep — display off + system idle.

@@ -69,4 +69,75 @@ public class BsNativeLayerSizeParseTest {
         assertEquals(720, p[0]);
         assertEquals(1920, p[1]);
     }
+
+    @Test
+    public void diLink5MirrorPrefersPlainPhysicalCompositionStack() {
+        String dump =
+                "mBaseDisplayInfo=DisplayInfo{\"fission_bg_XDJAScreenProjection\", "
+                + "displayId 2\", real 1920 x 720, layerStack 2, state ON}\n"
+                + "mBaseDisplayInfo=DisplayInfo{\"shared_fission_bg_"
+                + "XDJAScreenProjection_0\", displayId 3\", real 1920 x 720, "
+                + "layerStack 3, state ON}\n"
+                + "mBaseDisplayInfo=DisplayInfo{\"shared_fission_bg_"
+                + "XDJAScreenProjection_1\", displayId 4\", real 1920 x 720, "
+                + "layerStack 4, state ON}";
+
+        BsNativeLayer.FissionDisplay display =
+                BsNativeLayer.parseDiLink5MirrorDisplay(dump, 3);
+
+        assertEquals(2, display.displayId);
+        assertEquals(2, display.layerStack);
+        assertEquals(1920, display.width);
+        assertEquals(720, display.height);
+    }
+
+    @Test
+    public void diLink5MirrorAcceptsDisplayIdInsideQuotedHeader() {
+        String dump =
+                "mBaseDisplayInfo=DisplayInfo{\"fission_bg_XDJAScreenProjection, "
+                + "displayId 2\", real 1920 x 720, layerStack 2, state ON}\n"
+                + "mBaseDisplayInfo=DisplayInfo{\"shared_fission_bg_"
+                + "XDJAScreenProjection_0, displayId 3\", real 1 x 1, "
+                + "layerStack 3, state ON}";
+
+        BsNativeLayer.FissionDisplay display =
+                BsNativeLayer.parseDiLink5MirrorDisplay(dump, 3);
+
+        assertEquals(2, display.displayId);
+        assertEquals(2, display.layerStack);
+        assertEquals(1920, display.width);
+        assertEquals(720, display.height);
+    }
+
+    @Test
+    public void diLink5MirrorRefusesSharedShadowWithoutComposedSource() {
+        String dump =
+                "mBaseDisplayInfo=DisplayInfo{\"shared_fission_bg_"
+                + "XDJAScreenProjection_0\", displayId 3\", real 1920 x 720, "
+                + "layerStack 3, state ON}\n"
+                + "mBaseDisplayInfo=DisplayInfo{\"shared_fission_bg_"
+                + "XDJAScreenProjection_1\", displayId 4\", real 1920 x 720, "
+                + "layerStack 4, state ON}";
+
+        BsNativeLayer.FissionDisplay display =
+                BsNativeLayer.parseDiLink5MirrorDisplay(dump, 3);
+
+        assertEquals(-1, display.displayId);
+        assertEquals(-1, display.layerStack);
+    }
+
+    @Test
+    public void diLink5MirrorCanUseSelectedNonSharedProductionTarget() {
+        String dump =
+                "mBaseDisplayInfo=DisplayInfo{\"XDJAScreenProjection_0\", "
+                + "displayId 3\", real 1920 x 720, layerStack 3, state ON}\n"
+                + "mBaseDisplayInfo=DisplayInfo{\"XDJAScreenProjection_1\", "
+                + "displayId 4\", real 1920 x 720, layerStack 4, state ON}";
+
+        BsNativeLayer.FissionDisplay display =
+                BsNativeLayer.parseDiLink5MirrorDisplay(dump, 3);
+
+        assertEquals(3, display.displayId);
+        assertEquals(3, display.layerStack);
+    }
 }

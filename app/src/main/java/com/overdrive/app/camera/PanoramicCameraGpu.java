@@ -94,32 +94,84 @@ public class PanoramicCameraGpu {
     // output, 1-4=individual viewpoints.
     private int cameraSurfaceMode = 0;
 
-    // Frame-ingestion path selector. Two modes, persisted in unified
+    // Frame-ingestion path selector. Three modes, persisted in unified
     // config under camera.cameraMode:
     //   "default" → legacy ImageReader + 4-strip → 2x2 rearrangement.
     //   "dilink4" → oem SurfaceTexture (addTexture + setTexture +
     //               previewIndex). Normal mode uses layout 3 for the known
     //               four-corner remap; passive APA uses layout 1 to record
     //               preview port 0 unchanged.
+    //   "dilink5" → fast_cam_capture DMA-BUFs composited into a persistent
+    //               GL_TEXTURE_2D, with a CPU upload fallback.
     //
-    // Resolved at construction. 0=legacy strip, 1=passive full-frame APA,
-    // 3=DiLink 4 four-corner remap.
+    // Resolved at construction. 0=legacy strip, 1=full-frame passthrough,
+    // 3=DiLink 4 remapped 2x2 mosaic.
+    private final boolean USE_DILINK5_QCARCAM_PATH =
+        com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
     private final int CAMERA_LAYOUT_MODE = resolveCameraLayoutModeFromConfig();
     private final boolean USE_OEM_SURFACE_TEXTURE_PATH = CAMERA_LAYOUT_MODE != 0;
+    private final boolean USE_DILINK4_AVM_PATH =
+        USE_OEM_SURFACE_TEXTURE_PATH && !USE_DILINK5_QCARCAM_PATH;
     // DiLink 4-only compatibility path: leave the OEM panorama output untouched
     // and consume preview port 0 exactly as supplied by the HAL.
-    private final boolean USE_PASSIVE_APA_MODE = CAMERA_LAYOUT_MODE == 1;
+    private final boolean USE_PASSIVE_APA_MODE =
+        CAMERA_LAYOUT_MODE == 1 && !USE_DILINK5_QCARCAM_PATH;
+
+    // Decoupled encoder lane (BYD native-AVM starvation fix). When enabled on
+    // the LEGACY ImageReader path, every consumer pass samples an app-owned
+    // COPY of the camera frame (CopiedFrameRing) instead of the camera-owned
+    // gralloc buffer; the bound Image/HardwareBuffer is released as soon as
+    // the copy's GPU fence signals (instead of at the NEXT bind); and the
+    // recorder's encoder-blocking GL (makeCurrent + mosaic draw +
+    // eglSwapBuffers — the calls that stall 100-300ms under MediaCodec
+    // backpressure) runs on a dedicated EncoderLane thread with a shared EGL
+    // context. The acquisition thread therefore never waits on the encoder,
+    // so ImageReader gralloc slots return to the BYD HAL producer at frame
+    // cadence even during encoder stalls — the starvation mechanism behind
+    // the native AVM losing its reverse-gear feed while we keep recording.
+    //
+    // Opt-in per vehicle via camera.decoupledEncoderLane (default false =
+    // shipped zero-copy behaviour, bit-identical). Applied at pipeline
+    // construction like every other USE_* path selector — never hot-swapped.
+    // Legacy path only: DiLink 5 already publishes app-owned 2D textures
+    // (native DMA compositor) and DiLink 4's SurfaceTexture path has a
+    // different buffer-lifetime model (updateTexImage auto-recycles).
+    private final boolean USE_DECOUPLED_ENCODER_LANE =
+        !USE_OEM_SURFACE_TEXTURE_PATH
+        && !USE_DILINK5_QCARCAM_PATH
+        && resolveDecoupledEncoderLaneFromConfig();
+
+    private static boolean resolveDecoupledEncoderLaneFromConfig() {
+        try {
+            org.json.JSONObject cam = com.overdrive.app.config.UnifiedConfigManager
+                .loadConfig().optJSONObject("camera");
+            return cam != null && cam.optBoolean("decoupledEncoderLane", false);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** True when the decoupled encoder lane is active (flag on + legacy path).
+     *  Consumers use this to pick the 2D windshield sampler variant; the
+     *  camera sampler variant rides the existing {@link #isTexture2D()}. */
+    public boolean isDecoupledEncoderLane() {
+        return USE_DECOUPLED_ENCODER_LANE;
+    }
 
     private static int resolveCameraLayoutModeFromConfig() {
-        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
-            return 1; // DiLink 5: direct 1:1 single camera passthrough (no 4-way mosaic)
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            return 1;
+        }
+        if (!com.overdrive.app.camera.dilink5.DiLink5Platform
+                .isDiLink4Selected()) {
+            return 0;
         }
         try {
             org.json.JSONObject cam = com.overdrive.app.config.UnifiedConfigManager
                 .loadConfig().optJSONObject("camera");
             if (cam == null) return 0;
             return Di4AvcViewpointPolicy.cameraLayoutMode(
-                cam.optString("cameraMode", "default"),
+                "dilink4",
                 cam.optBoolean("dilink4PassiveApaMode", false));
         } catch (Throwable t) {
             return 0;
@@ -131,9 +183,6 @@ public class PanoramicCameraGpu {
      *  1 = full-frame passthrough (DiLink 4 passive APA / DiLink 5);
      *  3 = DiLink 4 four-corner remap. */
     public int getCameraLayoutMode() {
-        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
-            return 1; // DiLink 5: direct 1:1 single camera passthrough (no 4-way mosaic)
-        }
         return CAMERA_LAYOUT_MODE;
     }
     
@@ -184,6 +233,23 @@ public class PanoramicCameraGpu {
     // releasing, so the GPU sample completes before the encoder can recycle the
     // buffer. See AiLaneGl.CameraState.cameraTextureLock()/isCameraTextureValid().
     private final Object cameraTextureLock = new Object();
+
+    // ==================== Decoupled encoder lane state ====================
+    // (camera.decoupledEncoderLane — see USE_DECOUPLED_ENCODER_LANE comment.)
+    // GL-side objects are GL-thread-confined; EncoderLane is thread-safe.
+    //
+    // cameraOesTextureId is the PRIVATE EXTERNAL_OES bind target for the HAL
+    // gralloc buffer (copy source). cameraTextureId — what every consumer
+    // samples — is republished each frame as the freshly-copied ring slot
+    // (2D), exactly the way the DiLink 5 path republishes its compositor
+    // output texture.
+    private int cameraOesTextureId;                 // GL thread
+    private CopiedFrameRing decoupledCamRing;       // GL thread (writer)
+    private CopiedFrameRing decoupledWsRing;        // GL thread (writer), lazy
+    private volatile EncoderLane encoderLane;
+    private int decoupledLastWsSlot = -1;           // GL thread
+    // =======================================================================
+
     // Camera consumer: ImageReader → AHardwareBuffer → EGLImage →
     // cameraTextureId. Bypasses SurfaceFlinger throttling that clamps the
     // SurfaceTexture path to ~8.5 fps on DiLink50 5.0UI builds (verified by
@@ -196,7 +262,25 @@ public class PanoramicCameraGpu {
     // setTexture / rmTexture). Lifetime mirrors cameraImageReader: created
     // by createCameraSurfaceTexture(), freed by releaseCameraConsumer().
     // Bound directly to cameraTextureId — no separate gralloc handoff.
-    private SurfaceTexture cameraSurfaceTexture;
+    private volatile SurfaceTexture cameraSurfaceTexture;
+
+    // DiLink 4 SurfaceTexture callbacks MUST NOT run on glHandler. The render
+    // runnable blocks that looper in frameSync.wait(), so a callback posted to
+    // the same looper cannot wake the wait and the path self-paces at the wait
+    // timeout instead of at producer cadence. Keep one lightweight callback
+    // thread for the lifetime of this pipeline; same-handle SurfaceTexture
+    // rebinds reuse it, and releaseGl retires it after the consumer is fenced.
+    //
+    // The state lock makes consumer replacement atomic with callback
+    // acceptance. setOnFrameAvailableListener(null) does not retract a message
+    // already queued on a Handler, so identity alone is not enough without a
+    // generation fence: an old SurfaceTexture callback could otherwise arrive
+    // after rebind, advance the new consumer's sequence and falsely cancel
+    // producer recovery.
+    private HandlerThread diLink4FrameCallbackThread;
+    private Handler diLink4FrameCallbackHandler;
+    private final Object diLink4SurfaceTextureStateLock = new Object();
+    private int diLink4SurfaceTextureEpoch = 0;
 
     // Optional direct windshield camera used by the dashcam recording layout.
     // Field verification on Tang: pano camera 2 and windshield camera 0 stream
@@ -209,6 +293,14 @@ public class PanoramicCameraGpu {
     private int windshieldTextureId;
     private volatile boolean windshieldEnabled = false;
     private volatile int windshieldCameraId = -1;
+    // Legacy AVMCamera open/start/close calls are uninterruptible vendor
+    // Binder transactions. Keep their ownership visible to stop() and latch
+    // teardown closed after a hard timeout; process retirement is then the
+    // only safe cleanup authority.
+    private final AtomicBoolean legacyWindshieldCameraLifecycleInFlight =
+        new AtomicBoolean(false);
+    private final AtomicBoolean legacyWindshieldCameraTerminalRestart =
+        new AtomicBoolean(false);
     private volatile boolean windshieldPending = false;
     private boolean windshieldStarted = false;
     private boolean windshieldOpenFailed = false;
@@ -266,6 +358,7 @@ public class PanoramicCameraGpu {
     private HandlerThread glThread;
     private Handler glHandler;
     private volatile boolean running = false;
+    private volatile long activeStartEpoch = Long.MIN_VALUE;
     private final Object frameSync = new Object();
     // State-backed signal between the HAL callback (onHalImageAvailable) and
     // the GL render loop. Plain notify()/wait() races: if the HAL fires while
@@ -364,21 +457,63 @@ public class PanoramicCameraGpu {
     // can take several seconds to deliver the first frame. During this period the
     // GL thread is legitimately blocked on frameSync.wait(), not deadlocked.
     private static final long GL_THREAD_WARMUP_TIMEOUT_MS = 10000;
+    // A stop racing an ordinary legacy open gets a brief chance to observe the
+    // uninterruptible vendor Binder call finish. Beyond this, touching the same
+    // partial handle or EGL state from teardown is unsafe; process retirement
+    // owns cleanup.
+    private static final long LEGACY_OPEN_STOP_GRACE_MS = 2_000L;
     private volatile boolean firstFrameReceived = false;
     
-    // SOTA: BYD camera coordinator for cooperative sharing and error recovery
+    // BYD camera coordinator for legacy polling and AVMCamera error events.
+    // DI4 deliberately skips IBYDCameraUser ownership arbitration: its single
+    // panoramic producer remains open continuously, matching DIPlus pano mode.
+    // DiLink 5 uses the dedicated source-handoff fields below.
     private BydCameraCoordinator cameraCoordinator;
     private volatile boolean cameraYielded = false;
+    private volatile boolean diLink5ReverseRequested = false;
+    private volatile boolean diLink5ReverseHandoffComplete = true;
+    private volatile boolean diLink5AvmPreservedForReverse = false;
+    // Reverse gear needs the physical FastCam inputs released to the system
+    // AVM, but it must not run the generic yield lifecycle: that lifecycle
+    // finalizes the current MP4, detaches live-view, and restarts recorder
+    // state. This flag marks the narrower DI5 source-only handoff so reacquire
+    // reopens the producer without touching recorder/streaming sessions.
+    private volatile boolean diLink5ReverseSourcePaused = false;
+    // Source-only recovery is also used for an active FastCam frame stall.
+    // Keep this separate from the reverse-state flag so health recovery can
+    // preserve recorder/live-view sessions without pretending system AVM owns
+    // the cameras.
+    private volatile boolean diLink5SourceOnlyReacquire = false;
+    // Coalesce camera-error/stall recovery requests until either the first
+    // replacement frame arrives or the attempt moves to a deferred retry.
+    // The epoch invalidates a queued recovery when reverse or shutdown
+    // supersedes it, preventing a stale task from closing a newly resumed
+    // source after an R -> D transition.
+    private final AtomicBoolean diLink5SourceRecoveryActive =
+            new AtomicBoolean(false);
+    private final AtomicInteger diLink5SourceRecoveryEpoch =
+            new AtomicInteger(0);
+    private volatile boolean diLink5ReverseSourceTransitionInProgress = false;
+    // Dedicated render/AI/preview gate while system reverse owns the physical
+    // inputs. Unlike cameraYielded, this never finalizes recording or detaches
+    // streaming. It remains closed across the R -> D settle delay and opens
+    // only immediately before a verified source reopen/resume.
+    private volatile boolean diLink5SystemAvmFrameGate = false;
+    // A reverse/source-health resume has left the source-handoff state but has
+    // not yet
+    // delivered a frame from the replacement FastCam session. This is distinct
+    // from the legacy cameraYielded lifecycle: DI5 preflight can spend several
+    // seconds with cameraObj == null. The frame watchdog must not reinterpret
+    // the previous session's timestamp as an active-stream stall during that
+    // ownership gap.
+    private volatile boolean diLink5ReacquireInProgress = false;
+    private volatile long diLink5ReacquireStartedAtMs = 0L;
+    private final AtomicInteger diLink5ReverseEpoch = new AtomicInteger(0);
+    private final java.util.concurrent.locks.ReentrantLock
+            diLink5OwnershipTransition =
+                    new java.util.concurrent.locks.ReentrantLock();
 
-    // Yield-state re-acquire poller. registerCameraUser() is permanently disabled
-    // (see BydCameraCoordinator), so once we yield to the native AVM app the
-    // event-driven IBYDCameraUser.onCameraAvailable callback never fires. The
-    // GL render loop also early-returns at line 2131 while yielded, so its
-    // frame-stall watchdog can't observe a recovery either. This poller is the
-    // only authoritative re-acquire path: every 5 s while yielded, ping
-    // BydCameraCoordinator.checkNativeAppActive() — its polling-fallback branch
-    // (lines 398-406) calls handleNativeAppClosed → onReacquireCamera when the
-    // native app releases the camera.
+    // Yield-state re-acquire poller for the legacy contention path.
     private volatile Thread yieldPollerThread;
     private static final long YIELD_POLL_INTERVAL_MS = 5000;
 
@@ -414,11 +549,14 @@ public class PanoramicCameraGpu {
     // attemptReacquireOnGlThread short-circuits the stale runnable.
     private volatile Runnable pendingReacquireRetry = null;
     private final AtomicInteger pendingReacquireEpoch = new AtomicInteger(0);
-    // audit avc-yield (round 5, finding consumer-recreate-every-attempt):
-    // recreateCameraSurface is only needed once per yield cycle (after the BYD
-    // HAL released the ImageReader Surface). Doing it on every retry attempt
-    // re-allocates GL textures for nothing and risks racing the encoder. Set
-    // by yieldCameraInternal, cleared after the first successful recreate.
+    // Recreate the camera consumer before the first open after a contention
+    // yield. Legacy ImageReader needs this once per yield cycle because the BYD
+    // HAL freezes a Surface released by the prior camera instance. DI4 also
+    // needs a new SurfaceTexture generation after every stale camera handle is
+    // closed during retry: otherwise a callback queued by the retired handle
+    // can be accepted after the replacement handle starts using the same
+    // SurfaceTexture. Set by yieldCameraInternal (and by DI4 stale-handle
+    // cleanup), cleared after a successful recreation.
     private volatile boolean consumerNeedsRecreation = false;
 
 
@@ -434,6 +572,17 @@ public class PanoramicCameraGpu {
     // case 8s first-frame latency with margin while staying under the 10s GL-hang
     // warmup timeout that bounds genuine deadlocks.
     private static final long FRAME_STALL_WARMUP_GRACE_MS = 9000;
+    private static final long DILINK5_REACQUIRE_MAX_MS = 45_000L;
+    private static final long DILINK5_DEFERRED_REACQUIRE_DELAY_MS = 30_000L;
+    // Closing the DMA producer and retiring its EGLImages is slower than an
+    // active render tick but must still be bounded. This is deliberately
+    // shorter than the full reacquire budget: no HAL warmup or first-frame
+    // wait belongs to the source-release half of the transition.
+    // The backend allows up to 22 s for one complete token-scoped retirement
+    // retry. Keep the GL watchdog beyond that bound plus scheduling/GL cleanup
+    // margin; otherwise it arms the non-cancellable 5 s process halt while a
+    // legitimate second native/process retirement attempt is still running.
+    private static final long DILINK5_OWNERSHIP_TRANSITION_TIMEOUT_MS = 30_000L;
     // When native app is active, use a longer threshold to avoid false yields
     // from transient CPU/IO load. The HAL needs time to settle into sharing mode.
     private static final long FRAME_STALL_CONTENTION_THRESHOLD_MS = 3000;
@@ -441,12 +590,240 @@ public class PanoramicCameraGpu {
     private static final int CONTENTION_STALL_COUNT_TO_YIELD = 2;
     private volatile int consecutiveContentionStalls = 0;
 
+    static boolean shouldSuppressDiLink5FrameStall(
+            boolean diLink5Path,
+            boolean reacquireInProgress,
+            boolean hasCameraHandle,
+            long lastCameraStartMs,
+            long reacquireStartedAtMs,
+            long nowMs,
+            long warmupGraceMs,
+            long maxReacquireMs) {
+        if (!diLink5Path || !reacquireInProgress) return false;
+        if (isDiLink5ReacquireDeadlineExpired(
+                reacquireStartedAtMs, nowMs, maxReacquireMs)) {
+            return false;
+        }
+        if (!hasCameraHandle) return true;
+        if (lastCameraStartMs <= 0) return true;
+        long ageMs = Math.max(0L, nowMs - lastCameraStartMs);
+        return ageMs < Math.max(0L, warmupGraceMs);
+    }
+
+    static boolean isDiLink5ReacquireDeadlineExpired(
+            long reacquireStartedAtMs,
+            long nowMs,
+            long maxReacquireMs) {
+        if (reacquireStartedAtMs <= 0 || maxReacquireMs <= 0) return true;
+        return Math.max(0L, nowMs - reacquireStartedAtMs)
+                >= maxReacquireMs;
+    }
+
+    static boolean shouldRunPostReacquireLifecycle(
+            boolean diLink5Path, boolean reverseSourcePaused) {
+        return !diLink5Path || !reverseSourcePaused;
+    }
+
+    /** True only while OEM reverse owns, or is taking, the DI5 camera inputs. */
+    private boolean isDiLink5SystemAvmHandoffActive() {
+        return USE_DILINK5_QCARCAM_PATH
+                && (diLink5SystemAvmFrameGate
+                        || diLink5ReverseRequested
+                        || diLink5ReverseSourceTransitionInProgress);
+    }
+
+    /**
+     * Frame consumers use a source-pause gate, not the legacy yield flag, on
+     * DiLink 5. Once reverse ends, cameraObj==null keeps consumers out until
+     * reopen; after publication they must be allowed to consume the first frame.
+     */
+    private boolean isCameraFrameConsumptionPaused() {
+        return USE_DILINK5_QCARCAM_PATH
+                ? isDiLink5SystemAvmHandoffActive()
+                : cameraYielded
+                    || legacyWindshieldCameraLifecycleInFlight.get()
+                    || legacyWindshieldCameraTerminalRestart.get();
+    }
+
+    /** A generic coordinator yield must never gate DI5 source acquisition. */
+    private boolean isCameraReacquireBlockedByOwnershipHandoff() {
+        if (USE_DILINK5_QCARCAM_PATH) {
+            return diLink5ReverseRequested || isFreshDiLink5Reverse();
+        }
+        return cameraYielded
+                || (cameraCoordinator != null
+                        && cameraCoordinator.isCameraYielded());
+    }
+
+    private void beginDiLink5Reacquire(String reason) {
+        if (!USE_DILINK5_QCARCAM_PATH) return;
+        boolean firstTransition = !diLink5ReacquireInProgress;
+        diLink5ReacquireInProgress = true;
+        if (firstTransition) {
+            diLink5ReacquireStartedAtMs = System.currentTimeMillis();
+        }
+        // Retire both clocks from the prior FastCam ownership session. The
+        // watchdog falls back to lastCameraStartTime after the new handle opens.
+        lastRealFrameTimeSt = 0L;
+        lastFrameTime = 0L;
+        lastCameraStartTime = 0L;
+        warmupGraceLoggedForStartMs = -1L;
+        if (firstTransition) {
+            logger.info("DiLink 5 FastCam reacquire started: " + reason);
+        }
+    }
+
+    private void finishDiLink5Reacquire(String reason) {
+        if (!USE_DILINK5_QCARCAM_PATH) return;
+        diLink5SourceRecoveryActive.set(false);
+        if (!diLink5ReacquireInProgress) return;
+        diLink5ReacquireInProgress = false;
+        diLink5ReacquireStartedAtMs = 0L;
+        logger.info("DiLink 5 FastCam reacquire finished: " + reason);
+    }
+
+    /**
+     * Leave the recorder and daemon alive when a DI5 source reopen cannot
+     * complete immediately. A fresh bounded retry is queued after the HAL and
+     * system AVM have had time to settle. This is intentionally process-local:
+     * an ordinary reopen failure is not proof that camera ownership is unsafe
+     * for the rest of the vehicle boot.
+     */
+    private boolean scheduleDiLink5DeferredReacquire(String reason) {
+        if (!USE_DILINK5_QCARCAM_PATH) return false;
+        finishDiLink5Reacquire("waiting for deferred source retry");
+        if (!running || diLink5SafetyDisabled
+                || diLink5ReverseRequested || isFreshDiLink5Reverse()) {
+            logger.warn("DiLink 5 deferred source retry not scheduled: "
+                    + reason + " (running=" + running
+                    + ", reverse=" + diLink5ReverseRequested
+                    + ", safeOff=" + diLink5SafetyDisabled + ")");
+            return false;
+        }
+
+        cancelPendingReacquireRetry(
+                "DiLink 5: replaced pending source retry");
+        Handler handler = glHandler;
+        if (handler == null) {
+            logger.error("DiLink 5 source unavailable; GL handler is absent: "
+                    + reason);
+            return false;
+        }
+
+        final int scheduledEpoch = pendingReacquireEpoch.get();
+        Runnable retry = new Runnable() {
+            @Override
+            public void run() {
+                if (pendingReacquireRetry == this) {
+                    pendingReacquireRetry = null;
+                }
+                if (pendingReacquireEpoch.get() != scheduledEpoch
+                        || !running
+                        || diLink5SafetyDisabled
+                        || diLink5ReverseRequested
+                        || isFreshDiLink5Reverse()) {
+                    logger.info("DiLink 5 deferred source retry was superseded");
+                    return;
+                }
+                if (cameraObj != null) {
+                    logger.info("DiLink 5 deferred source retry skipped; "
+                            + "a camera source is already open");
+                    return;
+                }
+                beginDiLink5Reacquire("deferred source retry");
+                attemptReacquireOnGlThread();
+            }
+        };
+        pendingReacquireRetry = retry;
+        if (!handler.postDelayed(
+                retry, DILINK5_DEFERRED_REACQUIRE_DELAY_MS)) {
+            pendingReacquireRetry = null;
+            logger.error("DiLink 5 source unavailable; deferred retry was "
+                    + "rejected by the GL handler: " + reason);
+            return false;
+        }
+        logger.warn("DiLink 5 source unavailable without daemon restart; "
+                + "retrying in " + DILINK5_DEFERRED_REACQUIRE_DELAY_MS
+                + "ms: " + reason);
+        return true;
+    }
+
+    /**
+     * Recover only the DI5 FastCam producer. Recorder, muxer, encoder drainers
+     * and live-view objects remain attached throughout this operation.
+     */
+    private void requestDiLink5SourceOnlyRecovery(String reason) {
+        if (!USE_DILINK5_QCARCAM_PATH || !running
+                || diLink5SafetyDisabled) {
+            return;
+        }
+        if (!diLink5SourceRecoveryActive.compareAndSet(false, true)) {
+            logger.info("DiLink 5 source-only recovery already active; "
+                    + "coalescing request: " + reason);
+            return;
+        }
+        final int recoveryEpoch =
+                diLink5SourceRecoveryEpoch.incrementAndGet();
+        Handler handler = glHandler;
+        if (handler == null) {
+            diLink5SourceRecoveryActive.set(false);
+            logger.error("DiLink 5 source-only recovery unavailable; "
+                    + "GL handler is absent: " + reason);
+            return;
+        }
+        boolean posted = handler.post(() -> {
+            diLink5OwnershipTransition.lock();
+            try {
+                if (recoveryEpoch != diLink5SourceRecoveryEpoch.get()
+                        || !running || diLink5SafetyDisabled
+                        || diLink5ReverseRequested
+                        || isFreshDiLink5Reverse()) {
+                    return;
+                }
+                diLink5SourceOnlyReacquire = true;
+                diLink5ReverseSourcePaused = false;
+                cancelPendingReacquireRetry(
+                        "DiLink 5 source recovery replaced a pending retry");
+                beginDiLink5Reacquire(reason);
+
+                Object source = cameraObj;
+                if (source != null) {
+                    if (!closeCameraForPath(source, false)) {
+                        // closeCameraForPath already owns the hard escape for
+                        // a proven native/EGL ownership-retirement failure.
+                        return;
+                    }
+                    cameraObj = null;
+                    if (cameraCoordinator != null) {
+                        cameraCoordinator.resetEventCallbackState();
+                        cameraCoordinator.notifyPosCloseCamera();
+                    }
+                }
+                attemptReacquireOnGlThread();
+            } finally {
+                if (recoveryEpoch == diLink5SourceRecoveryEpoch.get()
+                        && !diLink5ReacquireInProgress) {
+                    diLink5SourceRecoveryActive.set(false);
+                }
+                lastGlThreadHeartbeat = System.currentTimeMillis();
+                diLink5OwnershipTransition.unlock();
+            }
+        });
+        if (!posted) {
+            if (recoveryEpoch == diLink5SourceRecoveryEpoch.get()) {
+                diLink5SourceRecoveryActive.set(false);
+            }
+            logger.error("DiLink 5 source-only recovery was rejected by "
+                    + "the GL handler; daemon left running: " + reason);
+        }
+    }
+
     // Escalation: count consecutive bare-reopen restarts that delivered ZERO
-    // frames. A bare close/reopen cannot recover a wedged AVM HAL co-consumer
-    // state (the sentry->drive blackout: 14 reopens, 0 frames, 2 min lost).
-    // Only a full teardown + com.byd.avc warmup recovers it. After this many
-    // back-to-back zero-frame reopens, escalate to the listener's warmup-routed
-    // restart instead of looping bare reopens forever. Incremented in
+    // frames. A close/reopen is not enough when the AVM producer route or this
+    // process's camera/GL state remains wedged (the sentry->drive blackout:
+    // 14 reopens, 0 frames, 2 min lost). After this many back-to-back zero-frame
+    // reopens, escalate to a full camera/GL rebuild or trip-safe process
+    // replacement instead of looping bare reopens forever. Incremented in
     // restartCameraAfterError when the prior open never produced a frame;
     // reset to 0 the moment a real frame arrives.
     private static final int FRAME_STALL_RESTART_ESCALATE_THRESHOLD = 3;
@@ -455,8 +832,8 @@ public class PanoramicCameraGpu {
     // hasn't advanced past this by the next restart, that open delivered nothing.
     private volatile long frameCounterAtOpen = 0;
     // Set true while an escalation is in flight so the watchdog stops posting
-    // bare restartCameraAfterError() until the warmup-routed recovery completes
-    // (and resets it via notePipelineRestarted()).
+    // bare restartCameraAfterError() until the full rebuild completes (and
+    // resets it via notePipelineRestarted()).
     private volatile boolean halRecoveryEscalated = false;
 
     // DiLink 4 parked-producer recovery: the byd_apa producer can die at ACC OFF
@@ -476,6 +853,85 @@ public class PanoramicCameraGpu {
     private static final long DILINK4_RECOVERY_PROOF_MS = 30_000L;
     private volatile int dilink4RecoveryProofFrames = 0;
     private volatile long dilink4RecoveryProofSinceMs = 0L;
+
+    // DI4 demand-driven producer recovery. A parked byd_apa producer may stop
+    // emitting while the AVMCamera handle remains open and isPreview() still
+    // reports true. Carrying that handle across ACC ON is intentional, but a
+    // newly-active consumer must be able to re-arm it without immediately
+    // destroying the mosaic/viewpoint state.
+    //
+    // Recovery ladder:
+    //   1. one-shot byte-callback producer probe/kick;
+    //   2. recreate + rebind only the SurfaceTexture on the SAME AVMCamera;
+    //   3. bounded full camera close/reopen;
+    //   4. existing zero-frame escalation to a full process/pipeline rebuild.
+    private static final long DILINK4_DEMAND_STALE_MS = 2_000L;
+    private static final long DILINK4_SOFT_RECOVERY_VERIFY_MS = 1_750L;
+    // Same-handle recovery on a stopped preview must follow the old-DI4
+    // callback-first contract too. Allow the producer its normal first-byte
+    // warmup before declaring that stage dead; once attached, the ordinary
+    // 1.75 s texture-frame verification starts from the actual attach edge.
+    private static final long DILINK4_REBIND_CALLBACK_TIMEOUT_MS = 6_000L;
+    // The callback watcher polls every 200 ms. Let its finally block retire
+    // before stage 2 installs another callback on the same AVMCamera.
+    private static final long DILINK4_CALLBACK_DISARM_SETTLE_MS = 250L;
+    private static final long DILINK4_SOFT_RECOVERY_MIN_INTERVAL_MS = 5_000L;
+    private final AtomicBoolean dilink4SoftRecoveryInFlight =
+        new AtomicBoolean(false);
+    private final AtomicInteger dilink4SoftRecoveryEpoch =
+        new AtomicInteger(0);
+    // A 60-second OEM reopen floor can defer stage 3. Keep exactly one timer,
+    // bound to the AVMCamera instance that failed; a frame, teardown or camera
+    // replacement invalidates it before it can disturb a newer session.
+    private final AtomicBoolean dilink4DeferredReopenPending =
+        new AtomicBoolean(false);
+    private final AtomicInteger dilink4DeferredReopenEpoch =
+        new AtomicInteger(0);
+    private volatile boolean dilink4FrameDemanded = false;
+    private volatile String dilink4FrameDemandReason = "none";
+    private volatile long dilink4LastSoftRecoveryAttemptMs = 0L;
+    private volatile int dilink4SoftRecoveryCycles = 0;
+    // Unlike lastRealFrameTimeSt, this is NEVER advanced by the watchdog to
+    // throttle repeated stall handling. It changes only on a genuine
+    // SurfaceTexture onFrameAvailable callback and therefore remains a
+    // trustworthy demand-edge freshness signal during a multi-hour stall.
+    private volatile long dilink4LastGenuineFrameArrivalMs = 0L;
+
+    private enum DiLink4SurfaceRebindResult {
+        FAILED,
+        ATTACHED,
+        WAITING_FOR_CALLBACK
+    }
+
+    static boolean isDiLink4ProducerStale(
+            boolean diLink4Path,
+            long lastGenuineFrameArrivalMs,
+            long cameraStartMs,
+            long nowMs,
+            long staleThresholdMs,
+            long firstFrameGraceMs) {
+        if (!diLink4Path || nowMs <= 0L) return false;
+        if (lastGenuineFrameArrivalMs > 0L) {
+            return Math.max(0L, nowMs - lastGenuineFrameArrivalMs)
+                >= Math.max(0L, staleThresholdMs);
+        }
+        if (cameraStartMs <= 0L) return false;
+        return Math.max(0L, nowMs - cameraStartMs)
+            >= Math.max(0L, firstFrameGraceMs);
+    }
+
+    static boolean isDiLink4ConsumerStarved(
+            boolean explicitFrameDemand,
+            boolean blindSpotVisible,
+            boolean recorderWriting,
+            boolean eventWriterActive,
+            boolean streamLanePresent) {
+        return explicitFrameDemand
+            || blindSpotVisible
+            || recorderWriting
+            || eventWriterActive
+            || streamLanePresent;
+    }
 
     // DEAD-SLOT ESCAPE (issue #170). Every self-healing path above needs proof
     // that the camera produced at least one frame: the frame-15/50 revalidation
@@ -536,6 +992,14 @@ public class PanoramicCameraGpu {
     // compareAndSet(false,true)==false and returns; only the winner runs the
     // close/open sequence and is responsible for clearing the flag.
     private final AtomicBoolean restartInProgress = new AtomicBoolean(false);
+    // Exact ownership fences for legacy startup/open work. AVMCamera.open() is
+    // an uninterruptible vendor Binder call and publishes cameraObj before all
+    // attach/start steps finish. stop() must not close that partial object or
+    // tear down its GL state from another thread.
+    private final AtomicBoolean legacyCameraOpenInFlight =
+            new AtomicBoolean(false);
+    private final AtomicBoolean legacyCameraInitializationInFlight =
+            new AtomicBoolean(false);
     
     // SOTA: Pre-yield listener — pipeline registers this to finalize recordings before yield
     public interface CameraYieldListener {
@@ -546,13 +1010,10 @@ public class PanoramicCameraGpu {
         /**
          * Called when bare close/reopen restarts have repeatedly failed to
          * revive frame delivery (FRAME_STALL_RESTART_ESCALATE_THRESHOLD
-         * consecutive reopens with zero frames). A bare reopen cannot recover
-         * a wedged AVM HAL co-consumer state — only a full pipeline teardown +
-         * com.byd.avc warmup can (observed empirically: the only thing that
-         * ever broke the sentry->drive reopen-loop blackout). The listener
-         * should route through its warmup-capable restart path
-         * (RecordingModeManager.activateModeWithWarmup-equivalent). Default
-         * no-op so existing listeners stay source-compatible.
+         * consecutive reopens with zero frames). The listener should rebuild
+         * the complete camera/GL pipeline; when there is no active recording
+         * mode to reactivate, it should request the trip-safe process rebuild.
+         * Default no-op so existing listeners stay source-compatible.
          */
         default void onHalRecoveryNeeded() {}
     }
@@ -696,6 +1157,13 @@ public class PanoramicCameraGpu {
     // signalled at least one onFrameAvailable. Drives the renderLoop bind
     // instead of imagePending (which is for the ImageReader path).
     private volatile boolean stFramePending = false;
+    // Native fast-camera callback signal. DiLink 5 composites or uploads the
+    // matching frame into cameraTextureId on the GL thread.
+    private volatile boolean diLink5FramePending = false;
+    private volatile boolean diLink5CloseInProgress = false;
+    private volatile com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+            diLink5GlOwnerBackend;
+    private volatile boolean diLink5SafetyDisabled = false;
 
     // GENUINE new-buffer counter for the SurfaceTexture (dilink4) path.
     // Incremented ONLY from onFrameAvailable — i.e. only when the HAL actually
@@ -843,22 +1311,97 @@ public class PanoramicCameraGpu {
         // its own GL context.
         if (sentry != null) {
             sentry.setCameraTargetFps(targetFps);
+            // Frozen-feed detector (parked): the HAL can keep queuing buffers
+            // whose content never changes (camera/ISP rail down while the AVM
+            // SoC re-emits its last frame — DI5 field log 2026-09-21). The
+            // engine hashes its downscaled CPU frames; this listener owns the
+            // response: always log the episode, and reopen the camera only
+            // when camera.frozenFeedReopen is enabled (default OFF — evidence
+            // first; a reopen cannot fix a rail-down freeze, only the MCU
+            // power hold can).
+            sentry.setFrozenFeedListener(new FrozenFeedDetector.Listener() {
+                @Override
+                public void onFrozenFeed(int identicalSamples, long frozenForMs) {
+                    logger.warn("FROZEN FEED: " + identicalSamples
+                            + " consecutive bit-identical sampled frames over "
+                            + frozenForMs + " ms — HAL is repeating one buffer"
+                            + " (camera/ISP likely powered down; check MCU hold)");
+                    maybeReopenForFrozenFeed();
+                }
+
+                @Override
+                public void onFeedRecovered(long frozenForMs) {
+                    logger.info("FROZEN FEED recovered after " + frozenForMs
+                            + " ms — frame content is changing again");
+                }
+            });
         }
     }
-    
+
+    // One reopen per frozen episode at most, and never more often than this.
+    private static final long FROZEN_FEED_RESTART_MIN_INTERVAL_MS = 60_000L;
+    private volatile long lastFrozenFeedRestartMs = 0L;
+
+    /** Config-gated (camera.frozenFeedReopen, default false) throttled reopen. */
+    private void maybeReopenForFrozenFeed() {
+        boolean reopenEnabled = false;
+        try {
+            org.json.JSONObject cam = com.overdrive.app.config.UnifiedConfigManager
+                    .loadConfig().optJSONObject("camera");
+            reopenEnabled = cam != null && cam.optBoolean("frozenFeedReopen", false);
+        } catch (Throwable ignored) {
+        }
+        if (!reopenEnabled) {
+            logger.info("Frozen feed: reopen disabled (camera.frozenFeedReopen=false) — log only");
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (now - lastFrozenFeedRestartMs < FROZEN_FEED_RESTART_MIN_INTERVAL_MS) {
+            logger.info("Frozen feed: reopen throttled ("
+                    + (now - lastFrozenFeedRestartMs) + " ms since last)");
+            return;
+        }
+        lastFrozenFeedRestartMs = now;
+        logger.warn("Frozen feed: requesting camera reopen (same throttled path as frame stall)");
+        android.os.Handler h = glHandler;
+        if (h != null) {
+            h.post(this::restartCameraAfterError);
+        }
+    }
+
     /**
      * Starts the GPU camera pipeline.
      * 
      * @throws Exception if initialization fails
      */
+    private static boolean isCurrentStartEpoch(long startEpoch) {
+        return com.overdrive.app.daemon.CameraDaemon
+                .isCameraStartEpochCurrent(startEpoch);
+    }
+
+    private static void requireCurrentStartEpoch(
+            long startEpoch, String phase) {
+        if (!isCurrentStartEpoch(startEpoch)) {
+            throw new IllegalStateException(
+                    "Camera start cancelled during " + phase);
+        }
+    }
+
     public void start() throws Exception {
+        start(com.overdrive.app.daemon.CameraDaemon.captureCameraStartEpoch());
+    }
+
+    public void start(long startEpoch) throws Exception {
+        requireCurrentStartEpoch(startEpoch, "camera admission");
+        activeStartEpoch = startEpoch;
         logger.info( "Starting GPU camera pipeline...");
         // Surface the resolved ingestion mode in every camera open log so
         // field debugging can correlate "what does the recording look like"
         // with "which path the daemon took".
         logger.info("Camera ingestion mode: "
-            + (USE_OEM_SURFACE_TEXTURE_PATH ? "DiLink 4 (SurfaceTexture passthrough)"
-                                              : "Default (ImageReader + 2x2 rearrangement)"));
+            + (USE_DILINK5_QCARCAM_PATH ? "DiLink 5 (fast_cam_capture DMA bridge)"
+                : USE_DILINK4_AVM_PATH ? "DiLink 4 (SurfaceTexture passthrough)"
+                : "Default (ImageReader + 2x2 rearrangement)"));
         startTime = System.currentTimeMillis();
         
         // SOTA: Initialize BYD camera coordinator for cooperative sharing
@@ -866,9 +1409,30 @@ public class PanoramicCameraGpu {
             cameraCoordinator = new BydCameraCoordinator();
             cameraCoordinator.setYieldCallback(new BydCameraCoordinator.CameraYieldCallback() {
                 @Override
-                public void onYieldCamera() {
+                public boolean onYieldCamera() {
+                    if (USE_DILINK5_QCARCAM_PATH) {
+                        // FastCam does not participate in the legacy
+                        // IBYDCameraUser yield lifecycle. That lifecycle
+                        // finalizes the muxer and detaches live streaming,
+                        // which turns a transient/stale coordinator callback
+                        // into a recording split. DI5 arbitration is owned by
+                        // the gear handoff and source-only health recovery.
+                        logger.warn("Ignoring legacy camera-yield callback on "
+                                + "DiLink 5; recorder and live view remain active");
+                        return true;
+                    }
+                    if (USE_DILINK4_AVM_PATH) {
+                        // DIPlus panoramic recording is a continuous
+                        // co-consumer. It never releases AVMCamera when the
+                        // native camera UI opens.
+                        logger.warn("Ignoring camera-yield callback on DiLink 4 "
+                                + "panoramic mode; keeping the single AVMCamera "
+                                + "producer and recording session active");
+                        return true;
+                    }
                     // Contention detected — yield on GL thread
                     logger.info("YIELD: Contention detected — releasing camera for native app");
+                    finishDiLink5Reacquire("new native-app yield");
                     cameraYielded = true;
                     // audit avc-yield (round 8, finding yield-mid-backoff-cascades-to-exit):
                     // a Yield #2 arriving mid-backoff for a failed Yield #1 reacquire
@@ -879,57 +1443,33 @@ public class PanoramicCameraGpu {
                     // attemptIdx=3 cascades to System.exit(0) — converting a
                     // legitimate native-app re-engagement into a daemon kill.
                     // Symmetric with onReacquireCamera at line 543/552.
-                    reacquireRetryCount.set(0);
-                    pendingReacquireEpoch.incrementAndGet();
-                    Runnable staleRetry = pendingReacquireRetry;
-                    pendingReacquireRetry = null;
-                    if (staleRetry != null && glHandler != null) {
-                        try {
-                            glHandler.removeCallbacks(staleRetry);
-                            logger.info("Yield: cancelled pending postDelayed "
-                                + "reacquire retry (fresh yield supersedes prior "
-                                + "failed-reacquire backoff)");
-                        } catch (Throwable th) {
-                            logger.warn("Yield: removeCallbacks errored: "
-                                + th.getMessage());
-                        }
+                    cancelPendingReacquireRetry(
+                        "Yield: cancelled pending postDelayed reacquire retry");
+                    if (glHandler != null
+                            && glHandler.post(() -> yieldCameraInternal())) {
+                        return true;
                     }
-                    if (glHandler != null) {
-                        glHandler.post(() -> yieldCameraInternal());
-                    }
+                    return cameraObj == null;
                 }
 
                 @Override
                 public void onReacquireCamera() {
+                    if (USE_DILINK5_QCARCAM_PATH) {
+                        logger.info("Ignoring legacy camera-reacquire callback "
+                                + "on DiLink 5; source ownership has its own "
+                                + "gear/recovery state machine");
+                        return;
+                    }
                     // Native app released camera after contention yield — re-acquire
                     logger.info("REACQUIRE: Native app released camera — reopening");
+                    beginDiLink5Reacquire("native app released camera");
                     cameraYielded = false;
                     stopYieldPoller();
                     // audit avc-yield (round 2): reset retry counter at the
                     // start of every fresh re-acquire — a successful prior
                     // cycle should not poison the next yield.
-                    reacquireRetryCount.set(0);
-                    // audit avc-yield (round 7, finding pending-retry-not-cancelled):
-                    // the previous attempt may have scheduled a postDelayed retry
-                    // runnable. If we post a fresh immediate attempt now without
-                    // cancelling it, the stale retry will fire ~2s later and tear
-                    // down the just-resumed camera (extra MP4 split + ~1-3s
-                    // recording gap). Cancel + bump epoch so any in-flight
-                    // runnable that survives the removeCallbacks race short-
-                    // circuits at the epoch-gate.
-                    pendingReacquireEpoch.incrementAndGet();
-                    Runnable stale = pendingReacquireRetry;
-                    pendingReacquireRetry = null;
-                    if (stale != null && glHandler != null) {
-                        try {
-                            glHandler.removeCallbacks(stale);
-                            logger.info("Reacquire (poller path): cancelled "
-                                + "pending postDelayed retry before fresh attempt");
-                        } catch (Throwable th) {
-                            logger.warn("Reacquire: removeCallbacks errored: "
-                                + th.getMessage());
-                        }
-                    }
+                    cancelPendingReacquireRetry(
+                        "Reacquire: cancelled pending postDelayed retry");
                     if (glHandler != null) {
                         glHandler.post(() -> attemptReacquireOnGlThread());
                     }
@@ -958,7 +1498,7 @@ public class PanoramicCameraGpu {
                     // watchdog will catch a genuine permanent failure later.
                     // Legacy fleet (USE_OEM_SURFACE_TEXTURE_PATH == false)
                     // keeps the prior immediate-restart behaviour.
-                    if (USE_OEM_SURFACE_TEXTURE_PATH) {
+                    if (USE_DILINK4_AVM_PATH) {
                         // Log only: event=8 lands ~25s AFTER frames stop, and some
                         // failures emit no error at all, so the stall watchdog owns
                         // reopening. It is the ONLY dilink4 restart trigger — do not
@@ -972,22 +1512,27 @@ public class PanoramicCameraGpu {
                             + ")");
                         return;
                     }
+                    if (USE_DILINK5_QCARCAM_PATH) {
+                        logger.error("CAMERA ERROR: event=" + eventType
+                                + " — reopening only the DiLink 5 FastCam "
+                                + "source");
+                        requestDiLink5SourceOnlyRecovery(
+                                "FastCam camera error event " + eventType);
+                        return;
+                    }
                     logger.error("CAMERA ERROR: event=" + eventType + " — restarting camera");
                     if (glHandler != null) {
                         glHandler.post(() -> restartCameraAfterError());
                     }
                 }
             });
-            // Oem-parity: skip IBYDCameraService binder registration on
-            // dilink4 (byd_apa). Oem never touches the bydcameramanager
-            // service — it opens AVMCamera directly. The arbitration
-            // protocol may require an IBYDCameraUser.onYield ack we never
-            // send; the HAL can stay in "waiting for user-ack" state and
-            // refuse to stream frames. See audit Top-5 #5.
-            if (!USE_OEM_SURFACE_TEXTURE_PATH) {
+            if (!USE_DILINK4_AVM_PATH && !USE_DILINK5_QCARCAM_PATH) {
                 cameraCoordinator.register();
+            } else if (USE_DILINK4_AVM_PATH) {
+                logger.info("dilink4: skipping IBYDCameraService registration "
+                        + "(DIPlus panoramic recorder parity)");
             } else {
-                logger.info("dilink4: skipping IBYDCameraService registration (oem-parity)");
+                logger.info("dilink5: skipping legacy IBYDCameraService registration");
             }
         }
         
@@ -1025,11 +1570,15 @@ public class PanoramicCameraGpu {
             @Override public int getCameraTextureId() { return cameraTextureId; }
             @Override public long getFrameSeq()      { return cameraFrameSeq.get(); }
             // Crash-fix: the AI lane must NOT sample the camera texture while the
-            // camera is yielded/closed/restarting (its backing EGLImage is being
-            // freed/swapped). cameraYielded / cameraObj==null / restartInProgress
-            // are all volatile/atomic — safe to read cross-thread.
+            // camera source is handed off/closed/restarting (its backing
+            // EGLImage is being freed/swapped). All gates are volatile/atomic
+            // and safe to read cross-thread.
             @Override public boolean isCameraTextureValid() {
-                return !(cameraYielded || cameraObj == null || restartInProgress.get());
+                return !(isCameraFrameConsumptionPaused()
+                        || diLink5SafetyDisabled
+                        || diLink5CloseInProgress
+                        || cameraObj == null
+                        || restartInProgress.get());
             }
             @Override public Object cameraTextureLock() { return cameraTextureLock; }
         };
@@ -1051,6 +1600,8 @@ public class PanoramicCameraGpu {
         // thread is quit+joined, and the actual exception propagates
         // synchronously out of start() so the pipeline's rollback path can do
         // its job.
+        final boolean legacyInitialization =
+                !USE_DILINK4_AVM_PATH && !USE_DILINK5_QCARCAM_PATH;
         final java.util.concurrent.CountDownLatch initDone =
             new java.util.concurrent.CountDownLatch(1);
         final java.util.concurrent.atomic.AtomicReference<Exception> initError =
@@ -1075,12 +1626,17 @@ public class PanoramicCameraGpu {
         // publishes) or publication completes first (the rollback's stop()
         // then tears down a FULLY published camera, which it handles).
         final Object publishLock = new Object();
-        glHandler.post(() -> {
+        if (legacyInitialization) {
+            legacyCameraInitializationInFlight.set(true);
+        }
+        boolean initPosted = glHandler.post(() -> {
             try {
+                requireCurrentStartEpoch(startEpoch, "GL initialization");
                 initializeGl();
 
                 // Cancelled while initializeGl ran? Don't open the HAL at all.
-                if (startCancelled.get()) {
+                if (startCancelled.get()
+                        || !isCurrentStartEpoch(startEpoch)) {
                     logger.warn("start: cancelled during GL init — releasing GL state, "
                         + "skipping camera open");
                     try { releaseGl(); } catch (Throwable t) {
@@ -1089,6 +1645,7 @@ public class PanoramicCameraGpu {
                     return;
                 }
 
+                requireCurrentStartEpoch(startEpoch, "camera open");
                 startCamera();
 
                 // SOTA: Setup event callback for HAL error detection (-10086, 8)
@@ -1118,7 +1675,8 @@ public class PanoramicCameraGpu {
                 // (aiCameraState) is captured into a field for the lazy path.
                 boolean published = false;
                 synchronized (publishLock) {
-                    if (!startCancelled.get()) {
+                    if (!startCancelled.get()
+                            && isCurrentStartEpoch(startEpoch)) {
                         this.aiCameraStateRef = aiCameraState;
                         running = true;
                         // Start render loop
@@ -1166,15 +1724,45 @@ public class PanoramicCameraGpu {
                 }
             } finally {
                 initDone.countDown();
+                if (legacyInitialization) {
+                    legacyCameraInitializationInFlight.set(false);
+                }
             }
         });
+        if (!initPosted) {
+            if (legacyInitialization) {
+                legacyCameraInitializationInFlight.set(false);
+            }
+            throw new Exception(
+                    "GL pipeline initialization could not be posted");
+        }
 
-        // Wait for GL-thread init to complete. Camera HAL open can be slow on
-        // a cold boot; 20s comfortably covers the worst observed open latency
-        // while still bounding a genuinely wedged driver.
+        // Wait for GL-thread init to complete. DiLink 5 performs a boot-scoped
+        // safety preflight and may wait for a prior daemon generation's
+        // release fence. DiLink 4 retains its shipped 20-second deadline.
+        //
+        // Legacy startup also runs the bounded AVC cold-open recovery inside
+        // this GL runnable. Its force-restart branch can legitimately consume
+        // the full warmup allowance before AVMCamera/EGL gets its former
+        // 10-second startup allowance. Cancelling the runnable at the old
+        // 20-second aggregate deadline could therefore abort a healthy third-
+        // failure AVC recovery and feed a boot/restart loop.
+        long initTimeoutMs;
+        if (USE_DILINK5_QCARCAM_PATH) {
+            initTimeoutMs = 35_000L;
+        } else if (USE_DILINK4_AVM_PATH) {
+            initTimeoutMs = 20_000L;
+        } else {
+            initTimeoutMs = Math.max(
+                    20_000L,
+                    AvcHalWarmup.coldOpenWarmupTimeoutMs()
+                            + GL_THREAD_WARMUP_TIMEOUT_MS);
+        }
         boolean completed;
         try {
-            completed = initDone.await(20, java.util.concurrent.TimeUnit.SECONDS);
+            completed = initDone.await(
+                    initTimeoutMs,
+                    java.util.concurrent.TimeUnit.MILLISECONDS);
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             // Same race as the timeout path: the runnable may still be in
@@ -1199,7 +1787,8 @@ public class PanoramicCameraGpu {
             synchronized (publishLock) {
                 startCancelled.set(true);
             }
-            throw new Exception("GL pipeline init did not complete within 20s "
+            throw new Exception("GL pipeline init did not complete within "
+                + initTimeoutMs + "ms "
                 + "(camera HAL or EGL wedged) — in-flight init cancelled");
         }
         Exception failure = initError.get();
@@ -1220,6 +1809,22 @@ public class PanoramicCameraGpu {
                 }
             }
             throw failure;
+        }
+    }
+
+    private void cancelPendingReacquireRetry(String reason) {
+        reacquireRetryCount.set(0);
+        pendingReacquireEpoch.incrementAndGet();
+        Runnable stale = pendingReacquireRetry;
+        pendingReacquireRetry = null;
+        Handler handler = glHandler;
+        if (stale == null || handler == null) return;
+        try {
+            handler.removeCallbacks(stale);
+            logger.info(reason);
+        } catch (Throwable failure) {
+            logger.warn("Failed to cancel pending camera reacquire: "
+                + failure.getMessage());
         }
     }
     
@@ -1301,6 +1906,12 @@ public class PanoramicCameraGpu {
         logger.info("AI lane released (surveillance disarmed) — freed thread + EGL context + cropper buffers");
     }
 
+    public boolean isTexture2D() {
+        // DiLink 5 owns a native DMA compositor output texture; the decoupled
+        // encoder lane publishes app-owned ring copies. Both are plain 2D.
+        return USE_DILINK5_QCARCAM_PATH || USE_DECOUPLED_ENCODER_LANE;
+    }
+
     /**
      * Initializes OpenGL context and textures.
      */
@@ -1316,9 +1927,30 @@ public class PanoramicCameraGpu {
         // Log GL info (now that context is current)
         GlUtil.logGlInfo();
         
-        // Create camera texture (OES type for external camera)
-        cameraTextureId = GlUtil.createExternalTexture();
+        // DiLink 5 writes a standard 2D output; legacy camera paths remain OES.
+        cameraTextureId = isTexture2D()
+            ? GlUtil.create2DTexture()
+            : GlUtil.createExternalTexture();
         windshieldTextureId = GlUtil.createExternalTexture();
+
+        // Decoupled encoder lane: the HAL frame binds to a PRIVATE OES texture
+        // and is immediately blitted into an app-owned ring; the 2D
+        // cameraTextureId created above is only a pre-first-frame placeholder
+        // that runDecoupledLanePass() republishes as ring slot textures.
+        // Ring allocation failure is a hard start failure by design — with
+        // isTexture2D() already true every consumer compiled 2D shaders, so
+        // there is no coherent fallback short of a restart with the flag off.
+        if (USE_DECOUPLED_ENCODER_LANE) {
+            cameraOesTextureId = GlUtil.createExternalTexture();
+            decoupledCamRing = new CopiedFrameRing("CamRing", 3, width, height);
+            if (!decoupledCamRing.init()) {
+                decoupledCamRing = null;
+                throw new RuntimeException(
+                    "decoupledEncoderLane: camera copy ring allocation failed ("
+                    + width + "x" + height + " ×3 RGBA8) — disable "
+                    + "camera.decoupledEncoderLane or free GPU memory");
+            }
+        }
 
         // Build the camera consumer. Default = oem-style SurfaceTexture
         // path (addTexture/setTexture/rmTexture + previewIndex). Falls back
@@ -1326,7 +1958,10 @@ public class PanoramicCameraGpu {
         // disabled — kept around for FPS-ceiling investigations on Seal
         // (verified ~26 fps by AvmImageReaderFpsProbe vs SurfaceFlinger's
         // ~8.5 fps clamp on legacy SurfaceTexture wiring).
-        if (USE_OEM_SURFACE_TEXTURE_PATH) {
+        if (USE_DILINK5_QCARCAM_PATH) {
+            cameraSurfaceTexture = null;
+            cameraSurface = null;
+        } else if (USE_OEM_SURFACE_TEXTURE_PATH) {
             createCameraSurfaceTexture();
         } else {
             createCameraImageReader();
@@ -1416,7 +2051,8 @@ public class PanoramicCameraGpu {
             // mapping (Q0=Front..Q3=Left) only holds when the downscaler
             // emits canonical layout — without this the cropper's centroid
             // and the engine's quadrant grid disagree.
-            if (CAMERA_LAYOUT_MODE == 3) {
+            if (CAMERA_LAYOUT_MODE == 3
+                    && !com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {
                 // Read from Dilink4Constants rather than re-typing the arrays.
                 // These were duplicated literals and had drifted: this site
                 // carried the Y bit on Front+Right (the pair that rendered
@@ -1435,7 +2071,10 @@ public class PanoramicCameraGpu {
                     Dilink4Constants.FLIP_REAR,
                     Dilink4Constants.FLIP_LEFT);
             }
-            if (USE_OEM_SURFACE_TEXTURE_PATH) {
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {
+                downscaler.setRedMaskEnabled(false);
+                downscaler.setApaCenterInset(0.0f);
+            } else if (USE_OEM_SURFACE_TEXTURE_PATH) {
                 // Red-mask remains available on both DiLink 4 layouts. The
                 // center inset is specific to the four-corner layout.
                 try {
@@ -1470,12 +2109,13 @@ public class PanoramicCameraGpu {
             // GL thread. Allocating its FBOs + shader on the encoder thread
             // would serialize readback against encoder eglSwapBuffers.
             foveatedCropper = new FoveatedCropper(width, height,
-                quadrantStripOffsetX, quadrantCornerOffsetsXY);
+                quadrantStripOffsetX, quadrantCornerOffsetsXY, isTexture2D());
             foveatedCropper.setCameraLayout(getCameraLayoutMode());
 
             // DiLink 4: override the canonical corner map with the known
             // four-corner layout so AI crops match recorder/stream geometry.
-            if (CAMERA_LAYOUT_MODE == 3) {
+            if (CAMERA_LAYOUT_MODE == 3
+                    && !com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {
                 foveatedCropper.setProducerCornerMap(
                     Dilink4Constants.CORNER_FRONT,
                     Dilink4Constants.CORNER_RIGHT,
@@ -1487,7 +2127,10 @@ public class PanoramicCameraGpu {
                     Dilink4Constants.FLIP_REAR,
                     Dilink4Constants.FLIP_LEFT);
             }
-            if (USE_OEM_SURFACE_TEXTURE_PATH) {
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {
+                foveatedCropper.setRedMaskEnabled(false);
+                foveatedCropper.setApaCenterInset(0.0f);
+            } else if (USE_OEM_SURFACE_TEXTURE_PATH) {
                 try {
                     org.json.JSONObject camCfgFc = com.overdrive.app.config
                         .UnifiedConfigManager.loadConfig().optJSONObject("camera");
@@ -1524,7 +2167,25 @@ public class PanoramicCameraGpu {
         
         // Store encoder reference for draining in render loop
         this.encoder = encoder;
-        
+
+        // Decoupled lane: the recorder's GL (shaders, encoder EGL surface,
+        // every subsequent drawFrame) lives on the EncoderLane thread with its
+        // shared child context — init it THERE, not on the render thread.
+        // Probe wiring and the ready-callback semantics are identical.
+        if (USE_DECOUPLED_ENCODER_LANE) {
+            EncoderLane lane = ensureEncoderLane();
+            if (lane == null) {
+                logger.error("Decoupled lane unavailable — recorder init skipped");
+                return;
+            }
+            lane.initRecorder(recorder, encoder, () -> {
+                if (recorderInitCallback != null) {
+                    recorderInitCallback.run();
+                }
+            });
+            return;
+        }
+
         glHandler.post(() -> {
             try {
                 recorder.init(eglCore, encoder);
@@ -1617,51 +2278,202 @@ public class PanoramicCameraGpu {
     /** Build a SurfaceTexture-backed consumer (oem path).
      *  Frame handling:
      *    HAL → SurfaceTexture producer (BufferQueue)
-     *      → setOnFrameAvailableListener fires on glHandler
-     *        → renderLoop sees stFramePending, calls updateTexImage()
+     *      → setOnFrameAvailableListener fires on diLink4FrameCallbackHandler
+     *        → callback advances the genuine-arrival sequence + wakes frameSync
+     *          → renderLoop sees stFramePending, calls updateTexImage()
      *  Mirrors oem's gl.C5920a path: addTexture/setTexture/rmTexture.
      *  cameraTextureId is created in initializeGl() and is the EXTERNAL_OES
-     *  texture the SurfaceTexture writes into. We attach the listener on
-     *  glHandler so the renderLoop wakeup happens on the same thread that
-     *  later calls updateTexImage — the HAL ping/notify race that motivates
-     *  imagePending on the ImageReader path applies the same way here.
+     *  texture the SurfaceTexture writes into. The callback thread does no GL
+     *  work; updateTexImage remains on glHandler where the EGL context is
+     *  current. Keeping notification and consumption on separate loopers is
+     *  load-bearing because renderLoop blocks glHandler in frameSync.wait().
      *
      *  We do NOT call attachToGLContext / detachFromGLContext on this
      *  SurfaceTexture: the SurfaceTexture(int) ctor already attaches it to
      *  the current EGL context's cameraTextureId, and updateTexImage runs
      *  on the GL thread where that context is current.  */
     private void createCameraSurfaceTexture() {
+        if (USE_DILINK5_QCARCAM_PATH) {
+            cameraSurfaceTexture = null;
+            cameraSurface = null;
+            return;
+        }
         if (cameraTextureId == 0) {
             logger.warn("createCameraSurfaceTexture called before GL texture exists");
             return;
         }
-        cameraSurfaceTexture = new SurfaceTexture(cameraTextureId);
-        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
-            cameraSurfaceTexture.setDefaultBufferSize(width > 0 ? width : 1920, height > 0 ? height : 1024);
+        Handler callbackHandler = ensureDiLink4FrameCallbackHandler();
+        SurfaceTexture created = new SurfaceTexture(cameraTextureId);
+        final int consumerEpoch;
+        synchronized (diLink4SurfaceTextureStateLock) {
+            consumerEpoch = ++diLink4SurfaceTextureEpoch;
+            cameraSurfaceTexture = created;
+            stFramePending = false;
+            stFrameArrivalSeq.set(0L);
+            stLastConsumedArrivalSeq = 0L;
         }
-        cameraSurfaceTexture.setOnFrameAvailableListener(st -> {
-            // Cheap signalling — the actual updateTexImage happens on the GL
-            // thread inside renderLoop. Ride frameSync so the wait/notify
-            // protocol matches the ImageReader path.
-            //
+        try {
+            created.setOnFrameAvailableListener(
+                st -> onDiLink4SurfaceTextureFrameAvailable(st, consumerEpoch),
+                callbackHandler);
+        } catch (RuntimeException | Error registrationFailure) {
+            synchronized (diLink4SurfaceTextureStateLock) {
+                if (cameraSurfaceTexture == created
+                        && diLink4SurfaceTextureEpoch == consumerEpoch) {
+                    diLink4SurfaceTextureEpoch++;
+                    cameraSurfaceTexture = null;
+                }
+            }
+            try { created.release(); } catch (Throwable ignored) {}
+            throw registrationFailure;
+        }
+        cameraSurface = null;
+    }
+
+    /** Create the DI4 callback looper lazily and retain it across soft rebinds. */
+    private Handler ensureDiLink4FrameCallbackHandler() {
+        if (!USE_DILINK4_AVM_PATH) {
+            throw new IllegalStateException(
+                "SurfaceTexture callback thread requested outside DiLink 4");
+        }
+        HandlerThread currentThread = diLink4FrameCallbackThread;
+        Handler currentHandler = diLink4FrameCallbackHandler;
+        if (currentThread != null && currentThread.isAlive()
+                && currentHandler != null) {
+            return currentHandler;
+        }
+        if (currentThread != null) {
+            try { currentThread.quit(); } catch (Throwable ignored) {}
+        }
+        HandlerThread replacement = new HandlerThread("Di4-FrameCallback");
+        replacement.start();
+        Handler replacementHandler = new Handler(replacement.getLooper());
+        if (glHandler != null
+                && replacementHandler.getLooper() == glHandler.getLooper()) {
+            replacement.quit();
+            throw new IllegalStateException(
+                "DiLink 4 frame callback looper aliases GL render looper");
+        }
+        diLink4FrameCallbackThread = replacement;
+        diLink4FrameCallbackHandler = replacementHandler;
+        return replacementHandler;
+    }
+
+    /** Full-pipeline teardown only; soft SurfaceTexture rebinds reuse the looper. */
+    private void shutdownDiLink4FrameCallbackThread() {
+        if (USE_DILINK4_AVM_PATH) {
+            // Fence callbacks even if the preceding consumer teardown was
+            // partial or threw before it could retire the active identity.
+            // cameraTornDown is normally already true, but the epoch is the
+            // durable guard for startup-failure and abnormal-release paths.
+            synchronized (diLink4SurfaceTextureStateLock) {
+                diLink4SurfaceTextureEpoch++;
+            }
+        }
+        HandlerThread thread = diLink4FrameCallbackThread;
+        diLink4FrameCallbackThread = null;
+        diLink4FrameCallbackHandler = null;
+        if (thread == null) return;
+        try { thread.quitSafely(); } catch (Throwable ignored) {}
+        if (Thread.currentThread() == thread) return;
+
+        final boolean[] interrupted = { Thread.interrupted() };
+        boolean exited = false;
+        try {
+            exited = com.overdrive.app.util.ThreadJoins
+                .joinFullDeadline(thread, 1000L, interrupted);
+        } finally {
+            if (interrupted[0]) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        if (!exited) {
+            // Every callback is generation/identity fenced, so a late worker
+            // cannot mutate a replacement pipeline. Keep the failure visible
+            // without turning a harmless callback-thread retirement delay into
+            // a process restart.
+            logger.warn("DiLink 4 frame callback thread did not exit within 1s");
+        }
+    }
+
+    static boolean shouldAcceptDiLink4SurfaceTextureCallback(
+            int callbackEpoch,
+            int activeEpoch,
+            boolean sameSurfaceTexture,
+            boolean cameraTornDown) {
+        return callbackEpoch == activeEpoch
+            && sameSurfaceTexture
+            && !cameraTornDown;
+    }
+
+    /**
+     * Producer notification only — deliberately no GL calls on this thread.
+     * The identity + epoch check rejects messages queued by an old
+     * SurfaceTexture before its listener was cleared during rebind/teardown.
+     */
+    private void onDiLink4SurfaceTextureFrameAvailable(
+            SurfaceTexture callbackSurface, int callbackEpoch) {
+        boolean softRecoverySucceeded;
+        boolean deferredReopenCancelled;
+        int recoveryCycles;
+        String demandReason;
+        synchronized (diLink4SurfaceTextureStateLock) {
+            if (!shouldAcceptDiLink4SurfaceTextureCallback(
+                    callbackEpoch,
+                    diLink4SurfaceTextureEpoch,
+                    cameraSurfaceTexture == callbackSurface,
+                    cameraTornDown)) {
+                return;
+            }
+            dilink4LastGenuineFrameArrivalMs = System.currentTimeMillis();
+            softRecoverySucceeded =
+                dilink4SoftRecoveryInFlight.getAndSet(false);
+            if (softRecoverySucceeded) {
+                dilink4SoftRecoveryEpoch.incrementAndGet();
+            }
+            deferredReopenCancelled =
+                dilink4DeferredReopenPending.getAndSet(false);
+            if (deferredReopenCancelled) {
+                dilink4DeferredReopenEpoch.incrementAndGet();
+            }
+            recoveryCycles = dilink4SoftRecoveryCycles;
+            demandReason = dilink4FrameDemandReason;
+            dilink4SoftRecoveryCycles = 0;
+
             // stFrameArrivalSeq is the ONLY genuine "the HAL queued a new
-            // buffer" signal on this path. updateTexImage() is a documented
-            // no-op that does NOT throw when the queue is empty, so it can
-            // never tell us whether content changed (unlike the legacy path's
-            // acquireLatestImage() == null). Everything that needs to know
-            // "did a real frame arrive" reads this counter, not frameCounter.
+            // buffer" signal on this path. Publish it before notifying the GL
+            // waiter so updateTexImage cannot run ahead of freshness tracking.
             stFrameArrivalSeq.incrementAndGet();
+            stFramePending = true;
             synchronized (frameSync) {
-                stFramePending = true;
                 frameSync.notify();
             }
-        }, glHandler);
-        if (cameraObj instanceof com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) {
-            cameraSurface = new Surface(cameraSurfaceTexture);
-            ((com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) cameraObj).startSurface(cameraSurface);
-            logger.info("DiLink 5 QCarCamBackend started with new SurfaceTexture Surface");
-        } else {
-            cameraSurface = null;
+        }
+        if (softRecoverySucceeded) {
+            logger.info("DiLink 4 soft producer recovery succeeded after "
+                + recoveryCycles + " cycle(s); first SurfaceTexture"
+                + " frame arrived for demand=" + demandReason);
+        }
+        if (deferredReopenCancelled) {
+            logger.info("DiLink 4 deferred full reopen cancelled — producer"
+                + " delivered a genuine SurfaceTexture frame");
+        }
+    }
+
+    /**
+     * Atomically retire the current SurfaceTexture before clearing/releasing it.
+     * A callback already queued for the retired object will observe either the
+     * new epoch or the new identity and return without touching frame health.
+     */
+    private SurfaceTexture retireCameraSurfaceTextureConsumer() {
+        synchronized (diLink4SurfaceTextureStateLock) {
+            SurfaceTexture retired = cameraSurfaceTexture;
+            diLink4SurfaceTextureEpoch++;
+            cameraSurfaceTexture = null;
+            stFramePending = false;
+            stFrameArrivalSeq.set(0L);
+            stLastConsumedArrivalSeq = 0L;
+            return retired;
         }
     }
 
@@ -1674,18 +2486,31 @@ public class PanoramicCameraGpu {
      *  output, 1-4=individual viewpoints).
      *  Caller must have just opened the camera (cameraObj != null). */
     private void attachSurfaceTextureToCamera(int cameraId) throws Exception {
-        if (cameraObj == null) {
+        attachSurfaceTextureToCamera(cameraId, false, null);
+    }
+
+    private void attachSurfaceTextureToCamera(
+            int cameraId, boolean di4CallbackReady, Object expectedCamera)
+            throws Exception {
+        Object attachedCamera = cameraObj;
+        if (attachedCamera == null) {
             throw new IllegalStateException("attachSurfaceTextureToCamera with null cameraObj");
+        }
+        if (expectedCamera != null && attachedCamera != expectedCamera) {
+            logger.info("Skipping stale DiLink 4 callback texture attach");
+            return;
+        }
+        if (attachedCamera instanceof com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) {
+            logger.info("Attaching GL texture to DiLink 5 QCarCam backend");
+            if (!((com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend)
+                    attachedCamera).isStreaming()) {
+                throw new IllegalStateException(
+                    "DiLink 5 QCarCam stream is not active");
+            }
+            return;
         }
         if (cameraSurfaceTexture == null) {
             throw new IllegalStateException("attachSurfaceTextureToCamera before createCameraSurfaceTexture");
-        }
-
-        if (cameraObj instanceof com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) {
-            logger.info("Attaching Surface to DiLink 5 QCarCam backend");
-            if (cameraSurface == null) cameraSurface = new Surface(cameraSurfaceTexture);
-            ((com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) cameraObj).startSurface(cameraSurface);
-            return;
         }
 
         Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
@@ -1723,86 +2548,79 @@ public class PanoramicCameraGpu {
         // supported path in the app that works on these cars.
         logAvmCalibrationProps();
 
-        // ── isPreview() PROBE (cf. OEM gl/a.java:265-278) ──────────────────
-        // The OEM branches on isPreview(): when true it skips startPreview() and
-        // only disables the byte callback before re-attaching the texture.
-        //
-        // WE DO NOT SKIP startPreview(), deliberately — the OEM's precondition is
-        // not ours. It calls isPreview() on an AVMCamera instance IT opened moments
-        // earlier in the same method (gl/a.java:568 `camera.v()` → `:265 c(st)`),
-        // so a true there means "my own instance is streaming". On this fleet the
-        // AVM HAL is a shared multi-consumer service: AvcHalWarmup pre-warms
-        // com.byd.avc, and OemDashcamPipeline / CameraPreviewHelper drive their own
-        // AVMCamera objects. So a true here may describe SOMEONE ELSE's stream —
-        // and skipping startPreview() would then mean our freshly-bound texture is
-        // never started and we deliver ZERO frames. No video is a far worse
-        // regression than one redundant startPreview(), which is the behaviour that
-        // shipped for the entire life of this path and is known-safe (the OEM
-        // itself calls startPreview() on an already-previewing camera at
-        // gl/a.java:410). Probe + log it for field correlation; don't act on it.
+        // Exact DIPlus beta18 parity: every pre-API-32 DiLink 4 starts the byte
+        // producer first and attaches the texture from the first valid callback.
+        // DIPlus does not even resolve the BmmCameraInfo width/height methods on
+        // those releases, so a positive vendor backport must not silently switch
+        // us to texture-first startup. The callback stays armed until that frame
+        // arrives or this camera is torn down; startup itself does not block.
+        boolean di4PreviewBootstrapped = di4CallbackReady;
+        if (shouldUseDi4PreviewBootstrap()
+                && !di4CallbackReady) {
+            if (bootstrapDi4PreviewBeforeTexture(
+                    avmClass, cameraId, previewIndex, attachedCamera)) {
+                firstFrameDimsLogged = false;
+                return;
+            }
+        }
+
+        // ── isPreview() PROBE ───────────────────────────────────────────────
+        // DIPlus checks this on every SurfaceTexture availability edge. True
+        // means THIS AVMCamera instance is already streaming, so only
+        // addTexture+setTexture are needed; never call startPreview twice.
         boolean alreadyPreviewing = false;
         try {
             Method mIsPreview = avmClass.getDeclaredMethod("isPreview");
             mIsPreview.setAccessible(true);
-            Object pv = mIsPreview.invoke(cameraObj);
+            Object pv = mIsPreview.invoke(attachedCamera);
             if (pv instanceof Boolean) alreadyPreviewing = (Boolean) pv;
             logger.info("isPreview() = " + alreadyPreviewing
-                + " (diagnostic only — startPreview is called either way)");
+                + (di4PreviewBootstrapped
+                    ? " after DiLink 4 callback bootstrap"
+                    : " (diagnostic only — texture-first path unchanged)"));
         } catch (NoSuchMethodException e) {
             logger.info("isPreview() not present on this HAL");
         } catch (Throwable t) {
             logger.warn("isPreview() probe failed: " + t.getMessage());
         }
 
-        // Note: no disablePreviewCallback() here either. The OEM issues one in its
-        // already-previewing branch, but on its OWN instance. Ours could disable a
-        // callback that com.byd.avc or another in-process consumer legitimately
-        // owns, breaking their feed to fix nothing of ours — our frames come from
-        // the texture, not a byte callback.
-
         Method mAddTexture = avmClass.getDeclaredMethod(
             "addTexture", SurfaceTexture.class, int.class);
         mAddTexture.setAccessible(true);
-        mAddTexture.invoke(cameraObj, cameraSurfaceTexture, previewIndex);
+        mAddTexture.invoke(attachedCamera, cameraSurfaceTexture, previewIndex);
 
         Method mSetTexture = avmClass.getDeclaredMethod(
             "setTexture", SurfaceTexture.class, int.class);
         mSetTexture.setAccessible(true);
-        mSetTexture.invoke(cameraObj, cameraSurfaceTexture, previewIndex);
+        mSetTexture.invoke(attachedCamera, cameraSurfaceTexture, previewIndex);
 
-        // ALWAYS startPreview — unchanged from what shipped. See the isPreview()
-        // note above for why we don't skip it.
         Method mStart = avmClass.getDeclaredMethod("startPreview");
         mStart.setAccessible(true);
-        Object startResult = mStart.invoke(cameraObj);
-        logger.info("Oem-path attached: addTexture+setTexture(idx=" + previewIndex
-            + ") + startPreview → " + startResult
-            + " (cameraId=" + cameraId + ", isPreview was " + alreadyPreviewing + ")");
+        if (USE_DILINK4_AVM_PATH && alreadyPreviewing) {
+            logger.info("DiLink 4 texture attached: addTexture+setTexture(idx="
+                + previewIndex + "), preview already running — no second startPreview"
+                + " (cameraId=" + cameraId
+                + ", callbackBootstrap=" + di4PreviewBootstrapped + ")");
+        } else {
+            Object startResult = mStart.invoke(attachedCamera);
+            logger.info("Oem-path attached: addTexture+setTexture(idx=" + previewIndex
+                + ") + startPreview → " + startResult
+                + " (cameraId=" + cameraId + ", isPreview was " + alreadyPreviewing + ")");
+        }
 
         // ── BYTE-CALLBACK KICK when the HAL declares no preview size ───────
-        // This is the branch that separates working from broken DiLink 4 cars.
-        // The OEM (gl/a.java:407-413) checks BmmCameraInfo dims FIRST and, when
-        // they are absent/zero — precisely our failing unit, which logs
-        // "BmmCameraInfo.getDefaultPreviewWidth/Height not found" — takes a
-        // COMPLETELY different startup path: setPreviewCallback + startPreview
-        // + enablePreviewCallback(idx), tearing the callback down again on the
-        // first frame (gl/a.java:162-163). That callback is what pokes these
-        // boards into actually producing.
+        // API-32+ DIPlus resolves BmmCameraInfo and uses this fallback when the
+        // declared size is absent/zero. Pre-32 DI4 already took the unconditional
+        // callback-first branch above, matching beta18 exactly.
         //
         // We keep our SurfaceTexture as the real frame source and use the
         // callback purely as a producer kick.
         //
-        // ARMED IMMEDIATELY, matching the OEM (gl/a.java:409-413). The
-        // regression guard is the `!halDeclaredDimsKnown` condition itself —
-        // which is the OEM's own discriminator at gl/a.java:407 — not a delay:
-        // a car whose BmmCameraInfo answers correctly never reaches this line at
-        // any timing. An earlier revision waited 9s first, but that protected
-        // nobody the dims gate doesn't already protect while adding 9s of black
-        // screen for exactly the broken population. A car that happens to work
-        // despite absent dims is the case the OEM arms unconditionally too, and
-        // its own first frame disarms us on the next watcher tick (<=200ms).
-        if (!halDeclaredDimsKnown) {
-            armPreviewCallbackKick(avmClass, previewIndex);
+        // ARMED IMMEDIATELY, matching the OEM (gl/a.java:409-413). There is no
+        // delay: a car whose API-32+ BmmCameraInfo answers correctly never reaches
+        // this branch, while a missing entry needs the producer kick immediately.
+        if (!halDeclaredDimsKnown && !di4PreviewBootstrapped) {
+            armPreviewCallbackKick(avmClass, previewIndex, false, null);
         }
 
         // NO POST-ATTACH SETTLE HERE — deliberately.
@@ -1837,6 +2655,61 @@ public class PanoramicCameraGpu {
         firstFrameDimsLogged = false;
     }
 
+    /** The callback-first bootstrap is restricted to the pre-API-32 DiLink 4 path.
+     *  The explicit runtime camera mode keeps default, legacy and DiLink 5/SL7
+     *  models completely outside this behavior. */
+    private boolean shouldUseDi4PreviewBootstrap() {
+        return USE_DILINK4_AVM_PATH
+            && android.os.Build.VERSION.SDK_INT < 32;
+    }
+
+    /**
+     * Start the old-Di4 producer in byte-callback mode and return immediately.
+     * The first valid callback schedules SurfaceTexture attachment on the GL
+     * thread; the callback remains armed until then or until teardown.
+     *
+     * <p>Returns false when the callback API cannot be armed, allowing the caller
+     * to execute the exact texture-first path that shipped before this branch.
+     */
+    private boolean bootstrapDi4PreviewBeforeTexture(
+            Class<?> avmClass,
+            int cameraId,
+            int previewIndex,
+            Object expectedCamera) {
+        boolean armed = armPreviewCallbackKick(avmClass, previewIndex, true, () -> {
+            Handler handler = glHandler;
+            if (handler == null || cameraTornDown || cameraObj != expectedCamera) {
+                logger.info("Ignoring stale DiLink 4 preview callback");
+                disableDi4PreviewCallbackAfterFirstFrame(
+                    previewIndex, expectedCamera);
+                return;
+            }
+            boolean posted = handler.post(() -> {
+                if (cameraTornDown || cameraObj != expectedCamera) return;
+                try {
+                    logger.info("DiLink 4 callback-first bootstrap received a valid frame"
+                        + " — attaching SurfaceTexture");
+                    attachSurfaceTextureToCamera(
+                        cameraId, true, expectedCamera);
+                } catch (Throwable t) {
+                    logger.error("DiLink 4 callback texture attach failed: "
+                        + t.getMessage());
+                }
+            });
+            if (!posted) {
+                logger.warn("DiLink 4 callback texture attach was rejected"
+                    + " by the GL thread");
+            }
+            disableDi4PreviewCallbackAfterFirstFrame(
+                previewIndex, expectedCamera);
+        });
+        if (!armed) {
+            logger.warn("DiLink 4 callback-first bootstrap unavailable"
+                + " — falling back to shipped texture-first attach");
+        }
+        return armed;
+    }
+
     /** True when BmmCameraInfo answered with a usable (non-zero) preview size
      *  for the slot we are attaching. False when the class/method is absent or
      *  the HAL reports 0x0 — the OEM treats that as "take the byte-callback
@@ -1849,6 +2722,11 @@ public class PanoramicCameraGpu {
      *  attach strategy (texture-only vs texture + byte-callback kick). */
     private void logHalDeclaredDims(int cameraId) {
         halDeclaredDimsKnown = false;
+        if (shouldUseDi4PreviewBootstrap()) {
+            logger.info("BmmCameraInfo dim probe skipped on pre-API-32 DiLink 4"
+                + " (DIPlus beta18 always uses callback-first startup)");
+            return;
+        }
         try {
             Class<?> bmm = Class.forName("android.hardware.BmmCameraInfo");
             Method gw = bmm.getDeclaredMethod("getDefaultPreviewWidth", int.class);
@@ -1875,8 +2753,8 @@ public class PanoramicCameraGpu {
                 logger.info("  → mosaic-doubled would be " + mosaicW + "x" + mosaicH
                     + " (oem AVMCamera 2x scale rule)");
             } else {
-                logger.info("  → no declared size: will arm the byte-callback"
-                    + " producer kick after attach (OEM gl/a.java:407-413 parity)");
+                logger.info("  → no declared size: old DiLink 4 uses callback-first"
+                    + " bootstrap; other paths arm the producer kick after attach");
             }
         } catch (ClassNotFoundException e) {
             logger.info("BmmCameraInfo class not present — skipping dim probe");
@@ -1891,17 +2769,11 @@ public class PanoramicCameraGpu {
      *  GL/daemon threads both touch it during attach/teardown, hence volatile. */
     private volatile Object previewCallbackProxy = null;
 
-    /** Max time a byte-callback kick stays armed before we disarm it anyway.
+    /** Max time the post-attach fallback kick stays armed.
      *
-     *  <p>Deliberately SHORT. While armed, the HAL copies full-resolution NV21
-     *  into a shared-memory preview heap and the framework materialises a
-     *  ~7 MB byte[] per frame that we immediately discard — at ~8 fps that is
-     *  tens of MB/s of bandwidth and allocation churn on a device already
-     *  GPU- and thermally-bound. The disarm signal (a genuine onFrameAvailable)
-     *  arrives within one frame period of the producer waking, so a long window
-     *  buys nothing: the 9s pre-arm delay has already absorbed the documented
-     *  5-8s BYD first-frame latency before we get here. */
-    private static final long PREVIEW_KICK_MAX_MS = 6_000L;
+     *  <p>The callback-first old-Di4 path does not use this deadline: it stays
+     *  armed until a valid byte frame arrives or that camera is torn down. */
+    private static final long POST_ATTACH_PREVIEW_KICK_MAX_MS = 6_000L;
 
     /** Liveness signal for the attach-time helper threads.
      *
@@ -1943,14 +2815,18 @@ public class PanoramicCameraGpu {
      * those boards the callback is what makes the producer start emitting.
      *
      * <p>We do NOT decode the callback bytes — the SurfaceTexture remains the
-     * one frame source, so there is no second decode path to keep in sync. The
-     * callback is disarmed as soon as {@link #stFrameArrivalSeq} moves (proof
-     * the texture path is alive) or after {@link #PREVIEW_KICK_MAX_MS}.
+     * one frame source, so there is no second decode path to keep in sync.
+     * Callback-driven Di4 startup waits for a valid byte frame; the fallback
+     * post-attach kick keeps its existing bounded deadline.
      *
      * <p>Fails soft in every direction: any missing method, any throw, and we
      * simply continue with the plain texture attach that shipped before.
      */
-    private void armPreviewCallbackKick(Class<?> avmClass, int previewIndex) {
+    private boolean armPreviewCallbackKick(
+            Class<?> avmClass,
+            int previewIndex,
+            boolean startPreviewBeforeEnable,
+            Runnable firstValidFrameAction) {
         // ATOMIC claim, not a check-then-act on the volatile. Two attaches racing
         // (probe walk + reacquire) could both read previewCallbackProxy == null and
         // both install a proxy; the second would overwrite the field and the first
@@ -1958,10 +2834,13 @@ public class PanoramicCameraGpu {
         // full-resolution frames to a callback nobody will ever disarm.
         if (!previewKickArming.compareAndSet(false, true)) {
             logger.info("Preview-callback kick already armed/arming — skipping re-arm");
-            return;
+            return false;
         }
         final Object camAtArm = cameraObj;
-        if (camAtArm == null) { previewKickArming.set(false); return; }
+        if (camAtArm == null) {
+            previewKickArming.set(false);
+            return false;
+        }
         // Fresh arm ⇒ fresh disarm signals. A leftover true from a previous
         // session would make the watcher disarm on its very first tick.
         previewKickByteSeen = false;
@@ -1970,28 +2849,44 @@ public class PanoramicCameraGpu {
             Class<?> cbInterface = Class.forName(
                 "android.hardware.AVMCamera$IPreviewCallback");
             final long baselineArrival = stFrameArrivalSeq.get();
+            final AtomicBoolean firstValidFrameHandled = new AtomicBoolean(false);
             Object proxy = Proxy.newProxyInstance(
                 cbInterface.getClassLoader(),
                 new Class<?>[]{ cbInterface },
                 (p, method, args) -> {
-                    // The HAL hands us (data, ?, width, height, ...) — we do not
-                    // consume the pixels, we only note that the producer woke up.
+                    // AVMCamera callback args are
+                    // (camera, data, width, height, format, size, index, time).
+                    // We do not consume the pixels, only verify a real payload.
                     // NOTE: this runs on a HAL binder thread. Keep it trivial and
                     // never touch GL state here.
                     if ("onPreview".equals(method.getName())) {
-                        int w = -1, h = -1;
-                        if (args != null && args.length >= 4) {
+                        int w = -1, h = -1, size = -1;
+                        if (args != null && args.length >= 6) {
                             if (args[2] instanceof Integer) w = (Integer) args[2];
                             if (args[3] instanceof Integer) h = (Integer) args[3];
+                            if (args[5] instanceof Integer) size = (Integer) args[5];
                         }
-                        // Record the arrival OUTSIDE the log-gated block below:
-                        // this is the disarm signal and it must survive R8's
-                        // log-stripping in release builds.
+                        // Preserve the shipped post-attach fallback behavior:
+                        // any callback proves that producer path is responsive.
                         previewKickByteSeen = true;
+                        boolean validFrame = w > 0 && h > 0 && size > 0;
+                        // DI4 texture attachment still requires a usable frame.
+                        if (validFrame) {
+                            if (firstValidFrameAction != null
+                                    && firstValidFrameHandled.compareAndSet(
+                                        false, true)) {
+                                try {
+                                    firstValidFrameAction.run();
+                                } catch (Throwable t) {
+                                    logger.warn("Preview callback action failed: "
+                                        + t.getMessage());
+                                }
+                            }
+                        }
                         if (!previewKickFirstByteLogged) {
                             previewKickFirstByteLogged = true;
                             logger.info("Preview-callback kick: HAL emitted first byte"
-                                + " frame " + w + "x" + h
+                                + " frame " + w + "x" + h + " size=" + size
                                 + " (producer is alive; texture path should follow)");
                             // Record the dims the HAL reports on this callback.
                             //
@@ -2031,12 +2926,28 @@ public class PanoramicCameraGpu {
             previewKickArmedCamera = camAtArm;
             mSetCb.invoke(camAtArm, proxy);
 
+            if (startPreviewBeforeEnable) {
+                Method mStart = avmClass.getDeclaredMethod("startPreview");
+                mStart.setAccessible(true);
+                Object started = mStart.invoke(camAtArm);
+                logger.info("DiLink 4 callback-first bootstrap: startPreview → "
+                    + started + " before enablePreviewCallback(idx="
+                    + previewIndex + ")");
+            }
+
             Method mEnableCb = avmClass.getDeclaredMethod(
                 "enablePreviewCallback", int.class);
             mEnableCb.setAccessible(true);
             Object enabled = mEnableCb.invoke(camAtArm, previewIndex);
             logger.info("Preview-callback kick ARMED (idx=" + previewIndex
                 + ", enablePreviewCallback → " + enabled + ")");
+
+            // Callback-driven Di4 startup has no timeout. Its first valid frame
+            // action queues both callback removal and texture attachment; close
+            // also clears it if the camera is torn down before any frame arrives.
+            if (firstValidFrameAction != null) {
+                return true;
+            }
 
             // Disarm watcher. Runs off the GL thread so a wedged HAL call can
             // never stall rendering. Single-flight + monotonic clock, same
@@ -2052,48 +2963,45 @@ public class PanoramicCameraGpu {
                 logger.info("Preview-kick watcher already running — disarming this"
                     + " arm rather than leaving it unattended");
                 disarmPreviewCallbackKick(idx);
-                return;
+                return false;
             }
             Thread watcher = new Thread(() -> {
-                long deadline = android.os.SystemClock.elapsedRealtime() + PREVIEW_KICK_MAX_MS;
+                long deadline = android.os.SystemClock.elapsedRealtime()
+                    + POST_ATTACH_PREVIEW_KICK_MAX_MS;
                 try {
                     while (android.os.SystemClock.elapsedRealtime() < deadline) {
                         // cameraTornDown, NOT !running — start() spawns us from
                         // startCamera() before it sets running = true, so testing
                         // `running` would disarm the kick instantly on cold start.
-                        if (cameraTornDown) { disarmPreviewCallbackKick(idx); return; }
-                        // Disarm on the FIRST BYTE, exactly as the OEM does
-                        // (gl/a.java:162-163 tears the callback down inside its
-                        // first-frame handler). The byte callback fires the moment
-                        // the producer wakes; the texture path follows 5-8s later
-                        // on this HAL. Waiting for the texture frame meant the
-                        // kick stayed armed for the whole PREVIEW_KICK_MAX_MS
-                        // window on EVERY attach — hundreds of MB/s of
-                        // full-resolution HAL copies we discard, during precisely
-                        // the warmup that has to succeed. The byte proves the
-                        // producer is alive, which is all the kick exists to do.
+                        if (cameraTornDown
+                                || cameraObj != camAtArm
+                                || previewKickArmedCamera != camAtArm) {
+                            disarmPreviewCallbackKick(idx, camAtArm);
+                            return;
+                        }
                         if (previewKickByteSeen) {
-                            logger.info("Preview-callback kick: producer emitted a byte frame"
-                                + " — disarming immediately (OEM gl/a.java:162-163 parity)");
-                            disarmPreviewCallbackKick(idx);
+                            logger.info("Preview-callback kick: producer emitted"
+                                + " a byte callback — disarming");
+                            disarmPreviewCallbackKick(idx, camAtArm);
                             return;
                         }
                         if (stFrameArrivalSeq.get() != baselineArrival) {
                             logger.info("Preview-callback kick: texture path delivered"
                                 + " — disarming callback");
-                            disarmPreviewCallbackKick(idx);
+                            disarmPreviewCallbackKick(idx, camAtArm);
                             return;
                         }
                         Thread.sleep(200);
                     }
-                    logger.warn("Preview-callback kick: no texture frame within "
-                        + PREVIEW_KICK_MAX_MS + "ms — disarming anyway");
-                    disarmPreviewCallbackKick(idx);
+                    logger.warn("Preview-callback kick: no valid frame within "
+                        + POST_ATTACH_PREVIEW_KICK_MAX_MS
+                        + "ms — disarming fallback callback");
+                    disarmPreviewCallbackKick(idx, camAtArm);
                 } catch (InterruptedException ignored) {
-                    disarmPreviewCallbackKick(idx);
+                    disarmPreviewCallbackKick(idx, camAtArm);
                 } catch (Throwable t) {
                     logger.warn("Preview-kick watcher error: " + t.getMessage());
-                    disarmPreviewCallbackKick(idx);
+                    disarmPreviewCallbackKick(idx, camAtArm);
                 } finally {
                     previewKickWatcherRunning.set(false);
                 }
@@ -2108,14 +3016,22 @@ public class PanoramicCameraGpu {
                 logger.warn("Preview-kick watcher failed to start: " + startFail.getMessage());
                 previewKickWatcherRunning.set(false);
                 disarmPreviewCallbackKick(idx);
+                return false;
             }
+            return true;
         } catch (ClassNotFoundException e) {
             previewKickArming.set(false);
             logger.info("AVMCamera$IPreviewCallback absent — no byte-callback kick available");
+            return false;
         } catch (NoSuchMethodException e) {
-            previewKickArming.set(false);
+            if (previewCallbackProxy != null) {
+                disarmPreviewCallbackKick(previewIndex);
+            } else {
+                previewKickArming.set(false);
+            }
             logger.info("setPreviewCallback/enablePreviewCallback absent — skipping kick: "
                 + e.getMessage());
+            return false;
         } catch (Throwable t) {
             // Release the claim so a later attach can retry; if a proxy did get
             // installed before the throw, tear it down rather than leak it.
@@ -2125,6 +3041,7 @@ public class PanoramicCameraGpu {
                 previewKickArming.set(false);
             }
             logger.warn("Preview-callback kick failed to arm: " + t.getMessage());
+            return false;
         }
     }
 
@@ -2140,9 +3057,39 @@ public class PanoramicCameraGpu {
      *  {@code disablePreviewCallback} on an instance we never enabled — the exact
      *  co-consumer hazard we avoid elsewhere in this method. */
     private void disarmPreviewCallbackKick(int previewIndex) {
+        disarmPreviewCallbackKick(previewIndex, null);
+    }
+
+    /** First-valid-frame cleanup for callback-driven Di4 startup.
+     *  Keep the registered proxy in place but disabled until camera close. */
+    private void disableDi4PreviewCallbackAfterFirstFrame(
+            int previewIndex, Object expectedCamera) {
+        Object cam = previewKickArmedCamera;
+        if (cam == null || cam != expectedCamera) return;
+        try {
+            Method mDisable = cam.getClass().getDeclaredMethod(
+                "disablePreviewCallback", int.class);
+            mDisable.setAccessible(true);
+            mDisable.invoke(cam, previewIndex);
+            if (previewKickArmedCamera == expectedCamera) {
+                previewCallbackProxy = null;
+                previewKickArmedCamera = null;
+                previewKickArming.set(false);
+            }
+            logger.info("DiLink 4 preview callback disabled after first valid frame");
+        } catch (Throwable t) {
+            logger.warn("DiLink 4 preview callback disable failed: "
+                + t.getMessage());
+            disarmPreviewCallbackKick(previewIndex, expectedCamera);
+        }
+    }
+
+    private void disarmPreviewCallbackKick(
+            int previewIndex, Object expectedCamera) {
+        Object cam = previewKickArmedCamera;
+        if (expectedCamera != null && cam != expectedCamera) return;
         Object proxy = previewCallbackProxy;
         if (proxy == null) { previewKickArming.set(false); return; }
-        Object cam = previewKickArmedCamera;
         if (cam == null || cam != cameraObj) {
             // The camera we armed is gone or has been replaced. closeCameraForPath
             // already nulled the HAL-side callback for it, so there is nothing
@@ -2184,6 +3131,674 @@ public class PanoramicCameraGpu {
         }
     }
 
+    /**
+     * Publish whether a real camera consumer currently needs fresh DI4 frames.
+     * Repeated calls are cheap: recovery is single-flight, stale-gated and
+     * interval-limited. A rising edge is handled immediately; a sustained demand
+     * is also visible to the watchdog so a producer that later stalls is repaired.
+     */
+    public void setDiLink4FrameDemand(boolean demanded, String reason) {
+        if (!USE_DILINK4_AVM_PATH) return;
+        String safeReason = (reason == null || reason.trim().isEmpty())
+            ? "unspecified" : reason;
+        boolean rising = demanded && !dilink4FrameDemanded;
+        dilink4FrameDemanded = demanded;
+        dilink4FrameDemandReason = safeReason;
+        if (demanded) {
+            requestDiLink4ProducerRecovery(
+                (rising ? "demand-rising:" : "demand-refresh:") + safeReason,
+                false);
+        }
+    }
+
+    /**
+     * One-shot recovery request for lifecycle edges such as ACC ON. This does
+     * not make the caller a persistent demand owner; it only repairs an already
+     * stale persistent handle before the next UI/recording consumer needs it.
+     */
+    public void requestDiLink4ProducerRecovery(String reason) {
+        requestDiLink4ProducerRecovery(reason, true);
+    }
+
+    private boolean requestDiLink4ProducerRecovery(
+            String reason, boolean forceDemandEdge) {
+        if (!USE_DILINK4_AVM_PATH || !running || cameraTornDown
+                || cameraObj == null || restartInProgress.get()
+                || halRecoveryEscalated
+                || dilink4DeferredReopenPending.get()
+                || com.overdrive.app.daemon.CameraDaemon
+                    .isProcessRestartPending()) {
+            return false;
+        }
+        if (!forceDemandEdge && !dilink4FrameDemanded && !bsLayerVisible) {
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        if (!isDiLink4ProducerStale(
+                true,
+                dilink4LastGenuineFrameArrivalMs,
+                lastCameraStartTime,
+                now,
+                DILINK4_DEMAND_STALE_MS,
+                FRAME_STALL_WARMUP_GRACE_MS)) {
+            return false;
+        }
+        long sinceLastAttempt = dilink4LastSoftRecoveryAttemptMs > 0L
+            ? Math.max(0L, now - dilink4LastSoftRecoveryAttemptMs)
+            : Long.MAX_VALUE;
+        if (sinceLastAttempt < DILINK4_SOFT_RECOVERY_MIN_INTERVAL_MS) {
+            return false;
+        }
+        if (!dilink4SoftRecoveryInFlight.compareAndSet(false, true)) {
+            return false;
+        }
+
+        final Object expectedCamera = cameraObj;
+        final int recoveryEpoch = dilink4SoftRecoveryEpoch.incrementAndGet();
+        final String safeReason = (reason == null || reason.trim().isEmpty())
+            ? "unspecified" : reason;
+        Handler handler = glHandler;
+        if (handler == null || !handler.post(() ->
+                beginDiLink4SoftRecovery(
+                    expectedCamera, recoveryEpoch, safeReason, forceDemandEdge))) {
+            if (dilink4SoftRecoveryEpoch.get() == recoveryEpoch) {
+                dilink4SoftRecoveryInFlight.set(false);
+            }
+            logger.warn("DiLink 4 soft producer recovery could not be posted"
+                + " (reason=" + safeReason + ")");
+            return false;
+        }
+        return true;
+    }
+
+    private void beginDiLink4SoftRecovery(
+            Object expectedCamera,
+            int recoveryEpoch,
+            String reason,
+            boolean forceDemandEdge) {
+        if (!isCurrentDiLink4SoftRecovery(expectedCamera, recoveryEpoch)) return;
+        if (com.overdrive.app.daemon.CameraDaemon.isProcessRestartPending()) {
+            finishDiLink4SoftRecovery(
+                recoveryEpoch, "trip-safe process rebuild already pending");
+            return;
+        }
+        if (!forceDemandEdge && !dilink4FrameDemanded && !bsLayerVisible) {
+            finishDiLink4SoftRecovery(recoveryEpoch,
+                "demand disappeared before recovery began");
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (!isDiLink4ProducerStale(
+                true,
+                dilink4LastGenuineFrameArrivalMs,
+                lastCameraStartTime,
+                now,
+                DILINK4_DEMAND_STALE_MS,
+                FRAME_STALL_WARMUP_GRACE_MS)) {
+            finishDiLink4SoftRecovery(recoveryEpoch,
+                "producer resumed before recovery began");
+            return;
+        }
+
+        dilink4LastSoftRecoveryAttemptMs = now;
+        dilink4SoftRecoveryCycles++;
+        dilink4FrameDemandReason = reason;
+        try {
+            BydApaViewpointHelper.reassertIfHeld();
+        } catch (Throwable t) {
+            logger.warn("DiLink 4 soft recovery viewpoint re-assert failed: "
+                + t.getMessage());
+        }
+
+        try {
+            Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
+            Boolean previewing = queryDiLink4PreviewState(
+                avmClass, expectedCamera, "soft-recovery");
+            boolean startPreview = Boolean.FALSE.equals(previewing);
+            boolean callbackArmed = armPreviewCallbackKick(
+                avmClass, cameraSurfaceMode, startPreview, null);
+            logger.warn("DiLink 4 producer stale on active demand — callback probe"
+                + " armed=" + callbackArmed
+                + ", isPreview=" + previewing
+                + ", staleMs=" + diLink4GenuineFrameAgeMs(now)
+                + ", reason=" + reason);
+        } catch (Throwable t) {
+            logger.warn("DiLink 4 callback-probe recovery failed to arm: "
+                + t.getMessage());
+        }
+
+        if (!postDiLink4RecoveryVerification(
+                expectedCamera, recoveryEpoch, reason, forceDemandEdge, false)) {
+            escalateDiLink4SoftRecovery(
+                expectedCamera, recoveryEpoch, reason, forceDemandEdge,
+                "callback verification could not be scheduled");
+        }
+    }
+
+    private boolean postDiLink4RecoveryVerification(
+            Object expectedCamera,
+            int recoveryEpoch,
+            String reason,
+            boolean forceDemandEdge,
+            boolean surfaceRebound) {
+        Handler handler = glHandler;
+        return handler != null && handler.postDelayed(() ->
+                verifyDiLink4SoftRecovery(
+                    expectedCamera,
+                    recoveryEpoch,
+                    reason,
+                    forceDemandEdge,
+                    surfaceRebound),
+            DILINK4_SOFT_RECOVERY_VERIFY_MS);
+    }
+
+    private void verifyDiLink4SoftRecovery(
+            Object expectedCamera,
+            int recoveryEpoch,
+            String reason,
+            boolean forceDemandEdge,
+            boolean surfaceRebound) {
+        if (!isCurrentDiLink4SoftRecovery(expectedCamera, recoveryEpoch)) return;
+        if (com.overdrive.app.daemon.CameraDaemon.isProcessRestartPending()) {
+            finishDiLink4SoftRecovery(
+                recoveryEpoch, "trip-safe process rebuild already pending");
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (!isDiLink4ProducerStale(
+                true,
+                dilink4LastGenuineFrameArrivalMs,
+                lastCameraStartTime,
+                now,
+                DILINK4_DEMAND_STALE_MS,
+                FRAME_STALL_WARMUP_GRACE_MS)) {
+            finishDiLink4SoftRecovery(recoveryEpoch,
+                "fresh SurfaceTexture frame observed");
+            return;
+        }
+        if (!forceDemandEdge && !dilink4FrameDemanded && !bsLayerVisible) {
+            finishDiLink4SoftRecovery(recoveryEpoch,
+                "demand disappeared during recovery");
+            return;
+        }
+
+        boolean byteFrameSeen = previewKickByteSeen;
+        disarmPreviewCallbackKick(cameraSurfaceMode, expectedCamera);
+        if (!surfaceRebound) {
+            logger.warn("DiLink 4 callback probe did not restore texture frames"
+                + " (byteFrameSeen=" + byteFrameSeen + ", staleMs="
+                + diLink4GenuineFrameAgeMs(now) + ") — rebuilding only the"
+                + " SurfaceTexture on the existing AVMCamera");
+            if (postDiLink4SurfaceRebind(
+                    expectedCamera, recoveryEpoch, reason, forceDemandEdge)) {
+                return;
+            }
+            escalateDiLink4SoftRecovery(
+                expectedCamera, recoveryEpoch, reason, forceDemandEdge,
+                "same-handle SurfaceTexture rebind could not be scheduled");
+            return;
+        }
+
+        escalateDiLink4SoftRecovery(
+            expectedCamera, recoveryEpoch, reason, forceDemandEdge,
+            "callback probe and same-handle SurfaceTexture rebind produced no frame");
+    }
+
+    /**
+     * Hand stage 1's callback watcher enough time to observe the disarm and
+     * exit before stage 2 may install a fresh callback. Without this boundary,
+     * the old watcher can win its single-flight cleanup race and disarm the new
+     * callback immediately.
+     */
+    private boolean postDiLink4SurfaceRebind(
+            Object expectedCamera,
+            int recoveryEpoch,
+            String reason,
+            boolean forceDemandEdge) {
+        Handler handler = glHandler;
+        return handler != null && handler.postDelayed(() -> {
+            if (!isCurrentDiLink4SoftRecovery(
+                    expectedCamera, recoveryEpoch)) {
+                return;
+            }
+            if (com.overdrive.app.daemon.CameraDaemon
+                    .isProcessRestartPending()) {
+                finishDiLink4SoftRecovery(
+                    recoveryEpoch, "trip-safe process rebuild already pending");
+                return;
+            }
+            long now = System.currentTimeMillis();
+            if (!isDiLink4ProducerStale(
+                    true,
+                    dilink4LastGenuineFrameArrivalMs,
+                    lastCameraStartTime,
+                    now,
+                    DILINK4_DEMAND_STALE_MS,
+                    FRAME_STALL_WARMUP_GRACE_MS)) {
+                finishDiLink4SoftRecovery(
+                    recoveryEpoch, "producer resumed before SurfaceTexture rebind");
+                return;
+            }
+            if (!forceDemandEdge && !dilink4FrameDemanded && !bsLayerVisible) {
+                finishDiLink4SoftRecovery(
+                    recoveryEpoch, "demand disappeared before SurfaceTexture rebind");
+                return;
+            }
+            DiLink4SurfaceRebindResult rebindResult =
+                rebindDiLink4SurfaceTexture(
+                    expectedCamera,
+                    recoveryEpoch,
+                    reason,
+                    forceDemandEdge);
+            if (rebindResult == DiLink4SurfaceRebindResult.WAITING_FOR_CALLBACK) {
+                return;
+            }
+            if (rebindResult == DiLink4SurfaceRebindResult.ATTACHED
+                    && postDiLink4RecoveryVerification(
+                        expectedCamera,
+                        recoveryEpoch,
+                        reason,
+                        forceDemandEdge,
+                        true)) {
+                return;
+            }
+            escalateDiLink4SoftRecovery(
+                expectedCamera, recoveryEpoch, reason, forceDemandEdge,
+                "same-handle SurfaceTexture rebind failed");
+        }, DILINK4_CALLBACK_DISARM_SETTLE_MS);
+    }
+
+    /**
+     * Rebuild only the BufferQueue consumer while preserving the AVMCamera
+     * handle and panorama/viewpoint ownership. This is the DIPlus-compatible
+     * recovery for "producer alive, texture route dead".
+     */
+    private DiLink4SurfaceRebindResult rebindDiLink4SurfaceTexture(
+            Object expectedCamera,
+            int recoveryEpoch,
+            String reason,
+            boolean forceDemandEdge) {
+        if (!USE_DILINK4_AVM_PATH || expectedCamera == null
+                || cameraObj != expectedCamera || cameraTextureId == 0) {
+            return DiLink4SurfaceRebindResult.FAILED;
+        }
+        SurfaceTexture retiredSurface = null;
+        try {
+            Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
+            disarmPreviewCallbackKick(cameraSurfaceMode, expectedCamera);
+
+            // Serialize the final "still stale?" decision with callback
+            // acceptance. If a genuine frame won this lock first it already
+            // completed the recovery, so leave the now-healthy consumer alone.
+            // If we win, retire the old identity/epoch before any HAL detach so
+            // a callback queued concurrently can no longer certify this stage.
+            synchronized (diLink4SurfaceTextureStateLock) {
+                if (!isCurrentDiLink4SoftRecovery(
+                        expectedCamera, recoveryEpoch)) {
+                    return DiLink4SurfaceRebindResult.FAILED;
+                }
+                retiredSurface = retireCameraSurfaceTextureConsumer();
+            }
+
+            detachSurfaceTextureFromCamera(expectedCamera, retiredSurface);
+            synchronized (cameraTextureLock) {
+                if (retiredSurface != null) {
+                    try { retiredSurface.setOnFrameAvailableListener(null); }
+                    catch (Throwable ignored) {}
+                    try { retiredSurface.release(); } catch (Throwable ignored) {}
+                    retiredSurface = null;
+                }
+                createCameraSurfaceTexture();
+            }
+            final SurfaceTexture reboundSurface = cameraSurfaceTexture;
+            if (reboundSurface == null || cameraObj != expectedCamera) {
+                throw new IllegalStateException(
+                    "SurfaceTexture recreation did not produce a live consumer");
+            }
+
+            Boolean previewing = queryDiLink4PreviewState(
+                avmClass, expectedCamera, "surface-rebind");
+            // DIPlus pre-32 ordering when preview is stopped: callback first,
+            // then startPreview, then enablePreviewCallback, with texture attach
+            // following ONLY after the first valid byte frame. The former
+            // recovery path attached immediately after enablePreviewCallback,
+            // which reintroduced the exact ordering beta18 avoids.
+            if (Boolean.FALSE.equals(previewing)) {
+                final AtomicBoolean callbackAttachStarted =
+                    new AtomicBoolean(false);
+                boolean callbackArmed = armPreviewCallbackKick(
+                    avmClass, cameraSurfaceMode, true, () -> {
+                        Handler handler = glHandler;
+                        boolean posted = handler != null && handler.post(() -> {
+                            if (!isCurrentDiLink4SoftRecovery(
+                                    expectedCamera, recoveryEpoch)
+                                    || cameraSurfaceTexture != reboundSurface) {
+                                return;
+                            }
+                            callbackAttachStarted.set(true);
+                            if (!forceDemandEdge
+                                    && !dilink4FrameDemanded
+                                    && !bsLayerVisible) {
+                                finishDiLink4SoftRecovery(
+                                    recoveryEpoch,
+                                    "demand disappeared before callback-first"
+                                        + " SurfaceTexture attach");
+                                return;
+                            }
+                            try {
+                                bindDiLink4ReboundSurfaceTexture(
+                                    avmClass,
+                                    expectedCamera,
+                                    reboundSurface,
+                                    previewing,
+                                    reason);
+                                if (!postDiLink4RecoveryVerification(
+                                        expectedCamera,
+                                        recoveryEpoch,
+                                        reason,
+                                        forceDemandEdge,
+                                        true)) {
+                                    escalateDiLink4SoftRecovery(
+                                        expectedCamera,
+                                        recoveryEpoch,
+                                        reason,
+                                        forceDemandEdge,
+                                        "callback-first SurfaceTexture"
+                                            + " verification could not be scheduled");
+                                }
+                            } catch (Throwable t) {
+                                logger.warn("DiLink 4 callback-first SurfaceTexture"
+                                    + " attach failed: " + t.getMessage());
+                                escalateDiLink4SoftRecovery(
+                                    expectedCamera,
+                                    recoveryEpoch,
+                                    reason,
+                                    forceDemandEdge,
+                                    "callback-first SurfaceTexture attach failed");
+                            }
+                        });
+                        if (!posted) {
+                            logger.warn("DiLink 4 callback-first SurfaceTexture"
+                                + " attach was rejected by the GL handler");
+                        }
+                        disableDi4PreviewCallbackAfterFirstFrame(
+                            cameraSurfaceMode, expectedCamera);
+                    });
+                if (!callbackArmed) {
+                    return DiLink4SurfaceRebindResult.FAILED;
+                }
+
+                Handler handler = glHandler;
+                boolean timeoutPosted = handler != null && handler.postDelayed(() -> {
+                    if (callbackAttachStarted.get()
+                            || !isCurrentDiLink4SoftRecovery(
+                                expectedCamera, recoveryEpoch)) {
+                        return;
+                    }
+                    disarmPreviewCallbackKick(
+                        cameraSurfaceMode, expectedCamera);
+                    escalateDiLink4SoftRecovery(
+                        expectedCamera,
+                        recoveryEpoch,
+                        reason,
+                        forceDemandEdge,
+                        "same-handle rebind produced no valid byte frame");
+                }, DILINK4_REBIND_CALLBACK_TIMEOUT_MS);
+                if (!timeoutPosted) {
+                    disarmPreviewCallbackKick(
+                        cameraSurfaceMode, expectedCamera);
+                    return DiLink4SurfaceRebindResult.FAILED;
+                }
+                logger.info("DiLink 4 SurfaceTexture rebind waiting for first"
+                    + " valid byte frame before addTexture/setTexture"
+                    + " (reason=" + reason + ")");
+                return DiLink4SurfaceRebindResult.WAITING_FOR_CALLBACK;
+            }
+
+            bindDiLink4ReboundSurfaceTexture(
+                avmClass,
+                expectedCamera,
+                reboundSurface,
+                previewing,
+                reason);
+            // isPreview=true (or unavailable): never double-start. A bounded
+            // callback probe is safe and tells us whether only the texture
+            // route was broken.
+            armPreviewCallbackKick(
+                avmClass, cameraSurfaceMode, false, null);
+            return DiLink4SurfaceRebindResult.ATTACHED;
+        } catch (Throwable t) {
+            if (retiredSurface != null) {
+                try { retiredSurface.setOnFrameAvailableListener(null); }
+                catch (Throwable ignored) {}
+                try { retiredSurface.release(); } catch (Throwable ignored) {}
+            }
+            logger.warn("DiLink 4 same-handle SurfaceTexture rebind failed: "
+                + t.getMessage());
+            return DiLink4SurfaceRebindResult.FAILED;
+        }
+    }
+
+    /** Attach a recreated SurfaceTexture without issuing startPreview. */
+    private void bindDiLink4ReboundSurfaceTexture(
+            Class<?> avmClass,
+            Object expectedCamera,
+            SurfaceTexture expectedSurface,
+            Boolean previewing,
+            String reason) throws Exception {
+        if (cameraObj != expectedCamera
+                || cameraSurfaceTexture != expectedSurface) {
+            throw new IllegalStateException(
+                "stale camera/SurfaceTexture during same-handle rebind");
+        }
+        Method mAddTexture = avmClass.getDeclaredMethod(
+            "addTexture", SurfaceTexture.class, int.class);
+        mAddTexture.setAccessible(true);
+        mAddTexture.invoke(
+            expectedCamera, expectedSurface, cameraSurfaceMode);
+
+        Method mSetTexture = avmClass.getDeclaredMethod(
+            "setTexture", SurfaceTexture.class, int.class);
+        mSetTexture.setAccessible(true);
+        mSetTexture.invoke(
+            expectedCamera, expectedSurface, cameraSurfaceMode);
+
+        cameraTornDown = false;
+        firstFrameDimsLogged = false;
+        logger.info("DiLink 4 SurfaceTexture rebound on existing AVMCamera"
+            + " (isPreview=" + previewing + ", reason=" + reason + ")");
+    }
+
+    private Boolean queryDiLink4PreviewState(
+            Class<?> avmClass, Object camera, String context) {
+        try {
+            Method mIsPreview = avmClass.getDeclaredMethod("isPreview");
+            mIsPreview.setAccessible(true);
+            Object value = mIsPreview.invoke(camera);
+            Boolean result = value instanceof Boolean ? (Boolean) value : null;
+            logger.info("DiLink 4 isPreview(" + context + ")=" + result);
+            return result;
+        } catch (NoSuchMethodException e) {
+            logger.info("DiLink 4 isPreview unavailable during " + context);
+            return null;
+        } catch (Throwable t) {
+            logger.warn("DiLink 4 isPreview failed during " + context + ": "
+                + t.getMessage());
+            return null;
+        }
+    }
+
+    private boolean isCurrentDiLink4SoftRecovery(
+            Object expectedCamera, int recoveryEpoch) {
+        return USE_DILINK4_AVM_PATH
+            && dilink4SoftRecoveryInFlight.get()
+            && dilink4SoftRecoveryEpoch.get() == recoveryEpoch
+            && running
+            && !cameraTornDown
+            && cameraObj == expectedCamera
+            && !restartInProgress.get()
+            && !halRecoveryEscalated;
+    }
+
+    private long diLink4GenuineFrameAgeMs(long now) {
+        long anchor = dilink4LastGenuineFrameArrivalMs > 0L
+            ? dilink4LastGenuineFrameArrivalMs : lastCameraStartTime;
+        return anchor > 0L ? Math.max(0L, now - anchor) : Long.MAX_VALUE;
+    }
+
+    private void finishDiLink4SoftRecovery(
+            int recoveryEpoch, String outcome) {
+        if (dilink4SoftRecoveryEpoch.get() != recoveryEpoch) return;
+        dilink4SoftRecoveryInFlight.set(false);
+        dilink4SoftRecoveryEpoch.incrementAndGet();
+        logger.info("DiLink 4 soft producer recovery finished: " + outcome);
+    }
+
+    private void escalateDiLink4SoftRecovery(
+            Object expectedCamera,
+            int recoveryEpoch,
+            String reason,
+            boolean forceDemandEdge,
+            String failure) {
+        if (!isCurrentDiLink4SoftRecovery(expectedCamera, recoveryEpoch)) return;
+        dilink4SoftRecoveryInFlight.set(false);
+        dilink4SoftRecoveryEpoch.incrementAndGet();
+        if (!forceDemandEdge && !dilink4FrameDemanded && !bsLayerVisible) {
+            logger.info("DiLink 4 soft recovery exhausted after demand ended: "
+                + failure);
+            return;
+        }
+        requestDiLink4CameraReopen(
+            expectedCamera, reason, failure, forceDemandEdge);
+    }
+
+    private boolean requestDiLink4CameraReopen(
+            Object expectedCamera,
+            String reason,
+            String failure,
+            boolean forceDemandEdge) {
+        if (!USE_DILINK4_AVM_PATH
+                || expectedCamera == null
+                || cameraObj != expectedCamera
+                || cameraTornDown
+                || !running
+                || restartInProgress.get()
+                || halRecoveryEscalated
+                || com.overdrive.app.daemon.CameraDaemon
+                    .isProcessRestartPending()) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        long lastAttemptAnchor = Math.max(
+            lastCameraStartTime, dilink4LastStallRestartMs);
+        long sinceLastAttempt = lastAttemptAnchor > 0L
+            ? Math.max(0L, now - lastAttemptAnchor) : Long.MAX_VALUE;
+        if (sinceLastAttempt < DILINK4_ERROR_RESTART_MIN_INTERVAL_MS) {
+            long delay = DILINK4_ERROR_RESTART_MIN_INTERVAL_MS - sinceLastAttempt;
+            Handler handler = glHandler;
+            if (handler == null
+                    || !dilink4DeferredReopenPending.compareAndSet(
+                        false, true)) {
+                return false;
+            }
+            final int deferredEpoch =
+                dilink4DeferredReopenEpoch.incrementAndGet();
+            boolean posted = handler.postDelayed(() -> {
+                    if (dilink4DeferredReopenEpoch.get() != deferredEpoch) {
+                        return;
+                    }
+                    dilink4DeferredReopenPending.set(false);
+                    if (cameraObj != expectedCamera
+                            || cameraTornDown
+                            || !running
+                            || restartInProgress.get()
+                            || halRecoveryEscalated
+                            || com.overdrive.app.daemon.CameraDaemon
+                                .isProcessRestartPending()) {
+                        return;
+                    }
+                    if ((!forceDemandEdge && !dilink4FrameDemanded
+                            && !bsLayerVisible)
+                            || !isDiLink4ProducerStale(
+                                true,
+                                dilink4LastGenuineFrameArrivalMs,
+                                lastCameraStartTime,
+                                System.currentTimeMillis(),
+                                DILINK4_DEMAND_STALE_MS,
+                                FRAME_STALL_WARMUP_GRACE_MS)) {
+                        return;
+                    }
+                    requestDiLink4CameraReopen(
+                        expectedCamera,
+                        reason,
+                        failure + " (deferred by reopen floor)",
+                        forceDemandEdge);
+                }, delay);
+            if (!posted) {
+                if (dilink4DeferredReopenEpoch.get() == deferredEpoch) {
+                    dilink4DeferredReopenPending.set(false);
+                    dilink4DeferredReopenEpoch.incrementAndGet();
+                }
+                logger.warn("DiLink 4 full reopen could not be scheduled on"
+                    + " the GL handler");
+                return false;
+            }
+            logger.info("DiLink 4 full reopen deferred " + delay
+                + "ms by the reopen floor after soft-recovery failure");
+            return false;
+        }
+        if (dilink4StallRecoveryExhausted
+                || dilink4StallRestartAttempts
+                    >= DILINK4_STALL_RESTART_MAX_ATTEMPTS) {
+            dilink4StallRecoveryExhausted = true;
+            logger.error("DiLink 4 producer recovery exhausted "
+                + dilink4StallRestartAttempts + " camera reopens — requesting"
+                + " full pipeline/process recovery (reason=" + reason + ")");
+            requestDiLink4HalRecoveryEscalation();
+            return false;
+        }
+
+        dilink4DeferredReopenPending.set(false);
+        dilink4DeferredReopenEpoch.incrementAndGet();
+        dilink4StallRestartAttempts++;
+        dilink4LastStallRestartMs = now;
+        logger.warn("DiLink 4 soft recovery failed (" + failure
+            + ") — full camera reopen attempt "
+            + dilink4StallRestartAttempts + "/"
+            + DILINK4_STALL_RESTART_MAX_ATTEMPTS
+            + " (reason=" + reason + ")");
+        restartCameraAfterError();
+        return true;
+    }
+
+    private void requestDiLink4HalRecoveryEscalation() {
+        if (halRecoveryEscalated
+                || com.overdrive.app.daemon.CameraDaemon
+                    .isProcessRestartPending()) {
+            return;
+        }
+        if (yieldListener == null) {
+            logger.error("DiLink 4 full-rebuild listener unavailable —"
+                + " requesting trip-safe process recovery");
+            com.overdrive.app.daemon.CameraDaemon
+                .requestProcessRestartPreservingTrip(
+                    "DI4 producer recovery exhausted without pipeline listener");
+            return;
+        }
+        halRecoveryEscalated = true;
+        try {
+            yieldListener.onHalRecoveryNeeded();
+        } catch (Throwable t) {
+            halRecoveryEscalated = false;
+            logger.warn("DiLink 4 full recovery dispatch failed: "
+                + t.getMessage() + " — requesting trip-safe process recovery");
+            com.overdrive.app.daemon.CameraDaemon
+                .requestProcessRestartPreservingTrip(
+                    "DI4 producer full-rebuild dispatch failed");
+        }
+    }
+
     private volatile boolean previewKickFirstByteLogged = false;
 
     /** The AVMCamera instance the byte-callback kick was armed ON. Disarm must
@@ -2192,11 +3807,9 @@ public class PanoramicCameraGpu {
      *  {@code disablePreviewCallback} on an instance we never enabled. */
     private volatile Object previewKickArmedCamera = null;
 
-    /** Set by the byte-callback proxy on its FIRST frame. This — not the texture
-     *  arrival counter — is the kick's disarm signal: the byte callback fires as
-     *  soon as the producer wakes, whereas the texture path can trail by the
-     *  documented 5-8s BYD first-frame latency. Assigned OUTSIDE the log-gated
-     *  block so R8's log-stripping cannot remove it. */
+    /** Set by any byte callback for the bounded post-attach fallback watcher.
+     *  Callback-driven Di4 attachment separately requires valid dimensions and
+     *  payload size before it schedules the texture. */
     private volatile boolean previewKickByteSeen = false;
 
     /** True producer dims as reported by the HAL's own byte callback, or -1.
@@ -2308,7 +3921,12 @@ public class PanoramicCameraGpu {
      *  Mirrors oem gl.C5920a.m26746l: rmTexture(st, previewIndex).
      *  Quiet on errors — close() right after is the canonical teardown. */
     private void detachSurfaceTextureFromCamera(Object cam) {
-        SurfaceTexture st = cameraSurfaceTexture;
+        detachSurfaceTextureFromCamera(cam, cameraSurfaceTexture);
+    }
+
+    /** Explicit-consumer variant used after callback identity was retired. */
+    private void detachSurfaceTextureFromCamera(
+            Object cam, SurfaceTexture st) {
         if (cam == null || st == null) return;
         try {
             ensureReflectionCache();
@@ -2332,9 +3950,63 @@ public class PanoramicCameraGpu {
      *  disablePreviewCallback before stopPreview, which is benign).
      *
      *  Legacy path: only steps 5+6 — BydCameraCoordinator.closeCamera. */
-    private void closeCameraForPath(Object cam) {
-        if (cam == null) return;
-        if (USE_OEM_SURFACE_TEXTURE_PATH) {
+    private boolean closeCameraForPath(Object cam) {
+        return closeCameraForPath(cam, false);
+    }
+
+    private boolean closeCameraForPath(
+            Object cam, boolean preserveDiLink5Avm) {
+        if (cam == null) return true;
+        if (cam instanceof com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) {
+            com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend backend =
+                    (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) cam;
+            boolean currentOwner = diLink5GlOwnerBackend == backend;
+            if (currentOwner) {
+                diLink5CloseInProgress = true;
+                diLink5FramePending = false;
+            }
+            // Arm the exact child before GL teardown. A pending producer frame
+            // can make the release guard exit with status 125 during this
+            // phase, before closeWithRetirementRetry reaches nativeRelease().
+            backend.markExpectedProcessRetirement();
+            backend.clearFrameListenerIfOwner();
+            // An unclaimed/stale worker never imported EGLImages. Only the
+            // backend currently published in cameraObj may retire the GL
+            // source; the backend token makes the native side compare-and-clear
+            // as a second line of defense.
+            boolean glReleased = !currentOwner
+                    || releaseDiLink5GlResourcesBeforeClose(backend);
+            if (currentOwner
+                    && glReleased
+                    && diLink5GlOwnerBackend == backend) {
+                diLink5GlOwnerBackend = null;
+            }
+            // Native stream stop and release each have their own bounded wait.
+            // Complete a token-scoped retry while this exact backend still
+            // owns the sidecar before arming any process halt; otherwise the
+            // old five-second urgent guard could kill JNI/DMA ownership in the
+            // middle of its legitimate second retirement attempt.
+            boolean clean = glReleased
+                    && backend.closeWithRetirementRetry(
+                            !preserveDiLink5Avm);
+            if (!clean) {
+                stopVerdictWedged = true;
+                logger.error(glReleased
+                        ? "DiLink 5 native camera handle did not close cleanly"
+                        : "DiLink 5 EGLImage cleanup did not complete; "
+                                + "producer shutdown was refused");
+                try {
+                    com.overdrive.app.daemon.CameraDaemon
+                            .requestUrgentCameraReleaseRestart(
+                                    "DiLink 5 camera ownership release incomplete");
+                } catch (Throwable t) {
+                    logger.error("Native camera restart request failed: "
+                            + t.getMessage());
+                }
+            }
+            return clean;
+        }
+        if (USE_DILINK4_AVM_PATH) {
             // Step 1 — release our viewpoint token. Mirrors oem C5920a.m26747m
             // (gl/C5920a.java:323 — C6498a.f26622a.m28933k(this)). Observer-set
             // semantics: this only writes viewpoint=0 + disableDevice if WE were
@@ -2357,14 +4029,56 @@ public class PanoramicCameraGpu {
             // (compareAndSet fails) and the kick would be permanently unavailable
             // after the first camera close.
             previewKickArming.set(false);
-            if (cam instanceof com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) {
-                ((com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) cam).close();
-                return;
-            }
             clearAvmCameraCallbacks(cam);
         }
         // Steps 5+6 (and disablePreviewCallback in legacy compat).
-        BydCameraCoordinator.closeCamera(cam, cameraSurfaceMode);
+        return BydCameraCoordinator.closeCamera(cam, cameraSurfaceMode);
+    }
+
+    private boolean releaseDiLink5GlResourcesBeforeClose(
+            com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend backend) {
+        if (!USE_DILINK5_QCARCAM_PATH) return true;
+        Handler handler = glHandler;
+        if (handler == null
+                || android.os.Looper.myLooper() == handler.getLooper()) {
+            return releaseDiLink5GlResourcesOnGlThread(backend);
+        }
+        java.util.concurrent.CountDownLatch done =
+                new java.util.concurrent.CountDownLatch(1);
+        AtomicBoolean released = new AtomicBoolean(false);
+        if (!handler.post(() -> {
+            try {
+                released.set(releaseDiLink5GlResourcesOnGlThread(backend));
+            } finally {
+                done.countDown();
+            }
+        })) {
+            return false;
+        }
+        try {
+            return done.await(
+                    GL_THREAD_TIMEOUT_MS,
+                    java.util.concurrent.TimeUnit.MILLISECONDS)
+                    && released.get();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    private boolean releaseDiLink5GlResourcesOnGlThread(
+            com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend backend) {
+        synchronized (cameraTextureLock) {
+            try {
+                if (eglCore != null && dummySurface != null) {
+                    eglCore.makeCurrent(dummySurface);
+                }
+                return backend.releaseOwnedGlResources();
+            } catch (Throwable t) {
+                logger.warn("DiLink 5 EGLImage cleanup failed: " + t.getMessage());
+                return false;
+            }
+        }
     }
 
     /** Null out the AVMCamera-side preview + event callback proxies before
@@ -2465,6 +4179,10 @@ public class PanoramicCameraGpu {
         // top releasePreviousBoundImage AND the SurfaceTexture.release). Harmless
         // when reached from releaseGl (AI lane already shut down there).
         synchronized (cameraTextureLock) {
+        // Decoupled lane note: any buffer copied this session was already
+        // closed inline behind the per-frame publish barrier; the only
+        // possible holdover is a bind that never reached its copy, and
+        // releasePreviousBoundImage below owns exactly that case.
         // Release the held Image + HardwareBuffer FIRST so the gralloc slots
         // go back to the ImageReader pool before we close the reader.
         releasePreviousBoundImage();
@@ -2477,16 +4195,21 @@ public class PanoramicCameraGpu {
             cameraImageReader = null;
         }
         if (cameraSurfaceTexture != null) {
-            try { cameraSurfaceTexture.setOnFrameAvailableListener(null); } catch (Throwable ignored) {}
-            try { cameraSurfaceTexture.release(); } catch (Throwable ignored) {}
-            cameraSurfaceTexture = null;
+            SurfaceTexture retired = retireCameraSurfaceTextureConsumer();
+            if (retired != null) {
+                try { retired.setOnFrameAvailableListener(null); } catch (Throwable ignored) {}
+                try { retired.release(); } catch (Throwable ignored) {}
+            }
         }
         }
         stFramePending = false;
+        diLink5FramePending = false;
         // Reset the arrival bookkeeping together with the SurfaceTexture it
-        // describes. The old SurfaceTexture's listener is detached above, so no
-        // further increments can arrive from it; a NEW SurfaceTexture starts its
-        // own arrival sequence. Both must go back to 0 in lockstep:
+        // describes. The old listener is detached and, more importantly, its
+        // identity/epoch was retired above, so even a callback already queued on
+        // the Handler cannot increment the replacement consumer's state. A NEW
+        // SurfaceTexture starts its own arrival sequence. Both must go back to 0
+        // in lockstep:
         //   - leaving stFrameArrivalSeq high while stLastConsumedArrivalSeq is
         //     reset would fabricate a "fresh" frame before the HAL produced one;
         //   - leaving stLastConsumedArrivalSeq high while the counter restarts
@@ -2495,6 +4218,12 @@ public class PanoramicCameraGpu {
         // Resetting both to 0 keeps the invariant "equal ⇒ nothing new".
         stFrameArrivalSeq.set(0);
         stLastConsumedArrivalSeq = 0;
+        dilink4LastGenuineFrameArrivalMs = 0L;
+        dilink4SoftRecoveryEpoch.incrementAndGet();
+        dilink4SoftRecoveryInFlight.set(false);
+        dilink4DeferredReopenEpoch.incrementAndGet();
+        dilink4DeferredReopenPending.set(false);
+        dilink4SoftRecoveryCycles = 0;
         // Drop the real-arrival clock too: a stale value would make the stall
         // watchdog measure against the previous camera session and could fire
         // (or suppress) spuriously right after a reattach. 0 = "no frame yet",
@@ -2589,8 +4318,42 @@ public class PanoramicCameraGpu {
     }
 
     private void startWindshieldCameraOnGlThread() {
+        if (USE_DILINK4_AVM_PATH) {
+            int concurrentAvmSupported = -1;
+            try {
+                org.json.JSONObject cameraConfig =
+                    com.overdrive.app.config.UnifiedConfigManager
+                        .loadConfig().optJSONObject("camera");
+                if (cameraConfig != null) {
+                    concurrentAvmSupported =
+                        cameraConfig.optInt("concurrentAvmSupported", -1);
+                }
+            } catch (Throwable ignored) {
+                concurrentAvmSupported = -1;
+            }
+            int primaryCameraId = getCameraId();
+            if (!Di4CameraSafetyPolicy.canOpenSecondaryAvmCamera(
+                    true,
+                    primaryCameraId,
+                    windshieldCameraId,
+                    concurrentAvmSupported)) {
+                logger.warn("DiLink 4 windshield open blocked: primaryId="
+                    + primaryCameraId + ", windshieldId=" + windshieldCameraId
+                    + ", concurrentAvmSupported=" + concurrentAvmSupported);
+                windshieldOpenFailed = true;
+                return;
+            }
+        }
+        if (!USE_DILINK4_AVM_PATH && !USE_DILINK5_QCARCAM_PATH) {
+            startLegacyWindshieldCameraWithHardTimeout();
+            return;
+        }
         try {
             createWindshieldImageReader();
+            // This is a secondary handle opened only from the render loop
+            // after the primary camera is already live and has passed the
+            // cold-open warmup gate. Re-warming here would block the GL thread
+            // and drop primary recording frames.
             Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
             Constructor<?> constructor = avmClass.getDeclaredConstructor(int.class);
             constructor.setAccessible(true);
@@ -2628,9 +4391,248 @@ public class PanoramicCameraGpu {
         }
     }
 
-    private void stopWindshieldCameraOnGlThread() {
+    /**
+     * Bounds the optional legacy windshield camera's complete vendor
+     * acquisition (open + attach + startPreview). The old path ran all three
+     * calls directly on the primary GL thread, so one wedged secondary camera
+     * froze the primary recorder and fed the frame-stall restart loop.
+     */
+    private void startLegacyWindshieldCameraWithHardTimeout() {
+        if (legacyWindshieldCameraTerminalRestart.get()
+                || CameraDaemon.isProcessRestartPending()) {
+            windshieldOpenFailed = true;
+            return;
+        }
+
+        final int requestedCameraId = windshieldCameraId;
+        final long requestedStartEpoch = activeStartEpoch;
+        final int requestedFps = targetFps;
+        final java.util.concurrent.atomic.AtomicReference<Object> openedCamera =
+            new java.util.concurrent.atomic.AtomicReference<>();
+        final java.util.concurrent.atomic.AtomicReference<Throwable> openFailure =
+            new java.util.concurrent.atomic.AtomicReference<>();
+
+        try {
+            createWindshieldImageReader();
+            final Surface requestedSurface = windshieldSurface;
+            if (!legacyWindshieldCameraLifecycleInFlight
+                    .compareAndSet(false, true)) {
+                logger.info("Legacy windshield camera lifecycle already in flight");
+                return;
+            }
+
+            Thread worker = new Thread(() -> {
+                Object candidate = null;
+                try {
+                    Class<?> avmClass =
+                        Class.forName("android.hardware.AVMCamera");
+                    Constructor<?> constructor =
+                        avmClass.getDeclaredConstructor(int.class);
+                    constructor.setAccessible(true);
+                    candidate = constructor.newInstance(requestedCameraId);
+
+                    Method mOpen = avmClass.getDeclaredMethod("open");
+                    mOpen.setAccessible(true);
+                    if (!(boolean) mOpen.invoke(candidate)) {
+                        throw new RuntimeException(
+                            "AVMCamera.open() returned false (id="
+                                + requestedCameraId + ")");
+                    }
+
+                    AvmCameraHelper.setCameraFps(candidate, requestedFps);
+
+                    Method mAddSurface = avmClass.getDeclaredMethod(
+                        "addPreviewSurface", Surface.class, int.class);
+                    mAddSurface.setAccessible(true);
+                    mAddSurface.invoke(candidate, requestedSurface, 0);
+
+                    Method mStart =
+                        avmClass.getDeclaredMethod("startPreview");
+                    mStart.setAccessible(true);
+                    mStart.invoke(candidate);
+
+                    if (!isLegacyWindshieldRequestCurrent(
+                            requestedCameraId, requestedStartEpoch)) {
+                        logger.info("Legacy windshield camera request retired "
+                            + "during vendor acquisition");
+                        return;
+                    }
+                    openedCamera.set(candidate);
+                    candidate = null;
+                } catch (Throwable t) {
+                    openFailure.set(t);
+                } finally {
+                    try {
+                        if (candidate != null) {
+                            // This cleanup is part of the same bounded worker.
+                            // If it wedges, the caller's hard deadline retires
+                            // the process instead of touching the ambiguous
+                            // handle.
+                            BydCameraCoordinator.closeCamera(candidate, 0);
+                        }
+                    } finally {
+                        legacyWindshieldCameraLifecycleInFlight.set(false);
+                    }
+                }
+            }, "LegacyWindshieldCameraOpen");
+            worker.setDaemon(true);
+            try {
+                worker.start();
+            } catch (Throwable spawnFailure) {
+                legacyWindshieldCameraLifecycleInFlight.set(false);
+                throw spawnFailure;
+            }
+
+            if (!awaitLegacyWindshieldWorker(
+                    worker, "Legacy windshield camera open/start")) {
+                windshieldOpenFailed = true;
+                return;
+            }
+
+            Throwable failure = openFailure.get();
+            if (failure != null) {
+                throw new RuntimeException(
+                    "Legacy windshield camera acquisition failed", failure);
+            }
+
+            Object completed = openedCamera.getAndSet(null);
+            if (completed == null) {
+                // A request retired while the worker was in vendor code. Its
+                // worker-side finally already closed the temporary handle.
+                return;
+            }
+            if (!isLegacyWindshieldRequestCurrent(
+                    requestedCameraId, requestedStartEpoch)) {
+                if (CameraDaemon.isProcessRestartPending()) {
+                    armLegacyWindshieldTerminalRestart(
+                        "Legacy windshield camera completed after process "
+                            + "retirement began");
+                    windshieldOpenFailed = true;
+                    return;
+                }
+                if (!closeLegacyWindshieldCameraWithHardTimeout(
+                        completed, "retired after acquisition")) {
+                    windshieldOpenFailed = true;
+                }
+                return;
+            }
+
+            windshieldCameraObj = completed;
+            windshieldStarted = true;
+            windshieldFrameReady = false;
+            windshieldFrameCount = 0;
+            windshieldLastFrameMs = System.currentTimeMillis();
+            // The primary camera continued producing while its GL consumer
+            // waited for the secondary acquisition. Give it a fresh stall
+            // window instead of treating that intentional wait as HAL loss.
+            lastFrameTime = System.currentTimeMillis();
+            lastGlThreadHeartbeat = lastFrameTime;
+            logger.info("Windshield camera started (id="
+                + requestedCameraId + ")");
+        } catch (Throwable t) {
+            logger.warn("Windshield camera unavailable; dashcam layout will "
+                + "fall back to 360 front: " + t.getMessage());
+            windshieldOpenFailed = true;
+            stopWindshieldCameraOnGlThread();
+        }
+    }
+
+    private boolean isLegacyWindshieldRequestCurrent(
+            int requestedCameraId, long requestedStartEpoch) {
+        return running
+            && windshieldEnabled
+            && windshieldCameraId == requestedCameraId
+            && CameraDaemon.isCameraStartEpochCurrent(requestedStartEpoch)
+            && !restartInProgress.get()
+            && !CameraDaemon.isProcessRestartPending()
+            && !legacyWindshieldCameraTerminalRestart.get();
+    }
+
+    private boolean awaitLegacyWindshieldWorker(
+            Thread worker, String phase) {
+        boolean interrupted = false;
+        long deadline = android.os.SystemClock.elapsedRealtime()
+            + GL_THREAD_WARMUP_TIMEOUT_MS;
+        while (worker.isAlive()) {
+            long remaining =
+                deadline - android.os.SystemClock.elapsedRealtime();
+            if (remaining <= 0L) break;
+            lastGlThreadHeartbeat = System.currentTimeMillis();
+            try {
+                worker.join(Math.min(remaining, 200L));
+            } catch (InterruptedException waitInterrupted) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+        if (worker.isAlive()) {
+            armLegacyWindshieldTerminalRestart(
+                phase + " blocked for " + GL_THREAD_WARMUP_TIMEOUT_MS + "ms");
+            return false;
+        }
+        return true;
+    }
+
+    private boolean closeLegacyWindshieldCameraWithHardTimeout(
+            Object camera, String phase) {
+        if (camera == null) return true;
+        if (legacyWindshieldCameraTerminalRestart.get()) return false;
+        if (!legacyWindshieldCameraLifecycleInFlight.compareAndSet(
+                false, true)) {
+            armLegacyWindshieldTerminalRestart(
+                "Overlapping legacy windshield camera lifecycle during "
+                    + phase);
+            return false;
+        }
+
+        Thread worker = new Thread(() -> {
+            try {
+                BydCameraCoordinator.closeCamera(camera, 0);
+            } finally {
+                legacyWindshieldCameraLifecycleInFlight.set(false);
+            }
+        }, "LegacyWindshieldCameraClose");
+        worker.setDaemon(true);
+        try {
+            worker.start();
+        } catch (Throwable spawnFailure) {
+            legacyWindshieldCameraLifecycleInFlight.set(false);
+            armLegacyWindshieldTerminalRestart(
+                "Could not start bounded legacy windshield close worker: "
+                    + spawnFailure.getMessage());
+            return false;
+        }
+        return awaitLegacyWindshieldWorker(
+            worker, "Legacy windshield camera close (" + phase + ")");
+    }
+
+    private void armLegacyWindshieldTerminalRestart(String reason) {
+        legacyWindshieldCameraTerminalRestart.set(true);
+        CameraDaemon.requestUrgentCameraReleaseRestart(reason);
+        logger.error(reason + " — terminal process retirement armed; "
+            + "windshield camera/EGL cleanup fenced");
+    }
+
+    private boolean stopWindshieldCameraOnGlThread() {
+        if (legacyWindshieldCameraTerminalRestart.get()) {
+            logger.warn("Skipping windshield teardown: terminal legacy camera "
+                    + "restart owns the ambiguous vendor lifecycle");
+            return false;
+        }
+        boolean cameraClosed = true;
         if (windshieldCameraObj != null) {
-            BydCameraCoordinator.closeCamera(windshieldCameraObj, 0);
+            Object cameraToClose = windshieldCameraObj;
+            if (!USE_DILINK4_AVM_PATH && !USE_DILINK5_QCARCAM_PATH) {
+                if (!closeLegacyWindshieldCameraWithHardTimeout(
+                        cameraToClose, "normal teardown")) {
+                    return false;
+                }
+            } else {
+                cameraClosed =
+                        BydCameraCoordinator.closeCamera(cameraToClose, 0);
+            }
             windshieldCameraObj = null;
         }
         releasePreviousBoundWindshieldImage();
@@ -2649,6 +4651,44 @@ public class PanoramicCameraGpu {
         windshieldPending = false;
         windshieldFrameReady = false;
         windshieldFrameCount = 0;
+        return cameraClosed;
+    }
+
+    /**
+     * DiLink 5 never yields the FastCam source to OEM reverse. The AIS server
+     * multiplexes the QCarCam inputs to every client, so the OEM reverse/360
+     * view renders alongside our stream. The former gear-driven pause/resume
+     * (kill producer on R, respawn 3 s after leaving R, hand the vendor AVM
+     * back and forth) raced the frame watchdog, the release guard and the
+     * boot-scoped safety markers; it was removed. Both predicates are kept
+     * as permanent {@code false} roots so every remaining reverse-flag
+     * writer in this class is unreachable, and the {@code diLink5Reverse*}
+     * flags they gated stay at their idle defaults for the process lifetime.
+     */
+    private boolean shouldHoldForDiLink5Reverse() {
+        return false;
+    }
+
+    private boolean isFreshDiLink5Reverse() {
+        return false;
+    }
+
+    private boolean awaitDiLink5OwnershipTransitionBeforeStop() {
+        if (!USE_DILINK5_QCARCAM_PATH) return true;
+        boolean locked = false;
+        try {
+            locked = diLink5OwnershipTransition.tryLock(
+                    GL_THREAD_WARMUP_TIMEOUT_MS + GL_THREAD_TIMEOUT_MS,
+                    java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (locked) return true;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        } finally {
+            if (locked) diLink5OwnershipTransition.unlock();
+        }
+        CameraDaemon.requestUrgentCameraReleaseRestart(
+                "DiLink 5 GL ownership transition did not stop");
+        return false;
     }
 
     /**
@@ -2656,8 +4696,19 @@ public class PanoramicCameraGpu {
      * Tries constructor path first, then static factory for firmware compatibility.
      */
     private void startCamera() throws Exception {
+        requireCurrentStartEpoch(activeStartEpoch, "camera acquisition");
+        if (USE_DILINK5_QCARCAM_PATH && diLink5SafetyDisabled) {
+            logger.error("DiLink 5 camera remains in boot-scoped safe-off mode");
+            return;
+        }
+        if (shouldHoldForDiLink5Reverse()) {
+            logger.info("DiLink 5 reverse/AVM owns the cameras — skipping FastCam open");
+            return;
+        }
         // GATE: Don't open camera if yielded to native app via IBYDCameraUser callback
-        if (cameraCoordinator != null && cameraCoordinator.isCameraYielded()) {
+        if (!USE_DILINK5_QCARCAM_PATH
+                && cameraCoordinator != null
+                && cameraCoordinator.isCameraYielded()) {
             logger.info("Camera yielded to native app — skipping open");
             cameraYielded = true;
             // Defensive: ensure the yield poller is running. yieldCameraInternal
@@ -2667,62 +4718,150 @@ public class PanoramicCameraGpu {
             return;
         }
 
+        if (cameraObj != null) {
+            logger.info("Camera handle already active — skipping duplicate cold open");
+            return;
+        }
+
+        // Cold-open invariant: every path that creates the primary AVMCamera
+        // handle (initial start, ACC reopen, HAL-error restart, yield
+        // reacquire, and auto-probe) routes through this one method.
+        if (!AvcHalWarmup.warmupBeforeColdOpen(
+                () -> (running || legacyCameraInitializationInFlight.get())
+                    && cameraObj == null
+                    && CameraDaemon.isCameraStartEpochCurrent(activeStartEpoch)
+                    && !CameraDaemon.isProcessRestartPending())) {
+            throw new InterruptedException(
+                "AVC HAL warmup interrupted before AVMCamera open");
+        }
+        lastGlThreadHeartbeat = System.currentTimeMillis();
+
+        // Warmup is deliberately blocking. Revalidate everything that may
+        // have changed while it ran before touching the HAL.
+        requireCurrentStartEpoch(activeStartEpoch, "post-warmup camera acquisition");
+        if (shouldHoldForDiLink5Reverse()) {
+            logger.info("DiLink 5 reverse/AVM claimed the cameras during warmup");
+            return;
+        }
+        if (cameraObj != null) {
+            logger.info("Camera opened by a concurrent path during warmup — "
+                + "skipping duplicate cold open");
+            return;
+        }
+        if (!USE_DILINK5_QCARCAM_PATH
+                && cameraCoordinator != null
+                && cameraCoordinator.isCameraYielded()) {
+            logger.info("Camera yielded during warmup — skipping open");
+            cameraYielded = true;
+            startYieldPoller();
+            return;
+        }
+
         int cameraId = cameraIdOverride >= 0 ? cameraIdOverride : PHYSICAL_CAMERA_ID;
+        final boolean legacyOpen =
+                !USE_DILINK4_AVM_PATH && !USE_DILINK5_QCARCAM_PATH;
+        if (legacyOpen) {
+            legacyCameraOpenInFlight.set(true);
+        }
+        try {
+            startCameraViaAvmReflection(cameraId);
+            if (USE_DILINK5_QCARCAM_PATH
+                    && diLink5SafetyDisabled
+                    && cameraObj == null) {
+                logger.error("DiLink 5 camera startup degraded to camera-off mode; "
+                        + "the daemon and non-camera subsystems remain active");
+                return;
+            }
+            if (USE_DILINK5_QCARCAM_PATH && cameraObj == null) {
+                if (diLink5ReverseRequested || isFreshDiLink5Reverse()) {
+                    diLink5ReverseRequested = true;
+                    diLink5SystemAvmFrameGate = true;
+                    logger.info("DiLink 5 FastCam open was superseded before "
+                            + "GL-owner publication; system reverse retains the "
+                            + "physical inputs");
+                    return;
+                }
+                throw new IllegalStateException(
+                        "DiLink 5 FastCam source was not published to its GL owner");
+            }
 
-        startCameraViaAvmReflection(cameraId);
+            // Remember every slot we've opened so the dead-slot walk (issue #170)
+            // can't loop back onto one that already failed to deliver a frame.
+            // Recomputed rather than reusing the local: the static-factory branch
+            // inside startCameraViaAvmReflection can probe ids 0-5 and open a
+            // DIFFERENT slot (it updates cameraIdOverride when it does) — record
+            // the id that actually opened, not the one we asked for.
+            deadSlotTriedCameraIds.add(
+                    cameraIdOverride >= 0
+                            ? cameraIdOverride : PHYSICAL_CAMERA_ID);
 
-        // Remember every slot we've opened so the dead-slot walk (issue #170)
-        // can't loop back onto one that already failed to deliver a frame.
-        // Recomputed rather than reusing the local: the static-factory branch
-        // inside startCameraViaAvmReflection can probe ids 0-5 and open a
-        // DIFFERENT slot (it updates cameraIdOverride when it does) — record
-        // the id that actually opened, not the one we asked for.
-        deadSlotTriedCameraIds.add(cameraIdOverride >= 0 ? cameraIdOverride : PHYSICAL_CAMERA_ID);
+            boolean reverseClaimedDuringOpen =
+                    USE_DILINK5_QCARCAM_PATH
+                            && (diLink5ReverseRequested || isFreshDiLink5Reverse());
+            if (reverseClaimedDuringOpen) {
+                // Reverse can arrive while nativeInit/start is blocked inside the
+                // HAL. The queued reverse task owns the subsequent close, but the
+                // newly opened producer must never become render-visible in the
+                // meantime.
+                diLink5ReverseRequested = true;
+                diLink5SystemAvmFrameGate = true;
+                diLink5ReverseHandoffComplete = false;
+                logger.info("DiLink 5 reverse claimed the camera during FastCam "
+                        + "open; keeping frame consumption paused until the "
+                        + "source-only handoff closes it");
+            } else {
+                if (!USE_DILINK5_QCARCAM_PATH) {
+                    cameraYielded = false;
+                } else {
+                    diLink5SystemAvmFrameGate = false;
+                }
+                diLink5ReverseHandoffComplete = true;
+                diLink5AvmPreservedForReverse = false;
+            }
+            lastCameraStartTime = System.currentTimeMillis();
+            // Snapshot the frame counter at this open so the next restart can tell
+            // whether THIS open ever delivered a frame (zero-frame-reopen escalation).
+            frameCounterAtOpen = frameCounter;
+            logger.info("Camera started (" + width + "x" + height +
+                ", id=" + cameraId + ", surfaceMode=" + cameraSurfaceMode + ")");
 
-        cameraYielded = false;
-        lastCameraStartTime = System.currentTimeMillis();
-        // Snapshot the frame counter at this open so the next restart can tell
-        // whether THIS open ever delivered a frame (zero-frame-reopen escalation).
-        frameCounterAtOpen = frameCounter;
-        logger.info("Camera started (" + width + "x" + height +
-            ", id=" + cameraId + ", surfaceMode=" + cameraSurfaceMode + ")");
-        
-        // Update coordinator with actual camera ID
-        if (cameraCoordinator != null) {
-            cameraCoordinator.setActiveCameraId(cameraId);
+            // Update coordinator with actual camera ID
+            if (cameraCoordinator != null) {
+                cameraCoordinator.setActiveCameraId(cameraId);
+            }
+        } finally {
+            if (legacyOpen) {
+                legacyCameraOpenInFlight.set(false);
+            }
         }
     }
 
     /**
      * Opens camera via AVMCamera reflection.
      *
-     * Strategy (mirrors the secondary reference app C4051a.m4446d() approach):
-     *   1. Constructor: new AVMCamera(int) + .open() — required on this device.
-     *      The static factory AVMCamera.open(int) returns null because
-     *      BmmCameraInfo.isValidCamera() is empty (vehicle.config.cam_sort
-     *      is unset on DiLink 5.0). The constructor bypasses that gate and
-     *      is the only path that opens the camera at all.
-     *   2. Static factory AVMCamera.open(int) — only if constructor is
-     *      missing entirely (DiLink 6.0+ may remove it).
+     * Strategy:
+     *   - Old DiLink 4: try the static AVMCamera.open(int) factory first,
+     *     then fall back to new AVMCamera(int) + .open(). This keeps the
+     *     factory-managed path without adding a reverse-gear recording gap.
+     *   - Every other AVMCamera path retains the shipped constructor-first
+     *     behavior and its static-factory fallback/probe.
      *
      * See CAMERA_FPS_INVESTIGATION.md for the full rationale.
      *
      * After either path succeeds, addPreviewSurface + startPreview are called.
      *
-     * Notifies IBYDCameraService before opening so the service can arbitrate
-     * with native apps (reverse camera, dashcam, AVM parking view).
+     * Calls the coordinator's pre-open hook before acquisition.
      */
     private void startCameraViaAvmReflection(int cameraId) throws Exception {
-        // OEM-PARITY: no gate. oem's user-preview path opens AVMCamera
-        // immediately on PanoCameraRecordService.m19854a → AIDL → daemon
-        // C5312b.m24073j → C5920a.mo26750v with no wall-clock wait. All
-        // OverDrive open paths (StreamingApiHandler, RecordingModeManager,
-        // OemDashcam, CameraDaemon ACC-OFF) reach this method directly.
+        requireCurrentStartEpoch(activeStartEpoch, "AVM acquisition");
+        // The cold-open warmup gate is centralized in startCamera(), before
+        // any caller can reach this reflection boundary.
 
         // Notify camera service we're about to open
         if (cameraCoordinator != null) {
             cameraCoordinator.notifyPreOpenCamera();
         }
+        requireCurrentStartEpoch(activeStartEpoch, "AVM pre-open");
 
         // oem-parity: tell the BYDAutoManager Panorama device (1031) to switch
         // its viewpoint to mosaic-output BEFORE opening AVMCamera. On byd_apa /
@@ -2735,7 +4874,7 @@ public class PanoramicCameraGpu {
         // keep the pair symmetric. The helper would warn-log on legacy
         // anyway (no panorama device exposed), but skipping the call also
         // skips a binder round-trip per camera open.
-        if (USE_OEM_SURFACE_TEXTURE_PATH) {
+        if (USE_DILINK4_AVM_PATH) {
             // Acquire our viewpoint token. Mirrors oem C5920a.mo26750v
             // (gl/C5920a.java:387 — C6498a.f26622a.m28930h(this)). If
             // we're the only holder this writes viewpoint=2012 and registers
@@ -2750,75 +4889,151 @@ public class PanoramicCameraGpu {
             releaseSentryBridgeViewpoint();
         }
 
-        // DiLink 5.0 (Snapdragon SA8155P): uses native QCarCam / AIS backend directly
-        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+        // DiLink 5.0 (Snapdragon SA8155P): uses fast_cam_capture DMA-FD IPC.
+        // Never silently fall back to the legacy AVMCamera path when explicitly selected.
+        if (USE_DILINK5_QCARCAM_PATH) {
+            if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {
+                throw new IllegalStateException(
+                        "DiLink 5 selected but the QCarCam/AIS runtime is unavailable");
+            }
             logger.info("DiLink 5 platform detected — initializing native QCarCam backend (cameraId=" + cameraId + ")");
             com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend dilink5Backend =
-                    new com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend(cameraId);
-            if (cameraSurfaceTexture != null) {
-                if (cameraSurface == null) cameraSurface = new Surface(cameraSurfaceTexture);
-                dilink5Backend.startSurface(cameraSurface);
-            } else {
-                dilink5Backend.start();
+                    new com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend(
+                            cameraId, activeStartEpoch);
+            boolean started = dilink5Backend.start(ignoredTimestampNs -> {
+                synchronized (frameSync) {
+                    diLink5FramePending = true;
+                    frameSync.notify();
+                }
+            });
+            if (!started) {
+                dilink5Backend.clearFrameListenerIfOwner();
+                closeCameraForPath(dilink5Backend);
+                if (com.overdrive.app.camera.dilink5
+                        .DiLink5QCarCamBackend.isCaptureSuppressed()) {
+                    diLink5SafetyDisabled = true;
+                    logger.error("DiLink 5 QCarCam acquisition was refused by "
+                            + "the lifecycle safety guard; camera features are "
+                            + "disabled until the next safe daemon/vehicle cycle");
+                    return;
+                }
+                throw new IllegalStateException(
+                        "DiLink 5 native QCarCam stream failed to start");
             }
-            cameraObj = dilink5Backend;
+            boolean sourceClaimed;
+            synchronized (com.overdrive.app.camera.dilink5
+                    .DiLink5QCarCamBackend.class) {
+                sourceClaimed =
+                        dilink5Backend.claimPublishedSourceForGlOwner();
+                if (sourceClaimed) {
+                    // The backend claim and this owner-visible assignment must
+                    // be one atomic step against reverse cancellation. Once
+                    // cancellation observes "claimed", its queued GL task is
+                    // guaranteed to find this exact source in cameraObj.
+                    cameraObj = dilink5Backend;
+                    diLink5GlOwnerBackend = dilink5Backend;
+                    diLink5CloseInProgress = false;
+                }
+            }
+            if (!sourceClaimed) {
+                dilink5Backend.clearFrameListenerIfOwner();
+                boolean closed =
+                        dilink5Backend.closeWithRetirementRetry(false);
+                if (!closed) {
+                    CameraDaemon.requestUrgentCameraReleaseRestart(
+                            "FastCam source lost GL-owner claim and could not close");
+                }
+                logger.info("DiLink 5 native QCarCam source was superseded "
+                        + "before GL-owner publication.");
+                return;
+            }
             logger.info("DiLink 5 native QCarCam stream initialized (cameraObj assigned).");
             return;
         }
 
-        Class<?> avmClass;
-        try {
-            avmClass = Class.forName("android.hardware.AVMCamera");
-        } catch (ClassNotFoundException e) {
-            logger.warn("android.hardware.AVMCamera not present on this device (DiLink 5+ architecture)");
-            return;
-        }
+        Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
 
-        // === ATTEMPT 1: Constructor new AVMCamera(int) + .open() ===
-        // Required on this firmware. The static factory would return null.
-        try {
-            Constructor<?> constructor = avmClass.getDeclaredConstructor(int.class);
-            constructor.setAccessible(true);
-            cameraObj = constructor.newInstance(cameraId);
-
-            Method mOpen = avmClass.getDeclaredMethod("open");
-            mOpen.setAccessible(true);
-            if (!(boolean) mOpen.invoke(cameraObj)) {
-                throw new RuntimeException("AVMCamera.open() returned false (id=" + cameraId + ")");
-            }
-            logger.info("Camera opened via constructor path (id=" + cameraId + ")");
-        } catch (NoSuchMethodException e) {
-            // Constructor with int param doesn't exist — fall back to static factory
-            logger.info("AVMCamera(int) constructor not found — trying static factory");
+        if (shouldUseDi4PreviewBootstrap()) {
+            // Old-Di4 pano uses the framework factory before constructor fallback.
+            // Unlike a reverse-gear yield, this leaves the recorder running.
             cameraObj = null;
-
-            // === ATTEMPT 2: Static factory AVMCamera.open(cameraId) ===
             try {
                 Method mStaticOpen = avmClass.getDeclaredMethod("open", int.class);
                 mStaticOpen.setAccessible(true);
                 cameraObj = mStaticOpen.invoke(null, cameraId);
                 if (cameraObj != null) {
-                    logger.info("Camera opened via static factory (id=" + cameraId + ")");
-                } else {
-                    logger.info("AVMCamera.open(" + cameraId + ") returned null — trying IDs 0-5");
-                    for (int tryId = 0; tryId <= 5; tryId++) {
-                        if (tryId == cameraId) continue;
-                        cameraObj = mStaticOpen.invoke(null, tryId);
-                        if (cameraObj != null) {
-                            logger.info("Camera opened via static factory probe (id=" + tryId + ")");
-                            cameraIdOverride = tryId;
-                            break;
+                    logger.info("DiLink 4 camera opened via static factory (id="
+                        + cameraId + ")");
+                }
+            } catch (Throwable staticOpenFailure) {
+                logger.warn("DiLink 4 static AVMCamera.open(" + cameraId
+                    + ") failed — trying constructor: "
+                    + staticOpenFailure.getMessage());
+                cameraObj = null;
+            }
+
+            if (cameraObj == null) {
+                logger.info("DiLink 4 static AVMCamera.open(" + cameraId
+                    + ") returned null — trying constructor fallback");
+                Constructor<?> constructor = avmClass.getDeclaredConstructor(int.class);
+                constructor.setAccessible(true);
+                cameraObj = constructor.newInstance(cameraId);
+
+                Method mOpen = avmClass.getDeclaredMethod("open");
+                mOpen.setAccessible(true);
+                if (!(boolean) mOpen.invoke(cameraObj)) {
+                    throw new RuntimeException(
+                        "AVMCamera.open() returned false (id=" + cameraId + ")");
+                }
+                logger.info("DiLink 4 camera opened via constructor fallback (id="
+                    + cameraId + ")");
+            }
+        } else {
+            // === ATTEMPT 1: Constructor new AVMCamera(int) + .open() ===
+            try {
+                Constructor<?> constructor = avmClass.getDeclaredConstructor(int.class);
+                constructor.setAccessible(true);
+                cameraObj = constructor.newInstance(cameraId);
+
+                Method mOpen = avmClass.getDeclaredMethod("open");
+                mOpen.setAccessible(true);
+                if (!(boolean) mOpen.invoke(cameraObj)) {
+                    throw new RuntimeException("AVMCamera.open() returned false (id=" + cameraId + ")");
+                }
+                logger.info("Camera opened via constructor path (id=" + cameraId + ")");
+            } catch (NoSuchMethodException e) {
+                // Constructor with int param doesn't exist — fall back to static factory
+                logger.info("AVMCamera(int) constructor not found — trying static factory");
+                cameraObj = null;
+
+                // === ATTEMPT 2: Static factory AVMCamera.open(cameraId) ===
+                try {
+                    Method mStaticOpen = avmClass.getDeclaredMethod("open", int.class);
+                    mStaticOpen.setAccessible(true);
+                    cameraObj = mStaticOpen.invoke(null, cameraId);
+                    if (cameraObj != null) {
+                        logger.info("Camera opened via static factory (id=" + cameraId + ")");
+                    } else {
+                        logger.info("AVMCamera.open(" + cameraId + ") returned null — trying IDs 0-5");
+                        for (int tryId = 0; tryId <= 5; tryId++) {
+                            if (tryId == cameraId) continue;
+                            cameraObj = mStaticOpen.invoke(null, tryId);
+                            if (cameraObj != null) {
+                                logger.info("Camera opened via static factory probe (id=" + tryId + ")");
+                                cameraIdOverride = tryId;
+                                break;
+                            }
                         }
                     }
+                    if (cameraObj == null) {
+                        throw new RuntimeException("AVMCamera.open() returned null for all IDs 0-5");
+                    }
+                } catch (NoSuchMethodException e2) {
+                    throw new RuntimeException(
+                        "AVMCamera API not compatible: no constructor(int) and no static open(int). " +
+                        "Available constructors: " + Arrays.toString(avmClass.getDeclaredConstructors()) +
+                        ", methods: " + Arrays.toString(avmClass.getDeclaredMethods()), e2);
                 }
-                if (cameraObj == null) {
-                    throw new RuntimeException("AVMCamera.open() returned null for all IDs 0-5");
-                }
-            } catch (NoSuchMethodException e2) {
-                throw new RuntimeException(
-                    "AVMCamera API not compatible: no constructor(int) and no static open(int). " +
-                    "Available constructors: " + Arrays.toString(avmClass.getDeclaredConstructors()) +
-                    ", methods: " + Arrays.toString(avmClass.getDeclaredMethods()), e2);
             }
         }
         
@@ -2991,9 +5206,17 @@ public class PanoramicCameraGpu {
             // Crash-fix: hold cameraTextureLock across the rebind + prev-buffer
             // free so the AI lane cannot be mid-sampling the OLD backing buffer
             // when we swap the EGLImage / free the gralloc it points at.
+            //
+            // Decoupled lane: the HAL buffer binds to the PRIVATE OES texture
+            // (copy source) — consumers sample the published ring slot, never
+            // this texture, so the AI-lane rebind race can't reach it; the
+            // lock is still taken for the release-previous path parity.
+            final int bindTargetTexture = USE_DECOUPLED_ENCODER_LANE
+                ? cameraOesTextureId
+                : cameraTextureId;
             synchronized (cameraTextureLock) {
                 boolean bound = HardwareBufferTextureBinder
-                    .bindHardwareBufferToTextureNative(hwBuffer, cameraTextureId);
+                    .bindHardwareBufferToTextureNative(hwBuffer, bindTargetTexture);
                 if (!bound) {
                     logger.warn("bindHardwareBufferToTexture failed — dropping frame");
                     irBindFailCount++;
@@ -3035,6 +5258,51 @@ public class PanoramicCameraGpu {
                 }
             }
         }
+    }
+
+    /** Composite or upload the latest DiLink 5 frame into cameraTextureId. */
+    private boolean consumeDiLink5Frame() {
+        if (!(cameraObj
+                instanceof com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend)) {
+            return false;
+        }
+        com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend backend =
+                (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend)
+                        cameraObj;
+        int activeTexture;
+        synchronized (cameraTextureLock) {
+            activeTexture =
+                    backend.bindLatestFrameForOwner(cameraTextureId);
+            if (activeTexture > 0) cameraTextureId = activeTexture;
+        }
+        if (activeTexture <= 0) return false;
+
+        // FastCam's timestamp is only an arrival signal. Keep presentation
+        // timestamps in the same monotonic clock domain as every other path.
+        long candidate = System.nanoTime();
+        if (candidate <= lastAcceptedPtsNs) {
+            candidate = lastAcceptedPtsNs + 1_000L;
+        }
+        lastAcceptedPtsNs = candidate;
+        currentFrameTimestampNs = candidate;
+        cameraFrameSeq.incrementAndGet();
+        lastRealFrameTimeSt = System.currentTimeMillis();
+        if (diLink5ReverseSourcePaused) {
+            diLink5ReverseSourcePaused = false;
+            logger.info("DiLink 5 reverse source delivered its first "
+                    + "replacement frame");
+        } else if (diLink5SourceOnlyReacquire) {
+            logger.info("DiLink 5 FastCam source recovery delivered its "
+                    + "first replacement frame");
+        }
+        diLink5SourceOnlyReacquire = false;
+        finishDiLink5Reacquire("first replacement frame received");
+        if (stallEpisodeLogged) {
+            stallEpisodeLogged = false;
+            stallEpisodeStartMs = 0L;
+            stallEpisodeNextLogMs = 0L;
+        }
+        return true;
     }
 
     /**
@@ -3164,26 +5432,28 @@ public class PanoramicCameraGpu {
         // freeze again; refilling on frame 1 would let it reopen indefinitely.
         // dilink4LastStallRestartMs is deliberately NOT cleared — it is half of the
         // reopen floor's anchor and must keep its spacing.
-        if (dilink4StallRestartAttempts != 0 || dilink4StallRecoveryExhausted) {
-            if (dilink4RecoveryProofFrames == 0) {
-                dilink4RecoveryProofSinceMs = lastRealFrameTimeSt;
-            }
-            dilink4RecoveryProofFrames++;
-            if (dilink4RecoveryProofFrames >= DILINK4_RECOVERY_PROOF_FRAMES
-                    && (lastRealFrameTimeSt - dilink4RecoveryProofSinceMs)
-                        >= DILINK4_RECOVERY_PROOF_MS) {
-                logger.info("dilink4 producer sustained " + dilink4RecoveryProofFrames
-                    + " frames over "
-                    + (lastRealFrameTimeSt - dilink4RecoveryProofSinceMs)
-                    + "ms — reopen budget refilled");
-                dilink4StallRestartAttempts = 0;
-                dilink4StallRecoveryExhausted = false;
+        if (USE_DILINK4_AVM_PATH) {
+            if (dilink4StallRestartAttempts != 0 || dilink4StallRecoveryExhausted) {
+                if (dilink4RecoveryProofFrames == 0) {
+                    dilink4RecoveryProofSinceMs = lastRealFrameTimeSt;
+                }
+                dilink4RecoveryProofFrames++;
+                if (dilink4RecoveryProofFrames >= DILINK4_RECOVERY_PROOF_FRAMES
+                        && (lastRealFrameTimeSt - dilink4RecoveryProofSinceMs)
+                            >= DILINK4_RECOVERY_PROOF_MS) {
+                    logger.info("dilink4 producer sustained " + dilink4RecoveryProofFrames
+                        + " frames over "
+                        + (lastRealFrameTimeSt - dilink4RecoveryProofSinceMs)
+                        + "ms — reopen budget refilled");
+                    dilink4StallRestartAttempts = 0;
+                    dilink4StallRecoveryExhausted = false;
+                    dilink4RecoveryProofFrames = 0;
+                    dilink4RecoveryProofSinceMs = 0L;
+                }
+            } else if (dilink4RecoveryProofFrames != 0) {
                 dilink4RecoveryProofFrames = 0;
                 dilink4RecoveryProofSinceMs = 0L;
             }
-        } else if (dilink4RecoveryProofFrames != 0) {
-            dilink4RecoveryProofFrames = 0;
-            dilink4RecoveryProofSinceMs = 0L;
         }
         if (!firstFrameDimsLogged) {
             firstFrameDimsLogged = true;
@@ -3584,6 +5854,262 @@ public class PanoramicCameraGpu {
         }
     }
 
+    // ==================== Decoupled encoder lane (GL thread) ====================
+
+    /**
+     * Flag-on replacement for PASS 1A. Runs on the GL render thread with the
+     * freshly-bound HAL frame on {@code cameraOesTextureId}.
+     *
+     * Sequence per frame:
+     *   1. Windshield camera work (open/drain/stall-guard) — camera-side, so
+     *      it STAYS on this thread; only the encoder draw moved to the lane.
+     *   2. Blit camera OES → ring slot; blit windshield OES → its ring on a
+     *      FRESH windshield frame only (the previous slot stays valid for
+     *      re-composition — re-blitting a released OES source would be the
+     *      exact use-after-free this design removes).
+     *   3. COMPLETION BARRIER: CopiedFrameRing.copyFrom glFinish-es INSIDE
+     *      its write reservation before returning, covering three needs at
+     *      once. (a) Cross-context completeness: the lane and AI contexts
+     *      may sample the slot immediately after publish, and glFlush only
+     *      SUBMITS the blit — sampling a half-written slot is a visible-
+     *      corruption race. (b) Camera-buffer lifetime: the held Image/
+     *      HardwareBuffer must not close before the GPU retired the blit
+     *      that sampled it. (c) Reservation integrity: writingSlot must stay
+     *      held until the write COMPLETES, or a stale lane packet can pin
+     *      the slot mid-write (review round 2, finding 2). The barrier is
+     *      bounded (~1-2 ms; only this frame's blits are queued) and is the
+     *      deliberately-simple v1 choice; per-slot fences waited on in EACH
+     *      consumer context are the later optimization — a producer-side
+     *      fence alone would cover only (b).
+     *   4. Close the camera-owned buffers inline — the barrier just proved
+     *      the GPU is done with them, so their gralloc slots go straight
+     *      back to the BYD HAL producer pool.
+     *   5. Republish cameraTextureId = ring slot under cameraTextureLock
+     *      (same discipline as the DiLink 5 compositor path) for PASS
+     *      1B/1C/AI and the pixel probes.
+     *   6. Submit the packet to the EncoderLane (recorder gate applies; the
+     *      stride gate is applied lane-side for parity).
+     */
+    private void runDecoupledLanePass(GpuMosaicRecorder localRecorder) {
+        CopiedFrameRing camRing = decoupledCamRing;
+        if (camRing == null || !camRing.isInitialized() || cameraOesTextureId == 0) {
+            return;
+        }
+
+        boolean recorderGateOpen = localRecorder != null
+            && (recorderLaneEnabled || localRecorder.isRecording());
+
+        boolean wsFresh = false;
+        if (recorderGateOpen) {
+            updateWindshieldCameraOnGlThread();
+            // Unconditional drain — same lost-update-race rationale as the
+            // legacy PASS 1A block (gralloc slots fill → HAL producer stalls).
+            if (windshieldStarted) {
+                wsFresh = consumeLatestWindshieldImageAndBind();
+                windshieldPending = false;
+            }
+            // Windshield stall guard — verbatim behaviour from PASS 1A.
+            if (windshieldStarted && windshieldFrameReady
+                    && windshieldLastFrameMs > 0
+                    && (System.currentTimeMillis() - windshieldLastFrameMs)
+                        > WINDSHIELD_STALL_THRESHOLD_MS) {
+                long stalledMs = System.currentTimeMillis() - windshieldLastFrameMs;
+                logger.warn("Windshield feed stalled " + stalledMs
+                    + "ms (frames=" + windshieldFrameCount
+                    + ") — falling back to 360 front + scheduling reopen");
+                windshieldFrameReady = false;
+                long nowReopen = System.currentTimeMillis();
+                if (nowReopen - windshieldLastReopenMs > WINDSHIELD_REOPEN_MIN_INTERVAL_MS) {
+                    windshieldLastReopenMs = nowReopen;
+                    try {
+                        stopWindshieldCameraOnGlThread();
+                        windshieldOpenFailed = false;
+                    } catch (Throwable t) {
+                        logger.warn("Windshield reopen (stop phase) failed: " + t.getMessage());
+                    }
+                }
+            }
+        } else if (windshieldStarted) {
+            // Same teardown as legacy PASS 1A's else-branch: with the recorder
+            // lane off, nothing would drain the windshield reader — its slots
+            // fill and the HAL producer stalls. runDecoupledLanePass keeps the
+            // pano copy flowing for PASS 1B/1C/AI regardless.
+            stopWindshieldCameraOnGlThread();
+        }
+
+        // Camera blit. On failure keep legacy lifetime semantics: the bound
+        // Image stays in currentBoundImage and is released at the next bind.
+        int camSlot = camRing.copyFrom(cameraOesTextureId);
+        if (camSlot < 0) {
+            return;
+        }
+
+        // Windshield blit on fresh frames only.
+        boolean wsCopiedThisFrame = false;
+        if (recorderGateOpen && wsFresh && windshieldFrameReady) {
+            if (decoupledWsRing == null) {
+                CopiedFrameRing ring = new CopiedFrameRing("WsRing", 3, 1920, 1080);
+                if (ring.init()) {
+                    decoupledWsRing = ring;
+                } else {
+                    logger.warn("Windshield copy ring init failed — dashcam top band"
+                        + " falls back to the 360 front slice");
+                }
+            }
+            if (decoupledWsRing != null && decoupledWsRing.isInitialized()) {
+                int slot = decoupledWsRing.copyFrom(windshieldTextureId);
+                if (slot >= 0) {
+                    decoupledLastWsSlot = slot;
+                    wsCopiedThisFrame = true;
+                }
+            }
+        }
+
+        // Inline release behind the ring's completion barrier (see method
+        // doc, steps 3-4): every successful copyFrom above glFinish-ed before
+        // returning, so the GPU has provably retired the blits that sampled
+        // these buffers. The windshield Image is only closed when its pixels
+        // were captured into the ring THIS frame — otherwise it stays held
+        // (legacy release-at-next-bind), because the OES texture must keep a
+        // live backing buffer until a fresh frame replaces it.
+        closeHeldCameraBuffersAfterBarrier(wsCopiedThisFrame);
+
+        // Publish. AI lane samples under this same lock (DiLink5 parity).
+        int slotTex = camRing.textureOf(camSlot);
+        if (slotTex != 0) {
+            synchronized (cameraTextureLock) {
+                cameraTextureId = slotTex;
+            }
+        }
+
+        if (recorderGateOpen) {
+            EncoderLane lane = encoderLane;
+            if (lane != null) {
+                boolean wsUsable = windshieldStarted && windshieldFrameReady
+                    && decoupledLastWsSlot >= 0
+                    && decoupledWsRing != null;
+                lane.submit(new EncoderLane.Frame(
+                    camSlot,
+                    slotTex,
+                    wsUsable ? decoupledLastWsSlot : -1,
+                    wsUsable ? decoupledWsRing.textureOf(decoupledLastWsSlot) : 0,
+                    wsUsable,
+                    currentFrameTimestampNs,
+                    cameraFrameSeq.get()));
+            }
+        }
+    }
+
+    /**
+     * Closes the held camera (and, when copied this frame, windshield)
+     * buffers. MUST be called only after the publish barrier (glFinish) has
+     * proven the GPU retired the blits that sampled them — closing earlier
+     * returns a gralloc slot the GPU may still be reading, the exact
+     * use-after-free class the cameraTextureLock comments document.
+     * GL thread only.
+     */
+    private void closeHeldCameraBuffersAfterBarrier(boolean wsCopiedThisFrame) {
+        if (currentBoundHwBuffer != null) {
+            try { currentBoundHwBuffer.close(); } catch (Throwable ignored) { }
+            currentBoundHwBuffer = null;
+        }
+        if (currentBoundImage != null) {
+            try { currentBoundImage.close(); } catch (Throwable ignored) { }
+            currentBoundImage = null;
+        }
+        if (wsCopiedThisFrame) {
+            if (windshieldBoundHwBuffer != null) {
+                try { windshieldBoundHwBuffer.close(); } catch (Throwable ignored) { }
+                windshieldBoundHwBuffer = null;
+            }
+            if (windshieldBoundImage != null) {
+                try { windshieldBoundImage.close(); } catch (Throwable ignored) { }
+                windshieldBoundImage = null;
+            }
+        }
+    }
+
+    /** Lazily creates the EncoderLane (thread starts on first initRecorder). */
+    private synchronized EncoderLane ensureEncoderLane() {
+        if (encoderLane != null) {
+            return encoderLane;
+        }
+        EGLCore core = eglCore;
+        if (core == null) {
+            logger.error("EncoderLane requested before GL init");
+            return null;
+        }
+        encoderLane = new EncoderLane(
+            core,
+            () -> decoupledCamRing,
+            () -> decoupledWsRing,
+            () -> recorderLaneEnabled,
+            () -> recorderFrameStride,
+            () -> {
+                BydCameraCoordinator c = cameraCoordinator;
+                return c != null && c.isNativeAppActive();
+            },
+            restartInProgress);
+        return encoderLane;
+    }
+
+    /**
+     * Pipeline live-reconfiguration support (decoupled lane only): releases
+     * the recorder's encoder EGL surface ON THE LANE THREAD, serialized with
+     * draws by the lane handler's FIFO ordering. Posting this to the render
+     * thread — the legacy pipeline behaviour — would destroy a surface the
+     * lane may be mid-eglSwapBuffers on (release-blocker review, finding 1).
+     *
+     * @return true when the release ran within the deadline. A lane that was
+     *         never started holds no recorder GL, so there is nothing to
+     *         race — reported as success.
+     */
+    public boolean releaseRecorderEncoderSurfaceOnLane(GpuMosaicRecorder rec,
+            long timeoutMs) {
+        if (!USE_DECOUPLED_ENCODER_LANE || rec == null) {
+            return false;
+        }
+        EncoderLane lane = encoderLane;
+        if (lane == null) {
+            return true;
+        }
+        return lane.runOnLane(() -> {
+            try {
+                rec.releaseEncoderSurface();
+                logger.info("Recorder encoder surface released on EncoderLane thread");
+            } catch (Exception e) {
+                logger.warn("Error releasing recorder surface (lane): " + e.getMessage());
+            }
+        }, timeoutMs);
+    }
+
+    /**
+     * Pipeline live-reconfiguration support (decoupled lane only):
+     * synchronous recorder (re)initialization against the lane context —
+     * init, contention-probe wiring, and adoption of the new recorder AND
+     * encoder refs by the lane, all as one serialized lane operation. Without
+     * the adoption step the lane keeps drawing against the released codec
+     * (release-blocker review, finding 1).
+     *
+     * @return null on success, otherwise the failure to rethrow.
+     */
+    public Exception reinitRecorderOnEncoderLane(GpuMosaicRecorder rec,
+            HardwareEventRecorderGpu enc, long timeoutMs) {
+        if (!USE_DECOUPLED_ENCODER_LANE) {
+            return new IllegalStateException("decoupled encoder lane not active");
+        }
+        EncoderLane lane = ensureEncoderLane();
+        if (lane == null) {
+            return new IllegalStateException("EncoderLane unavailable");
+        }
+        // Keep this pipeline's encoder field in step for the lane path only —
+        // the legacy path deliberately keeps its historical behaviour.
+        this.encoder = enc;
+        return lane.initRecorderAndWait(rec, enc, timeoutMs);
+    }
+
+    // ============================================================================
+
     /** Periodic diagnostic for the ImageReader path. Throttled to align with
      *  the 2-minute Stats log so it rides along instead of spamming. */
     private void maybeLogImageReaderDiag() {
@@ -3608,11 +6134,12 @@ public class PanoramicCameraGpu {
             // path already signaled while we were processing the previous
             // frame — otherwise the unconditional wait() would miss that
             // notify and park us until the NEXT HAL fire, capping FPS.
-            // imagePending is set by the ImageReader OnImageAvailable cb;
-            // stFramePending is set by SurfaceTexture.onFrameAvailable. The
-            // path that's inactive simply never sets its flag.
+            // imagePending is set by ImageReader, stFramePending by
+            // SurfaceTexture, and diLink5FramePending by the native bridge.
             synchronized (frameSync) {
-                if (!imagePending && !stFramePending) {
+                if (!imagePending
+                        && !stFramePending
+                        && !diLink5FramePending) {
                     try {
                         // FIX H4: 250 ms timeout (was 100 ms). The watchdog
                         // owns frame-stall detection at its own 5 s cadence;
@@ -3628,6 +6155,7 @@ public class PanoramicCameraGpu {
                 }
                 imagePending = false;
                 stFramePending = false;
+                diLink5FramePending = false;
             }
 
             if (!running) {
@@ -3645,12 +6173,17 @@ public class PanoramicCameraGpu {
             // daemon thread's close and block in updateTexImage() against a
             // dead BufferQueue, freezing the GL thread until the watchdog
             // kills the process.
-            if (cameraYielded || cameraObj == null || restartInProgress.get()) {
+            if (isCameraFrameConsumptionPaused()
+                    || diLink5SafetyDisabled
+                    || cameraObj == null
+                    || restartInProgress.get()
+                    || diLink5CloseInProgress) {
                 // GL thread stays alive but doesn't touch camera — waiting for re-acquire
                 return;
             }
 
-            // Bind the latest camera frame to cameraTextureId. Two paths:
+            // Bind the latest camera frame to cameraTextureId. Three paths:
+            //   - DiLink 5: DMA-BUF compositor (or CPU upload fallback) into 2D.
             //   - oem SurfaceTexture: updateTexImage() pulls the most recent
             //     BufferQueue slot into the EXTERNAL_OES texture. PTS comes
             //     from SurfaceTexture.getTimestamp().
@@ -3660,7 +6193,11 @@ public class PanoramicCameraGpu {
             // frame is ready (spurious wakeup or notify race), return — the
             // finally re-posts the loop and we wait again.
             long stageT0 = System.nanoTime();
-            if (USE_OEM_SURFACE_TEXTURE_PATH) {
+            if (USE_DILINK5_QCARCAM_PATH) {
+                if (!consumeDiLink5Frame()) {
+                    return;
+                }
+            } else if (USE_OEM_SURFACE_TEXTURE_PATH) {
                 if (cameraSurfaceTexture == null) {
                     return;
                 }
@@ -3696,6 +6233,14 @@ public class PanoramicCameraGpu {
                     + " confirm content before anything is persisted");
             }
 
+            // DiLink 5 is fed by fast_cam_capture, not the legacy camera HAL.
+            // Never sweep camera IDs or run blocking pixel probes against it.
+            if (USE_DILINK5_QCARCAM_PATH) {
+                probeComplete = true;
+                autoProbeCameras = false;
+                skipFrameValidation = true;
+            }
+
             // SOTA: Full-matrix auto-probe at frame 15 (~2 sec).
             // Sweeps camera IDs 0-5 × surface modes 0-5 to find the first
             // combination that produces panoramic image data. Each combo gets
@@ -3708,7 +6253,7 @@ public class PanoramicCameraGpu {
             // suspenders (this check), because the dead-slot walk resets
             // skipFrameValidation=false in advanceToNextCandidateCameraId.
             if (frameCounter == 15 && downscaler != null && downscaler.isInitialized()
-                    && !skipFrameValidation) {
+                    && !skipFrameValidation && !USE_DILINK5_QCARCAM_PATH) {
                 try {
                     byte[] probe = downscaler.readPixels(cameraTextureId, 8, 8);
                     boolean hasData = false;
@@ -3718,7 +6263,7 @@ public class PanoramicCameraGpu {
                         }
                     }
                     int currentId = cameraIdOverride >= 0 ? cameraIdOverride : PHYSICAL_CAMERA_ID;
-                    boolean isDilink5 = com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported();
+                    boolean isDilink5 = com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
                     boolean isPanoramic = isDilink5 || (width >= 5000);
                     logger.info("Camera ID " + currentId + " probe: " + 
                         (hasData ? "HAS DATA" : "BLACK") +
@@ -3726,10 +6271,9 @@ public class PanoramicCameraGpu {
                         " | type=" + (isPanoramic ? "PANORAMIC" : "SINGLE") +
                         " | surfaceMode=" + cameraSurfaceMode);
                     
-                    if (isDilink5 || (hasData && isPanoramic)) {
+                    if (hasData && isPanoramic) {
                         // Track this camera as having real data (for fallback if strip check fails)
                         lastDataCameraId = currentId;
-                        probeComplete = true;
                         
                         // During auto-probe: accept the first camera with non-black panoramic data.
                         // The 5120x960 resolution IS the panoramic strip identifier on BYD — no other
@@ -3782,6 +6326,7 @@ public class PanoramicCameraGpu {
             // black frame; without isInitialized() this recheck would re-probe
             // a working camera whenever the downscaler thread failed init.
             if (frameCounter == 50 && !autoProbeCameras && !skipFrameValidation
+                    && !USE_DILINK5_QCARCAM_PATH
                     && downscaler != null && downscaler.isInitialized()) {
                 try {
                     byte[] probe = downscaler.readPixels(cameraTextureId, 8, 8);
@@ -3853,6 +6398,16 @@ public class PanoramicCameraGpu {
             GpuMosaicRecorder localRecorder = recorder;
             HardwareEventRecorderGpu localEncoder = encoder;
             long stageBeforeMosaicNs = System.nanoTime();
+            // DECOUPLED LANE (camera.decoupledEncoderLane): PASS 1A is replaced
+            // by copy-into-ring + EncoderLane submit — the encoder-blocking
+            // makeCurrent/draw/eglSwap now happen on the lane thread, so this
+            // thread never waits on MediaCodec backpressure and the camera's
+            // gralloc buffers go back to the HAL at frame cadence. PASS
+            // 1B/1C/AI below are unchanged; they sample cameraTextureId, which
+            // runDecoupledLanePass republished as the fresh ring copy.
+            if (USE_DECOUPLED_ENCODER_LANE) {
+                runDecoupledLanePass(localRecorder);
+            } else
             // Recorder lane master gate around ALL of PASS 1A (windshield consume
             // + recorder draw + drain). When the camera is kept warm ONLY for
             // blind-spot (PASS 1C, no encoder, no recording mode), the H.265
@@ -4359,6 +6914,12 @@ public class PanoramicCameraGpu {
      * @param skipId Camera ID to skip (the one we just tested). -1 to start fresh.
      */
     private void advanceProbeToNext(int skipId) {
+        if (USE_DILINK5_QCARCAM_PATH) {
+            probeComplete = true;
+            autoProbeCameras = false;
+            logger.info("DiLink 5: legacy camera auto-probe suppressed");
+            return;
+        }
         // Close current camera cleanly
         if (cameraObj != null) {
             try {
@@ -4504,9 +7065,31 @@ public class PanoramicCameraGpu {
                     // Also use extended timeout during camera restart — the GL thread
                     // is busy with close/reopen operations and heartbeat updates are
                     // interleaved but may not be frequent enough for the normal timeout.
-                    long effectiveTimeout = (firstFrameReceived && !restartInProgress.get())
-                            ? GL_THREAD_TIMEOUT_MS
-                            : GL_THREAD_WARMUP_TIMEOUT_MS;
+                    long effectiveTimeout;
+                    if (AvcHalWarmup.isColdOpenWarmupInProgress()) {
+                        effectiveTimeout = AvcHalWarmup.coldOpenWarmupTimeoutMs();
+                    } else if (USE_DILINK5_QCARCAM_PATH
+                            && diLink5ReacquireInProgress) {
+                        // Reverse recovery runs synchronously on the GL owner
+                        // and includes DI5 service probes/cooldown before a new
+                        // handle exists. Give that bounded acquisition the same
+                        // timeout as first-frame warmup; the normal 3 s active-
+                        // stream timeout resumes on the first replacement frame.
+                        effectiveTimeout = DILINK5_REACQUIRE_MAX_MS;
+                    } else if (USE_DILINK5_QCARCAM_PATH
+                            && (diLink5ReverseSourceTransitionInProgress
+                                    || diLink5CloseInProgress)) {
+                        // Releasing EGLImages, the native DMA client, and the
+                        // owned sidecar is a bounded GL-thread operation. It
+                        // can legitimately exceed the normal 3 s active-frame
+                        // heartbeat without implying a deadlock.
+                        effectiveTimeout =
+                                DILINK5_OWNERSHIP_TRANSITION_TIMEOUT_MS;
+                    } else {
+                        effectiveTimeout = (firstFrameReceived && !restartInProgress.get())
+                                ? GL_THREAD_TIMEOUT_MS
+                                : GL_THREAD_WARMUP_TIMEOUT_MS;
+                    }
                     
                     if (timeSinceHeartbeat > effectiveTimeout) {
                         // Request the restart BEFORE logging (audit follow-up):
@@ -4569,7 +7152,7 @@ public class PanoramicCameraGpu {
                     //     nothing since the pipeline started. Once any frame has
                     //     arrived the normal stall/restart machinery is armed and
                     //     owns recovery, so we stay out of its way for good.
-                    //   - !cameraYielded AND no native app active: an OEM app
+                    //   - source not handed off AND no native app active: an OEM app
                     //     (reverse cam, AVM parking view) holding or contending
                     //     the HAL legitimately starves frames without a yield
                     //     event — the stall monitor below makes the same
@@ -4583,7 +7166,7 @@ public class PanoramicCameraGpu {
                             && cameraCoordinator.isNativeAppActive();
                     if (!USE_OEM_SURFACE_TEXTURE_PATH
                             && !firstFrameReceived
-                            && !cameraYielded
+                            && !isCameraFrameConsumptionPaused()
                             && !nativeAppHoldsHal
                             && (cameraObj != null || deadSlotWalkActive)
                             && !restartInProgress.get()
@@ -4610,7 +7193,7 @@ public class PanoramicCameraGpu {
                     // the camera HAL may be starved or dead.
                     // Decision is contention-aware: if native app is active, use longer
                     // threshold and require consecutive stalls before yielding.
-                    // On dilink4 read the GENUINE-arrival clock, not
+                    // On DiLink 4/5 read the GENUINE-arrival clock, not
                     // lastFrameTime: the latter used to be refreshed by every
                     // render-loop tick (updateTexImage no-ops without throwing),
                     // which made this detector structurally unable to see a
@@ -4618,7 +7201,9 @@ public class PanoramicCameraGpu {
                     // onFrameAvailable. Legacy keeps lastFrameTime exactly as
                     // before — its acquireLatestImage() null-check already made
                     // lastFrameTime a true arrival signal there.
-                    long stallClock = USE_OEM_SURFACE_TEXTURE_PATH
+                    boolean usesRealArrivalStallClock =
+                            USE_DILINK4_AVM_PATH || USE_DILINK5_QCARCAM_PATH;
+                    long stallClock = usesRealArrivalStallClock
                         ? lastRealFrameTimeSt : lastFrameTime;
                     // dilink4: releaseCameraConsumer() zeroes lastRealFrameTimeSt on
                     // every reopen, so `stallClock > 0` alone would permanently
@@ -4626,10 +7211,34 @@ public class PanoramicCameraGpu {
                     // producer that never comes back. Fall back to the open time so a
                     // reopen that delivers nothing is still measurable. Legacy is
                     // untouched — its clock is not zeroed this way.
-                    if (USE_OEM_SURFACE_TEXTURE_PATH && stallClock <= 0) {
+                    if (usesRealArrivalStallClock && stallClock <= 0) {
                         stallClock = lastCameraStartTime;
                     }
-                    if (!cameraYielded && stallClock > 0 &&
+                    boolean diLink5ReacquireStallSuppressed =
+                            shouldSuppressDiLink5FrameStall(
+                                    USE_DILINK5_QCARCAM_PATH,
+                                    diLink5ReacquireInProgress,
+                                    cameraObj != null,
+                                    lastCameraStartTime,
+                                    diLink5ReacquireStartedAtMs,
+                                    now,
+                                    FRAME_STALL_WARMUP_GRACE_MS,
+                                    DILINK5_REACQUIRE_MAX_MS);
+                    if (USE_DILINK5_QCARCAM_PATH
+                            && diLink5ReacquireInProgress
+                            && cameraObj == null
+                            && !diLink5ReacquireStallSuppressed
+                            && !diLink5SafetyDisabled) {
+                        logger.error("DiLink 5 FastCam reacquire exceeded "
+                                + DILINK5_REACQUIRE_MAX_MS
+                                + "ms without an active handle");
+                        scheduleDiLink5DeferredReacquire(
+                                "FastCam reacquire deadline exceeded");
+                    }
+                    if (!isCameraFrameConsumptionPaused()
+                        && !diLink5SafetyDisabled
+                        && !diLink5ReacquireStallSuppressed
+                        && stallClock > 0 &&
                         timeSinceHeartbeat < GL_THREAD_TIMEOUT_MS) {
                         long timeSinceFrame = now - stallClock;
 
@@ -4657,10 +7266,10 @@ public class PanoramicCameraGpu {
                                 ? now - lastCameraStartTime
                                 : Long.MAX_VALUE;
                         if (timeSinceFrame > stallThreshold && halRecoveryEscalated) {
-                            // A warmup-routed recovery (onHalRecoveryNeeded) is in
+                            // A full-rebuild recovery (onHalRecoveryNeeded) is in
                             // flight. Don't post bare restarts on top of it — the
                             // pipeline clears this latch via notePipelineRestarted()
-                            // once its full teardown + warmup restart completes.
+                            // once its full camera/GL rebuild completes.
                             //
                             // Once per episode. These two suppression branches were
                             // unreachable on dilink4 before the stall clock was
@@ -4674,10 +7283,10 @@ public class PanoramicCameraGpu {
                             // stallEpisodeLogged, which is why it must not run on
                             // legacy — it would suppress the later FRAME STALL
                             // anchor for an episode that legacy does act on.
-                            if (!USE_OEM_SURFACE_TEXTURE_PATH || !stallEpisodeLogged) {
+                            if (!usesRealArrivalStallClock || !stallEpisodeLogged) {
                                 logger.info("Frame stall while HAL-recovery escalation in flight — "
-                                    + "deferring to warmup-routed restart.");
-                                if (USE_OEM_SURFACE_TEXTURE_PATH) stallEpisodeLogged = true;
+                                    + "deferring to full-rebuild recovery.");
+                                if (usesRealArrivalStallClock) stallEpisodeLogged = true;
                             }
                         } else if (timeSinceFrame > stallThreshold
                                 && timeSinceCameraStart < FRAME_STALL_WARMUP_GRACE_MS) {
@@ -4685,9 +7294,9 @@ public class PanoramicCameraGpu {
                             // once-per-tick on legacy (see the note above — no
                             // legacy log-cadence changes). Re-arms on the next
                             // camera open, since lastCameraStartTime changes.
-                            if (!USE_OEM_SURFACE_TEXTURE_PATH
+                            if (!usesRealArrivalStallClock
                                     || warmupGraceLoggedForStartMs != lastCameraStartTime) {
-                                if (USE_OEM_SURFACE_TEXTURE_PATH) {
+                                if (usesRealArrivalStallClock) {
                                     warmupGraceLoggedForStartMs = lastCameraStartTime;
                                 }
                                 logger.info("Frame stall suppressed — within post-open warmup grace ("
@@ -4721,14 +7330,18 @@ public class PanoramicCameraGpu {
                             // re-log on an escalating cadence carrying the real
                             // elapsed time — bounded volume, duration still
                             // diagnosable.
-                            boolean relogDue = USE_OEM_SURFACE_TEXTURE_PATH
+                            boolean relogDue = usesRealArrivalStallClock
                                 && stallEpisodeNextLogMs > 0 && now >= stallEpisodeNextLogMs;
-                            if (firstOfEpisode || !USE_OEM_SURFACE_TEXTURE_PATH || relogDue) {
+                            if (firstOfEpisode || !usesRealArrivalStallClock || relogDue) {
                                 logger.warn("FRAME STALL: No frames for " + timeSinceFrame + "ms" +
                                     (nativeActive ? " (native app active)" : "")
-                                    + (USE_OEM_SURFACE_TEXTURE_PATH
+                                    + (USE_DILINK4_AVM_PATH
                                         ? " (dilink4: from last REAL onFrameAvailable; episode "
-                                          + (episodeMs / 1000) + "s)" : ""));
+                                          + (episodeMs / 1000) + "s)"
+                                        : USE_DILINK5_QCARCAM_PATH
+                                            ? " (dilink5: from last REAL FastCam frame; episode "
+                                              + (episodeMs / 1000) + "s)"
+                                            : ""));
                                 if (relogDue) {
                                     // Escalate 1min → 5min → 30min → 30min…
                                     long step = (episodeMs < 300_000L) ? 300_000L
@@ -4741,22 +7354,25 @@ public class PanoramicCameraGpu {
                             // log condition short-circuits on
                             // !USE_OEM_SURFACE_TEXTURE_PATH), and leaving it
                             // unwritten keeps legacy state byte-identical.
-                            if (USE_OEM_SURFACE_TEXTURE_PATH) stallEpisodeLogged = true;
+                            if (usesRealArrivalStallClock) stallEpisodeLogged = true;
                             // Reset the clock this detector actually read, or the
                             // next tick re-fires immediately. On dilink4 that is
                             // lastRealFrameTimeSt; touching only lastFrameTime
                             // there would leave the stall latched forever.
                             lastFrameTime = now;
-                            if (USE_OEM_SURFACE_TEXTURE_PATH) {
+                            if (usesRealArrivalStallClock) {
                                 lastRealFrameTimeSt = now;
                             }
 
                             // dilink4: bounded stall-driven restart (oem caps at 5
                             // reopens too, but its watchdog can't fire for a
                             // producer that dies parked, so we don't copy it).
-                            if (USE_OEM_SURFACE_TEXTURE_PATH) {
+                            if (USE_DILINK4_AVM_PATH) {
                                 maybeRestartStalledDilink4Producer(now, episodeMs,
                                     firstOfEpisode);
+                            } else if (USE_DILINK5_QCARCAM_PATH) {
+                                requestDiLink5SourceOnlyRecovery(
+                                    "FastCam bridge frame stall");
                             } else if (cameraCoordinator != null) {
                                 if (nativeActive) {
                                     // Contention path: require consecutive stalls before yielding
@@ -4808,21 +7424,12 @@ public class PanoramicCameraGpu {
     }
 
     /**
-     * DiLink 4 only: reopen the camera when the byd_apa producer has stopped
-     * emitting and a consumer is starved.
+     * DiLink 4 only: recover a stalled byd_apa producer when a real consumer is
+     * starved. The first action is deliberately non-destructive: callback probe,
+     * then same-handle SurfaceTexture rebind. A full close/reopen is reached only
+     * if both soft stages fail.
      *
-     * <p>Throttled on {@code lastCameraStartTime} rather than a
-     * "last restart" field of its own. That is deliberate: every reopen path
-     * runs {@code releaseCameraConsumer()}, which zeroes
-     * {@code lastRealFrameTimeSt}, and the watchdog's {@code stallClock > 0}
-     * guard then suppresses this whole branch until a real frame arrives. A
-     * private attempt counter therefore could not be trusted — it either never
-     * advanced past 1 (dead producer) or was wiped by a single stray frame from
-     * a half-alive HAL, reopening every ~13s forever.
-     * {@code lastCameraStartTime} is refreshed by every open and never zeroed,
-     * so "how long since we last tried" is always answerable.
-     *
-     * @return true if a reopen was posted
+     * @return true if a soft recovery was posted
      */
     private boolean maybeRestartStalledDilink4Producer(long now, long episodeMs,
                                                        boolean firstOfEpisode) {
@@ -4831,15 +7438,18 @@ public class PanoramicCameraGpu {
         // 3+3+3+... to the threshold, refill the budget, and reopen forever.
         dilink4RecoveryProofFrames = 0;
         dilink4RecoveryProofSinceMs = 0L;
-        // Reopening only helps if something is starved RIGHT NOW. recorderLaneEnabled
-        // is true for the whole parked-sentry population, so it cannot be the test:
-        // an in-flight clip or a live stream can.
+        // The explicit demand is published by RecordingModeManager's single
+        // camera-intent authority and includes armed surveillance, visible
+        // camera-view/blind-spot and live stream demand. Keep the direct state
+        // checks as defense-in-depth for callers that precede the next reconcile.
         GpuMosaicRecorder recForStall = recorder;
         HardwareEventRecorderGpu encForStall = encoder;
-        boolean consumerStarved =
-            (recForStall != null && recForStall.isRecording())
-            || (encForStall != null && encForStall.isWritingToFile())
-            || streamEncoder != null;
+        boolean consumerStarved = isDiLink4ConsumerStarved(
+            dilink4FrameDemanded,
+            bsLayerVisible,
+            recForStall != null && recForStall.isRecording(),
+            encForStall != null && encForStall.isWritingToFile(),
+            streamEncoder != null);
         if (!consumerStarved) {
             if (firstOfEpisode) {
                 logger.info("Frame stall on dilink4 — no starved consumer,"
@@ -4847,43 +7457,17 @@ public class PanoramicCameraGpu {
             }
             return false;
         }
-        // Floor on the LATER of "last successful open" and "last reopen we posted".
-        // lastCameraStartTime alone is not enough: it is written only after a
-        // successful open (line ~2460), so a reopen that throws or times out would
-        // leave it stale and let the remaining attempts fire at stall cadence
-        // (~5s) instead of 60s apart.
-        long lastAttemptAnchor = Math.max(lastCameraStartTime, dilink4LastStallRestartMs);
-        long sinceLastAttempt = lastAttemptAnchor > 0
-            ? now - lastAttemptAnchor : Long.MAX_VALUE;
-        if (sinceLastAttempt < DILINK4_ERROR_RESTART_MIN_INTERVAL_MS) {
-            if (firstOfEpisode) {
-                logger.info("Frame stall on dilink4 — last camera open/reopen was "
-                    + sinceLastAttempt + "ms ago, within the "
-                    + (DILINK4_ERROR_RESTART_MIN_INTERVAL_MS / 1000)
-                    + "s reopen floor; waiting");
-            }
-            return false;
-        }
-        if (dilink4StallRecoveryExhausted) {
-            return false;
-        }
-        if (dilink4StallRestartAttempts >= DILINK4_STALL_RESTART_MAX_ATTEMPTS) {
+        if (dilink4StallRecoveryExhausted
+                || dilink4StallRestartAttempts
+                    >= DILINK4_STALL_RESTART_MAX_ATTEMPTS) {
             dilink4StallRecoveryExhausted = true;
-            logger.error("Frame stall on dilink4: " + dilink4StallRestartAttempts
-                + " reopens failed to revive the producer — giving up until frames"
-                + " resume or ACC cycles. Sentry clips will hold pre-roll only.");
-            return false;
-        }
-        dilink4StallRestartAttempts++;
-        dilink4LastStallRestartMs = now;
-        logger.warn("Frame stall on dilink4 — reopening camera (attempt "
-            + dilink4StallRestartAttempts + "/" + DILINK4_STALL_RESTART_MAX_ATTEMPTS
-            + ", episode " + (episodeMs / 1000) + "s)");
-        if (glHandler != null) {
-            glHandler.post(() -> restartCameraAfterError());
+            requestDiLink4HalRecoveryEscalation();
             return true;
         }
-        return false;
+        return requestDiLink4ProducerRecovery(
+            "watchdog episode=" + (episodeMs / 1000) + "s"
+                + ", demand=" + dilink4FrameDemandReason,
+            false);
     }
 
     /**
@@ -4901,7 +7485,7 @@ public class PanoramicCameraGpu {
         // ago, and a first frame (or someone else's restart) may have landed in
         // between. Cheap insurance against tearing down a camera that just
         // started working.
-        if (firstFrameReceived || cameraYielded
+        if (firstFrameReceived || isCameraFrameConsumptionPaused()
                 || restartInProgress.get() || halRecoveryEscalated
                 || deadSlotWalkExhausted) {
             return;
@@ -4969,8 +7553,8 @@ public class PanoramicCameraGpu {
         // The zero-frame reopen evidence was gathered against a DIFFERENT
         // physical slot, so it says nothing about this one. Without this reset
         // the escalation counter would reach its threshold mid-walk and hand
-        // off to the warmup-routed full restart, which reopens the same dead
-        // slot — exactly the loop this method exists to break.
+        // off to a full rebuild, which reopens the same dead slot — exactly the
+        // loop this method exists to break.
         consecutiveZeroFrameRestarts = 0;
         deadSlotWalkActive = true;
         // The saved config's validated/manual privilege belongs to the id it
@@ -5018,7 +7602,28 @@ public class PanoramicCameraGpu {
      * Camera is re-acquired when onCloseCamera fires from IBYDCameraService.
      */
     private void yieldCameraInternal() {
+        yieldCameraInternal(false);
+    }
+
+    private boolean yieldCameraInternal(boolean preserveDiLink5Avm) {
+        if (USE_DILINK5_QCARCAM_PATH) {
+            // This method owns the legacy full recorder/stream lifecycle.
+            // No DI5 path may enter it: FastCam recovery retires only the
+            // producer and keeps the muxer, encoder drainers and live-view
+            // session attached.
+            logger.error("Rejected generic camera yield on DiLink 5");
+            if (!diLink5ReverseRequested && !isFreshDiLink5Reverse()) {
+                requestDiLink5SourceOnlyRecovery(
+                        "legacy generic yield request");
+            }
+            return false;
+        }
         logger.info("Yielding camera to native AVM app...");
+        finishDiLink5Reacquire("camera yielded to native AVM");
+        // A generic yield owns the recorder/stream lifecycle below. Never let
+        // a stale reverse-only marker suppress its matching post-reacquire.
+        diLink5ReverseSourcePaused = false;
+        diLink5SourceOnlyReacquire = false;
 
         // CRITICAL: Finalize active recording BEFORE closing camera.
         // FIX: Same bounded-yield pattern as restartCameraAfterError — onPreYield()
@@ -5078,11 +7683,13 @@ public class PanoramicCameraGpu {
         // requested; process exit releases the camera handle, and the daemon
         // re-registers with the coordinator on its way back up).
         if (!stopEncoderDrainersBeforeCameraClose("yield", encoder, yieldStreamEnc)) {
-            return;
+            return false;
         }
         
+        boolean cameraClosed = true;
         if (cameraObj != null) {
-            closeCameraForPath(cameraObj);
+            cameraClosed = closeCameraForPath(
+                    cameraObj, preserveDiLink5Avm);
             cameraObj = null;
             if (cameraCoordinator != null) {
                 cameraCoordinator.resetEventCallbackState();
@@ -5090,26 +7697,34 @@ public class PanoramicCameraGpu {
             }
             logger.info("Camera yielded — GL pipeline idle, waiting for onCloseCamera");
         }
+        if (!cameraClosed) return false;
         
         // Restart drainer threads after camera is closed (for pre-record buffer)
         if (encoder != null) {
             encoder.restartDrainerAfterCameraClose();
         }
 
-        // audit avc-yield (round 5): mark the consumer (ImageReader Surface)
-        // as needing recreation — the BYD HAL just released our Surface, so
-        // the FIRST reacquire attempt must re-allocate it, but subsequent
-        // backoff retries should reuse the freshly-created consumer.
-        if (!USE_OEM_SURFACE_TEXTURE_PATH) {
+        // The BYD HAL just released this consumer from the old camera handle.
+        // Legacy ImageReader must be recreated to avoid the one-frame-then-
+        // freeze failure. DI4 must also get a fresh SurfaceTexture identity so
+        // a callback queued by the yielded handle cannot certify the replacement
+        // handle. DI5 is rejected at the top of this method and owns a separate
+        // source-only lifecycle.
+        if (!USE_DILINK5_QCARCAM_PATH) {
             consumerNeedsRecreation = true;
-            logger.info("Yield: marked consumerNeedsRecreation=true for next reacquire");
+            logger.info("Yield: marked "
+                + (USE_DILINK4_AVM_PATH ? "SurfaceTexture" : "ImageReader")
+                + " consumer for recreation before reacquire");
         }
 
         // Start the yield-state re-acquire poller. Without this, nothing
         // observes the native app closing — the IBYDCameraUser callback path
         // is disabled and the GL frame-stall watchdog can't fire (lastFrameTime
         // is frozen because the render loop early-returns while yielded).
-        startYieldPoller();
+        if (!preserveDiLink5Avm && !diLink5SafetyDisabled) {
+            startYieldPoller();
+        }
+        return true;
     }
 
     /**
@@ -5131,6 +7746,11 @@ public class PanoramicCameraGpu {
      * 2767 — wrapper script respawns and full cold-boot warmup runs.
      */
     private void attemptReacquireOnGlThread() {
+        if (USE_DILINK5_QCARCAM_PATH && diLink5SafetyDisabled) {
+            finishDiLink5Reacquire("camera already in safe-off mode");
+            logger.error("Reacquire skipped: DiLink 5 camera is in safe-off mode");
+            return;
+        }
         // audit avc-yield (round 7, finding pending-retry-not-cancelled):
         // capture the epoch on entry. The scheduling site (failure catch
         // below) snapshots epoch into a local closure when it postDelayed-
@@ -5148,15 +7768,20 @@ public class PanoramicCameraGpu {
         // (started by yieldCameraInternal) is the authoritative recovery
         // path during yield. This prevents a Yield #1 backoff retry from
         // colliding with Yield #2 and counter-bumping into System.exit(0).
-        if ((cameraCoordinator != null && cameraCoordinator.isCameraYielded())
-                || cameraYielded) {
+        if (isCameraReacquireBlockedByOwnershipHandoff()) {
             logger.info("Reacquire: yield-in-progress detected on entry "
-                + "(coordYielded="
-                + (cameraCoordinator != null && cameraCoordinator.isCameraYielded())
+                + "(diLink5=" + USE_DILINK5_QCARCAM_PATH
+                + ", reverse=" + diLink5ReverseRequested
+                + ", coordYielded="
+                + (cameraCoordinator != null
+                        && cameraCoordinator.isCameraYielded())
                 + ", localYielded=" + cameraYielded
-                + ") — aborting attempt; yield poller owns recovery");
+                + ") — aborting attempt; ownership handoff owns recovery");
             return;
         }
+        beginDiLink5Reacquire("GL ownership reacquire attempt");
+        final boolean resumeSourceOnly =
+                USE_DILINK5_QCARCAM_PATH && diLink5SourceOnlyReacquire;
         try {
             // audit avc-yield (round 5, finding belt-and-braces-leak): drop the
             // retryCount>0 gate. If cameraObj is non-null on entry to a fresh
@@ -5174,27 +7799,28 @@ public class PanoramicCameraGpu {
                     logger.warn("Reacquire: closeCameraForPath on stale obj errored: "
                         + th.getMessage());
                 }
+                if (USE_DILINK4_AVM_PATH) {
+                    // A retry is crossing another AVMCamera-handle generation.
+                    // Do not reuse the SurfaceTexture whose callback queue may
+                    // still contain notifications from the handle just closed.
+                    consumerNeedsRecreation = true;
+                }
             }
 
-            // audit avc-yield (round 3, finding 8): on the legacy ImageReader
-            // path the BYD HAL won't deliver continuous frames to a Surface
-            // that was previously connected to a different camera instance —
-            // only the first frame arrives, then the stream freezes (~5s
-            // before the stall watchdog kicks restartCameraAfterError). Mirror
-            // restartCameraAfterError's recreateCameraSurface() step so the
-            // post-yield reacquire is self-healing instead of structurally
-            // dropping ~5-10s of recording every contention cycle.
-            // SurfaceTexture path (dilink4) is gated out at the top of this
-            // file's slice constraints; recreateCameraSurface itself routes
-            // by USE_OEM_SURFACE_TEXTURE_PATH so it stays safe either way.
-            // audit avc-yield (round 5, finding consumer-recreate-every-attempt):
-            // gate on consumerNeedsRecreation — only the first attempt of a
-            // yield cycle needs the recreate; backoff retries reuse the just-
-            // created consumer.
-            if (!USE_OEM_SURFACE_TEXTURE_PATH && consumerNeedsRecreation) {
+            // Recreate only when the current consumer belongs to a retired
+            // camera-handle generation. For legacy that is normally the first
+            // attempt after yield. For DI4 it is also every retry that had to
+            // close a partially-open stale handle, preserving callback identity
+            // fencing across the full reacquire ladder. DI5 never enters this
+            // consumer path.
+            if (!USE_DILINK5_QCARCAM_PATH && consumerNeedsRecreation) {
                 try {
-                    logger.info("Reacquire: recreating ImageReader consumer "
-                        + "before reopen (legacy HAL frozen-frame guard)");
+                    logger.info("Reacquire: recreating "
+                        + (USE_DILINK4_AVM_PATH
+                            ? "SurfaceTexture consumer before reopen "
+                                + "(DI4 callback-generation fence)"
+                            : "ImageReader consumer before reopen "
+                                + "(legacy HAL frozen-frame guard)"));
                     recreateCameraSurface();
                     consumerNeedsRecreation = false;
                     lastGlThreadHeartbeat = System.currentTimeMillis();
@@ -5202,7 +7828,7 @@ public class PanoramicCameraGpu {
                     logger.warn("Reacquire: recreateCameraSurface failed — "
                         + "proceeding with stale consumer: " + th.getMessage());
                 }
-            } else if (!USE_OEM_SURFACE_TEXTURE_PATH) {
+            } else if (!USE_DILINK5_QCARCAM_PATH) {
                 logger.info("Reacquire: skipping consumer recreate "
                     + "(consumerNeedsRecreation=false, retry attempt)");
             }
@@ -5218,29 +7844,45 @@ public class PanoramicCameraGpu {
                     "startCamera returned without opening (cameraObj==null) — "
                     + "likely yielded gate hit; treating as reacquire failure");
             }
+            if (USE_DILINK5_QCARCAM_PATH
+                    && (diLink5ReverseRequested || isFreshDiLink5Reverse())) {
+                // A reverse transition landed while the blocking native open
+                // was in flight. The reverse runnable is queued behind this
+                // ownership section and will close only the FastCam source.
+                // Do not run generic post-reacquire callbacks or schedule a
+                // retry for an intentionally superseded open.
+                diLink5ReverseRequested = true;
+                logger.info("DiLink 5 FastCam reacquire was superseded by "
+                        + "reverse; queued source-only handoff owns cleanup");
+                return;
+            }
             if (cameraCoordinator != null && cameraObj != null) {
                 cameraCoordinator.resetEventCallbackState();
                 cameraCoordinator.setupEventCallback(cameraObj);
             }
 
-            // Restart encoder drainer thread — it was stopped during
-            // onPreYield → stopRecording → closeEventRecording.
-            // Without this, triggerEventRecording creates a muxer but
-            // no thread dequeues frames from the encoder to write them.
-            if (encoder != null) {
-                encoder.restartDrainerAfterCameraClose();
-            }
-
-            // SOTA: Notify pipeline to resume recording
-            if (yieldListener != null) {
-                try {
-                    yieldListener.onPostReacquire();
-                    logger.info("Post-reacquire: recording resumed");
-                } catch (Exception e) {
-                    logger.warn("Post-reacquire callback error: " + e.getMessage());
+            boolean skipPostReacquireLifecycle =
+                    USE_DILINK5_QCARCAM_PATH && resumeSourceOnly;
+            if (skipPostReacquireLifecycle) {
+                // Source-only arbitration never stopped either encoder
+                // drainer, finalized the muxer, or detached streaming.
+                logger.info("DiLink 5 source reopened; recorder and streaming sessions "
+                        + "remained attached");
+            } else {
+                // Generic contention/fault yield did stop the recorder lane.
+                // Restore its drainer and pipeline state exactly as before.
+                if (encoder != null) {
+                    encoder.restartDrainerAfterCameraClose();
+                }
+                if (yieldListener != null) {
+                    try {
+                        yieldListener.onPostReacquire();
+                        logger.info("Post-reacquire: recording resumed");
+                    } catch (Exception e) {
+                        logger.warn("Post-reacquire callback error: " + e.getMessage());
+                    }
                 }
             }
-
             // Success — reset retry budget for the next yield cycle.
             int finalCount = reacquireRetryCount.get();
             if (finalCount > 0) {
@@ -5281,13 +7923,15 @@ public class PanoramicCameraGpu {
             // schedule a retry. Let the yield poller drive recovery. Without
             // this, the failure path here would still cascade to System.exit
             // even if the top-of-method gate raced ahead.
-            if ((cameraCoordinator != null && cameraCoordinator.isCameraYielded())
-                    || cameraYielded) {
+            if (isCameraReacquireBlockedByOwnershipHandoff()) {
                 logger.warn("Reacquire: failure caught while yielded "
-                    + "(coordYielded="
-                    + (cameraCoordinator != null && cameraCoordinator.isCameraYielded())
+                    + "(diLink5=" + USE_DILINK5_QCARCAM_PATH
+                    + ", reverse=" + diLink5ReverseRequested
+                    + ", coordYielded="
+                    + (cameraCoordinator != null
+                            && cameraCoordinator.isCameraYielded())
                     + ", localYielded=" + cameraYielded
-                    + ") — suppressing retry schedule; yield poller owns recovery");
+                    + ") — suppressing retry schedule; ownership handoff owns recovery");
                 return;
             }
 
@@ -5336,10 +7980,38 @@ public class PanoramicCameraGpu {
                         }
                     };
                     pendingReacquireRetry = retryRunnable;
-                    glHandler.postDelayed(retryRunnable, delay);
+                    boolean retryPosted =
+                            glHandler.postDelayed(retryRunnable, delay);
+                    if (!retryPosted) {
+                        pendingReacquireRetry = null;
+                        if (USE_DILINK5_QCARCAM_PATH) {
+                            CameraDaemon.requestProcessRestartPreservingTrip(
+                                    "DiLink 5 source retry rejected by dead GL handler");
+                            finishDiLink5Reacquire(
+                                    "GL handler rejected source retry");
+                            logger.error("DiLink 5 camera source remains "
+                                    + "unavailable; a trip-safe daemon "
+                                    + "restart was requested");
+                        } else {
+                            logger.error("Reacquire retry rejected by GL handler");
+                            CameraDaemon.requestProcessRestartPreservingTrip(
+                                    "camera reacquire retry scheduling rejected");
+                        }
+                        return;
+                    }
                 } else {
                     logger.warn("Reacquire: glHandler null or pipeline stopped — "
                         + "cannot schedule retry");
+                    if (USE_DILINK5_QCARCAM_PATH && running) {
+                        CameraDaemon.requestProcessRestartPreservingTrip(
+                                "DiLink 5 source retry handler unavailable");
+                        finishDiLink5Reacquire(
+                                "source retry handler unavailable");
+                        logger.error("DiLink 5 camera source remains "
+                                + "unavailable; a trip-safe daemon "
+                                + "restart was requested");
+                    }
+                    return;
                 }
                 // Also restart poller as belt-and-braces last-ditch path.
                 // Audit notes this likely won't fire (edge already consumed),
@@ -5365,6 +8037,15 @@ public class PanoramicCameraGpu {
                         + th.getMessage());
                 }
             } else {
+                if (USE_DILINK5_QCARCAM_PATH) {
+                    logger.error("DiLink 5 reacquire retries exhausted — "
+                            + "leaving daemon alive and scheduling a fresh "
+                            + "source-only retry");
+                    reacquireRetryCount.set(0);
+                    scheduleDiLink5DeferredReacquire(
+                            "FastCam reacquire retries exhausted");
+                    return;
+                }
                 // All retries exhausted — give up and let the watchdog
                 // wrapper respawn the daemon. Mirrors line 2400/2767 GL
                 // watchdog escape hatch.
@@ -5387,6 +8068,7 @@ public class PanoramicCameraGpu {
      * false (i.e. the re-acquire path took over) or running flips false (stop).
      */
     private void startYieldPoller() {
+        if (USE_DILINK5_QCARCAM_PATH && diLink5SafetyDisabled) return;
         Thread existing = yieldPollerThread;
         if (existing != null && existing.isAlive()) return;
         Thread t = new Thread(() -> {
@@ -5446,6 +8128,19 @@ public class PanoramicCameraGpu {
      * a full process restart — just a camera reopen.
      */
     private void restartCameraAfterError() {
+        if (USE_DILINK5_QCARCAM_PATH && diLink5SafetyDisabled) {
+            logger.error("Camera restart skipped: DiLink 5 is in safe-off mode");
+            return;
+        }
+        if (USE_DILINK5_QCARCAM_PATH) {
+            // The generic restart below intentionally finalizes recording,
+            // detaches stream components and rebuilds the whole consumer.
+            // FastCam failures are producer-local and must never cross that
+            // lifecycle boundary.
+            requestDiLink5SourceOnlyRecovery(
+                    "legacy full camera restart request");
+            return;
+        }
         // P1 #11: CAS — only one restart can be in flight. If reopenCamera
         // (daemon thread) is already restarting, return without touching the
         // flag so its finally{set(false)} doesn't get clobbered.
@@ -5454,7 +8149,7 @@ public class PanoramicCameraGpu {
             return;
         }
 
-        // RE-ENTRY GUARD: once we've escalated to the warmup-routed restart, that
+        // RE-ENTRY GUARD: once we've escalated to the full-rebuild restart, that
         // path released restartInProgress (below) so its own close/open isn't
         // blocked — but it now OWNS the camera teardown on its worker thread
         // (forceWarmupRestart → pipeline.stop() → camera.stop() → closeCamera).
@@ -5462,21 +8157,22 @@ public class PanoramicCameraGpu {
         // could re-enter here, win the CAS, and fall through to a BARE
         // close/reopen concurrent with that teardown — redundant HAL churn that
         // can re-grab the wedged slot and perturb the warmup recovery. Bail out
-        // until notePipelineRestarted() clears the flag when warmup completes.
+        // until notePipelineRestarted() clears the flag when the rebuild completes.
         if (halRecoveryEscalated) {
-            logger.info("Restart skipped — HAL-recovery warmup restart in flight (owns camera teardown)");
+            logger.info("Restart skipped — HAL full-rebuild recovery in flight"
+                + " (owns camera teardown)");
             restartInProgress.set(false);
             return;
         }
 
-        // ESCALATION (#3): a bare close/reopen cannot recover a wedged AVM HAL
-        // co-consumer state. Empirically the sentry->drive blackout looped 14
-        // bare reopens over 2 min with ZERO frames; only a full pipeline
-        // teardown + com.byd.avc warmup recovered it. Detect that loop here: if
-        // the PREVIOUS open produced no frames (frameCounter didn't advance past
-        // the snapshot taken at its open), count it; once we've stacked
-        // FRAME_STALL_RESTART_ESCALATE_THRESHOLD consecutive zero-frame reopens,
-        // stop looping and hand off to the listener's warmup-routed restart.
+        // ESCALATION (#3): a bare close/reopen cannot recover a producer route
+        // or process-local camera/GL stack that remains wedged. Empirically the
+        // sentry->drive blackout looped 14 bare reopens over 2 min with ZERO
+        // frames. Detect that loop here: if the PREVIOUS open produced no frames
+        // (frameCounter didn't advance past the snapshot taken at its open),
+        // count it; once we've stacked FRAME_STALL_RESTART_ESCALATE_THRESHOLD
+        // consecutive zero-frame reopens, stop looping and hand off to the
+        // listener's full camera/GL rebuild.
         boolean priorOpenDeliveredNoFrame = (frameCounter == frameCounterAtOpen);
         if (priorOpenDeliveredNoFrame) {
             consecutiveZeroFrameRestarts++;
@@ -5488,8 +8184,8 @@ public class PanoramicCameraGpu {
             halRecoveryEscalated = true;
             logger.error("Frame-stall restart loop: " + consecutiveZeroFrameRestarts
                 + " consecutive reopens delivered ZERO frames — bare reopen cannot "
-                + "recover a wedged AVM HAL. Escalating to warmup-routed full restart.");
-            // Release the CAS so the warmup-routed restart (which does its own
+                + "recover the AVM producer. Escalating to a full camera/GL rebuild.");
+            // Release the CAS so the full-rebuild restart (which does its own
             // close/open) isn't blocked by our in-flight flag, then hand off.
             restartInProgress.set(false);
             try {
@@ -5535,6 +8231,7 @@ public class PanoramicCameraGpu {
             }
         }
 
+        boolean releaseRestartGate = true;
         try {
             // CRITICAL: Finalize active recording BEFORE closing camera.
             // FIX: onPreYield() calls muxer.stop() + FUSE rename which can block
@@ -5633,6 +8330,18 @@ public class PanoramicCameraGpu {
             
             // Update heartbeat again after surface recreation
             lastGlThreadHeartbeat = System.currentTimeMillis();
+
+            // Keep the existing 2-second AVMCamera.open timeout meaningful:
+            // complete the bounded AVC warmup first, then start the timed HAL
+            // open worker. startCamera() sees this fresh warmup and coalesces.
+            if (!AvcHalWarmup.warmupBeforeColdOpen(
+                    () -> running
+                        && restartInProgress.get()
+                        && !CameraDaemon.isProcessRestartPending())) {
+                throw new InterruptedException(
+                    "AVC HAL warmup interrupted before camera restart");
+            }
+            lastGlThreadHeartbeat = System.currentTimeMillis();
             
             // CRITICAL FIX: Open camera on a separate thread with a timeout.
             // startCamera() calls into the BYD HAL which can block indefinitely
@@ -5641,8 +8350,10 @@ public class PanoramicCameraGpu {
             // By opening on a worker thread, the GL thread stays alive and the
             // watchdog heartbeat keeps ticking. If the open times out, we let
             // the watchdog handle it on the next stall cycle instead of crash-looping.
-            final boolean[] openSuccess = {false};
-            final Exception[] openError = {null};
+            final java.util.concurrent.atomic.AtomicBoolean openSuccess =
+                    new java.util.concurrent.atomic.AtomicBoolean(false);
+            final java.util.concurrent.atomic.AtomicReference<Exception>
+                    openError = new java.util.concurrent.atomic.AtomicReference<>();
             Thread cameraOpenThread = new Thread(() -> {
                 try {
                     startCamera();
@@ -5651,32 +8362,62 @@ public class PanoramicCameraGpu {
                     // reports yielded; cameraObj==null then "succeeds" by
                     // accident. Treat success as "did not throw AND cameraObj
                     // is live" so the outer recovery path actually runs.
-                    openSuccess[0] = (cameraObj != null);
+                    openSuccess.set(cameraObj != null);
                 } catch (Exception e) {
-                    openError[0] = e;
+                    openError.set(e);
                 }
             }, "CameraReopen");
             cameraOpenThread.start();
 
-            // Wait up to 2 seconds for camera to open, updating heartbeat periodically
-            long openStart = System.currentTimeMillis();
-            long openTimeout = 2000;
+            long openSoftTimeout = 2_000L;
+            boolean legacyOpenAttempt =
+                    !USE_DILINK4_AVM_PATH && !USE_DILINK5_QCARCAM_PATH;
+            long openStart = legacyOpenAttempt
+                    ? android.os.SystemClock.elapsedRealtime()
+                    : System.currentTimeMillis();
+            long openHardTimeout = legacyOpenAttempt
+                    ? Math.max(openSoftTimeout, GL_THREAD_WARMUP_TIMEOUT_MS)
+                    : openSoftTimeout;
             while (cameraOpenThread.isAlive() &&
-                   (System.currentTimeMillis() - openStart) < openTimeout) {
+                   ((legacyOpenAttempt
+                           ? android.os.SystemClock.elapsedRealtime()
+                           : System.currentTimeMillis()) - openStart)
+                           < openHardTimeout) {
                 Thread.sleep(200);
                 lastGlThreadHeartbeat = System.currentTimeMillis();
             }
 
-            if (!openSuccess[0]) {
+            if (!openSuccess.get()) {
                 if (cameraOpenThread.isAlive()) {
-                    logger.warn("Camera open timed out after " + openTimeout +
-                        "ms — will retry on next stall cycle");
-                    // Don't interrupt — let it finish in background, watchdog won't kill us
-                    // because heartbeat is still updating
+                    if (legacyOpenAttempt) {
+                        // A timed-out Binder open cannot be safely abandoned:
+                        // the worker still owns the same start epoch and may
+                        // publish cameraObj after this method returns. Clearing
+                        // restartInProgress would then allow another close/open
+                        // to overlap it, while the late worker never runs the
+                        // callback/drainer/post-reacquire completion below.
+                        // Keep the restart gate latched and use the bounded
+                        // camera-release restart; process death is the only
+                        // reliable cancellation for an in-flight HAL open.
+                        releaseRestartGate = false;
+                        CameraDaemon.requestUrgentCameraReleaseRestart(
+                                "legacy AVMCamera open blocked for "
+                                        + openHardTimeout + "ms");
+                        logger.error("Legacy camera open remained blocked for "
+                                + openHardTimeout
+                                + "ms — terminal restart armed; overlapping "
+                                + "reopen attempts are fenced");
+                    } else {
+                        // Preserve the existing DiLink 4 behavior exactly;
+                        // this audit is intentionally scoped to legacy modes.
+                        logger.warn("Camera open timed out after "
+                                + openSoftTimeout
+                                + "ms — will retry on next stall cycle");
+                    }
                     return;
                 }
-                if (openError[0] != null) {
-                    throw openError[0];
+                if (openError.get() != null) {
+                    throw openError.get();
                 }
                 // audit avc-yield (round 3, finding 10): no throw but
                 // cameraObj is still null — startCamera short-circuited.
@@ -5745,7 +8486,9 @@ public class PanoramicCameraGpu {
             // If restart fails, the watchdog will eventually kill the process
             // but at least we won't crash-loop immediately
         } finally {
-            restartInProgress.set(false);
+            if (releaseRestartGate) {
+                restartInProgress.set(false);
+            }
         }
     }
 
@@ -5828,6 +8571,65 @@ public class PanoramicCameraGpu {
     }
 
     /**
+     * Wait briefly for legacy startup/open ownership to leave vendor code before
+     * teardown touches cameraObj or EGL. A Binder open that remains in flight
+     * cannot be cancelled safely in-process.
+     */
+    private boolean awaitLegacyCameraLifecycleIdleForStop() {
+        if (!legacyWindshieldCameraTerminalRestart.get()
+                && !legacyCameraInitializationInFlight.get()
+                && !legacyCameraOpenInFlight.get()
+                && !legacyWindshieldCameraLifecycleInFlight.get()) {
+            return true;
+        }
+
+        boolean interrupted = Thread.interrupted();
+        long waitStart = android.os.SystemClock.elapsedRealtime();
+        try {
+            while ((legacyCameraInitializationInFlight.get()
+                    || legacyCameraOpenInFlight.get()
+                    || legacyWindshieldCameraLifecycleInFlight.get())
+                    && android.os.SystemClock.elapsedRealtime() - waitStart
+                            < LEGACY_OPEN_STOP_GRACE_MS) {
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException waitInterrupted) {
+                    interrupted = true;
+                }
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        if (!legacyWindshieldCameraTerminalRestart.get()
+                && !legacyCameraInitializationInFlight.get()
+                && !legacyCameraOpenInFlight.get()
+                && !legacyWindshieldCameraLifecycleInFlight.get()) {
+            return true;
+        }
+
+        boolean cameraOwnershipIndeterminate =
+                legacyWindshieldCameraTerminalRestart.get()
+                    || legacyCameraOpenInFlight.get()
+                    || legacyWindshieldCameraLifecycleInFlight.get()
+                    || cameraObj != null
+                    || windshieldCameraObj != null;
+        if (cameraOwnershipIndeterminate) {
+            CameraDaemon.requestUrgentCameraReleaseRestart(
+                    "Legacy camera lifecycle remained indeterminate during stop");
+        } else {
+            CameraDaemon.requestProcessRestartPreservingTrip(
+                    "Legacy camera initialization remained in flight during stop");
+        }
+        logger.error("stop: legacy camera lifecycle did not quiesce within "
+                + LEGACY_OPEN_STOP_GRACE_MS
+                + "ms — refusing concurrent camera/EGL teardown");
+        return false;
+    }
+
+    /**
      * True while this pipeline holds an open AVMCamera handle. Volatile read —
      * safe from any thread. Used to decide between the URGENT bounded restart
      * (handle held: the native AVM app has no video until this process dies)
@@ -5835,7 +8637,21 @@ public class PanoramicCameraGpu {
      * waiting on a release).
      */
     public boolean isCameraHandleHeld() {
-        return cameraObj != null;
+        return cameraObj != null
+            || windshieldCameraObj != null
+            || legacyWindshieldCameraLifecycleInFlight.get()
+            || legacyWindshieldCameraTerminalRestart.get();
+    }
+
+    /** True only while DI5 has intentionally handed its physical inputs to
+     * the OEM reverse/360 view. Recorder and stream sessions remain alive, so
+     * health monitors must treat the resulting no-frame interval as planned. */
+    public boolean isDiLink5SourcePausedForSystemAvm() {
+        return USE_DILINK5_QCARCAM_PATH &&
+                (diLink5SystemAvmFrameGate ||
+                        diLink5ReverseRequested ||
+                        diLink5ReverseSourceTransitionInProgress ||
+                        diLink5ReverseSourcePaused);
     }
 
     /**
@@ -5850,7 +8666,31 @@ public class PanoramicCameraGpu {
      */
     public boolean stop() {
         logger.info( "Stopping GPU camera pipeline...");
-        running = false;
+        Object sourceAtStop = cameraObj;
+        if (sourceAtStop instanceof
+                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) {
+            // Stop can spend seconds quiescing encoder/GL workers after it
+            // stops consuming producer frames. Arm retirement before that
+            // interval so the release guard's bounded status-125 exit is
+            // classified as part of this intentional shutdown.
+            ((com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend)
+                    sourceAtStop).markExpectedProcessRetirement();
+        }
+        synchronized (this) {
+            running = false;
+            if (USE_DILINK5_QCARCAM_PATH) {
+                diLink5SourceRecoveryEpoch.incrementAndGet();
+                diLink5SourceRecoveryActive.set(false);
+                finishDiLink5Reacquire("pipeline stopping");
+                diLink5ReverseEpoch.incrementAndGet();
+                // DI5 no longer yields to reverse; keep the (now permanently
+                // idle) reverse flags at their defaults.
+                diLink5ReverseRequested = false;
+                diLink5ReverseHandoffComplete = true;
+                diLink5SystemAvmFrameGate = false;
+                cameraYielded = false;
+            }
+        }
         // Also stop the attach-time helper threads. They deliberately do NOT test
         // `running` (start() spawns them before it sets running = true, so that
         // test would kill them on every cold start) — this sentinel is their only
@@ -5866,6 +8706,16 @@ public class PanoramicCameraGpu {
 
         // Stop yield poller (if a yield is in-flight when stop() races in)
         stopYieldPoller();
+
+        if (!awaitLegacyCameraLifecycleIdleForStop()) {
+            stopVerdictWedged = true;
+            return false;
+        }
+
+        if (!awaitDiLink5OwnershipTransitionBeforeStop()) {
+            stopVerdictWedged = true;
+            return false;
+        }
         
         // FORTIFY FIX: Stop encoder drainer threads BEFORE closing camera —
         // and abort the close entirely if one is wedged (trip-safe restart
@@ -5873,14 +8723,49 @@ public class PanoramicCameraGpu {
         // has not detached the streaming components, so the field reads here
         // are the live snapshots. Returns false so the pipeline knows this
         // stop was ABORTED and skips its own recorder/encoder release.
+        // Decoupled lane: quiesce the EncoderLane FIRST, while the encoder
+        // drainers are still alive — a lane blocked mid-eglSwapBuffers can
+        // only complete if the encoder's output keeps draining, so stopping
+        // the drainers first could wedge the very draw this shutdown waits
+        // out. The shutdown also precedes camera close, releaseGl's parent-
+        // EGL teardown (child share group), and the pipeline's recorder/
+        // encoder release after stop() returns true. On a wedged lane the
+        // stop ABORTS and requests the trip-safe restart — the same posture
+        // as the drainer guard below, because proceeding would tear down the
+        // codec and EGL underneath a still-executing draw.
+        EncoderLane laneToStop = encoderLane;
+        if (laneToStop != null) {
+            if (!laneToStop.shutdown(2000)) {
+                // Request BEFORE logging (the logger can block on the same
+                // wedged storage that wedged the lane), and escalate urgently
+                // ONLY while the camera handle is held — conservative
+                // otherwise. Same posture and ordering as the drainer-close
+                // helper below.
+                if (cameraObj != null) {
+                    CameraDaemon.requestUrgentCameraReleaseRestart(
+                        "EncoderLane wedged during stop (camera held)");
+                } else {
+                    CameraDaemon.requestProcessRestartPreservingTrip(
+                        "EncoderLane wedged during stop");
+                }
+                logger.error("stop: EncoderLane did not quiesce — aborting stop; "
+                    + "trip-safe restart requested");
+                stopVerdictWedged = true;
+                return false;
+            }
+            encoderLane = null;
+        }
+
         if (!stopEncoderDrainersBeforeCameraClose("stop", encoder, streamEncoder)) {
             stopVerdictWedged = true;
             return false;
         }
         
+        boolean stopClean = true;
+
         // Close camera with proper cleanup + notify service
         if (cameraObj != null) {
-            closeCameraForPath(cameraObj);
+            stopClean = closeCameraForPath(cameraObj);
             cameraObj = null;
             if (cameraCoordinator != null) {
                 cameraCoordinator.notifyPosCloseCamera();
@@ -5909,7 +8794,6 @@ public class PanoramicCameraGpu {
             }
         }
 
-        boolean stopClean = true;
         // Stop GL thread. FIX (EGL-leak audit follow-up): the old join(1000)
         // (a) returned instantly if the caller arrived interrupted (swallowed
         // InterruptedException), (b) never checked isAlive() afterwards, and
@@ -6020,6 +8904,9 @@ public class PanoramicCameraGpu {
         }
 
         logger.info("Reopening AVMCamera...");
+        final boolean legacyOpenAttempt =
+                !USE_DILINK4_AVM_PATH && !USE_DILINK5_QCARCAM_PATH;
+        boolean releaseRestartGate = true;
 
         // CRITICAL: Mark restart-in-progress BEFORE touching the camera so the
         // GL watchdog uses GL_THREAD_WARMUP_TIMEOUT_MS (10s) instead of the
@@ -6073,10 +8960,15 @@ public class PanoramicCameraGpu {
             sleepWithHeartbeat(minWaitMs);
 
             if (cameraCoordinator != null && cameraCoordinator.isRegistered()) {
-                long deadline = System.currentTimeMillis() + (maxWaitMs - minWaitMs);
+                long deadline = (legacyOpenAttempt
+                        ? android.os.SystemClock.elapsedRealtime()
+                        : System.currentTimeMillis())
+                        + (maxWaitMs - minWaitMs);
                 boolean nativeAppDetected = false;
 
-                while (System.currentTimeMillis() < deadline) {
+                while ((legacyOpenAttempt
+                        ? android.os.SystemClock.elapsedRealtime()
+                        : System.currentTimeMillis()) < deadline) {
                     if (cameraCoordinator.checkNativeAppActive()) {
                         nativeAppDetected = true;
                         logger.info("Native app claimed camera (polling) — waiting for release");
@@ -6095,7 +8987,17 @@ public class PanoramicCameraGpu {
                 sleepWithHeartbeat(remainingWait);
             }
 
-            startCamera();
+            if (legacyOpenAttempt) {
+                if (!openLegacyCameraWithHardTimeout("ACC ON camera reopen")) {
+                    // The worker may still be inside the vendor Binder call.
+                    // Process death is the only safe cancellation; keep the
+                    // single-flight gate latched until the urgent restart lands.
+                    releaseRestartGate = false;
+                    return;
+                }
+            } else {
+                startCamera();
+            }
 
             if (cameraCoordinator != null && cameraObj != null) {
                 cameraCoordinator.setupEventCallback(cameraObj);
@@ -6125,7 +9027,15 @@ public class PanoramicCameraGpu {
             try {
                 if (cameraObj == null) {
                     logger.warn("Retry camera open...");
-                    startCamera();
+                    if (legacyOpenAttempt) {
+                        if (!openLegacyCameraWithHardTimeout(
+                                "ACC ON camera reopen retry")) {
+                            releaseRestartGate = false;
+                            return;
+                        }
+                    } else {
+                        startCamera();
+                    }
                     if (cameraCoordinator != null && cameraObj != null) {
                         cameraCoordinator.setupEventCallback(cameraObj);
                     }
@@ -6135,8 +9045,96 @@ public class PanoramicCameraGpu {
                 logger.error("Camera retry failed: " + e2.getMessage());
             }
         } finally {
-            restartInProgress.set(false);
+            if (releaseRestartGate) {
+                restartInProgress.set(false);
+            }
         }
+    }
+
+    /**
+     * Legacy-only bounded AVMCamera open used by the ACC ON reopen path.
+     *
+     * <p>The vendor Binder call can remain blocked after the caller's deadline;
+     * interrupting the Java worker cannot cancel that native transaction. A
+     * timeout therefore arms the bounded camera-release process restart and
+     * returns {@code false}, requiring the caller to leave
+     * {@link #restartInProgress} latched so no second open can overlap the late
+     * worker. DiLink 4/5 never call this helper.
+     */
+    private boolean openLegacyCameraWithHardTimeout(String phase)
+            throws Exception {
+        // Keep the timeout scoped to AVMCamera/HAL acquisition. startCamera()
+        // sees this just-completed warmup and coalesces its own cold-open gate.
+        if (!AvcHalWarmup.warmupBeforeColdOpen(
+                () -> running
+                    && restartInProgress.get()
+                    && !CameraDaemon.isProcessRestartPending())) {
+            throw new InterruptedException(
+                    "AVC HAL warmup interrupted before " + phase);
+        }
+        lastGlThreadHeartbeat = System.currentTimeMillis();
+
+        final java.util.concurrent.atomic.AtomicReference<Exception> openError =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Thread cameraOpenThread = new Thread(() -> {
+            try {
+                startCamera();
+            } catch (Exception e) {
+                // startCameraViaAvmReflection publishes cameraObj before every
+                // vendor step has completed. If a later attach/start operation
+                // throws, retire that partial handle on this same worker before
+                // exposing the error or attempting the one bounded retry.
+                Object partial = cameraObj;
+                if (partial != null) {
+                    cameraObj = null;
+                    try {
+                        closeCameraForPath(partial);
+                    } catch (Throwable cleanup) {
+                        logger.warn(phase + ": partial camera cleanup failed: "
+                                + cleanup.getMessage());
+                    }
+                    if (cameraCoordinator != null) {
+                        cameraCoordinator.resetEventCallbackState();
+                    }
+                }
+                openError.set(e);
+            }
+        }, "LegacyCameraReopen");
+        cameraOpenThread.setDaemon(true);
+        cameraOpenThread.start();
+
+        final long hardTimeoutMs = GL_THREAD_WARMUP_TIMEOUT_MS;
+        final long openStartElapsed =
+                android.os.SystemClock.elapsedRealtime();
+        while (cameraOpenThread.isAlive()
+                && android.os.SystemClock.elapsedRealtime()
+                        - openStartElapsed < hardTimeoutMs) {
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                CameraDaemon.requestUrgentCameraReleaseRestart(
+                        phase + " interrupted with AVMCamera open in flight");
+                logger.error(phase + " interrupted while vendor open remained "
+                        + "in flight — terminal restart armed");
+                return false;
+            }
+            lastGlThreadHeartbeat = System.currentTimeMillis();
+        }
+
+        if (cameraOpenThread.isAlive()) {
+            CameraDaemon.requestUrgentCameraReleaseRestart(
+                    phase + " blocked for " + hardTimeoutMs + "ms");
+            logger.error(phase + " remained blocked for " + hardTimeoutMs
+                    + "ms — terminal restart armed; overlapping opens fenced");
+            return false;
+        }
+
+        Exception error = openError.get();
+        if (error != null) {
+            throw error;
+        }
+        return true;
     }
 
     /**
@@ -6166,6 +9164,16 @@ public class PanoramicCameraGpu {
         if (aiLaneWorker != null) {
             try { aiLaneWorker.shutdown(); } catch (Throwable ignored) {}
             aiLaneWorker = null;
+        }
+
+        // Decoupled lane: defensive shutdown for teardown paths that reach
+        // releaseGl without going through stop() (init-failure rollback).
+        // Same share-group ordering rationale as the AI lane below. No-op on
+        // the normal stop() path, which already shut it down.
+        EncoderLane laneAtRelease = encoderLane;
+        if (laneAtRelease != null) {
+            try { laneAtRelease.shutdown(1500); } catch (Throwable ignored) {}
+            encoderLane = null;
         }
 
         // Tier 1: shut down the AI-lane GL thread before destroying the
@@ -6203,12 +9211,36 @@ public class PanoramicCameraGpu {
         // Releases whichever consumer (SurfaceTexture or ImageReader) is active.
         try { releaseCameraConsumer(); } catch (Throwable t) { logger.warn("releaseGl: consumer teardown: " + t.getMessage()); }
 
+        // DI4-only producer notifications have their own looper so they can
+        // wake frameSync while glHandler is waiting. The consumer was retired
+        // above (epoch advanced + identity cleared), so any already-queued
+        // callback is now harmless while the looper drains and exits.
+        shutdownDiLink4FrameCallbackThread();
+
         // Tear down the ImageReader callback thread (full shutdown only —
         // recreateCameraSurface keeps it alive across camera re-attach).
         if (imageReaderThread != null) {
             try { imageReaderThread.quitSafely(); } catch (Throwable ignored) {}
             imageReaderThread = null;
             imageReaderHandler = null;
+        }
+
+        if (USE_DILINK5_QCARCAM_PATH) {
+            try {
+                if (eglCore != null && dummySurface != null) {
+                    eglCore.makeCurrent(dummySurface);
+                }
+                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                        backend = diLink5GlOwnerBackend;
+                if (backend != null
+                        && !backend.releaseOwnedGlResources()) {
+                    logger.warn("releaseGl: deferred DiLink 5 EGLImage cleanup failed");
+                } else if (backend != null) {
+                    diLink5GlOwnerBackend = null;
+                }
+            } catch (Throwable t) {
+                logger.warn("releaseGl: DiLink 5 native teardown: " + t.getMessage());
+            }
         }
 
         if (cameraTextureId != 0) {
@@ -6218,6 +9250,25 @@ public class PanoramicCameraGpu {
         if (windshieldTextureId != 0) {
             try { GlUtil.deleteTexture(windshieldTextureId); } catch (Throwable t) { logger.warn("releaseGl: windshieldTextureId: " + t.getMessage()); }
             windshieldTextureId = 0;
+        }
+
+        // Decoupled lane resources. Held camera buffers were closed inline
+        // behind the per-frame publish barrier; releaseCameraConsumer above
+        // handled any bind that never reached its copy.
+        if (USE_DECOUPLED_ENCODER_LANE) {
+            if (decoupledCamRing != null) {
+                try { decoupledCamRing.release(); } catch (Throwable t) { logger.warn("releaseGl: camRing: " + t.getMessage()); }
+                decoupledCamRing = null;
+            }
+            if (decoupledWsRing != null) {
+                try { decoupledWsRing.release(); } catch (Throwable t) { logger.warn("releaseGl: wsRing: " + t.getMessage()); }
+                decoupledWsRing = null;
+            }
+            decoupledLastWsSlot = -1;
+            if (cameraOesTextureId != 0) {
+                try { GlUtil.deleteTexture(cameraOesTextureId); } catch (Throwable t) { logger.warn("releaseGl: cameraOesTextureId: " + t.getMessage()); }
+                cameraOesTextureId = 0;
+            }
         }
 
         // Free the OES-probe FBO/texture/program. These are lazily created
@@ -6324,7 +9375,11 @@ public class PanoramicCameraGpu {
      *  uses this to skip rendering while the layer is invisible, saving a full
      *  1280×960 GPU raster pass per frame. */
     public void setBsLayerVisible(boolean visible) {
+        boolean rising = visible && !this.bsLayerVisible;
         this.bsLayerVisible = visible;
+        if (rising) {
+            requestDiLink4ProducerRecovery("blind-spot/camera-view visible");
+        }
     }
 
     /** Whether PASS 1C is currently drawing the BS lane (the render gate). Used by
@@ -6444,12 +9499,10 @@ public class PanoramicCameraGpu {
     }
     
     /**
-     * Sets the target frame rate for the binder camera backend.
-     * Only effective when binder backend is enabled.
-     * Updates the target frame rate. If the camera is already open, also
-     * pushes the new rate to the HAL via AvmCameraHelper.setCameraFps so
-     * emission rate matches the encoder's KEY_FRAME_RATE without a full
-     * camera reopen.
+     * Sets the target frame rate for the active camera backend.
+     * DiLink 5 applies it to the native DMA-to-Surface output pacer; legacy
+     * backends push it to the HAL via AvmCameraHelper.setCameraFps. Neither
+     * path requires a camera reopen.
      *
      * @param fps Desired frames per second (range enforced by callers; this
      *            method just stores and applies)
@@ -6474,7 +9527,10 @@ public class PanoramicCameraGpu {
         // BYD HAL when isValidCamera gate fails) — we log and continue; the
         // encoder reconfig will still produce the right KEY_FRAME_RATE.
         Object cam = cameraObj;
-        if (cam != null) {
+        if (USE_DILINK5_QCARCAM_PATH) {
+            com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                .setOutputFps(fps);
+        } else if (cam != null) {
             try {
                 AvmCameraHelper.setCameraFps(cam, fps);
             } catch (Throwable t) {
@@ -6567,7 +9623,7 @@ public class PanoramicCameraGpu {
         // while the encoder is clamped to 10, giving stride 2 and halving an
         // already-slow feed.) Legacy keeps the full stride behaviour, where
         // targetFps is genuinely honoured by the HAL and skipping saves real work.
-        if (USE_OEM_SURFACE_TEXTURE_PATH && stride > 1) {
+        if (USE_DILINK4_AVM_PATH && stride > 1) {
             logger.info("dilink4: forcing stream stride 1 (was " + stride
                 + ") — HAL rate is fixed and below the request, so decimating"
                 + " would drop real frames");
@@ -6623,6 +9679,12 @@ public class PanoramicCameraGpu {
      * with non-black frames.
      */
     public void setAutoProbeCameras(boolean enabled) {
+        if (USE_DILINK5_QCARCAM_PATH) {
+            autoProbeCameras = false;
+            probeComplete = true;
+            logger.info("Camera auto-probe: DISABLED (DiLink 5 fast camera path)");
+            return;
+        }
         this.autoProbeCameras = enabled;
         if (enabled) {
             probeComplete = false;
@@ -6676,15 +9738,27 @@ public class PanoramicCameraGpu {
     /**
      * Clears the zero-frame-reopen escalation latch. The pipeline MUST call
      * this after it has handled onHalRecoveryNeeded() (i.e. performed its
-     * warmup-routed restart), so a later independent HAL wedge in the same
+     * full camera/GL rebuild), so a later independent HAL wedge in the same
      * drive can escalate again instead of being permanently suppressed.
-     * Also resets the zero-frame counter — the warmup restart is a fresh start.
+     * Also resets the zero-frame counter — the rebuild is a fresh start.
      */
     public void notePipelineRestarted() {
         consecutiveZeroFrameRestarts = 0;
         halRecoveryEscalated = false;
+        dilink4StallRestartAttempts = 0;
+        dilink4StallRecoveryExhausted = false;
+        dilink4RecoveryProofFrames = 0;
+        dilink4RecoveryProofSinceMs = 0L;
+        dilink4SoftRecoveryEpoch.incrementAndGet();
+        dilink4SoftRecoveryInFlight.set(false);
+        dilink4DeferredReopenEpoch.incrementAndGet();
+        dilink4DeferredReopenPending.set(false);
+        dilink4SoftRecoveryCycles = 0;
     }
-    
+
+    // The DiLink 5 gear-driven reverse arbitration was removed: DI5 keeps the
+    // FastCam source open in every gear. See shouldHoldForDiLink5Reverse().
+
     /**
      * SOTA: Returns true if camera is currently yielded to native BYD app.
      */
@@ -6773,16 +9847,33 @@ public class PanoramicCameraGpu {
      *     context isn't available.
      */
     public byte[] sampleFullResMosaicJpeg() {
-        HighResPreviewSampler sampler = ensureHighResSampler();
-        if (sampler == null || cameraTextureId == 0) {
-            logger.warn("sampleFullResMosaicJpeg early-exit sampler="
-                    + (sampler != null) + " textureId=" + cameraTextureId);
+        int textureId = cameraTextureId;
+        if (!isPreviewTextureAvailableForSampling(textureId)) {
+            logger.warn("sampleFullResMosaicJpeg unavailable during camera "
+                    + "ownership transition");
             return null;
         }
+        HighResPreviewSampler sampler = ensureHighResSampler();
+        if (sampler == null) {
+            logger.warn("sampleFullResMosaicJpeg early-exit sampler="
+                    + (sampler != null) + " textureId=" + textureId);
+            return null;
+        }
+        // Decoupled-lane exposure note (review round 2, finding 4 — accepted
+        // for v1): cameraTextureId is a ring-slot texture here and this
+        // sampler takes NO slot pin, so the writer can wrap onto the slot
+        // (~3 frame intervals) while the sampler's context still reads it.
+        // The ring's in-reservation glFinish guarantees the content it STARTS
+        // from is complete, memory is app-owned (never freed under the read),
+        // and the consequence is a torn on-demand PREVIEW JPEG — cosmetic,
+        // rare-path, and the same simultaneous read/rewrite exposure this
+        // sampler already has against the DiLink 5 compositor output. A
+        // second reader pin on CopiedFrameRing is the clean follow-up if
+        // field previews ever show tearing.
         float[] offsets = quadrantStripOffsetX != null
                 ? quadrantStripOffsetX.clone()
                 : new float[]{0.75f, 0.50f, 0.00f, 0.25f};
-        return sampler.sampleFullMosaicJpeg(cameraTextureId, width, height, offsets);
+        return sampler.sampleFullMosaicJpeg(textureId, width, height, offsets);
     }
 
     /**
@@ -6821,10 +9912,16 @@ public class PanoramicCameraGpu {
     public byte[] samplePerQuadrantJpeg(float sliceOffsetX,
                                         float cornerX, float cornerY,
                                         float xFlip, float yFlip) {
+        int textureId = cameraTextureId;
+        if (!isPreviewTextureAvailableForSampling(textureId)) {
+            logger.warn("samplePerQuadrantJpeg unavailable during camera "
+                    + "ownership transition");
+            return null;
+        }
         HighResPreviewSampler sampler = ensureHighResSampler();
-        if (sampler == null || cameraTextureId == 0) {
+        if (sampler == null) {
             logger.warn("samplePerQuadrantJpeg early-exit sampler="
-                    + (sampler != null) + " textureId=" + cameraTextureId);
+                    + (sampler != null) + " textureId=" + textureId);
             return null;
         }
         if (USE_PASSIVE_APA_MODE) {
@@ -6832,7 +9929,7 @@ public class PanoramicCameraGpu {
                     ? quadrantStripOffsetX.clone()
                     : new float[]{0.75f, 0.50f, 0.00f, 0.25f};
             return sampler.sampleFullMosaicJpeg(
-                    cameraTextureId, width, height, offsets);
+                    textureId, width, height, offsets);
         }
         // Force 2x2 math when DiLink 4 is active AND caller supplied corner
         // values; otherwise legacy 4-strip math.
@@ -6840,11 +9937,29 @@ public class PanoramicCameraGpu {
             && !Float.isNaN(cornerX) && !Float.isNaN(cornerY);
         if (useCorner) {
             return sampler.samplePerQuadrantJpeg(
-                cameraTextureId, width, height, sliceOffsetX,
+                textureId, width, height, sliceOffsetX,
                 cornerX, cornerY, xFlip, yFlip);
         }
         return sampler.samplePerQuadrantJpeg(
-            cameraTextureId, width, height, sliceOffsetX);
+            textureId, width, height, sliceOffsetX);
+    }
+
+    /**
+     * Called both before a preview request is queued and again on the sampler
+     * GL thread while {@link #cameraTextureLock} is held. The second check is
+     * what prevents a timed-out/queued HTTP sample from touching a texture
+     * after reverse teardown has retired its backing EGLImage.
+     */
+    private boolean isPreviewTextureAvailableForSampling(int expectedTextureId) {
+        if (expectedTextureId <= 0 || cameraTextureId != expectedTextureId) {
+            return false;
+        }
+        return !USE_DILINK5_QCARCAM_PATH
+                || (running
+                        && !isDiLink5SystemAvmHandoffActive()
+                        && !diLink5CloseInProgress
+                        && !diLink5SafetyDisabled
+                        && cameraObj != null);
     }
 
     /**
@@ -6862,12 +9977,20 @@ public class PanoramicCameraGpu {
             return null;
         }
         try {
-            highResSampler = new HighResPreviewSampler(sharedContext);
+            highResSampler = new HighResPreviewSampler(
+                sharedContext, isTexture2D());
+            highResSampler.setSourceGuard(
+                    cameraTextureLock,
+                    this::isPreviewTextureAvailableForSampling);
             // Layout mirrors the active camera layout mode; matrix is
             // refreshed on every consume tick so even legacy mode (which
             // uses identity) stays current.
             highResSampler.setCameraLayout(getCameraLayoutMode());
-            if (USE_OEM_SURFACE_TEXTURE_PATH) {
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {
+                highResSampler.setTextureMatrix(currentTexMatrix);
+                highResSampler.setRedMaskEnabled(false);
+                highResSampler.setApaCenterInset(0.0f);
+            } else if (USE_OEM_SURFACE_TEXTURE_PATH) {
                 highResSampler.setTextureMatrix(currentTexMatrix);
                 try {
                     org.json.JSONObject camCfgHr = com.overdrive.app.config

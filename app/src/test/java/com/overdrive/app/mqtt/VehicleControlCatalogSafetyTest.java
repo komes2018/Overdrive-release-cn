@@ -1,5 +1,6 @@
 package com.overdrive.app.mqtt;
 
+import com.overdrive.app.byd.BydVehicleData;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
@@ -12,6 +13,37 @@ import org.junit.Test;
 
 /** Ensures all ingress surfaces reject malformed catalog payloads before actuation. */
 public class VehicleControlCatalogSafetyTest {
+
+    @Test
+    public void lightTogglesIgnoreUnknownStaleReadback() {
+        BydVehicleData unknown = new BydVehicleData.Builder()
+                .dayTimeLight(true)
+                .hazard(true)
+                .lightKnownMask(BydVehicleData.LIGHT_KNOWN_NONE)
+                .build();
+
+        assertNull(VehicleControlCatalog
+                .get("drl").toAction(null, "toggle", unknown));
+        assertNull(VehicleControlCatalog
+                .get("hazard").toAction(null, "toggle", unknown));
+        assertNull(VehicleControlCatalog
+                .get("drl").toAction(null, "toggle", null));
+        assertNull(VehicleControlCatalog
+                .get("hazard").toAction(null, "toggle", null));
+
+        BydVehicleData knownOn = unknown.toBuilder()
+                .lightKnownMask(BydVehicleData.LIGHT_KNOWN_DRL
+                        | BydVehicleData.LIGHT_KNOWN_TURN_HAZARD)
+                .build();
+        VehicleCommandRouter.LightsCommand drlKnown =
+                (VehicleCommandRouter.LightsCommand) VehicleControlCatalog
+                        .get("drl").toAction(null, "toggle", knownOn).command;
+        VehicleCommandRouter.HazardCommand hazardKnown =
+                (VehicleCommandRouter.HazardCommand) VehicleControlCatalog
+                        .get("hazard").toAction(null, "toggle", knownOn).command;
+        assertFalse(drlKnown.drlOn);
+        assertFalse(hazardKnown.on);
+    }
 
     @Test
     public void rejectsMalformedSwitchSelectCoverAndNumberPayloads() {
@@ -109,7 +141,7 @@ public class VehicleControlCatalogSafetyTest {
         assertTrue(windows.command.hasSdkPath());
         assertFalse(windows.command.hasCloudPath());
         assertTrue(vent.command.hasCloudPath());
-        assertFalse(vent.command.hasSdkPath());
+        assertTrue(vent.command.hasSdkPath());
         assertTrue(tailgate.command.allowCloudFallbackFromMqtt());
         assertFalse(windows.command.allowCloudFallbackFromMqtt());
         assertTrue(vent.command.allowCloudFallbackFromMqtt());

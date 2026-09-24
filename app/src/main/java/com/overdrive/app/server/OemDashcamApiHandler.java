@@ -75,6 +75,18 @@ public class OemDashcamApiHandler {
         new java.util.concurrent.atomic.AtomicBoolean(false);
     private static final java.util.concurrent.atomic.AtomicBoolean lifecyclePending =
         new java.util.concurrent.atomic.AtomicBoolean(false);
+    private static final java.util.concurrent.atomic.AtomicLong lifecycleRevision =
+        new java.util.concurrent.atomic.AtomicLong(0);
+
+    /**
+     * True while the OEM lifecycle executor has a current or queued ownership
+     * transition. Pano ownerless cleanup treats this as a temporary owner: pano
+     * stop tears OEM down before EGL release, so closing pano in the middle of an
+     * OEM start/restart would abort a valid recording or DVR-view request.
+     */
+    public static boolean isCameraLifecycleTransitionInFlight() {
+        return lifecycleInFlight.get() || lifecyclePending.get();
+    }
 
     /**
      * Schedule one trigger-lifecycle recalc on the dedicated executor.
@@ -83,6 +95,12 @@ public class OemDashcamApiHandler {
      * previously did {@code new Thread(applyTriggerLifecycleFromUcm).start()}.
      */
     public static void scheduleLifecycleRecalc() {
+        // Invalidate a pass already blocked in HAL/encoder warmup. Its queued
+        // follow-up will resolve fresh state instead of starting stale recording.
+        lifecycleRevision.incrementAndGet();
+        // Publish pending before checking ownership so a worker finishing at
+        // this exact moment either sees the request or lets this caller submit it.
+        lifecyclePending.set(true);
         if (lifecycleInFlight.compareAndSet(false, true)) {
             try {
                 LIFECYCLE_EXEC.execute(LIFECYCLE_RUN);
@@ -94,8 +112,6 @@ public class OemDashcamApiHandler {
                 lifecycleInFlight.set(false);
                 logger.warn("scheduleLifecycleRecalc: executor rejected: " + t.getMessage());
             }
-        } else {
-            lifecyclePending.set(true);
         }
     }
 
@@ -226,6 +242,11 @@ public class OemDashcamApiHandler {
      *                         pipeline warm without flipping recording on.
      */
     public static void applyTriggerLifecycle(boolean recordingDesired, boolean streamingDesired) {
+        applyTriggerLifecycle(recordingDesired, streamingDesired, lifecycleRevision.get());
+    }
+
+    private static void applyTriggerLifecycle(
+            boolean recordingDesired, boolean streamingDesired, long expectedRevision) {
         boolean shouldRun = recordingDesired || streamingDesired;
         com.overdrive.app.camera.OemDashcamPipeline existing;
         boolean needFormatWait;
@@ -236,11 +257,12 @@ public class OemDashcamApiHandler {
         // (ACC bounce, quality-mirror restart, view-6 click) don't
         // block on a 3-second poll while the encoder warms up.
         synchronized (LIFECYCLE_LOCK) {
+            if (!isLifecycleRevisionCurrent(expectedRevision)) return;
             existing = com.overdrive.app.daemon.CameraDaemon.getOemDashcamPipeline();
             try {
                 if (shouldRun) {
                     if (existing == null || !existing.isRunning()) {
-                        existing = startPipeline();
+                        existing = startPipeline(expectedRevision);
                         if (existing == null) return;
                     } else if (streamingDesired
                             && !existing.isEglSharedWithPano()
@@ -274,7 +296,7 @@ public class OemDashcamApiHandler {
                         eglHealAttempted = true;
                         try { existing.stop(); } catch (Throwable ignored) {}
                         com.overdrive.app.daemon.CameraDaemon.setOemDashcamPipeline(null);
-                        existing = startPipeline();
+                        existing = startPipeline(expectedRevision);
                         if (existing == null) return;
                         if (existing.isEglSharedWithPano()) {
                             eglHealAttempted = false;   // heal worked; re-arm for next time
@@ -344,6 +366,15 @@ public class OemDashcamApiHandler {
             }
         }
 
+        // startPipeline() can spend several seconds in the factory HAL warmup.
+        // If ACC/config changed meanwhile, a fresh pass is already queued.
+        if (!isLifecycleRevisionCurrent(expectedRevision)) {
+            com.overdrive.app.daemon.CameraDaemon.log(
+                "OemDashcam: lifecycle superseded during pipeline warmup "
+                + "— skipping stale recording start");
+            return;
+        }
+
         // The lifecycle worker owns recovery after an OEM watchdog stop.
         // Reattach a rebuilt, route-ready source and let its first real
         // SurfaceTexture frame promote view 6. This avoids requiring another
@@ -394,6 +425,12 @@ public class OemDashcamApiHandler {
         // residual race.
         synchronized (LIFECYCLE_LOCK) {
             try {
+                if (!isLifecycleRevisionCurrent(expectedRevision)) {
+                    com.overdrive.app.daemon.CameraDaemon.log(
+                        "OemDashcam: lifecycle superseded during encoder warmup "
+                        + "— skipping stale recording start");
+                    return;
+                }
                 com.overdrive.app.camera.OemDashcamPipeline current =
                     com.overdrive.app.daemon.CameraDaemon.getOemDashcamPipeline();
                 if (current == existing
@@ -432,6 +469,29 @@ public class OemDashcamApiHandler {
      * </ul>
      */
     public static void applyTriggerLifecycleFromUcm() {
+        long expectedRevision = lifecycleRevision.get();
+        boolean streamingDesired = isAnyStreamingViewerActive();
+
+        // AccMonitor starts at accOn=false, but that cold default explicitly
+        // means "unknown", not a trustworthy parked state. Never let a boot
+        // resolver or the 30-second self-heal ticker turn that default into an
+        // automatic OEM AVMCamera/encoder start. An authenticated live DVR
+        // viewer remains an explicit owner and may start a non-recording
+        // pipeline; when that viewer disappears, this same branch tears it
+        // down. A later authoritative IPC/probe re-drives the normal axis
+        // resolver through the ACC hooks or self-heal ticker.
+        boolean accKnown =
+            com.overdrive.app.monitor.AccMonitor.isAccStateAuthoritative()
+            || com.overdrive.app.monitor.AccMonitor.wasLastProbeTrustworthy();
+        if (!accKnown) {
+            com.overdrive.app.daemon.CameraDaemon.log(
+                "OemDashcam: ACC state unknown — suppressing automatic "
+                + "recording/surveillance lifecycle"
+                + (streamingDesired ? "; explicit DVR viewer remains active" : ""));
+            applyTriggerLifecycle(false, streamingDesired, expectedRevision);
+            return;
+        }
+
         // Force-reload from disk: the picker may have been written by the app process
         // (settings activity), and our cache is mtime-gated to 1s — without a force
         // reload we can read state up to ~1s stale. Per project convention
@@ -461,7 +521,16 @@ public class OemDashcamApiHandler {
                     outsideSchedule = true;
                 }
                 survSuppressed = !userEnabled || inSafeZone || outsideSchedule;
-            } catch (Throwable ignored) {}
+            } catch (Throwable t) {
+                // These are privacy/ownership gates. If their state cannot be
+                // evaluated, defer the parked OEM camera rather than treating
+                // the failure as permission to open it. The self-heal ticker
+                // retries after the transient clears.
+                survSuppressed = true;
+                com.overdrive.app.daemon.CameraDaemon.log(
+                    "OemDashcam: parked surveillance gate unavailable — "
+                    + "suppressing lifecycle for this pass: " + t.getMessage());
+            }
         }
 
         // GATE (G5): "Vehicle ON only" mode — the parked (surveillance) axis must be
@@ -518,9 +587,13 @@ public class OemDashcamApiHandler {
         boolean keepWarmSurv = "smart".equals(surv) && !accOn && !survSuppressed;
         boolean keepWarm = keepWarmRec
             || keepWarmSurv
-            || isAnyStreamingViewerActive();
+            || streamingDesired;
 
-        applyTriggerLifecycle(recordingDesired, keepWarm);
+        applyTriggerLifecycle(recordingDesired, keepWarm, expectedRevision);
+    }
+
+    private static boolean isLifecycleRevisionCurrent(long expectedRevision) {
+        return lifecycleRevision.get() == expectedRevision;
     }
 
     private static boolean isPanoDashcamRecording() {
@@ -581,19 +654,21 @@ public class OemDashcamApiHandler {
         }
     }
 
-    private static com.overdrive.app.camera.OemDashcamPipeline startPipeline() {
+    private static com.overdrive.app.camera.OemDashcamPipeline startPipeline(
+            long expectedRevision) {
+        final long cameraStartEpoch =
+                com.overdrive.app.daemon.CameraDaemon.captureCameraStartEpoch();
+        if (!isLifecycleRevisionCurrent(expectedRevision)
+                || !com.overdrive.app.daemon.CameraDaemon
+                    .isCameraStartEpochCurrent(cameraStartEpoch)) {
+            return null;
+        }
         int oemId = com.overdrive.app.config.UnifiedConfigManager.resolveOemDashcamId();
         if (oemId < 0) {
             com.overdrive.app.daemon.CameraDaemon.log(
                 "OemDashcam: cannot start — id explicitly disabled");
             return null;
         }
-        try {
-            com.overdrive.app.camera.AvcHalWarmup warmup =
-                new com.overdrive.app.camera.AvcHalWarmup();
-            warmup.warmupAndWait();
-        } catch (Throwable ignored) {}
-
         String outDir = com.overdrive.app.storage.StorageManager.getInstance()
             .getRecordingsPath();
         try {
@@ -667,10 +742,27 @@ public class OemDashcamApiHandler {
                         // this cannot start an unwanted pano recording. It is idempotent
                         // (no-ops on running/starting, refuses while stopping), so a
                         // concurrent bring-up is harmless.
-                        pano.start(false);
+                        pano.start(false, cameraStartEpoch);
                     } catch (Throwable t) {
                         com.overdrive.app.daemon.CameraDaemon.log(
                             "OemDashcam: pano start request failed: " + t.getMessage());
+                    } finally {
+                        // The OEM pipeline is not published yet. If this
+                        // lifecycle is superseded, cancelled, or fails later,
+                        // there may be no setOemDashcamPipeline(null) edge to
+                        // release the pano that this preview request started.
+                        // Defer to pano's generation-pinned exhaustive owner
+                        // verdict; while this OEM transition is in flight it
+                        // waits, then either observes the published OEM owner
+                        // (or any other owner) or retires the orphan.
+                        try {
+                            pano.auditOwnerlessPipelineAfterExternalRelease(
+                                "OEM preview startup settlement");
+                        } catch (Throwable auditFailure) {
+                            com.overdrive.app.daemon.CameraDaemon.log(
+                                "OemDashcam: could not arm pano owner audit: "
+                                    + auditFailure.getMessage());
+                        }
                     }
                 }
                 // (1) Wait on the REAL precondition: pano running AND its EGLCore
@@ -678,9 +770,13 @@ public class OemDashcamApiHandler {
                 // its own running flag, and GpuSurveillancePipeline gates running on
                 // camera.isRunning(), so in practice this resolves as soon as pano is
                 // up — but polling the handle itself removes the ordering assumption.
-                long deadline = System.currentTimeMillis() + PANO_EGL_WAIT_MS;
+                long deadline = android.os.SystemClock.elapsedRealtime()
+                    + PANO_EGL_WAIT_MS;
                 com.overdrive.app.camera.EGLCore parentEgl = null;
-                while (System.currentTimeMillis() < deadline) {
+                while (android.os.SystemClock.elapsedRealtime() < deadline
+                        && isLifecycleRevisionCurrent(expectedRevision)
+                        && com.overdrive.app.daemon.CameraDaemon
+                                .isCameraStartEpochCurrent(cameraStartEpoch)) {
                     if (pano.isRunning()) {
                         com.overdrive.app.camera.PanoramicCameraGpu panoCam = pano.getCamera();
                         if (panoCam != null && panoCam.getEglCore() != null) {
@@ -717,8 +813,15 @@ public class OemDashcamApiHandler {
                 } catch (Throwable ignored) {}
             }
         } catch (Throwable ignored) {}
+        if (!isLifecycleRevisionCurrent(expectedRevision)
+                || !com.overdrive.app.daemon.CameraDaemon
+                    .isCameraStartEpochCurrent(cameraStartEpoch)) {
+            return null;
+        }
         try {
-            p.start();
+            p.start(
+                cameraStartEpoch,
+                () -> isLifecycleRevisionCurrent(expectedRevision));
         } catch (Throwable t) {
             com.overdrive.app.daemon.CameraDaemon.log(
                 "OemDashcam: pipeline.start failed: " + t.getMessage());
@@ -729,6 +832,15 @@ public class OemDashcamApiHandler {
                 rb.put("lastStartErrorAt", java.lang.System.currentTimeMillis());
                 com.overdrive.app.config.UnifiedConfigManager.setOemDashcam(rb);
             } catch (Throwable ignored) {}
+            return null;
+        }
+        if (!isLifecycleRevisionCurrent(expectedRevision)
+                || !com.overdrive.app.daemon.CameraDaemon
+                    .isCameraStartEpochCurrent(cameraStartEpoch)) {
+            try { p.stop(); } catch (Throwable ignored) {}
+            com.overdrive.app.daemon.CameraDaemon.log(
+                "OemDashcam: completed startup was superseded before publish "
+                    + "— replacement pipeline retired");
             return null;
         }
         com.overdrive.app.daemon.CameraDaemon.setOemDashcamPipeline(p);
@@ -767,6 +879,36 @@ public class OemDashcamApiHandler {
         applyTriggerLifecycleFromUcm();
     }
 
+    public static boolean stopPipelineForExplicitUserStop() {
+        return stopPipelineBeforePanoTeardown();
+    }
+
+    public static boolean stopPipelineBeforePanoTeardown() {
+        lifecycleRevision.incrementAndGet();
+        lifecyclePending.set(false);
+        synchronized (LIFECYCLE_LOCK) {
+            com.overdrive.app.camera.OemDashcamPipeline existing =
+                com.overdrive.app.daemon.CameraDaemon.getOemDashcamPipeline();
+            if (existing == null) return true;
+            boolean stopped = true;
+            try { existing.stopRecording(); } catch (Throwable failure) {
+                stopped = false;
+            }
+            try { existing.stop(); } catch (Throwable failure) {
+                stopped = false;
+            }
+            if (com.overdrive.app.daemon.CameraDaemon.getOemDashcamPipeline()
+                    == existing) {
+                com.overdrive.app.daemon.CameraDaemon
+                        .setOemDashcamPipeline(null);
+            }
+            try {
+                return stopped && !existing.isRunning();
+            } catch (Throwable failure) {
+                return false;
+            }
+        }
+    }
 
     /**
      * Poll the OEM pipeline's encoder until OUTPUT_FORMAT_CHANGED has
@@ -777,8 +919,8 @@ public class OemDashcamApiHandler {
     private static boolean waitForEncoderFormat(
             com.overdrive.app.camera.OemDashcamPipeline pipeline, long timeoutMs) {
         if (pipeline == null) return false;
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline) {
+        long deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs;
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
             try {
                 if (pipeline.isEncoderFormatAvailable()) return true;
             } catch (Throwable ignored) {

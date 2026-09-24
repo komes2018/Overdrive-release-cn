@@ -176,6 +176,12 @@ public class Conditions {
                         new Label("driver", "automation.driver"),
                         new Label("passenger", "automation.passenger"))));
         addCondition(new EventCondition(
+                new Label("steeringHeat", "automation.steering_heat"),
+                "automation.steering_heat_description",
+                new EnumType(new Label("state", "automation.state"),
+                        new Label("on", "automation.on"),
+                        new Label("off", "automation.off"))));
+        addCondition(new EventCondition(
                 new Label("ac", "automation.ac"),
                 "automation.ac_description",
                 new EnumType(new Label("state", "automation.state"), new Label("on", "automation.on"), new Label("off", "automation.off"))));

@@ -3,17 +3,25 @@ package com.overdrive.app.server;
 import com.overdrive.app.byd.BydDataCollector;
 import com.overdrive.app.byd.BydVehicleData;
 import com.overdrive.app.byd.cloud.BydCloudConfig;
+import com.overdrive.app.byd.cloud.VehicleCloudSnapshot;
 import com.overdrive.app.byd.light.LightConstants;
 import com.overdrive.app.byd.routing.DrivingSafetyGuard;
 import com.overdrive.app.byd.routing.VehicleCommandRouter;
 import com.overdrive.app.byd.routing.VehicleCommandRouter.CommandResult;
 import com.overdrive.app.byd.routing.VehicleCommandRouter.VehicleCommand;
+import com.overdrive.app.config.UnifiedConfigManager;
+import com.overdrive.app.genai.GenAiRoutineLearner;
 import com.overdrive.app.logging.DaemonLogger;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * API handler for the Vehicle Control page. All write endpoints route
@@ -38,6 +46,7 @@ import java.io.OutputStream;
  *   POST /api/vehicle/adas          — SDK_ONLY
  *   POST /api/vehicle/setting       — SDK_ONLY
  *   POST /api/vehicle/media         — media volume (AudioManager) + screen brightness (setting HAL)
+ *   POST /api/system/ivi-reboot     — parked-only Android head-unit reboot
  *   POST /api/vehicle/battery-heat  — CLOUD_ONLY
  *   GET  /api/vehicle/charging-schedule  — cloud state with local last-known fallback
  *   POST /api/vehicle/charging-schedule  — { startChargeTime, endChargeTime, chargeWay, enabled } CLOUD_ONLY
@@ -50,9 +59,72 @@ import java.io.OutputStream;
 public class VehicleControlApiHandler {
 
     private static final DaemonLogger logger = DaemonLogger.getInstance("VehicleControlApi");
+    static final long IVI_REBOOT_GUARD_MS = 5L * 60_000L;
+    private static final String IVI_REBOOT_BOOT_ID_KEY = "iviRebootGuardBootId";
+    private static final String IVI_REBOOT_ELAPSED_KEY = "iviRebootGuardElapsedMs";
+    private static final String BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id";
+    private static final Object IVI_REBOOT_LOCK = new Object();
+
+    /** Upper bound for the lease status file; anything larger is treated as corrupt. */
+    private static final long DI5_KEEPALIVE_STATUS_MAX_BYTES = 64L * 1024L;
+
+    private static void handleDi5KeepAliveStatus(OutputStream out) throws Exception {
+        org.json.JSONObject response = new org.json.JSONObject();
+        response.put("success", true);
+        response.put("enabled",
+                com.overdrive.app.config.UnifiedConfigManager.isDi5ParkedKeepAliveEnabled());
+        // Diagnostics only. The lease is deliberately NOT gated on the camera-mode
+        // selection (two DiLink 5 head-unit flavours), so these are context for
+        // reading a field log, not a capability verdict.
+        response.put("cameraMode",
+                com.overdrive.app.camera.dilink5.DiLink5Platform.currentActiveMode());
+        response.put("dilink5CameraHardware",
+                com.overdrive.app.camera.dilink5.DiLink5Platform.hasDiLink5CameraHardware());
+        java.io.File statusFile = new java.io.File(
+                com.overdrive.app.power.Di5ParkedPowerHold.DEFAULT_STATUS_PATH);
+        org.json.JSONObject status = null;
+        if (statusFile.isFile()
+                && statusFile.length() > 0
+                && statusFile.length() <= DI5_KEEPALIVE_STATUS_MAX_BYTES) {
+            try {
+                status = new org.json.JSONObject(new String(
+                        java.nio.file.Files.readAllBytes(statusFile.toPath()),
+                        java.nio.charset.StandardCharsets.UTF_8));
+            } catch (Throwable t) {
+                logger.warn("di5-keepalive status unreadable: " + t.getMessage());
+            }
+        }
+        response.put("status", status == null ? org.json.JSONObject.NULL : status);
+        response.put("statusFile", statusFile.getPath());
+        HttpResponse.sendJson(out, response.toString());
+    }
 
     public static boolean handle(String method, String path, String body, OutputStream out) throws Exception {
         String cleanPath = path.contains("?") ? path.substring(0, path.indexOf("?")) : path;
+
+        if (cleanPath.equals("/api/system/ivi-reboot")
+                && method.equals("POST")) {
+            handleIviReboot(out, body);
+            return true;
+        }
+
+        if (cleanPath.equals("/api/system/background-access")
+                && method.equals("POST")
+                && com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            HttpResponse.sendJson(
+                    out,
+                    com.overdrive.app.daemon.AccSentryDaemon
+                            .applyBackgroundAccess().toString());
+            return true;
+        }
+
+        // GET /api/vehicle/di5-keepalive — diagnostics for the DiLink 5 parked
+        // keep-alive lease. The lease runs in acc_sentry_daemon; this server runs
+        // in byd_cam_daemon, so the snapshot is read from the lease's status file.
+        if (cleanPath.equals("/api/vehicle/di5-keepalive") && method.equals("GET")) {
+            handleDi5KeepAliveStatus(out);
+            return true;
+        }
 
         // GET /api/vehicle/state
         if (cleanPath.equals("/api/vehicle/state") && method.equals("GET")) {
@@ -367,13 +439,43 @@ public class VehicleControlApiHandler {
             // Distinguish "app no longer installed" (so the UI can say so + refresh the
             // picker) from a generic failure, before attempting the cast.
             boolean installed = com.overdrive.app.launcher.AppLauncher.isLaunchable(pkg);
-            boolean ok = installed && com.overdrive.app.launcher.ClusterCast.start(pkg);
+            boolean diLink5 =
+                    com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
+            boolean diLink5Hardware =
+                    com.overdrive.app.camera.dilink5.DiLink5Platform
+                            .hasDiLink5CameraHardware();
+            boolean modeRequired = installed && diLink5Hardware && !diLink5;
+            boolean ok = false;
+            if (installed && !modeRequired) {
+                ok = diLink5
+                        ? com.overdrive.app.launcher.ClusterCast
+                                .startAndAwait(pkg, 60000L)
+                        : com.overdrive.app.launcher.ClusterCast.start(pkg);
+            }
             response.put("success", ok);
+            if (diLink5) {
+                response.put("phase",
+                        com.overdrive.app.launcher.ClusterCast.getStartPhase());
+            }
             if (!ok) {
-                response.put("reason", installed ? "cast_failed" : "not_installed");
-                response.put("error", installed
-                        ? "could not cast (unresolved component or projection failed)"
-                        : "app is not installed");
+                response.put("reason", !installed
+                        ? "not_installed"
+                        : (modeRequired
+                            ? "dilink5_mode_required"
+                            : "cast_failed"));
+                String detail = diLink5
+                        ? com.overdrive.app.launcher.ClusterCast.getLastStartFailure()
+                        : "";
+                response.put("error", !installed
+                        ? "app is not installed"
+                        : (modeRequired
+                            ? "DiLink 5 hardware is present but the active vehicle mode is "
+                                + com.overdrive.app.camera.dilink5.DiLink5Platform
+                                        .currentActiveMode()
+                                + "; select DiLink 5 and restart the camera service"
+                            : (detail == null || detail.isEmpty()
+                                ? "could not cast (unresolved component or projection failed)"
+                                : detail)));
             }
         } catch (Exception e) {
             logger.warn("cluster-cast failed: " + e.getMessage());
@@ -389,8 +491,11 @@ public class VehicleControlApiHandler {
         JSONObject response = new JSONObject();
         try {
             com.overdrive.app.surveillance.ClusterMirrorController.getInstance().stop();
-            com.overdrive.app.launcher.ClusterCast.stop();
-            response.put("success", true);
+            boolean stopped = com.overdrive.app.launcher.ClusterCast.stop();
+            response.put("success", stopped);
+            if (!stopped) {
+                response.put("error", "cluster projection cleanup incomplete");
+            }
         } catch (Exception e) {
             logger.warn("cluster-stop failed: " + e.getMessage());
             response.put("success", false);
@@ -502,6 +607,18 @@ public class VehicleControlApiHandler {
         try {
             response.put("success", true);
             response.put("casting", com.overdrive.app.launcher.ClusterCast.isActive());
+            response.put("vehicleMode",
+                    com.overdrive.app.camera.dilink5.DiLink5Platform
+                            .currentActiveMode());
+            response.put("dilink5Hardware",
+                    com.overdrive.app.camera.dilink5.DiLink5Platform
+                            .hasDiLink5CameraHardware());
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                response.put("castPhase",
+                        com.overdrive.app.launcher.ClusterCast.getStartPhase());
+                response.put("castError",
+                        com.overdrive.app.launcher.ClusterCast.getLastStartFailure());
+            }
             // WHICH package is on the cluster. The UI needs this because the resize box acts on the
             // CAST app, while the spinner reflects the user's next PICK — the two diverge as soon as
             // the user browses the list during a live cast. Without it the UI would key its geometry
@@ -574,31 +691,18 @@ public class VehicleControlApiHandler {
      */
     private static void handleGetState(OutputStream out) throws Exception {
         JSONObject response = new JSONObject();
+        boolean diLink5Selected =
+                com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
+        response.put("dilink5", diLink5Selected);
+        response.put("iviRebootAvailable", true);
         BydDataCollector collector = BydDataCollector.getInstance();
         BydVehicleData data = collector.getData();
-        if (data == null) {
-            // Trigger a full data collection in the background
-            try {
-                new Thread(() -> collector.collectAllFull(), "EarlyCollectState").start();
-            } catch (Throwable ignored) {}
-
-            // Check if cloud data is available to populate initial state
-            try {
-                com.overdrive.app.byd.cloud.BydCloudDataProvider provider =
-                        com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance();
-                com.overdrive.app.byd.cloud.VehicleCloudSnapshot cs = provider.getSnapshot();
-                BydVehicleData.Builder b = new BydVehicleData.Builder();
-                if (cs != null) {
-                    if (cs.hasSoc()) b.socPercent(cs.socPercent);
-                    if (cs.hasElecRange()) b.elecRangeKm(cs.elecRangeKm);
-                    if (cs.hasChargingState()) b.chargingState(cs.getChargingStateAsSdk());
-                }
-                data = b.build();
-            } catch (Throwable ignored) {}
-        }
 
         if (data == null) {
-            data = new BydVehicleData.Builder().build();
+            response.put("success", false);
+            response.put("error", Messages.get("errors.vehicle_data_unavailable"));
+            HttpResponse.sendJson(out, response.toString());
+            return;
         }
 
         response.put("success", true);
@@ -638,15 +742,18 @@ public class VehicleControlApiHandler {
         JSONObject doors = new JSONObject();
         int sdkOverall = -1;
         if (data.doorLockStatus != null && data.doorLockStatus.length >= 7) {
-            doors.put("rf", cloudLockToApi(data.doorLockStatus[0]));
-            doors.put("lf", cloudLockToApi(data.doorLockStatus[1]));
-            doors.put("rr", cloudLockToApi(data.doorLockStatus[2]));
-            doors.put("lr", cloudLockToApi(data.doorLockStatus[3]));
-            doors.put("trunk", cloudLockToApi(data.doorLockStatus[4]));
-            doors.put("hood", cloudLockToApi(data.doorLockStatus[5]));
-            int mappedOverall = cloudLockToApi(data.doorLockStatus[6]);
+            boolean diLink5 =
+                    com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
+            doors.put("rf", localLockToApi(data.doorLockStatus[0], diLink5));
+            doors.put("lf", localLockToApi(data.doorLockStatus[1], diLink5));
+            doors.put("rr", localLockToApi(data.doorLockStatus[2], diLink5));
+            doors.put("lr", localLockToApi(data.doorLockStatus[3], diLink5));
+            doors.put("trunk", localLockToApi(data.doorLockStatus[4], diLink5));
+            doors.put("hood", localLockToApi(data.doorLockStatus[5], diLink5));
+            int mappedOverall =
+                    localLockToApi(data.doorLockStatus[6], diLink5);
             doors.put("overall", mappedOverall);
-            if (mappedOverall != -1) {
+            if (mappedOverall == 1 || mappedOverall == 2) {
                 sdkOverall = mappedOverall;
                 doors.put("source", "sdk");
                 doors.put("scope", "vehicle");
@@ -785,52 +892,59 @@ public class VehicleControlApiHandler {
         }
         response.put("doors", doors);
 
-        // Window open percent [1-6]: 0=closed, 100=fully open, -1=unknown
-        // Index: 0=LF, 1=RF, 2=LR, 3=RR, 4=sunroof, 5=sunshade
+        // Exact local percentage stays authoritative. If it is unavailable, use the local
+        // open/closed getter and then a fresh cloud snapshot. A coarse OPEN never becomes 100%.
         JSONObject windows = new JSONObject();
-        if (data.windowOpenPercent != null && data.windowOpenPercent.length >= 4) {
-            windows.put("lf", data.windowOpenPercent[0]);
-            windows.put("rf", data.windowOpenPercent[1]);
-            windows.put("lr", data.windowOpenPercent[2]);
-            windows.put("rr", data.windowOpenPercent[3]);
-            if (data.windowOpenPercent.length >= 5) windows.put("sunroof", data.windowOpenPercent[4]);
-            if (data.windowOpenPercent.length >= 6) windows.put("sunshade", data.windowOpenPercent[5]);
-        } else {
-            // Check cloud fallback
-            try {
-                com.overdrive.app.byd.cloud.BydCloudDataProvider provider =
-                        com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance();
-                com.overdrive.app.byd.cloud.VehicleCloudSnapshot cs = provider.getSnapshot();
-                if (cs != null && cs.hasWindows()) {
-                    int[] w = cs.getWindowOpenPercentAsArray();
-                    windows.put("lf", w[0]);
-                    windows.put("rf", w[1]);
-                    windows.put("lr", w[2]);
-                    windows.put("rr", w[3]);
-                    windows.put("sunroof", w[4]);
-                    windows.put("sunshade", w[5]);
-                }
-            } catch (Exception ignored) {}
+        JSONObject windowOpen = new JSONObject();
+        VehicleCloudSnapshot cloudWindows = null;
+        try {
+            VehicleCloudSnapshot snapshot =
+                    com.overdrive.app.byd.cloud.BydCloudDataProvider
+                            .getInstance().getSnapshot();
+            if (snapshot != null && snapshot.isWindowStateFresh()) {
+                cloudWindows = snapshot;
+            }
+        } catch (Exception e) {
+            logger.debug("window cloud overlay failed: " + e.getMessage());
+        }
+
+        String[] sideKeys = {"lf", "rf", "lr", "rr"};
+        for (int i = 0; i < sideKeys.length; i++) {
+            int percent = data.windowOpenPercent != null
+                    && data.windowOpenPercent.length > i
+                    ? data.windowOpenPercent[i] : -1;
+            int localState = isValidWindowPercent(percent)
+                    ? -1 : collector.readWindowOpenState(i + 1);
+            int openState = resolveWindowOpenState(
+                    percent, localState, cloudWindowStateAt(cloudWindows, i));
+            if (!isValidWindowPercent(percent) && openState == 0) {
+                percent = 0;
+            }
+            windows.put(sideKeys[i], percent);
+            if (openState >= 0) {
+                windowOpen.put(sideKeys[i], openState == 1);
+            }
+        }
+        if (data.windowOpenPercent != null && data.windowOpenPercent.length >= 5) {
+            windows.put("sunroof", data.windowOpenPercent[4]);
+        }
+        if (data.windowOpenPercent != null && data.windowOpenPercent.length >= 6) {
+            windows.put("sunshade", data.windowOpenPercent[5]);
         }
         response.put("windows", windows);
+        response.put("windowOpen", windowOpen);
 
-        // Trunk/tailgate status from extended bodywork or cloud
+        // Trunk/tailgate status from extended bodywork
         JSONObject trunk = new JSONObject();
-        int trunkLock = -1;
+        // Back door status from feature ID (if available in toJson)
+        // We use doorLockStatus[4] for trunk lock, and check body door status flags
         if (data.doorLockStatus != null && data.doorLockStatus.length >= 5) {
-            trunkLock = data.doorLockStatus[4];
+            trunk.put(
+                    "lockStatus",
+                    com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                            ? cloudLockToApi(data.doorLockStatus[4])
+                            : data.doorLockStatus[4]);
         }
-        if (trunkLock == -1) {
-            try {
-                com.overdrive.app.byd.cloud.BydCloudDataProvider provider =
-                        com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance();
-                com.overdrive.app.byd.cloud.VehicleCloudSnapshot cs = provider.getSnapshot();
-                if (cs != null && cs.trunkLid != -1) {
-                    trunk.put("doorStatus", cs.trunkLid == 1 ? "OPEN" : "CLOSED");
-                }
-            } catch (Exception ignored) {}
-        }
-        trunk.put("lockStatus", trunkLock);
         response.put("trunk", trunk);
 
         // Sunroof
@@ -840,16 +954,6 @@ public class VehicleControlApiHandler {
         }
         if (data.sunroofPosition != BydVehicleData.UNAVAILABLE) {
             sunroof.put("position", data.sunroofPosition);
-        }
-        if (!sunroof.has("state")) {
-            try {
-                com.overdrive.app.byd.cloud.BydCloudDataProvider provider =
-                        com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance();
-                com.overdrive.app.byd.cloud.VehicleCloudSnapshot cs = provider.getSnapshot();
-                if (cs != null && cs.skylight != -1) {
-                    sunroof.put("state", cs.skylight == 2 ? 1 : 0);
-                }
-            } catch (Exception ignored) {}
         }
         response.put("sunroof", sunroof);
 
@@ -862,11 +966,12 @@ public class VehicleControlApiHandler {
 
         // Lights
         JSONObject lights = new JSONObject();
-        lights.put("lowBeam", data.lowBeam);
-        lights.put("highBeam", data.highBeam);
-        lights.put("hazard", data.hazard);
-        lights.put("dayTimeLight", data.dayTimeLight);
-        lights.put("ambientColour", data.ambientColour);
+        boolean diLink5 =
+                com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
+        putLightState(lights, data, diLink5);
+        if (!diLink5 || data.ambientColourKnown) {
+            lights.put("ambientColour", data.ambientColour);
+        }
         // Ambient main switch as a tri-state: true / false / omitted-when-unreadable, so a UI
         // can tell "off" apart from "this trim doesn't report it".
         if (data.ambientEnabled != BydVehicleData.UNAVAILABLE) {
@@ -877,35 +982,48 @@ public class VehicleControlApiHandler {
 
         // ADAS
         JSONObject adas = new JSONObject();
-        adas.put("speedLimitWarning", data.speedLimitWarning);
+        if (!diLink5 || data.speedLimitWarningKnown) {
+            adas.put("speedLimitWarning", data.speedLimitWarning);
+        }
         response.put("adas", adas);
 
         // Setting
         JSONObject setting = new JSONObject();
-        // SDK value: 1=on, 2=off, 3=delay. Treat on(1) and delay(3) as enabled; anything else —
-        // off(2) or the unpopulated default 0 on vehicles that don't report CPD — reads as off, so
-        // the UI toggle doesn't show "on" for an unknown state.
-        setting.put("childPresenceDetection",
-                data.childPresenceDetection == 1 || data.childPresenceDetection == 3);
+        if (data.childPresenceDetection >= 1
+                && data.childPresenceDetection <= 3) {
+            setting.put("childPresenceDetection",
+                    data.childPresenceDetection == 1
+                            || data.childPresenceDetection == 3);
+        }
         response.put("setting", setting);
 
         // Seats — heating/cooling levels for driver/passenger ([0-2], 0=off)
         JSONObject seats = new JSONObject();
         if (data.seatHeat != null && data.seatHeat.length > 0) {
             JSONArray heat = new JSONArray();
-            for (int v : data.seatHeat) heat.put(v);
+            for (int v : data.seatHeat) {
+                heat.put(v == BydVehicleData.UNAVAILABLE ? JSONObject.NULL : v);
+            }
             seats.put("heat", heat);
         }
         if (data.seatCool != null && data.seatCool.length > 0) {
             JSONArray cool = new JSONArray();
-            for (int v : data.seatCool) cool.put(v);
+            for (int v : data.seatCool) {
+                cool.put(v == BydVehicleData.UNAVAILABLE ? JSONObject.NULL : v);
+            }
             seats.put("cool", cool);
         }
-        // ventilatedSeats: hardware capability. Cars without ventilated seats
-        // (Atto 3 base, certain Seal trims) report hasFeature("SEAT_VENTILATING")=0
-        // and the BYD cloud returns 1001 on VENTILATIONHEATING. JS uses this
-        // to grey out the cool buttons.
-        seats.put("ventilatedSupported", BydDataCollector.getInstance().isSeatVentilationSupported());
+        seats.put("ventilatedSupported", collector.isSeatVentilationSupported());
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            JSONArray support = new JSONArray();
+            for (int position = 1; position <= 2; position++) {
+                Boolean supported =
+                        collector.getSeatVentilationSupport(position);
+                support.put(supported != null
+                        ? supported : JSONObject.NULL);
+            }
+            seats.put("ventilatedSupportedBySeat", support);
+        }
         // Steering-wheel heater. Local read first (2=on/1=off), then the cloud snapshot's
         // own wire domain. The key is omitted entirely when neither source answered, so the
         // UI shows an unknown toggle rather than asserting "off".
@@ -940,32 +1058,35 @@ public class VehicleControlApiHandler {
             logger.debug("battery-heat cloud read failed: " + e.getMessage());
         }
 
-        // Climate — only report AC state if vehicle power is on (powerLevel >= 2)
-        // Otherwise stale cached data shows AC on when car is actually off
+        // Legacy snapshots need the power-level gate to suppress stale AC state.
+        // DiLink 5 refreshes these fields directly and may not expose powerLevel.
         JSONObject climate = new JSONObject();
         boolean vehiclePoweredOn = (data.powerLevel != BydVehicleData.UNAVAILABLE && data.powerLevel >= 2);
         if (data.acStartState != BydVehicleData.UNAVAILABLE) {
-            climate.put("acOn", vehiclePoweredOn && data.acStartState == 1);
+            climate.put("acOn",
+                    (diLink5 || vehiclePoweredOn) && data.acStartState == 1);
         }
         if (data.hasFreshCabinTemperature() && !Double.isNaN(data.insideTempC)) {
             climate.put("insideTempC", data.insideTempC);
         }
         if (data.acWindMode != BydVehicleData.UNAVAILABLE) climate.put("windMode", data.acWindMode);
-        if (data.acFanLevel != BydVehicleData.UNAVAILABLE && vehiclePoweredOn) climate.put("fanLevel", data.acFanLevel);
-        // AC temperature SETPOINT (the dial) — distinct from insideTempC, which is the
-        // MEASURED cabin air. The collector already reads both dials every poll, but they
-        // were never surfaced here, so clients had no way to show the temperature the car
-        // is actually set to and fell back to a hardcoded default. Gated on power like
-        // fanLevel, since a parked car reports the last cached dial value. Key names match
-        // BydVehicleData.toJson() so both serializations agree. tempUnit rides along
-        // because the setpoint is expressed in the head unit's display unit (0 = F).
-        if (data.acSetpointDriver != BydVehicleData.UNAVAILABLE && vehiclePoweredOn) {
-            climate.put("setpointDriver", data.acSetpointDriver);
+        if (data.acFanLevel != BydVehicleData.UNAVAILABLE
+                && (diLink5 || vehiclePoweredOn)) {
+            climate.put("fanLevel", data.acFanLevel);
         }
-        if (data.acSetpointPassenger != BydVehicleData.UNAVAILABLE && vehiclePoweredOn) {
-            climate.put("setpointPassenger", data.acSetpointPassenger);
+        if (data.tempUnit != BydVehicleData.UNAVAILABLE) {
+            climate.put("tempUnit", data.tempUnit);
         }
-        if (data.tempUnit != BydVehicleData.UNAVAILABLE) climate.put("tempUnit", data.tempUnit);
+        if (data.acSetpointDriver != BydVehicleData.UNAVAILABLE
+                && (diLink5 || vehiclePoweredOn)) {
+            climate.put("setpointDriver",
+                    climateSetpointToCelsius(data.acSetpointDriver));
+        }
+        if (data.acSetpointPassenger != BydVehicleData.UNAVAILABLE
+                && (diLink5 || vehiclePoweredOn)) {
+            climate.put("setpointPassenger",
+                    climateSetpointToCelsius(data.acSetpointPassenger));
+        }
         Boolean remoteClimateActive = remoteClimateActive();
         if (remoteClimateActive != null) {
             climate.put("remoteClimateActive", remoteClimateActive.booleanValue());
@@ -978,18 +1099,26 @@ public class VehicleControlApiHandler {
         // block directly; if any required source is missing the corner falls
         // back to {available:false} so the UI shows a grey "no signal" state.
         JSONObject tyres = new JSONObject();
-        boolean anyTyreData = data.tyrePressure != null
+        boolean anyTyrePressure = false;
+        if (data.tyrePressure != null) {
+            for (int pressure : data.tyrePressure) {
+                if (pressure > 0 && pressure != BydVehicleData.UNAVAILABLE) {
+                    anyTyrePressure = true;
+                    break;
+                }
+            }
+        }
+        if (data.tyrePressure != null
                 || data.tyrePressureState != null
                 || data.tyreAirLeakState != null
                 || data.tyreSignalState != null
-                || data.tyreTemperature != null;
-        if (anyTyreData) {
+                || data.tyreTemperature != null) {
             String[] keys = { "fl", "fr", "rl", "rr" };
             for (int i = 0; i < keys.length; i++) {
                 JSONObject t = new JSONObject();
                 int kPa = (data.tyrePressure != null && i < data.tyrePressure.length)
                         ? data.tyrePressure[i] : BydVehicleData.UNAVAILABLE;
-                if (kPa != BydVehicleData.UNAVAILABLE && kPa > 0 && kPa < 1000 && kPa != 4095 && kPa != 2047 && kPa != 255) {
+                if (kPa != BydVehicleData.UNAVAILABLE && kPa > 0) {
                     t.put("kPa", kPa);
                     // PSI = kPa * 0.1450377 (matches the OEM vehicle-control app
                     // UnitFormatter conversion). One decimal place is
@@ -1003,23 +1132,27 @@ public class VehicleControlApiHandler {
                         && data.tyreTemperature[i] != BydVehicleData.UNAVAILABLE) {
                     t.put("temperatureC", data.tyreTemperature[i]);
                 }
-                if (data.tyrePressureState != null && i < data.tyrePressureState.length) {
+                if (data.tyrePressureState != null
+                        && i < data.tyrePressureState.length
+                        && data.tyrePressureState[i] != BydVehicleData.UNAVAILABLE) {
                     t.put("pressureState", data.tyrePressureState[i]);
                 }
-                if (data.tyreAirLeakState != null && i < data.tyreAirLeakState.length) {
+                if (data.tyreAirLeakState != null
+                        && i < data.tyreAirLeakState.length
+                        && data.tyreAirLeakState[i] != BydVehicleData.UNAVAILABLE) {
                     t.put("airLeakState", data.tyreAirLeakState[i]);
                 }
-                if (data.tyreSignalState != null && i < data.tyreSignalState.length) {
+                if (data.tyreSignalState != null
+                        && i < data.tyreSignalState.length
+                        && data.tyreSignalState[i] != BydVehicleData.UNAVAILABLE) {
                     t.put("signalState", data.tyreSignalState[i]);
                 }
                 // Available = we got at least one valid pressure reading.
                 t.put("available", t.has("kPa"));
                 tyres.put(keys[i], t);
             }
-            tyres.put("available", true);
-        } else {
-            tyres.put("available", false);
         }
+        tyres.put("available", anyTyrePressure);
         // The user's configured limits ride along with the readings so the web
         // UI colours corners against the SAME numbers that drive notifications
         // instead of its own hardcoded PSI literals. Always emitted (even when
@@ -1187,13 +1320,13 @@ public class VehicleControlApiHandler {
     /**
      * Window control routed through the command router.
      * Body: one of:
-     *   { "action": "vent" }                         cloud OPENWINDOW ventilation crack
+     *   { "action": "vent" }                         hybrid 15%/cloud ventilation crack
      *   { "area": 1-4 (LF/RF/LR/RR) or 0 for all, "command": 1=open, 2=close, 3=stop }
      *   { "area": 1-4,                              "targetPercent": 0..100 }
      *   { "area": 5-6, (Sunroof and Sunshade),      "targetPercent": 0..100 }
      *
-     * Full opening stays SDK-only. The cloud's OPENWINDOW ventilation crack is
-     * exposed separately so a successful remote vent is never reported as full open.
+     * Full opening stays SDK-only. Vent is exposed separately so local 15%
+     * positioning and the cloud's OPENWINDOW crack are never reported as full open.
      */
     private static void handleWindow(OutputStream out, String body) throws Exception {
         JSONObject response = new JSONObject();
@@ -1262,6 +1395,14 @@ public class VehicleControlApiHandler {
                 JSONObject resp = routedResponse(r, "window-target");
                 resp.put("area", area);
                 resp.put("targetPercent", target);
+                if (r.outcome == VehicleCommandRouter.Outcome.SUCCESS
+                        && area == 6 && !HttpServer.isAutomationRequest()) {
+                    if (target <= 5) {
+                        GenAiRoutineLearner.setSunshade("close");
+                    } else if (target >= 95) {
+                        GenAiRoutineLearner.setSunshade("open");
+                    }
+                }
                 HttpResponse.sendJson(out, resp.toString());
                 return;
             }
@@ -1303,6 +1444,14 @@ public class VehicleControlApiHandler {
             JSONObject resp = routedResponse(r, "window");
             resp.put("area", area);
             resp.put("command", command);
+            if (r.outcome == VehicleCommandRouter.Outcome.SUCCESS
+                    && area == 6 && !HttpServer.isAutomationRequest()) {
+                if (command == 1) {
+                    GenAiRoutineLearner.setSunshade("open");
+                } else if (command == 2) {
+                    GenAiRoutineLearner.setSunshade("close");
+                }
+            }
             HttpResponse.sendJson(out, resp.toString());
         } catch (Exception e) {
             logger.warn("Window command failed: " + e.getMessage());
@@ -1537,6 +1686,12 @@ public class VehicleControlApiHandler {
             // so a refused/failed write never leaves a timer that would switch off an AC this
             // request never managed to switch on.
             if (r.outcome == VehicleCommandRouter.Outcome.SUCCESS) {
+                if ("set_temp".equals(action)
+                        && !HttpServer.isAutomationRequest()) {
+                    GenAiRoutineLearner.recordClimate(
+                            req.optInt("zone", 0),
+                            req.optDouble("temp"));
+                }
                 if ("power_on".equals(action)) {
                     // "on for N minutes". Only a POSITIVE value acts; 0 deliberately leaves any
                     // pending window untouched rather than cancelling it.
@@ -2199,7 +2354,9 @@ public class VehicleControlApiHandler {
                     HttpResponse.sendJson(out, response.toString());
                     return;
                 }
-                ok = BydDataCollector.getInstance().setAmbientBrightnessZoned(zone, value);
+                CommandResult routed = VehicleCommandRouter.getInstance().execute(
+                        new VehicleCommandRouter.AmbientBrightnessCommand(value, zone));
+                ok = routed.outcome == VehicleCommandRouter.Outcome.SUCCESS;
             } else if (isAmbientPower) {
                 // Zoned interior-ambient on/off. value 0 → off, >0 → on. "both" uses the real
                 // global main switch (three-tier chain); a single zone has no dedicated switch, so
@@ -2212,19 +2369,25 @@ public class VehicleControlApiHandler {
                     HttpResponse.sendJson(out, response.toString());
                     return;
                 }
-                ok = BydDataCollector.getInstance().setAmbientLightEnabledZoned(zone, value > 0);
+                CommandResult routed = VehicleCommandRouter.getInstance().execute(
+                        new VehicleCommandRouter.AmbientPowerCommand(value > 0, zone));
+                ok = routed.outcome == VehicleCommandRouter.Outcome.SUCCESS;
             } else if (isBrightness) {
                 ok = BydDataCollector.getInstance().setInfotainmentBrightness(value);
             } else if (isClusterBrightness) {
                 ok = BydDataCollector.getInstance().setDriverDisplayBrightness(value);
             } else if (isHudBrightness) {
-                ok = BydDataCollector.getInstance().setHudBrightness(value);
+                CommandResult routed = VehicleCommandRouter.getInstance().execute(
+                        new VehicleCommandRouter.HudBrightnessCommand(value));
+                ok = routed.outcome == VehicleCommandRouter.Outcome.SUCCESS;
             } else if (isHudPower) {
                 // HUD on/off: value 0 → off, any value > 0 → on. This is the DEDICATED HUD
                 // power switch (SET_HUD_SWITCH_SET, 1=on/2=off), NOT brightness — driving
                 // brightness to 0 does not turn the HUD off. setHudPower actuates via the
                 // app-process VehicleActuatorService. The action sends value=0 / value=100.
-                ok = BydDataCollector.getInstance().setHudPower(value > 0);
+                CommandResult routed = VehicleCommandRouter.getInstance().execute(
+                        new VehicleCommandRouter.HudPowerCommand(value > 0));
+                ok = routed.outcome == VehicleCommandRouter.Outcome.SUCCESS;
             } else if (isScreenPower) {
                 // Turn the infotainment (centre) screen fully on/off via the proven
                 // backlight path (PowerManager.turnBacklightOn/Off → BYDAutoSettingDevice
@@ -2345,6 +2508,126 @@ public class VehicleControlApiHandler {
     private static final String SCREENSHOT_DIR = "/storage/sdcard/OverDrive/screenshots";
 
     /**
+     * Reboot the Android IVI only after explicit confirmation, a live parked-state check, and a
+     * persistent loop guard. Automation/keymap calls are additionally refused during the first
+     * five minutes of a boot, so "on boot -> reboot" cannot cycle forever. The delayed fixed
+     * command lets the HTTP success response reach the caller before the daemon disappears.
+     */
+    private static void handleIviReboot(OutputStream out, String body) throws Exception {
+        JSONObject response = new JSONObject();
+        try {
+            JSONObject req = (body == null || body.isEmpty())
+                    ? new JSONObject() : new JSONObject(body);
+            if (!"REBOOT".equals(req.optString("confirm", ""))) {
+                response.put("success", false);
+                response.put("error", "confirm must be REBOOT");
+            } else {
+                synchronized (IVI_REBOOT_LOCK) {
+                    String blockReason = DrivingSafetyGuard.getIviRebootBlockReason();
+                    if (blockReason != null) {
+                        response.put("success", false);
+                        response.put("error", Messages.get("vehicle_control.blocked_driving"));
+                    } else {
+                        boolean automationRequest = HttpServer.isAutomationRequest();
+                        long elapsedMs = android.os.SystemClock.elapsedRealtime();
+                        String bootId = readIviRebootBootId();
+                        JSONObject automationConfig = UnifiedConfigManager.getAutomation();
+                        long remainingMs = iviRebootCooldownRemainingMs(
+                                automationRequest,
+                                automationConfig.optString(IVI_REBOOT_BOOT_ID_KEY, ""),
+                                automationConfig.optLong(IVI_REBOOT_ELAPSED_KEY, -1L),
+                                bootId,
+                                elapsedMs);
+
+                        if (bootId == null || bootId.isEmpty()) {
+                            response.put("success", false);
+                            response.put("error", "IVI reboot safety guard is unavailable");
+                        } else if (remainingMs > 0L) {
+                            response.put("success", false);
+                            response.put("error", "IVI reboot cooldown active ("
+                                    + ((remainingMs + 999L) / 1000L)
+                                    + " seconds remaining)");
+                        } else if (!persistIviRebootGuard(bootId, elapsedMs)) {
+                            response.put("success", false);
+                            response.put("error", "Could not persist IVI reboot safety guard");
+                        } else if (DrivingSafetyGuard.getIviRebootBlockReason() != null) {
+                            // Re-check after persistence at the final actuation boundary.
+                            response.put("success", false);
+                            response.put("error", Messages.get("vehicle_control.blocked_driving"));
+                        } else {
+                            new ProcessBuilder(
+                                    "sh", "-c",
+                                    "sleep 1; svc power reboot >/dev/null 2>&1 & "
+                                            + "sleep 2; reboot >/dev/null 2>&1")
+                                    .start();
+                            response.put("success", true);
+                            response.put("message", "IVI reboot requested");
+                            logger.info("IVI reboot requested from "
+                                    + (automationRequest
+                                    ? "automation/key mapping" : "Vehicle Control"));
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("IVI reboot failed: " + e.getMessage());
+            response.put("success", false);
+            response.put("error", e.getMessage());
+        }
+        HttpResponse.sendJson(out, response.toString());
+    }
+
+    /**
+     * Remaining reboot guard time. elapsedRealtime is monotonic within one boot, avoiding the
+     * head unit's unreliable wall clock. A marker from another boot is ignored; autonomous
+     * callers are still covered by the unconditional startup guard.
+     */
+    static long iviRebootCooldownRemainingMs(
+            boolean automationRequest,
+            String storedBootId,
+            long storedElapsedMs,
+            String currentBootId,
+            long currentElapsedMs) {
+        if (currentElapsedMs < 0L) return IVI_REBOOT_GUARD_MS;
+        if (automationRequest && currentElapsedMs < IVI_REBOOT_GUARD_MS) {
+            return IVI_REBOOT_GUARD_MS - currentElapsedMs;
+        }
+        if (currentBootId == null || currentBootId.isEmpty()
+                || storedBootId == null || storedBootId.isEmpty()
+                || !currentBootId.equals(storedBootId)
+                || storedElapsedMs < 0L) {
+            return 0L;
+        }
+        if (currentElapsedMs < storedElapsedMs) return IVI_REBOOT_GUARD_MS;
+        long ageMs = currentElapsedMs - storedElapsedMs;
+        return ageMs < IVI_REBOOT_GUARD_MS
+                ? IVI_REBOOT_GUARD_MS - ageMs : 0L;
+    }
+
+    private static String readIviRebootBootId() {
+        try {
+            return new String(
+                    Files.readAllBytes(Paths.get(BOOT_ID_PATH)),
+                    StandardCharsets.UTF_8).trim();
+        } catch (Exception e) {
+            logger.warn("Could not read IVI reboot boot id: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static boolean persistIviRebootGuard(String bootId, long elapsedMs) {
+        try {
+            Map<String, Object> values = new HashMap<>();
+            values.put(IVI_REBOOT_BOOT_ID_KEY, bootId);
+            values.put(IVI_REBOOT_ELAPSED_KEY, elapsedMs);
+            return UnifiedConfigManager.updateValues("automation", values);
+        } catch (Throwable t) {
+            logger.warn("Could not persist IVI reboot guard: " + t.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * UI navigation + screenshot + move-to-display, run as the UID-2000 daemon via
      * shell. Body: { "target": "home|back|recents|screenshot|move_display",
      *   ["display": 0|1], ["package": "com.x/.Act"] }.
@@ -2413,7 +2696,11 @@ public class VehicleControlApiHandler {
                         // a blind --display 1). Route through ClusterCast, which acquires
                         // the projection, resolves the real fission id, launches fullscreen,
                         // and holds the projection open (gauges restore on stop / ACC-off).
-                        moved = com.overdrive.app.launcher.ClusterCast.start(pkg);
+                        moved = com.overdrive.app.camera.dilink5.DiLink5Platform
+                                .isSelected()
+                                ? com.overdrive.app.launcher.ClusterCast
+                                        .startAndAwait(pkg, 60000L)
+                                : com.overdrive.app.launcher.ClusterCast.start(pkg);
                     } else {
                         // Head unit: a normal launch. If an app was cast to the cluster,
                         // moving back to the head unit releases that hold so the gauges
@@ -2421,8 +2708,11 @@ public class VehicleControlApiHandler {
                         // stop(true): reparent the cast task to display 0 WHILE the fission
                         // display is still live (before releaseSustained closes it), so the
                         // app isn't orphaned on a torn-down display.
-                        com.overdrive.app.launcher.ClusterCast.stop(true);
-                        moved = com.overdrive.app.launcher.AppLauncher.launchOnDisplay(pkg, display);
+                        boolean stopped =
+                                com.overdrive.app.launcher.ClusterCast.stop(true);
+                        moved = stopped &&
+                                com.overdrive.app.launcher.AppLauncher
+                                        .launchOnDisplay(pkg, display);
                     }
                     response.put("success", moved);
                     response.put("target", target);
@@ -2434,8 +2724,14 @@ public class VehicleControlApiHandler {
                     // Stop casting any app to the driver cluster — releases the projection
                     // hold; the controller restores the gauges when no other consumer
                     // (map / blind-spot) still wants it. Idempotent.
-                    com.overdrive.app.launcher.ClusterCast.stop();
-                    response.put("success", true);
+                    boolean stopped =
+                            com.overdrive.app.launcher.ClusterCast.stop();
+                    response.put("success", stopped);
+                    if (!stopped) {
+                        response.put(
+                                "error",
+                                "cluster projection cleanup incomplete");
+                    }
                     response.put("target", target);
                     HttpResponse.sendJson(out, response.toString());
                     return;
@@ -3416,6 +3712,28 @@ public class VehicleControlApiHandler {
 
     // ==================== HELPERS ====================
 
+    static void putLightState(
+            JSONObject lights, BydVehicleData data, boolean diLink5)
+            throws org.json.JSONException {
+        if (!diLink5
+                || data.isLightKnown(BydVehicleData.LIGHT_KNOWN_LOW_BEAM)) {
+            lights.put("lowBeam", data.lowBeam);
+        }
+        if (!diLink5
+                || data.isLightKnown(BydVehicleData.LIGHT_KNOWN_HIGH_BEAM)) {
+            lights.put("highBeam", data.highBeam);
+        }
+        if (!diLink5
+                || data.isLightKnown(
+                        BydVehicleData.LIGHT_KNOWN_TURN_HAZARD)) {
+            lights.put("hazard", data.hazard);
+        }
+        if (!diLink5
+                || data.isLightKnown(BydVehicleData.LIGHT_KNOWN_DRL)) {
+            lights.put("dayTimeLight", data.dayTimeLight);
+        }
+    }
+
     /**
      * Convert BYD cloud per-door lock value to API contract.
      *   pyBYD reports: 1=UNLOCKED, 2=LOCKED on each *DoorLock field.
@@ -3426,6 +3744,47 @@ public class VehicleControlApiHandler {
         if (cloud == 2) return 1; // LOCKED
         if (cloud == 1) return 2; // UNLOCKED
         return -1;
+    }
+
+    static int localLockToApi(int value, boolean diLink5) {
+        return diLink5 ? cloudLockToApi(value) : value;
+    }
+
+    private static boolean isValidWindowPercent(int percent) {
+        return percent >= 0 && percent <= 100;
+    }
+
+    /**
+     * @return 0=closed, 1=open, -1=unknown
+     */
+    static int resolveWindowOpenState(int percent, int localState, int cloudState) {
+        if (isValidWindowPercent(percent)) return percent == 0 ? 0 : 1;
+        // A positive local state is decisive. Zero may be an unavailable default on some
+        // firmware, so let a fresh cloud value disambiguate it before accepting "closed".
+        if (localState == 1) return 1;
+        if (cloudState == 1) return 0;
+        if (cloudState == 2) return 1;
+        if (localState == 0) return 0;
+        return -1;
+    }
+
+    private static int cloudWindowStateAt(VehicleCloudSnapshot snapshot, int index) {
+        if (snapshot == null) return -1;
+        switch (index) {
+            case 0: return snapshot.leftFrontWindow;
+            case 1: return snapshot.rightFrontWindow;
+            case 2: return snapshot.leftRearWindow;
+            case 3: return snapshot.rightRearWindow;
+            default: return -1;
+        }
+    }
+
+    private static int climateSetpointToCelsius(int setpoint) {
+        if (setpoint >= BydDataCollector.AC_SETPOINT_MIN_F
+                && setpoint <= BydDataCollector.AC_SETPOINT_MAX_F) {
+            return (int) Math.round((setpoint - 32) * 5.0 / 9.0);
+        }
+        return setpoint;
     }
 
     /**

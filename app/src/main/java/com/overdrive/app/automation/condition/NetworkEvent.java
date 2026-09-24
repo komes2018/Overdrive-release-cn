@@ -29,7 +29,8 @@ public class NetworkEvent {
             "Wi-Fi",
             POLL_MS,
             NetworkEvent::wifiReferenced,
-            NetworkEvent::publishWifi);
+            NetworkEvent::publishWifi,
+            false);
 
     /** True when an enabled automation reads either WiFi signal, in any of the reference syntaxes. */
     private static boolean wifiReferenced() {

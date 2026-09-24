@@ -67,6 +67,20 @@ open class MainActivity : AppCompatActivity() {
     private val daemonsViewModel: DaemonsViewModel by viewModels()
     private val logsViewModel: LogsViewModel by viewModels()
     private var appUpdater: com.overdrive.app.updater.AppUpdater? = null
+    private var updateProgressHandle:
+        com.overdrive.app.updater.UpdateDialog.ProgressHandle? = null
+    // Every manual check owns one generation from daemon-progress probe through
+    // release lookup. A later tap supersedes the older async callbacks so an
+    // out-of-order "idle" reply cannot replace a newly reopened progress view.
+    private val manualUpdateCheckGeneration =
+        java.util.concurrent.atomic.AtomicLong(0L)
+    private val activeUpdatePhases = setOf(
+        "queued",
+        "downloading",
+        "verifying",
+        "stopping_daemons",
+        "installing",
+    )
 
     // Daemon startup manager
     private lateinit var daemonStartupManager: DaemonStartupManager
@@ -96,13 +110,9 @@ open class MainActivity : AppCompatActivity() {
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var updateCheckRunnable: Runnable? = null
 
-    // True only for the headless boot launch where BootReceiver delivers
-    // `minimize_on_start=true` so the app process stays alive for daemon
-    // stability without surfacing UI. Consumed once in onCreate; not
-    // re-read from intent later because Android's singleTop handling does
-    // NOT update getIntent() on subsequent onNewIntent calls unless we
-    // explicitly setIntent — without this latch the stale boot intent
-    // would permanently bypass the PIN gate after a launcher tap.
+    // True while a system-driven boot/update launch is being moved behind
+    // the user's current task. The marker is consumed from both cold and
+    // singleTop warm intents so a later launcher tap gates normally.
     private var headlessBootSilenceGate: Boolean = false
     private var remoteDevSession: Boolean = false
 
@@ -129,7 +139,11 @@ open class MainActivity : AppCompatActivity() {
     private val railSections = listOf(
         RailSection(
             R.id.railSectionCameras, R.string.rail_section_cameras,
-            setOf(NavigationRailCatalog.LIVE, NavigationRailCatalog.RECORDINGS)
+            setOf(
+                NavigationRailCatalog.LIVE,
+                NavigationRailCatalog.RECORDINGS,
+                NavigationRailCatalog.PARKING,
+            )
         ),
         RailSection(
             R.id.railSectionControls, R.string.rail_section_controls,
@@ -183,22 +197,27 @@ open class MainActivity : AppCompatActivity() {
         // The main app must run on the HEAD UNIT (display 0), never the driver
         // cluster. When the OEM cluster projection opens a secondary display, AMS
         // auto-launches the LAUNCHER activity (this one) onto it. If we land on a
-        // non-default display, relaunch on display 0 and finish — BEFORE any
-        // setContentView / startup work, so nothing partially initialises on the
-        // wrong display. (The earlier crash from this was the ADB launcher executor
-        // being torn down mid-sequence; that path is now guarded in AdbShellExecutor,
-        // and bailing here this early means the startup work hasn't begun yet.)
+        // non-default display, relaunch HEADLESS on display 0 and finish — BEFORE
+        // any setContentView / startup work, so nothing partially initialises on
+        // the wrong display or steals the foreground from the BYD home screen.
+        // Copy the original intent so boot/post-update markers survive the redirect.
         try {
             val did = display?.displayId ?: android.view.Display.DEFAULT_DISPLAY
             if (did != android.view.Display.DEFAULT_DISPLAY && !remoteDevSession) {
-                android.util.Log.w("MainActivity", "launched on display $did — relaunching on display 0")
+                android.util.Log.w(
+                    "MainActivity",
+                    "launched on display $did — relaunching headlessly on display 0",
+                )
                 val opts = android.app.ActivityOptions.makeBasic().apply {
                     launchDisplayId = android.view.Display.DEFAULT_DISPLAY
                 }
                 startActivity(
                     android.content.Intent(this, MainActivity::class.java).apply {
+                        action = intent.action
+                        putExtras(intent)
                         addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                         addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        putExtra(EXTRA_MINIMIZE_ON_START, true)
                     },
                     opts.toBundle()
                 )
@@ -223,7 +242,14 @@ open class MainActivity : AppCompatActivity() {
             // Physical MainActivity keeps the existing best-effort behavior.
         }
 
-        com.overdrive.app.byd.dilink5.Dilink5SdkInjector.ensure(this)
+        // Consume the marker before any UI work so a cold boot/update launch
+        // leaves the foreground immediately while initialization continues.
+        val requestedHeadlessLaunch = consumeHeadlessLaunchIntent(intent)
+        headlessBootSilenceGate = !remoteDevSession && requestedHeadlessLaunch
+        if (headlessBootSilenceGate) {
+            android.util.Log.i("MainActivity", "Cold system launch — minimizing to background")
+            moveTaskToBack(true)
+        }
 
         setContentView(R.layout.activity_main_new)
 
@@ -253,7 +279,15 @@ open class MainActivity : AppCompatActivity() {
             // ActivityThread.systemMain() can block for 1+ minute waiting for system services
             Thread {
                 try {
-                    BydDataCacheWhitelist.applyAll(this)
+                    val applied = BydDataCacheWhitelist.applyAll(this)
+                    if (!applied) {
+                        android.util.Log.e(
+                            "MainActivity",
+                            "Background access was not applied: " +
+                                (BydDataCacheWhitelist.getLastApplyFailure()
+                                    ?: "unknown failure"),
+                        )
+                    }
                 } catch (e: Exception) {
                     android.util.Log.e("MainActivity", "BYD whitelist error: ${e.message}")
                 }
@@ -265,21 +299,6 @@ open class MainActivity : AppCompatActivity() {
         // config-change recreate. The receiver is held by the application
         // process so it survives Activity destruction.
         com.overdrive.app.auth.PinSession.ensureScreenOffReceiverRegistered(applicationContext)
-
-        // Latch the headless-boot silence flag exactly once from the
-        // initial launch intent and STRIP the extra so the OS task-restore
-        // path (process kill → fresh MainActivity instance recreated from
-        // the same intent record) cannot re-arm the silence gate against
-        // the user's intent. Without the strip, a task restore after OOM
-        // would silently bypass the PIN gate again on the recreated
-        // instance — see audit round 2/3.
-        val rawIntent = intent
-        headlessBootSilenceGate =
-            rawIntent?.getBooleanExtra("minimize_on_start", false) == true
-        if (headlessBootSilenceGate) {
-            rawIntent?.removeExtra("minimize_on_start")
-            if (rawIntent != null) setIntent(rawIntent)
-        }
 
         // Gate before any visible state appears. If the PIN is enabled and
         // the session isn't fresh, push PinLockActivity on top right away
@@ -394,25 +413,6 @@ open class MainActivity : AppCompatActivity() {
         // Status overlay: start immediately if permission granted, show guide if not
         if (!remoteDevSession) startStatusOverlay()
         
-        // If launched from boot receiver with minimize flag, move to back immediately.
-        // This keeps the process alive (important for daemon stability) without
-        // showing the app UI over the BYD home screen.
-        if (!remoteDevSession && headlessBootSilenceGate) {
-            android.util.Log.i("MainActivity", "Boot launch — minimizing to background")
-            moveTaskToBack(true)
-            // NB: do NOT clear headlessBootSilenceGate here. This block runs
-            // inside onCreate; the launch's OWN first onResume fires immediately
-            // after and calls maybeShowPinLock(). If the latch were already
-            // cleared, that first onResume would gate and surface PinLockActivity
-            // over the BYD home screen (with FLAG_TURN_SCREEN_ON waking the
-            // panel) even though we just moved the task to back — an unrequested
-            // lock-screen flash on every boot / post-update. The latch is instead
-            // cleared in onPause (which fires once this minimized launch leaves
-            // the foreground), so the gate stays suppressed through the launch's
-            // own onResume and re-arms for the user's next genuine foreground
-            // entry. onNewIntent clears it explicitly for notification/user
-            // re-entries.
-        }
     }
     
     /**
@@ -465,23 +465,30 @@ open class MainActivity : AppCompatActivity() {
         if (delayMs <= 0L) runOnUiThread(runner)
         else android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(runner, delayMs)
     }
+
+    /**
+     * Consume the one-shot marker shared by cold and singleTop warm launches.
+     * Stripping it before storing the intent prevents a later task restore from
+     * silently treating a real user open as another headless boot.
+     */
+    private fun consumeHeadlessLaunchIntent(newIntent: android.content.Intent?): Boolean {
+        val headless =
+            newIntent?.getBooleanExtra(EXTRA_MINIMIZE_ON_START, false) == true
+        if (headless) newIntent?.removeExtra(EXTRA_MINIMIZE_ON_START)
+        if (newIntent != null) setIntent(newIntent)
+        return headless
+    }
     
     override fun onNewIntent(intent: android.content.Intent?) {
         super.onNewIntent(intent)
-        // Re-pin getIntent() to the new intent so any code that consults
-        // it (now or later) sees the current launcher/notification intent
-        // rather than the original cold-launch intent. Null-guarded so we
-        // don't strand getIntent() at null if the platform delivers a
-        // null intent on some upstream OEM build.
-        if (intent != null) setIntent(intent)
-        // Clear the boot-silence latch as soon as a fresh user intent
-        // arrives. Any onNewIntent path is by definition the user
-        // bringing the app forward — they should be gated.
-        headlessBootSilenceGate = false
-        // PIN gate first — notification taps reach MainActivity via
-        // onNewIntent because of singleTop. Gating here keeps that path
-        // covered without relying on onResume firing first.
-        maybeShowPinLock()
+        val requestedHeadlessLaunch = consumeHeadlessLaunchIntent(intent)
+        val headlessLaunch = !remoteDevSession && requestedHeadlessLaunch
+        headlessBootSilenceGate = headlessLaunch
+
+        // Notification/launcher taps carry no headless marker and still gate
+        // immediately. Boot/update re-entries keep the gate suppressed until
+        // moveTaskToBack drives the matching onPause below.
+        if (!headlessLaunch) maybeShowPinLock()
         intent?.let {
             if (!remoteDevSession) handleLocationStartIntent(it)
             handleNavigateExtra(it)
@@ -495,6 +502,13 @@ open class MainActivity : AppCompatActivity() {
             // checks inside isPostUpdateLaunch — once the sentinels are
             // consumed, subsequent calls become no-ops).
             if (!remoteDevSession) runDaemonStartup(it, fromOnCreate = false)
+        }
+        if (headlessLaunch) {
+            android.util.Log.i(
+                "MainActivity",
+                "Warm system launch — minimizing to background",
+            )
+            moveTaskToBack(true)
         }
     }
 
@@ -515,6 +529,7 @@ open class MainActivity : AppCompatActivity() {
             "charging" -> R.id.chargingFragment
             "roadsense" -> R.id.roadSenseFragment
             "recordings" -> R.id.recordingsFragment
+            "parking" -> R.id.parkingFragment
             "live" -> R.id.liveViewFragment
             "vehicle" -> R.id.vehicleControlFragment
             "dashboard" -> R.id.dashboardFragment
@@ -538,6 +553,14 @@ open class MainActivity : AppCompatActivity() {
     private fun runDaemonStartup(intent: android.content.Intent?, fromOnCreate: Boolean) {
         val isPostUpdate = com.overdrive.app.updater.UpdateLifecycle
             .isPostUpdateLaunch(this, intent)
+        if (intent?.getBooleanExtra(
+                com.overdrive.app.updater.UpdateLifecycle.EXTRA_POST_UPDATE,
+                false,
+            ) == true
+        ) {
+            intent.removeExtra(com.overdrive.app.updater.UpdateLifecycle.EXTRA_POST_UPDATE)
+            setIntent(intent)
+        }
         // Skip the postDelayed boilerplate when called from onNewIntent for
         // a non-post-update intent — daemons are already up from onCreate
         // and re-running initializeOnAppLaunch() in that case just churns.
@@ -983,6 +1006,54 @@ open class MainActivity : AppCompatActivity() {
      */
     fun checkForAppUpdateManual() {
         Toast.makeText(this, getString(R.string.toast_checking_for_updates), Toast.LENGTH_SHORT).show()
+        val checkGeneration = manualUpdateCheckGeneration.incrementAndGet()
+        reopenActiveUpdateProgressOr(checkGeneration) {
+            checkForAppUpdateManualFresh(checkGeneration)
+        }
+    }
+
+    /**
+     * Query the daemon before starting a new release check. The update itself
+     * survives this dialog and even this Activity, so the daemon's progress
+     * file is the source of truth—not whether an app-side dialog is visible.
+     */
+    private fun reopenActiveUpdateProgressOr(
+        checkGeneration: Long,
+        onNoActiveUpdate: () -> Unit,
+    ) {
+        Thread({
+            val resp = com.overdrive.app.server.DaemonIpcClient.send(
+                org.json.JSONObject().put("command", "GET_UPDATE_PROGRESS"),
+                5_000,
+            )
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (manualUpdateCheckGeneration.get() != checkGeneration) {
+                    return@runOnUiThread
+                }
+                val phase = if (resp?.optBoolean("success", false) == true) {
+                    resp.optString("phase", "")
+                } else {
+                    ""
+                }
+                if (phase in activeUpdatePhases) {
+                    val progress = showUpdateProgressDialog()
+                    renderUpdateProgress(progress, resp!!)
+                    startUpdateProgressPolling(progress, phase)
+                } else {
+                    onNoActiveUpdate()
+                }
+            }
+        }, "update-progress-probe").start()
+    }
+
+    private fun isCurrentManualUpdateCheck(checkGeneration: Long): Boolean =
+        !isFinishing &&
+            !isDestroyed &&
+            manualUpdateCheckGeneration.get() == checkGeneration
+
+    /** The original release/version lookup, reached only when no install is active. */
+    private fun checkForAppUpdateManualFresh(checkGeneration: Long) {
         val updater = com.overdrive.app.updater.AppUpdater(this)
         appUpdater = updater
 
@@ -990,25 +1061,43 @@ open class MainActivity : AppCompatActivity() {
             it.forceReload(); it.getUpdateChannel()
         }
         if (channel == com.overdrive.app.updater.AppUpdater.CHANNEL_ALPHA) {
-            checkAlphaVersions(updater)
+            checkAlphaVersions(updater, checkGeneration)
             return
         }
 
         updater.checkForUpdate(object : com.overdrive.app.updater.AppUpdater.UpdateCallback {
             override fun onUpdateAvailable(currentVersion: String, newVersion: String, releaseNotes: String) {
+                if (!isCurrentManualUpdateCheck(checkGeneration)) {
+                    updater.close()
+                    return
+                }
                 com.overdrive.app.updater.UpdateDialog.showUpdateAvailable(
                     this@MainActivity, currentVersion, newVersion, releaseNotes,
-                    { performAppUpdate(updater) },
+                    {
+                        if (isCurrentManualUpdateCheck(checkGeneration)) {
+                            performAppUpdate(updater)
+                        } else {
+                            updater.close()
+                        }
+                    },
                     { updater.close() }  // Dismiss path: release executor + scheduler.
                 )
             }
 
             override fun onNoUpdate(currentVersion: String) {
+                if (!isCurrentManualUpdateCheck(checkGeneration)) {
+                    updater.close()
+                    return
+                }
                 Toast.makeText(this@MainActivity, getString(R.string.toast_app_up_to_date, currentVersion), Toast.LENGTH_LONG).show()
                 updater.close()
             }
 
             override fun onError(error: String) {
+                if (!isCurrentManualUpdateCheck(checkGeneration)) {
+                    updater.close()
+                    return
+                }
                 Toast.makeText(this@MainActivity, getString(R.string.toast_update_check_failed, error), Toast.LENGTH_LONG).show()
                 updater.close()
             }
@@ -1020,12 +1109,19 @@ open class MainActivity : AppCompatActivity() {
      * resolve the chosen tag SERVER-SIDE (prepareInstall, off the UI thread —
      * it does network I/O) before handing off to the shared install flow.
      */
-    private fun checkAlphaVersions(updater: com.overdrive.app.updater.AppUpdater) {
+    private fun checkAlphaVersions(
+        updater: com.overdrive.app.updater.AppUpdater,
+        checkGeneration: Long,
+    ) {
         updater.listVersions(object : com.overdrive.app.updater.AppUpdater.VersionListCallback {
             override fun onResult(
                 versions: MutableList<com.overdrive.app.updater.AppUpdater.VersionEntry>,
                 currentVersion: String
             ) {
+                if (!isCurrentManualUpdateCheck(checkGeneration)) {
+                    updater.close()
+                    return
+                }
                 com.overdrive.app.updater.UpdateDialog.showVersionPicker(
                     this@MainActivity, versions,
                     object : com.overdrive.app.updater.UpdateDialog.VersionPickListener {
@@ -1035,13 +1131,21 @@ open class MainActivity : AppCompatActivity() {
                             // (prepareInstall) before downloading, so no app-side
                             // prepareInstall is needed (and the app UID's resolve
                             // would just be redundant work the daemon repeats).
-                            performAppUpdate(updater, entry.tag)
+                            if (isCurrentManualUpdateCheck(checkGeneration)) {
+                                performAppUpdate(updater, entry.tag)
+                            } else {
+                                updater.close()
+                            }
                         }
                         override fun onDismiss() { updater.close() }
                     })
             }
 
             override fun onError(error: String) {
+                if (!isCurrentManualUpdateCheck(checkGeneration)) {
+                    updater.close()
+                    return
+                }
                 Toast.makeText(this@MainActivity,
                     getString(R.string.toast_update_check_failed, error), Toast.LENGTH_LONG).show()
                 updater.close()
@@ -1063,6 +1167,23 @@ open class MainActivity : AppCompatActivity() {
         updateCheckRunnable = null
     }
 
+    /** Show one progress dialog, or reuse the currently visible one. */
+    private fun showUpdateProgressDialog():
+        com.overdrive.app.updater.UpdateDialog.ProgressHandle {
+        updateProgressHandle?.takeIf { it.isShowing }?.let { return it }
+
+        val progress = com.overdrive.app.updater.UpdateDialog.showProgress(this) {
+            // "Hide" stops only this Activity's polling. The daemon owns the
+            // update and keeps going; pressing Check for updates later queries
+            // GET_UPDATE_PROGRESS and reopens this surface.
+            updatePollRunnable?.let { mainHandler.removeCallbacks(it) }
+            updatePollRunnable = null
+            updateProgressHandle = null
+        }
+        updateProgressHandle = progress
+        return progress
+    }
+
     /**
      * Run the install in the DAEMON (UID 2000) via IPC, then poll progress —
      * the same INSTALL_UPDATE → /overdrive_update_progress.json path the webapp
@@ -1081,14 +1202,7 @@ open class MainActivity : AppCompatActivity() {
         // The whole flow runs in the daemon now, so this app-side AppUpdater is
         // only here for its lifecycle (close releases the lazily-allocated ADB
         // executor + tunnel scheduler). Release it once the IPC handoff is done.
-        val progress = com.overdrive.app.updater.UpdateDialog.showProgress(this) {
-            // "Hide" — the daemon download/install can't be cancelled from here
-            // (it runs in another process, mirroring the webapp which also has
-            // no mid-install cancel once scheduled). Just stop polling + dismiss;
-            // the install continues and the app restarts when it lands.
-            updatePollRunnable?.let { mainHandler.removeCallbacks(it) }
-            updatePollRunnable = null
-        }
+        val progress = showUpdateProgressDialog()
         progress.setStep(R.string.update_step_queued, R.drawable.ic_update, 0)
 
         // Kick off the install via IPC OFF the main thread (DaemonIpcClient.send
@@ -1113,6 +1227,14 @@ open class MainActivity : AppCompatActivity() {
                     updater.close()
                     return@runOnUiThread
                 }
+                // Hide may have been pressed during the daemon's pre-install
+                // check (up to ~25s), and the user may already have reopened a
+                // newer dialog. A late reply from this older handoff must not
+                // restart a hidden poll or replace the newer dialog's poll.
+                if (updateProgressHandle !== progress) {
+                    updater.close()
+                    return@runOnUiThread
+                }
                 if (resp == null) {
                     // Daemon down / IPC refused — can't delegate. Surface clearly.
                     progress.showError(getString(R.string.update_error_daemon_down))
@@ -1123,6 +1245,15 @@ open class MainActivity : AppCompatActivity() {
                     || "scheduled" == resp.optString("status")
                 if (!ok) {
                     val err = resp.optString("error", getString(R.string.errors_network))
+                    if (err.contains("already in progress", ignoreCase = true)) {
+                        // Race: the preflight saw idle just before another
+                        // surface scheduled the update. Attach this dialog to
+                        // the daemon's existing job instead of presenting the
+                        // install gate as a failure.
+                        updater.close()
+                        startUpdateProgressPolling(progress)
+                        return@runOnUiThread
+                    }
                     progress.showError(getString(R.string.update_error_start_failed, err))
                     updater.close()
                     return@runOnUiThread
@@ -1139,17 +1270,68 @@ open class MainActivity : AppCompatActivity() {
     private var updatePollRunnable: Runnable? = null
 
     /**
+     * Render one daemon progress snapshot. Returns false for a terminal error,
+     * allowing the polling loop to stop without duplicating phase mapping in
+     * the "reopen existing update" path.
+     */
+    private fun renderUpdateProgress(
+        progress: com.overdrive.app.updater.UpdateDialog.ProgressHandle,
+        resp: org.json.JSONObject,
+    ): Boolean {
+        val phase = resp.optString("phase", "")
+        val percent = resp.optInt("percent", -1)
+        when (phase) {
+            "error" -> {
+                progress.showError(resp.optString("error",
+                    resp.optString("message", getString(R.string.errors_network))))
+                return false
+            }
+            "downloading" -> {
+                if (percent < 0) {
+                    // No Content-Length (CDN/proxy) → indeterminate rather
+                    // than a frozen 15%.
+                    progress.setIndeterminate(getString(R.string.update_step_downloading))
+                } else {
+                    // Map 0..100 download into the bar's [15,75].
+                    val mapped = 15 + (percent.coerceIn(0, 100) * 60 / 100)
+                    progress.setStep(
+                        R.string.update_step_downloading,
+                        R.drawable.ic_arrow_down,
+                        mapped,
+                    )
+                }
+            }
+            "verifying" -> progress.setStep(
+                R.string.update_step_verifying, R.drawable.ic_check_circle, 75)
+            "stopping_daemons" -> progress.setStep(
+                R.string.update_step_stopping, R.drawable.ic_update, 85)
+            "installing" -> progress.setStep(
+                R.string.update_step_installing,
+                R.drawable.ic_download_log,
+                if (percent == 100) 100 else 95,
+            )
+            "queued" -> progress.setStep(
+                R.string.update_step_queued, R.drawable.ic_update, 0)
+            "idle" -> { /* install gate may be ahead of its first progress write */ }
+        }
+        return true
+    }
+
+    /**
      * Poll GET_UPDATE_PROGRESS every 1.5s and drive the progress dialog.
      * Mirrors the webapp's startProgressPolling: render {phase, percent},
      * treat `error` as a hard failure, and treat a daemon disconnect AFTER a
      * terminal phase (stopping_daemons / installing) as success — the install
      * is underway and pm install is tearing the daemon (and soon us) down.
      */
-    private fun startUpdateProgressPolling(progress: com.overdrive.app.updater.UpdateDialog.ProgressHandle) {
+    private fun startUpdateProgressPolling(
+        progress: com.overdrive.app.updater.UpdateDialog.ProgressHandle,
+        initialPhase: String? = null,
+    ) {
         updatePollRunnable?.let { mainHandler.removeCallbacks(it) }
         var consecutiveFailures = 0
-        var sawTerminalPhase = false
-        var barLatchedAt100 = false
+        var sawTerminalPhase =
+            initialPhase == "stopping_daemons" || initialPhase == "installing"
 
         val poll = object : Runnable {
             override fun run() {
@@ -1163,8 +1345,14 @@ open class MainActivity : AppCompatActivity() {
                             updatePollRunnable = null
                             return@runOnUiThread
                         }
-                        // If Hide stopped us between dispatch and reply, drop it.
-                        if (updatePollRunnable == null) return@runOnUiThread
+                        // If Hide stopped us between dispatch and reply, or a
+                        // later reopen replaced this poll with a new generation,
+                        // drop the stale reply. Checking only for null is not
+                        // enough: Hide → immediate reopen makes the field
+                        // non-null again while this old IPC call is still in
+                        // flight, allowing the old loop to overwrite/stop the
+                        // newly-visible dialog.
+                        if (updatePollRunnable !== this) return@runOnUiThread
 
                         if (resp == null || !resp.optBoolean("success", false)) {
                             consecutiveFailures++
@@ -1175,7 +1363,12 @@ open class MainActivity : AppCompatActivity() {
                             if (consecutiveFailures >= 2 && sawTerminalPhase) {
                                 updatePollRunnable = null
                                 progress.setStep(R.string.update_step_installing, R.drawable.ic_download_log, 100)
-                                mainHandler.postDelayed({ progress.dismiss() }, 2000)
+                                mainHandler.postDelayed({
+                                    if (updateProgressHandle === progress) {
+                                        updateProgressHandle = null
+                                    }
+                                    progress.dismiss()
+                                }, 2000)
                                 return@runOnUiThread
                             }
                             // Non-terminal disconnect (still queued/downloading/
@@ -1201,33 +1394,11 @@ open class MainActivity : AppCompatActivity() {
                         consecutiveFailures = 0
 
                         val phase = resp.optString("phase", "")
-                        val percent = resp.optInt("percent", -1)
                         if (phase == "stopping_daemons" || phase == "installing") sawTerminalPhase = true
 
-                        when (phase) {
-                            "error" -> {
-                                updatePollRunnable = null
-                                progress.showError(resp.optString("error",
-                                    resp.optString("message", getString(R.string.errors_network))))
-                                return@runOnUiThread
-                            }
-                            "downloading" -> {
-                                if (percent < 0) {
-                                    // No Content-Length (CDN/proxy) → indeterminate
-                                    // rather than a frozen 15%.
-                                    progress.setIndeterminate(getString(R.string.update_step_downloading))
-                                } else {
-                                    // Map 0..100 download into the bar's [15,75).
-                                    val mapped = 15 + (percent.coerceIn(0, 100) * 60 / 100)
-                                    progress.setStep(R.string.update_step_downloading, R.drawable.ic_arrow_down, mapped)
-                                    if (percent >= 100) barLatchedAt100 = true
-                                }
-                            }
-                            "verifying" -> progress.setStep(R.string.update_step_verifying, R.drawable.ic_check_circle, 75)
-                            "stopping_daemons" -> progress.setStep(R.string.update_step_stopping, R.drawable.ic_update, 85)
-                            "installing" -> progress.setStep(R.string.update_step_installing, R.drawable.ic_download_log, if (percent == 100) 100 else 95)
-                            "queued" -> progress.setStep(R.string.update_step_queued, R.drawable.ic_update, 0)
-                            "idle" -> { /* no active install yet — keep polling */ }
+                        if (!renderUpdateProgress(progress, resp)) {
+                            updatePollRunnable = null
+                            return@runOnUiThread
                         }
                         mainHandler.postDelayed(this, 1500)
                     }
@@ -1487,6 +1658,7 @@ open class MainActivity : AppCompatActivity() {
                 R.id.genAiFragment,
                 R.id.liveViewFragment,
                 R.id.recordingsFragment,
+                R.id.parkingFragment,
                 R.id.vehicleControlFragment,
                 R.id.seatPositionsFragment,
                 R.id.projectionFragment,
@@ -1546,6 +1718,8 @@ open class MainActivity : AppCompatActivity() {
                     R.id.surveillanceSettingsWebFragment,
                     R.id.recordingSettingsWebFragment,
                 )),
+            RailItem(NavigationRailCatalog.PARKING, R.id.railDestParking,
+                R.id.parkingFragment, R.drawable.ic_parking, R.string.rail_parking),
             RailItem(NavigationRailCatalog.VEHICLE, R.id.railDestVehicle,
                 R.id.vehicleControlFragment,
                 R.drawable.ic_vehicle_control, R.string.rail_vehicle),
@@ -2298,10 +2472,13 @@ open class MainActivity : AppCompatActivity() {
         // Drives the manual-camera-ID radio group's initial selection.
         val manualCameraId: Int?,
         val isManualOverride: Boolean,
-        // Persisted ingestion mode. "default" = legacy ImageReader + 4-strip
-        // → 2x2 rearrangement. "dilink4" = oem SurfaceTexture passthrough.
+        // Persisted ingestion mode. "default" = legacy ImageReader + 4-strip,
+        // "dilink4" = OEM SurfaceTexture, "dilink5" = native QCarCam.
         // Absent in older config → "default".
         val cameraMode: String,
+        // Optional native camera-ID order in front,right,rear,left order.
+        // Empty keeps the model/property auto-detection path.
+        val dilink5CameraMapping: String,
         // DiLink 4-only path that leaves APA output untouched and consumes
         // preview port 0 exactly as supplied by the HAL.
         val dilink4PassiveApaMode: Boolean,
@@ -2320,7 +2497,12 @@ open class MainActivity : AppCompatActivity() {
         val oemDashcamManualOverride: Boolean,
         // Opt-in for the destructive dual-camera concurrency probe
         // (camera.concurrentAvmProbeEnabled). Default false = never auto-probe.
-        val concurrentAvmProbeEnabled: Boolean
+        val concurrentAvmProbeEnabled: Boolean,
+        // Opt-in for the decoupled encoder pipeline
+        // (camera.decoupledEncoderLane) — the native-AVM reverse-camera
+        // starvation fix. Legacy camera mode only; applied at the next
+        // camera restart. Default false = shipped zero-copy behaviour.
+        val decoupledEncoderLaneEnabled: Boolean
     )
 
     /**
@@ -2429,7 +2611,7 @@ open class MainActivity : AppCompatActivity() {
 
             val cameraMode = config.optString("cameraMode", "default")
                 .lowercase(java.util.Locale.US)
-                .let { if (it == "dilink4") "dilink4" else "default" }
+                .let { if (it == "dilink4" || it == "dilink5") it else "default" }
 
             // OEM Dashcam state lives in the same camera.* UCM section but is
             // not (yet) merged into /api/surveillance/config. Read it directly
@@ -2444,6 +2626,8 @@ open class MainActivity : AppCompatActivity() {
                 "oemDashcamManualOverride", false)
             val concurrentAvmProbeEnabled = cameraSection.optBoolean(
                 "concurrentAvmProbeEnabled", false)
+            val decoupledEncoderLaneEnabled = cameraSection.optBoolean(
+                "decoupledEncoderLane", false)
 
             CameraMappingState(
                 summary = summary,
@@ -2453,13 +2637,16 @@ open class MainActivity : AppCompatActivity() {
                 manualCameraId = manualCameraId,
                 isManualOverride = manualOverride,
                 cameraMode = cameraMode,
+                dilink5CameraMapping = config.optString(
+                    "dilink5CameraMapping", ""),
                 dilink4PassiveApaMode = config.optBoolean(
                     "dilink4PassiveApaMode", false),
                 dilink4RedMask = config.optBoolean("dilink4RedMask", false),
                 panoCameraId = panoCameraId,
                 oemDashcamCameraId = oemDashcamCameraId,
                 oemDashcamManualOverride = oemDashcamManualOverride,
-                concurrentAvmProbeEnabled = concurrentAvmProbeEnabled
+                concurrentAvmProbeEnabled = concurrentAvmProbeEnabled,
+                decoupledEncoderLaneEnabled = decoupledEncoderLaneEnabled
             )
         } catch (e: Exception) {
             logsViewModel.error("Camera", "Failed to load camera mapping state: ${e.message}")
@@ -2487,13 +2674,19 @@ open class MainActivity : AppCompatActivity() {
         val cameraModeGroup = dialogView.findViewById<android.widget.RadioGroup>(R.id.rgCameraMode)
         val currentCameraModeView = dialogView.findViewById<TextView>(R.id.tvCurrentCameraMode)
         val saveCameraModeButton = dialogView.findViewById<View>(R.id.btnSaveCameraMode)
+        val dilink5MappingCard = dialogView.findViewById<View>(R.id.cardDiLink5CameraMapping)
+        val dilink5MappingGroup = dialogView.findViewById<android.widget.RadioGroup>(R.id.rgDiLink5CameraMapping)
+        val currentDilink5MappingView = dialogView.findViewById<TextView>(R.id.tvCurrentDiLink5CameraMapping)
+        val saveDilink5MappingButton = dialogView.findViewById<View>(R.id.btnSaveDiLink5CameraMapping)
         val saveDilink4TweaksButton = dialogView.findViewById<View>(R.id.btnSaveCameraDilink4Tweaks)
         val dilink4PassiveApaSwitch = dialogView.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.swCameraDilink4PassiveApaMode)
+        val legacyMappingEditable = state.cameraMode != "dilink5"
         val dilink4RedMaskSwitch = dialogView.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.swCameraDilink4RedMask)
         val oemDashcamGroup = dialogView.findViewById<android.widget.RadioGroup>(R.id.rgOemDashcamId)
         val currentOemDashcamView = dialogView.findViewById<TextView>(R.id.tvCurrentOemDashcam)
         val saveOemDashcamButton = dialogView.findViewById<View>(R.id.btnSaveOemDashcamId)
         val concurrentProbeSwitch = dialogView.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.swConcurrentAvmProbe)
+        val decoupledLaneSwitch = dialogView.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.swDecoupledEncoderLane)
         summaryView.text = state.summary
 
         val roleAdapter = android.widget.ArrayAdapter(
@@ -2747,9 +2940,29 @@ open class MainActivity : AppCompatActivity() {
         // save". The buttons are re-enabled only on a save *failure* (the
         // dialog stays open so the user can retry).
         fun setActionsEnabled(enabled: Boolean) {
-            saveMappingButton.isEnabled = enabled
-            clearMappingButton.isEnabled = enabled
+            saveMappingButton.isEnabled = legacyMappingEditable && enabled
+            clearMappingButton.isEnabled = legacyMappingEditable && enabled
         }
+        roleSpinner.isEnabled = legacyMappingEditable
+        manualCameraGroup.isEnabled = legacyMappingEditable
+        for (index in 0 until manualCameraGroup.childCount) {
+            manualCameraGroup.getChildAt(index).isEnabled = legacyMappingEditable
+        }
+        saveManualCameraButton.isEnabled = legacyMappingEditable
+        dilink4PassiveApaSwitch.isEnabled = legacyMappingEditable
+        dilink4RedMaskSwitch.isEnabled = legacyMappingEditable
+        saveDilink4TweaksButton.isEnabled = legacyMappingEditable
+        oemDashcamGroup.isEnabled = legacyMappingEditable
+        for (index in 0 until oemDashcamGroup.childCount) {
+            oemDashcamGroup.getChildAt(index).isEnabled = legacyMappingEditable
+        }
+        concurrentProbeSwitch?.isEnabled = legacyMappingEditable
+        // Decoupled encoder lane applies to the LEGACY ImageReader path only —
+        // PanoramicCameraGpu hard-gates the flag off on DiLink 4/5, so gray
+        // the switch out there rather than accept writes that would be inert.
+        decoupledLaneSwitch?.isEnabled = state.cameraMode == "default"
+        saveOemDashcamButton.isEnabled = legacyMappingEditable
+        setActionsEnabled(true)
 
         saveMappingButton.setOnClickListener {
             val role = state.roles.getOrNull(currentRoleIndex) ?: return@setOnClickListener
@@ -2849,7 +3062,7 @@ open class MainActivity : AppCompatActivity() {
             }.toString()
             saveManualCameraButton.isEnabled = false
             postSurveillanceConfig(payload) { success, message ->
-                saveManualCameraButton.isEnabled = true
+                saveManualCameraButton.isEnabled = legacyMappingEditable
                 if (success) {
                     currentManualCameraView.text = if (selectedId >= 0) {
                         getString(R.string.camera_mapping_current_format, "Camera $selectedId")
@@ -2871,25 +3084,105 @@ open class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Camera ingestion mode (Default vs DiLink 4). Pre-select from
+        // Camera ingestion mode. Pre-select from
         // saved config; if no value present the data class default is
         // "default" so the radio group defaults match the daemon's
         // resolveCameraModeFromConfig fallback.
-        val initialModeRadioId = if (state.cameraMode == "dilink4") {
-            R.id.rbCameraModeDilink4
-        } else {
-            R.id.rbCameraModeDefault
+        val initialModeRadioId = when (state.cameraMode) {
+            "dilink4" -> R.id.rbCameraModeDilink4
+            "dilink5" -> R.id.rbCameraModeDilink5
+            else -> R.id.rbCameraModeDefault
         }
         cameraModeGroup.check(initialModeRadioId)
-        currentCameraModeView.text = if (state.cameraMode == "dilink4") {
-            getString(R.string.camera_mode_current_dilink4)
+        currentCameraModeView.text = when (state.cameraMode) {
+            "dilink4" -> getString(R.string.camera_mode_current_dilink4)
+            "dilink5" -> getString(R.string.camera_mode_current_dilink5)
+            else -> getString(R.string.camera_mode_current_default)
+        }
+
+        // DiLink 5 hardware order override. This is deliberately separate
+        // from legacy role/slice mapping: the native bridge consumes physical
+        // IDs in front,right,rear,left order before it builds the mosaic.
+        val dilink5MappingEditable = state.cameraMode == "dilink5"
+        val savedDilink5Mapping = state.dilink5CameraMapping
+            .split(',')
+            .joinToString(",") { it.trim() }
+            .takeIf { state.dilink5CameraMapping.isNotBlank() }
+            .orEmpty()
+        dilink5MappingCard.visibility =
+            if (dilink5MappingEditable) View.VISIBLE else View.GONE
+        currentDilink5MappingView.text = if (savedDilink5Mapping.isEmpty()) {
+            getString(R.string.camera_dilink5_mapping_current_auto)
         } else {
-            getString(R.string.camera_mode_current_default)
+            getString(
+                R.string.camera_dilink5_mapping_current_format,
+                savedDilink5Mapping
+            )
+        }
+        when (savedDilink5Mapping) {
+            "" -> dilink5MappingGroup.check(R.id.rbDiLink5MappingAuto)
+            "0,1,2,3" -> dilink5MappingGroup.check(R.id.rbDiLink5MappingStandard)
+            "2,3,0,1" -> dilink5MappingGroup.check(R.id.rbDiLink5MappingOpposite)
+            "8,9,5,4" -> dilink5MappingGroup.check(R.id.rbDiLink5MappingShark)
+            else -> dilink5MappingGroup.clearCheck()
+        }
+        fun selectedDilink5Mapping(): String? = when (
+            dilink5MappingGroup.checkedRadioButtonId
+        ) {
+            R.id.rbDiLink5MappingAuto -> ""
+            R.id.rbDiLink5MappingStandard -> "0,1,2,3"
+            R.id.rbDiLink5MappingOpposite -> "2,3,0,1"
+            R.id.rbDiLink5MappingShark -> "8,9,5,4"
+            else -> null
+        }
+        fun refreshDilink5MappingAction() {
+            saveDilink5MappingButton.isEnabled =
+                dilink5MappingEditable && selectedDilink5Mapping() != null
+        }
+        dilink5MappingGroup.setOnCheckedChangeListener { _, _ ->
+            refreshDilink5MappingAction()
+        }
+        refreshDilink5MappingAction()
+
+        saveDilink5MappingButton.setOnClickListener {
+            val selectedMapping =
+                selectedDilink5Mapping() ?: return@setOnClickListener
+            if (selectedMapping == savedDilink5Mapping) {
+                Toast.makeText(
+                    this,
+                    getString(R.string.camera_dilink5_mapping_unchanged),
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+            val payload = org.json.JSONObject().apply {
+                put("dilink5CameraMapping", selectedMapping)
+            }.toString()
+            saveDilink5MappingButton.isEnabled = false
+            postSurveillanceConfig(payload) { success, message ->
+                if (success) {
+                    Toast.makeText(
+                        this,
+                        getString(R.string.camera_mapping_saved),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    restartCameraDaemonForCameraSettings()
+                    dialog.dismiss()
+                } else {
+                    refreshDilink5MappingAction()
+                    Toast.makeText(
+                        this,
+                        message ?: getString(R.string.toast_failed_to_save_short),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
         }
 
         saveCameraModeButton.setOnClickListener {
             val selectedMode = when (cameraModeGroup.checkedRadioButtonId) {
                 R.id.rbCameraModeDilink4 -> "dilink4"
+                R.id.rbCameraModeDilink5 -> "dilink5"
                 else -> "default"
             }
             // No-op when the user re-applies the already-saved mode — saves a
@@ -2908,10 +3201,10 @@ open class MainActivity : AppCompatActivity() {
             saveCameraModeButton.isEnabled = false
             postSurveillanceConfig(payload) { success, message ->
                 if (success) {
-                    currentCameraModeView.text = if (selectedMode == "dilink4") {
-                        getString(R.string.camera_mode_current_dilink4)
-                    } else {
-                        getString(R.string.camera_mode_current_default)
+                    currentCameraModeView.text = when (selectedMode) {
+                        "dilink4" -> getString(R.string.camera_mode_current_dilink4)
+                        "dilink5" -> getString(R.string.camera_mode_current_dilink5)
+                        else -> getString(R.string.camera_mode_current_default)
                     }
                     Toast.makeText(
                         this,
@@ -2954,7 +3247,7 @@ open class MainActivity : AppCompatActivity() {
                     restartCameraDaemonForCameraSettings()
                     dialog.dismiss()
                 } else {
-                    saveDilink4TweaksButton.isEnabled = true
+                    saveDilink4TweaksButton.isEnabled = legacyMappingEditable
                     Toast.makeText(
                         this,
                         message ?: getString(R.string.toast_failed_to_save_short),
@@ -2964,14 +3257,9 @@ open class MainActivity : AppCompatActivity() {
             }
         }
 
-        // OEM Dashcam camera ID picker. Mirrors the manual-camera-ID card
-        // above but writes to camera.oemDashcamCameraId / oemDashcamManual
-        // Override directly via UnifiedConfigManager.updateSection (same
-        // direct-write shape MainActivity.performCameraReconfigure uses) —
-        // the OEM dashcam fields aren't merged into /api/surveillance/config
-        // yet, so going through the daemon HTTP path would silently drop
-        // them. Auto means: let resolveOemDashcamId() infer pano^1 at
-        // pipeline init.
+        // OEM Dashcam camera ID picker. The shared config boundary rejects
+        // this entire legacy control set while DiLink 5 is active. Auto means:
+        // let resolveOemDashcamId() infer pano^1 at pipeline init.
         //
         // After save we invalidate ConcurrentAvmProbe so the next daemon
         // boot re-probes — the previous probe result was keyed against the
@@ -2993,6 +3281,59 @@ open class MainActivity : AppCompatActivity() {
         }
         oemDashcamGroup.check(initialOemDashcamRadioId)
         concurrentProbeSwitch?.isChecked = state.concurrentAvmProbeEnabled
+
+        // Decoupled encoder lane: initialize BEFORE attaching the listener so
+        // the programmatic set doesn't fire a save, then persist immediately
+        // on user toggle (write-through switch — no Save button; the flag is
+        // read at pipeline construction and goes live on the next camera
+        // restart, which the subtitle spells out). UCM writes must stay off
+        // the UI looper (feedback_no_unified_writes_on_ui_thread.md), same
+        // pattern as the OEM-dashcam save above.
+        decoupledLaneSwitch?.isChecked = state.decoupledEncoderLaneEnabled
+        // Revert guard: a failed save flips the switch back programmatically;
+        // this flag stops the revert from firing a second (doomed) save while
+        // keeping the one listener permanently attached.
+        val decoupledLaneReverting = java.util.concurrent.atomic.AtomicBoolean(false)
+        decoupledLaneSwitch?.setOnCheckedChangeListener { switchView, checked ->
+            if (decoupledLaneReverting.get()) return@setOnCheckedChangeListener
+            switchView.isEnabled = false
+            Thread {
+                val ok = try {
+                    com.overdrive.app.camera.CameraConfigResolver
+                        .saveDecoupledEncoderLane(checked)
+                } catch (e: Exception) {
+                    logsViewModel.error(
+                        "Camera",
+                        "Failed to save decoupledEncoderLane: ${e.message}"
+                    )
+                    false
+                }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    switchView.isEnabled = state.cameraMode == "default"
+                    if (ok) {
+                        Toast.makeText(
+                            this,
+                            getString(R.string.camera_mapping_saved),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    } else {
+                        decoupledLaneReverting.set(true)
+                        try {
+                            (switchView as? android.widget.CompoundButton)
+                                ?.isChecked = !checked
+                        } finally {
+                            decoupledLaneReverting.set(false)
+                        }
+                        Toast.makeText(
+                            this,
+                            getString(R.string.toast_failed_to_save_short),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }.start()
+        }
 
         fun refreshOemDashcamSubLabel(
             isManual: Boolean,
@@ -3039,15 +3380,6 @@ open class MainActivity : AppCompatActivity() {
             }
             val manualOverride = selectedId >= 0
             val probeOptIn = concurrentProbeSwitch?.isChecked ?: false
-            val patch = org.json.JSONObject().apply {
-                put("oemDashcamManualOverride", manualOverride)
-                put("oemDashcamCameraId", if (manualOverride) selectedId else -1)
-                // Opt-in for the destructive dual-camera probe. Persist the
-                // user's explicit choice; the daemon only runs the probe on
-                // next boot when this is true (and even then defers if a
-                // pipeline is live, per ConcurrentAvmProbe liveness guard).
-                put("concurrentAvmProbeEnabled", probeOptIn)
-            }
             saveOemDashcamButton.isEnabled = false
             // Background thread for the UCM write — updateSection rewrites
             // the whole JSON file and is not safe on the UI looper (per
@@ -3055,8 +3387,12 @@ open class MainActivity : AppCompatActivity() {
             // performCameraReconfigure pattern.
             Thread {
                 val ok = try {
-                    com.overdrive.app.config.UnifiedConfigManager
-                        .updateSection("camera", patch)
+                    com.overdrive.app.camera.CameraConfigResolver
+                        .saveLegacyOemCameraSettings(
+                            manualOverride,
+                            selectedId,
+                            probeOptIn
+                        )
                 } catch (e: Exception) {
                     logsViewModel.error(
                         "Camera",
@@ -3108,7 +3444,7 @@ open class MainActivity : AppCompatActivity() {
                 }
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
-                    saveOemDashcamButton.isEnabled = true
+                    saveOemDashcamButton.isEnabled = legacyMappingEditable
                     if (ok) {
                         refreshOemDashcamSubLabel(
                             manualOverride,
@@ -3287,7 +3623,8 @@ open class MainActivity : AppCompatActivity() {
                 dash >= 0 -> getString(R.string.camera_pair_value_auto, dash)
                 else -> getString(R.string.camera_option_auto)
             }
-            swapButton?.isEnabled = pano in 0..5 && dash in 0..5 && pano != dash
+            swapButton?.isEnabled = legacyMappingEditable
+                    && pano in 0..5 && dash in 0..5 && pano != dash
             loadPairThumb(0, pairPanoThumb, pano)
             loadPairThumb(1, pairDashcamThumb, dash)
         }
@@ -3308,6 +3645,7 @@ open class MainActivity : AppCompatActivity() {
         val advancedIdSection = dialogView.findViewById<View>(R.id.advancedIdSection)
         val advancedIdsToggle = dialogView.findViewById<View>(R.id.btnToggleAdvancedIds)
         val advancedIdsChevron = dialogView.findViewById<ImageView>(R.id.ivAdvancedIdsChevron)
+        advancedIdsToggle?.isEnabled = legacyMappingEditable
         fun setAdvancedIdsExpanded(expanded: Boolean) {
             advancedIdSection?.visibility = if (expanded) View.VISIBLE else View.GONE
             advancedIdsChevron?.rotation = if (expanded) 180f else 0f
@@ -3487,13 +3825,21 @@ open class MainActivity : AppCompatActivity() {
             // meant saving camera settings shortly after parking failed with the
             // settings written but never applied.
             var prepared = false
+            val restartRequestId =
+                java.util.UUID.randomUUID().toString().replace("-", "")
             for (attempt in 1..6) {
                 var retryable = false
                 prepared = try {
                     val conn = com.overdrive.app.util.DaemonHttpClient.open(
-                        "/api/surveillance/prepare-restart", "POST", 3000, 10000)
+                        "/api/surveillance/prepare-restart", "POST", 3000, 30000)
                     conn.doOutput = true
-                    conn.outputStream.use { it.write(byteArrayOf()) }
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    val requestBody = org.json.JSONObject()
+                        .put("reason", "camera_settings")
+                        .put("requestId", restartRequestId)
+                        .toString()
+                        .toByteArray(Charsets.UTF_8)
+                    conn.outputStream.use { it.write(requestBody) }
                     val code = conn.responseCode
                     val detail = try {
                         val stream = if (code in 200..299) conn.inputStream else conn.errorStream
@@ -4013,6 +4359,7 @@ open class MainActivity : AppCompatActivity() {
             "seagull" -> getString(R.string.vehicle_model_seagull)
             "sealion6" -> "BYD Sealion 6"
             "sealion7" -> "BYD Sealion 7"
+            "shark" -> "BYD Shark"
             "sealu", "seal-u" -> "BYD Seal U"
             else -> modelId.replaceFirstChar { it.uppercase() }
         }
@@ -4470,6 +4817,10 @@ open class MainActivity : AppCompatActivity() {
         // holding this activity until the next tick no-ops on isDestroyed).
         updatePollRunnable?.let { mainHandler.removeCallbacks(it) }
         updatePollRunnable = null
+        // Invalidate daemon probes / release callbacks already in flight.
+        manualUpdateCheckGeneration.incrementAndGet()
+        updateProgressHandle?.dismiss()
+        updateProgressHandle = null
         // Cancel any in-flight post-update watchdog. Without this the
         // Handler.postDelayed lambda holds a reference to this@MainActivity
         // for up to 30 seconds, leaking the activity if the user backs out
@@ -4709,5 +5060,6 @@ open class MainActivity : AppCompatActivity() {
         /** Deep-link extra consumed by [handleNavigateExtra] (launcher glance widgets). */
         const val EXTRA_NAVIGATE_TO = "navigate_to"
         const val EXTRA_REMOTE_DEV_SESSION = "remote_dev_session"
+        private const val EXTRA_MINIMIZE_ON_START = "minimize_on_start"
     }
 }

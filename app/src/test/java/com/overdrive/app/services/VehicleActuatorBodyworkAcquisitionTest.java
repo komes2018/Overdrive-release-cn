@@ -23,10 +23,19 @@ public class VehicleActuatorBodyworkAcquisitionTest {
 
         int wrap = mirrorPath.indexOf("withBydPermissionBypass(");
         int acquire = mirrorPath.indexOf("BydDeviceHelper.getDevice(");
+        int selectedRoute = mirrorPath.indexOf(
+                "setDiLink5MirrorsFolded(bydContext, fold, value)");
+        int exact = mirrorPath.indexOf("setAutoExternalRearMirrorFoldState");
+        int setting = mirrorPath.indexOf(
+                "BydConstants.MIRROR_FOLD_SETTING_DEVICE_CLASS");
         int legacy = mirrorPath.indexOf("setMirrorsFoldedViaLegacyBodywork(");
         assertTrue("mirror path must create the BYD permission context", wrap >= 0);
         assertTrue("permission context must be created before mirror acquisition",
                 acquire > wrap);
+        assertTrue("selected DiLink 5 must use its exact mirror setter",
+                mirrorPath.contains("DiLink5Platform.isSelected()") && exact >= 0);
+        assertTrue("exact DiLink 5 route must precede compatibility routes",
+                selectedRoute >= 0 && selectedRoute < setting);
         assertTrue("Setting acquisition must receive the wrapped context",
                 mirrorPath.contains(
                         "BydConstants.MIRROR_FOLD_SETTING_DEVICE_CLASS, bydContext"));
@@ -40,7 +49,7 @@ public class VehicleActuatorBodyworkAcquisitionTest {
         assertTrue("1/2 command mapping must be used",
                 mirrorPath.contains("BydConstants.mirrorFoldCommand(fold)"));
         assertTrue("legacy bodywork path must run only after the Setting route",
-                legacy > acquire);
+                legacy > setting);
     }
 
     private static String readRepositoryFile(String relativePath) throws Exception {

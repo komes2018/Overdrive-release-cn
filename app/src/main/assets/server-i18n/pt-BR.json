@@ -167,6 +167,30 @@
     "soh_frame_mismatch_title": "A capacidade da bateria necessita revisão",
     "soh_frame_mismatch_body": "O veículo relata {0} kWh com carga total, mas a capacidade da bateria está configurada para {1} kWh. Abra a Saúde da Bateria para corrigir com um toque."
   },
+  "parking": {
+    "notify": {
+      "started_title": "Estacionado",
+      "ended_title": "De volta ao carro",
+      "ended_body": "Fora por {0} · {1} eventos · {2} veículos chegaram ou saíram",
+      "ended_body_short": "{0} veículos chegaram ou saíram",
+      "ended_body_unwatched": "Fora por {0} · Vigilância não armada ({1})",
+      "ended_events": "{0} eventos",
+      "nothing_critical": "Nada crítico",
+      "no_place": "Localização indisponível",
+      "gps_fresh": "GPS recente",
+      "gps_recent": "GPS de alguns minutos",
+      "gps_stale": "GPS antigo — garagem?",
+      "gps_unknown": "Sem sinal de GPS",
+      "sentry_off": "Vigilância não armada ({0})",
+      "sentry_safe_zone": "zona segura",
+      "sentry_schedule": "fora do horário",
+      "sentry_disabled": "vigilância desativada",
+      "sentry_vehicle_on_only": "modo apenas com veículo ligado",
+      "sentry_pipeline_down": "câmera não está em execução",
+      "sentry_unknown": "desconhecido",
+      "btn_walk": "Me leve até o carro"
+    }
+  },
   "telegram": {
     "recording_caption": "📹 Gravando ({0}) - {1}s",
     "recording_caption_no_label": "📹 Gravando - {0} s",
@@ -250,7 +274,23 @@
       "error": "⚠️ Erro: {0}"
     },
     "help": {
-      "text": "📖 *Comandos*\n*OverDrive {0}*\n\n*Vigilância*\n`/start` - Iniciar vigilância\n`/stop` - Parar vigilância\n`/status` - Status do sistema\n\n*Eventos*\n`/events [horas] [página]` - Listar gravações\n`/download <file>` - Baixar vídeo\n\n*Daemons*\n`/daemons` - Listar todos os daemons\n`/daemon <name>  start|stop` - Iniciar/Parar daemon\n\n*Sistema*\n`/url` - URL do túnel\n`/update` - Verificar atualizações do app\n`/backup` - Exportar backup das configurações\n`/backup trips` - Backup incluindo histórico de viagens\n`/help` - Esta mensagem"
+      "text": "📖 *Comandos*\n*OverDrive {0}*\n\n*Vigilância*\n`/start` - Iniciar vigilância\n`/stop` - Parar vigilância\n`/status` - Status do sistema\n\n*Eventos*\n`/events [horas] [página]` - Listar gravações\n`/download <file>` - Baixar vídeo\n\n*Daemons*\n`/daemons` - Listar todos os daemons\n`/daemon <name>  start|stop` - Iniciar/Parar daemon\n\n*Sistema*\n`/url` - URL do túnel\n`/update` - Verificar atualizações do app\n`/backup` - Exportar backup das configurações\n`/backup trips` - Backup incluindo histórico de viagens\n`/where` - Onde estacionei?\n`/help` - Esta mensagem"
+    },
+    "parking": {
+      "where": {
+        "unavailable": "⚠️ Não foi possível contatar o daemon da câmera. Tente `/daemon camera start`.",
+        "disabled": "🅿️ O Parking Intelligence está desativado. Ative-o em Configurações de vigilância → Estacionamento.",
+        "none": "🅿️ Nenhuma sessão de estacionamento registrada ainda.",
+        "title_open": "🅿️ *Seu carro está estacionado*",
+        "title_last": "🅿️ *Última sessão de estacionamento*",
+        "parked_for": "Estacionado há {0}",
+        "was_away": "Você ficou fora por {0}",
+        "counts": "{0} eventos de vigilância · {1} veículos ao seu redor",
+        "gps_fresh": "Sinal de GPS recente",
+        "gps_recent": "Sinal de GPS de alguns minutos atrás",
+        "gps_stale": "Sinal de GPS antigo — provavelmente uma garagem coberta; a posição mostrada é a entrada",
+        "gps_unknown": "Sem sinal de GPS"
+      }
     },
     "surveillance": {
       "started": "✅ Vigilância iniciada",
@@ -1092,12 +1132,7 @@
     "set_rear_defrost": "Desembaçador Traseiro",
     "set_rear_defrost_description": "Liga ou desliga o desembaçador do parabrisa traseiro. Este controle não funciona quando o veículo está desligado.",
     "wait_until_description": "Pausar as ações restantes até que um sinal escolhido atenda a uma comparação, ou o tempo limite se esgote. Exemplo: aguarde até Velocidade = 0 antes de fechar as janelas.",
-    "wait_until_state_description": "Pausar as ações restantes até o sinal de liga/desliga escolhido atingir um estado, ou o tempo de espera se esgote. Exemplo: espere até que as setas = desligado antes de continuar.",
-      "wait_timeout": "Tempo limite (segundos)",
-      "save_seat_position": "Salvar Posição do Assento",
-      "save_seat_position_description": "Armazenar a posição atual do assento do motorista em um espaço da memória.",
-      "set_seat_position": "Controlar a Posição dos Bancos",
-      "set_seat_position_description": "Carregar uma posição da memória dos bancos. Certifique-se de que a memória foi salva previamente no veículo. Este controle não funciona quando o veículo estiver desligado."
+    "wait_until_state_description": "Pausar as ações restantes até o sinal de liga/desliga escolhido atingir um estado, ou o tempo de espera se esgote. Exemplo: espere até que as setas = desligado antes de continuar."
   },
   "messages": {
     "logged_out": "Sessão encerrada",

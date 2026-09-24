@@ -334,8 +334,12 @@ public class OverlayBitmapRenderer {
             final boolean needBeams = fields.hasAny(Field.LOW_BEAM, Field.HIGH_BEAM);
             final boolean needLoc = fields.has(Field.LOCATION);
             final boolean needVin = fields.has(Field.VIN);
+            final boolean diLink5 =
+                    com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
             double soc = Double.NaN, volt12 = Double.NaN;
             boolean lowBeam = false, highBeam = false;
+            boolean lowBeamKnown = !diLink5;
+            boolean highBeamKnown = lowBeamKnown;
             double lat = Double.NaN, lon = Double.NaN;
             boolean hasLoc = false;
             String vin = null;
@@ -350,6 +354,12 @@ public class OverlayBitmapRenderer {
                             volt12 = d.voltage12v;
                             lowBeam = d.lowBeam;
                             highBeam = d.highBeam;
+                            lowBeamKnown = !diLink5 || d.isLightKnown(
+                                    com.overdrive.app.byd.BydVehicleData
+                                            .LIGHT_KNOWN_LOW_BEAM);
+                            highBeamKnown = !diLink5 || d.isLightKnown(
+                                    com.overdrive.app.byd.BydVehicleData
+                                            .LIGHT_KNOWN_HIGH_BEAM);
                             vin = d.vin;
                         }
                     }
@@ -451,7 +461,9 @@ public class OverlayBitmapRenderer {
                 if (!first) x += SEGMENT_GAP;
                 first = false;
                 drawSegment(c, f, x, iy, canText, blink, spd, spdUnit, snap,
-                        soc, volt12, lowBeam, highBeam, lat, lon, hasLoc, vin);
+                        soc, volt12, lowBeam, highBeam,
+                        lowBeamKnown, highBeamKnown,
+                        lat, lon, hasLoc, vin);
                 x += segWidth[f.ordinal()];
             }
             if (saveCount >= 0) c.restoreToCount(saveCount);
@@ -531,6 +543,7 @@ public class OverlayBitmapRenderer {
                              boolean blink, String spd, String spdUnit,
                              TelemetrySnapshot snap, double soc, double volt12,
                              boolean lowBeam, boolean highBeam,
+                             boolean lowBeamKnown, boolean highBeamKnown,
                              double lat, double lon, boolean hasLoc, String vin) {
         switch (f) {
             case SPEED:
@@ -587,10 +600,10 @@ public class OverlayBitmapRenderer {
                 break;
             }
             case LOW_BEAM:
-                drawBeamGlyph(c, x, iy, lowBeam, false);
+                if (lowBeamKnown) drawBeamGlyph(c, x, iy, lowBeam, false);
                 break;
             case HIGH_BEAM:
-                drawBeamGlyph(c, x, iy, highBeam, true);
+                if (highBeamKnown) drawBeamGlyph(c, x, iy, highBeam, true);
                 break;
             case BATTERY_PERCENT:
                 drawBattery(c, x, iy, soc, canText);

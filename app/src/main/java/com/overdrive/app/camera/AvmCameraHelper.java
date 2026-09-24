@@ -17,25 +17,61 @@ public final class AvmCameraHelper {
 
     private static final String BMM_CAMERA_INFO_CLASS = "android.hardware.BmmCameraInfo";
 
-    /** Panoramic camera tags to try, in priority order. */
-    // Matches the cascade in BmmCameraInfo.processCamProperty:242-260 verbatim:
-    // pano_h → pano_l → byd_apa → apa. The jar's cascade is if/else if so only
-    // one of these is ever populated per device — order here only matters if a
-    // future jar build relaxes the cascade.
-    private static final String[] PANO_TAGS = {"pano_h", "pano_l", "byd_apa", "apa"};
+    /**
+     * DIPlus 1.3.8-beta18 camera-selection order.
+     *
+     * <p>The native panoramic tags expose preview index 0. Only the APA
+     * fallback exposes preview index 1.
+     */
+    private static final String[] DI4_PANO_TAGS = {"pano_h", "pano_l"};
+    private static final String[] APA_FALLBACK_TAGS = {"apa", "byd_apa"};
+    private static final String[] LEGACY_PANO_TAGS =
+            {"pano_h", "pano_l", "byd_apa", "apa"};
+    private static volatile PanoCameraSelection cachedPanoSelection;
 
     private AvmCameraHelper() {}
 
     // ── Camera Discovery (REQ-1) ────────────────────────────────────────
 
+    /** HAL-selected panoramic camera and the preview index used for that tag. */
+    public static final class PanoCameraSelection {
+        private final int cameraId;
+        private final int previewIndex;
+        private final String tag;
+
+        private PanoCameraSelection(int cameraId, int previewIndex, String tag) {
+            this.cameraId = cameraId;
+            this.previewIndex = previewIndex;
+            this.tag = tag;
+        }
+
+        public int getCameraId() {
+            return cameraId;
+        }
+
+        public int getPreviewIndex() {
+            return previewIndex;
+        }
+
+        public String getTag() {
+            return tag;
+        }
+    }
+
     /**
-     * Discovers the panoramic camera ID via BmmCameraInfo.getCameraId() reflection.
-     * BmmCameraInfo reads the system property vehicle.config.cam_sort which maps
-     * camera tags to IDs. Tries pano_h → pano_l → byd_apa → apa.
+     * Discovers the panoramic camera and preview index via
+     * BmmCameraInfo.getCameraId() reflection.
      *
-     * @return camera ID (>= 0) or -1 if not found
+     * <p>This mirrors the uninterrupted DIPlus panoramic recorder:
+     * pano_h → pano_l use preview index 0; apa → byd_apa use preview index 1.
+     *
+     * @return the HAL selection, or {@code null} if no panoramic tag exists
      */
-    public static int discoverPanoCameraId() {
+    public static PanoCameraSelection discoverDi4PanoCameraSelection() {
+        PanoCameraSelection cached = cachedPanoSelection;
+        if (cached != null) {
+            return cached;
+        }
         try {
             Class<?> bmmClass = Class.forName(BMM_CAMERA_INFO_CLASS);
 
@@ -65,26 +101,75 @@ public final class AvmCameraHelper {
             }
             logger.info(sb.toString());
 
-            // Try panoramic tags in priority order
-            for (String tag : PANO_TAGS) {
+            // DIPlus pano_h/pano_l path: preview index 0.
+            for (String tag : DI4_PANO_TAGS) {
                 Object result = getCameraId.invoke(null, tag);
                 if (result instanceof Integer) {
                     int id = (Integer) result;
                     if (id >= 0) {
-                        logger.info("Discovered panoramic camera: " + tag + " → ID " + id);
-                        return id;
+                        PanoCameraSelection selection =
+                                new PanoCameraSelection(id, 0, tag);
+                        cachedPanoSelection = selection;
+                        logger.info("Discovered panoramic camera: " + tag
+                                + " → ID " + id + ", previewIndex=0");
+                        return selection;
+                    }
+                }
+            }
+
+            // DIPlus APA fallback: preview index 1.
+            for (String tag : APA_FALLBACK_TAGS) {
+                Object result = getCameraId.invoke(null, tag);
+                if (result instanceof Integer) {
+                    int id = (Integer) result;
+                    if (id >= 0) {
+                        PanoCameraSelection selection =
+                                new PanoCameraSelection(id, 1, tag);
+                        cachedPanoSelection = selection;
+                        logger.info("Discovered panoramic camera fallback: "
+                                + tag + " → ID " + id
+                                + ", previewIndex=1");
+                        return selection;
                     }
                 }
             }
             logger.info("BmmCameraInfo: no panoramic camera found for any tag");
-            return -1;
+            return null;
         } catch (ClassNotFoundException e) {
             logger.warn("BmmCameraInfo class not available on this device");
-            return -1;
+            return null;
         } catch (Exception e) {
             logger.warn("BmmCameraInfo discovery failed: " + e.getMessage());
-            return -1;
+            return null;
         }
+    }
+
+    /**
+     * Legacy ID-only discovery. Keep its historical fallback order unchanged
+     * so enabling the DI4 path cannot alter older vehicle behavior.
+     */
+    public static int discoverPanoCameraId() {
+        try {
+            Class<?> bmmClass = Class.forName(BMM_CAMERA_INFO_CLASS);
+            java.lang.reflect.Method getCameraId =
+                    bmmClass.getDeclaredMethod("getCameraId", String.class);
+            getCameraId.setAccessible(true);
+            for (String tag : LEGACY_PANO_TAGS) {
+                Object result = getCameraId.invoke(null, tag);
+                if (result instanceof Integer && (Integer) result >= 0) {
+                    int id = (Integer) result;
+                    logger.info("Discovered panoramic camera: " + tag
+                            + " → ID " + id);
+                    return id;
+                }
+            }
+            logger.info("BmmCameraInfo: no panoramic camera found for any tag");
+        } catch (ClassNotFoundException e) {
+            logger.warn("BmmCameraInfo class not available on this device");
+        } catch (Exception e) {
+            logger.warn("BmmCameraInfo discovery failed: " + e.getMessage());
+        }
+        return -1;
     }
 
     // ── Frame Rate Control (REQ-2) ──────────────────────────────────────

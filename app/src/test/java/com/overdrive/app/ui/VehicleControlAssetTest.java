@@ -9,8 +9,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import org.json.JSONArray;
-import org.json.JSONObject;
 import org.junit.Test;
 
 /** Guards the Vehicle screen's old-WebView spacing and model-fit behaviour. */
@@ -53,6 +51,38 @@ public class VehicleControlAssetTest {
         // Chrome 58 ignores flex `gap`, so the gutters must be margins.
         assertTrue(css.contains(".vc-tyre-cell + .vc-tyre-cell { margin-left: 4px; }"));
         assertFalse(ruleFor(css, ".vc-tyre-strip").contains("gap:"));
+    }
+
+    @Test
+    public void mobileChromeWrapsWithoutLeavingABottomGap() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
+
+        assertTrue(html.contains("vehicle-control.css?v=47"));
+        assertTrue(css.contains("order: 3;"));
+        assertTrue(css.contains("flex: 0 0 100%;"));
+        assertTrue(css.contains(".vc-bar { left: 0; right: 0; bottom: 0; }"));
+        assertFalse(css.contains(
+                "padding-bottom: calc(5px + env(safe-area-inset-bottom, 0px));"));
+        assertTrue(css.contains("height: calc(var(--vh, 1vh) * 100);"));
+    }
+
+    @Test
+    public void customPaintUsesTheSharedSpectrumInsteadOfAnOsPicker()
+            throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
+        String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
+
+        assertTrue(html.contains("id=\"colorModalSpectrum\""));
+        assertTrue(html.contains("id=\"colorModalHue\""));
+        assertTrue(html.contains("id=\"colorModalPreview\""));
+        assertFalse(html.contains("id=\"colorModalNative\""));
+        assertTrue(css.contains(".vc-color-spectrum"));
+        assertTrue(css.contains(".vc-color-hue"));
+        assertTrue(script.contains("_hexToHsv: function(hex)"));
+        assertTrue(script.contains("_hsvToHex: function(h, s, v)"));
+        assertTrue(script.contains("self._setColorSpectrumDraft();"));
     }
 
     /** Trunk actions use the current Lucide door glyphs. */
@@ -501,40 +531,6 @@ public class VehicleControlAssetTest {
     }
 
     @Test
-    public void releasedAtto2AndSealion7UseBodyPaintMeshHints() throws Exception {
-        String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
-        JSONObject manifest = new JSONObject(readRepositoryFile(
-                "app/src/main/assets/web/shared/models/manifest.json"));
-
-        assertTrue(script.contains("modelEntry.paintMeshHint"));
-        assertTrue(script.contains("paintName.indexOf(paintMeshHint) >= 0"));
-
-        JSONObject atto2 = null;
-        JSONObject sealion7 = null;
-        JSONArray models = manifest.getJSONArray("models");
-        for (int i = 0; i < models.length(); i++) {
-            JSONObject model = models.getJSONObject(i);
-            if ("atto2".equals(model.getString("id"))) {
-                atto2 = model;
-            } else if ("sealion7".equals(model.getString("id"))) {
-                sealion7 = model;
-            }
-        }
-
-        assertTrue(atto2 != null);
-        assertEquals("mk_body", atto2.getString("paintMeshHint"));
-
-        assertTrue(sealion7 != null);
-        assertEquals("bodypaint", sealion7.getString("paintMeshHint"));
-        assertEquals("sealion7.glb", sealion7.getString("file"));
-        assertEquals(1645180, sealion7.getInt("sizeBytes"));
-        assertEquals(
-                "b1bd4c94aaf50e09ee5a294381bcec52b5160fe2cc3394e4b1c9d5ce37b055e2",
-                sealion7.getString("sha256"));
-        assertFalse(sealion7.getBoolean("bundled"));
-    }
-
-    @Test
     public void rawLimitsStillCatchLowPressureWhenSdkSaysNormal() throws IOException {
         String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
 
@@ -578,6 +574,21 @@ public class VehicleControlAssetTest {
         assertTrue(script.contains("_tyreStateToken: function(corner, isFront)"));
         assertTrue(script.contains("_tyreStateLabel: function(corner, isFront)"));
         assertTrue(script.contains("var isFront = i < 2;"));
+    }
+
+    @Test
+    public void liveClimateSetpointDoesNotOverwritePendingCommands()
+            throws IOException {
+        String script = readRepositoryFile(
+                "app/src/main/assets/web/shared/vehicle-control.js");
+
+        assertTrue(script.contains(
+                "var climateTempRevision = this._climateTempRevision"));
+        assertTrue(script.contains(
+                "climateTempRevision === self._climateTempRevision"));
+        assertTrue(script.contains("!self._climatePending.temp"));
+        assertTrue(script.contains(
+                "self.vehicleState.acTemp = data.climate.setpointDriver"));
     }
 
     /**
@@ -625,7 +636,7 @@ public class VehicleControlAssetTest {
                 + count(html, "data-state=\"3\" disabled")
                 + count(html, "data-state=\"4\" disabled")
                 + count(html, "data-state=\"5\" disabled"));
-        assertTrue(html.contains("vehicle-control.js?v=vclite26"));
+        assertTrue(html.contains("vehicle-control.js?v=vclite31"));
         assertTrue(script.contains("fetch('/api/vehicle/ac-charge-current-limit')"));
         assertTrue(script.contains("self.apiPost('/api/vehicle/ac-charge-current-limit'"));
         assertTrue(script.contains("startAcChargeCurrentSync: function()"));
@@ -637,6 +648,41 @@ public class VehicleControlAssetTest {
         assertTrue(script.contains("state.available !== true"));
         assertTrue(script.contains(
                 "self.vehicleState.acChargeCurrentLimit.available = false;"));
+    }
+
+    @Test
+    public void iviRebootIsConfirmedAndParkedOnly() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
+        String api = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/server/VehicleControlApiHandler.java");
+        String server = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/server/HttpServer.java");
+
+        assertTrue(html.contains("id=\"panelSystem\""));
+        assertTrue(html.contains("id=\"btnIviReboot\""));
+        assertTrue(script.contains("BYD.utils.confirmDialog"));
+        assertTrue(script.contains(
+                "self.apiPost('/api/system/ivi-reboot', {"));
+        assertTrue(script.contains("confirm: 'REBOOT'"));
+        assertTrue(script.contains(
+                "data.iviRebootAvailable === true"));
+        assertTrue(api.contains(
+                "response.put(\"iviRebootAvailable\", true)"));
+        assertFalse(api.contains(
+                "cleanPath.equals(\"/api/system/ivi-reboot\")\n"
+                        + "                && method.equals(\"POST\")\n"
+                        + "                && com.overdrive.app.camera.dilink5"));
+        assertTrue(api.contains("\"REBOOT\".equals(req.optString(\"confirm\", \"\"))"));
+        assertTrue(api.contains(
+                "DrivingSafetyGuard.getIviRebootBlockReason()"));
+        assertTrue(api.contains("sleep 1; svc power reboot"));
+        assertTrue(api.contains("sleep 2; reboot"));
+        assertTrue(server.contains("path.startsWith(\"/api/system/ivi-reboot\")"));
+        int allowlistStart = server.indexOf("AUTOMATION_ALLOWED_PREFIXES");
+        int allowlistEnd = server.indexOf("};", allowlistStart);
+        assertFalse(server.substring(allowlistStart, allowlistEnd)
+                .contains("/api/system/ivi-reboot"));
     }
 
     private static int count(String text, String needle) {

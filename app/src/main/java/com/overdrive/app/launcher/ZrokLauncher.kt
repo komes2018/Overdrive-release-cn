@@ -41,6 +41,7 @@ class ZrokLauncher(
         private const val ZROK_BACKEND_URL = "http://127.0.0.1:8080"
         private const val ZROK_RUNTIME_PROBE_CLASS = "com.overdrive.app.launcher.ZrokRuntimeProbe"
         private const val APP_PACKAGE = "com.overdrive.app"
+        private const val ZROK_RATE_LIMIT_COOLDOWN_SEC = 300
 
         // Watchdog state. Mirrors the CameraDaemon pattern: a shell wrapper
         // that re-execs `zrok share` if it ever exits, with a sentinel file
@@ -131,6 +132,7 @@ class ZrokLauncher(
                 "PROBE_INTERVAL_SEC=60",
                 "PROBE_INITIAL_DELAY_SEC=60",
                 "PROBE_STRIKES=2",
+                "RATE_LIMIT_COOLDOWN_SEC=$ZROK_RATE_LIMIT_COOLDOWN_SEC",
                 "APK_PATH=\$(pm path $APP_PACKAGE 2>/dev/null | head -1 | cut -d: -f2)",
                 "PROBE_CLASS=\"$ZROK_RUNTIME_PROBE_CLASS\"",
                 "PACKAGED_ZROK=\"\${APK_PATH%/base.apk}/lib/arm64/libzrok.so\"",
@@ -201,8 +203,15 @@ class ZrokLauncher(
                 "    RETRY_COUNT=0",
                 "  fi",
                 "  RETRY_COUNT=\$((RETRY_COUNT + 1))",
-                "  DELAY=\$((RETRY_COUNT * 3))",
-                "  if [ \$DELAY -gt 60 ]; then DELAY=60; fi",
+                "  if awk '/Starting zrok share.../ { rate_limited=0 } " +
+                        "/SERVER_TOO_MANY_REQUESTS|Too many requests to alter state/ { rate_limited=1 } " +
+                        "END { exit rate_limited ? 0 : 1 }' \"\$LOG_FILE\"; then",
+                "    DELAY=\$RATE_LIMIT_COOLDOWN_SEC",
+                "    echo \"[\$(date)] Zrok service rate-limited; cooling down for \${DELAY}s\" >> \"\$LOG_FILE\"",
+                "  else",
+                "    DELAY=\$((RETRY_COUNT * 3))",
+                "    if [ \$DELAY -gt 60 ]; then DELAY=60; fi",
+                "  fi",
                 "  echo \"[\$(date)] Tunnel exited with code \$EXIT_CODE after \${UPTIME_SEC}s; retrying in \${DELAY}s\" >> \"\$LOG_FILE\"",
                 "  sleep \$DELAY",
                 "done"
@@ -1543,88 +1552,29 @@ class ZrokLauncher(
     }
 
     /**
-     * Edge-session-stale detection. The original 8–9 hour 502 bug: the
-     * `zrok share` process is alive (so isTunnelRunning returns true) but
-     * the underlay session at the zrok edge has gone stale, so external
-     * requests to the public URL return HTTP 502. The watchdog never
-     * triggers because zrok never exits; the in-process health-check
-     * passes because pgrep finds the alive process. Result: tunnel is
-     * dead at the user-visible level forever.
-     *
-     * This method does an HTTP probe against the public URL (or any
-     * `https://<name>.share.zrok.io` we can find in the log) and returns:
-     *   - HEALTHY    : process alive AND probe got a non-502/503/504 response
-     *   - PROCESS_DEAD: zrok share process not running
-     *   - EDGE_STALE : process alive but the edge returned 502/503/504 twice
-     *
-     * Stickiness: a single 502 is not enough — the zrok edge can blip
-     * during a transient network event. We keep a per-instance counter
-     * of consecutive failed probes; treat as EDGE_STALE only after 2
-     * consecutive failures, matching the recommendation in the audit.
+     * True while either the actual share or its shell watchdog is alive.
+     * The watchdog's app_process probe is the sole edge-health owner; the
+     * app health check only rebuilds the tunnel when both processes are gone.
      */
-    enum class TunnelHealth { HEALTHY, PROCESS_DEAD, EDGE_STALE }
+    fun isTunnelManaged(callback: (Boolean) -> Unit) {
+        adbShellExecutor.execute(
+            command = "ps -A -o ARGS 2>/dev/null | " +
+                    "grep -E 'zrok share|sh $ZROK_WATCHDOG_SCRIPT' | grep -v grep | head -1",
+            callback = object : AdbShellExecutor.ShellCallback {
+                override fun onSuccess(output: String) {
+                    val managed = output.trim().isNotEmpty()
+                    logManager.debug(TAG, "isTunnelManaged check: $managed")
+                    callback(managed)
+                }
 
-    private var consecutiveProbeFailures: Int = 0
-    private var localOriginWasDown: Boolean = false
-
-    fun checkTunnelHealth(callback: (TunnelHealth) -> Unit) {
-        isTunnelRunning { processAlive ->
-            if (!processAlive) {
-                consecutiveProbeFailures = 0
-                callback(TunnelHealth.PROCESS_DEAD)
-                return@isTunnelRunning
-            }
-
-            getTunnelUrl { liveUrl ->
-                if (liveUrl == null) {
-                    logManager.debug(TAG, "Zrok edge probe inconclusive: current share URL unavailable")
-                    callback(TunnelHealth.HEALTHY)
-                } else {
-                    doHealthProbe(liveUrl, callback)
+                override fun onError(error: String) {
+                    // Unknown is not dead: avoid launching a second watchdog
+                    // when only the ADB process-table probe failed.
+                    logManager.warn(TAG, "isTunnelManaged probe unavailable: $error")
+                    callback(true)
                 }
             }
-        }
-    }
-
-    private fun doHealthProbe(probeUrl: String, callback: (TunnelHealth) -> Unit) {
-        reconcileScheduler.execute {
-            if (!ProxyHelper.probePort(ZROK_BACKEND_PORT)) {
-                consecutiveProbeFailures = 0
-                if (!localOriginWasDown) {
-                    logManager.warn(TAG, "Local zrok origin $ZROK_BACKEND_URL is unavailable; preserving tunnel session")
-                }
-                localOriginWasDown = true
-                callback(TunnelHealth.HEALTHY)
-                return@execute
-            }
-            if (localOriginWasDown) {
-                logManager.info(TAG, "Local zrok origin recovered")
-                localOriginWasDown = false
-            }
-
-            val status = ZrokRuntimeProbe.probeStatus(probeUrl)
-            val nextFailures = ZrokRuntimeProbe.nextEdgeFailureCount(true, status, consecutiveProbeFailures)
-            if (ZrokRuntimeProbe.isStaleStatus(status)) {
-                consecutiveProbeFailures = nextFailures
-                logManager.warn(
-                    TAG,
-                    "Zrok edge probe failed (status=$status, consecutive=$consecutiveProbeFailures): $probeUrl"
-                )
-                if (consecutiveProbeFailures >= 2) {
-                    logManager.warn(TAG, "Zrok edge stale confirmed; relaunch needed")
-                    consecutiveProbeFailures = 0
-                    callback(TunnelHealth.EDGE_STALE)
-                } else {
-                    callback(TunnelHealth.HEALTHY)
-                }
-            } else {
-                if (status != null && status > 0 && consecutiveProbeFailures > 0) {
-                    logManager.info(TAG, "Zrok edge probe recovered (status=$status), resetting failure counter")
-                }
-                consecutiveProbeFailures = nextFailures
-                callback(TunnelHealth.HEALTHY)
-            }
-        }
+        )
     }
 
     /**

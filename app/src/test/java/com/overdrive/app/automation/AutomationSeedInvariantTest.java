@@ -1,10 +1,12 @@
 package com.overdrive.app.automation;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import com.overdrive.app.automation.action.SetVariableAction;
 import com.overdrive.app.automation.condition.BydEvent;
+import com.overdrive.app.automation.condition.EventData;
 import com.overdrive.app.automation.value.Value;
 
 import org.json.JSONArray;
@@ -192,6 +194,22 @@ public class AutomationSeedInvariantTest {
         Automations.updateObservedEdge(BydEvent.LOCK, "locked");
         assertEquals("observed edge must fire even as the first value for the key",
                 "fired", awaitProbeVariable("fired", 5000));
+    }
+
+    @Test
+    public void scopedExpiryHidesRelayedStateWithoutChangingOrdinaryUpdates() {
+        EventData key = new EventData(
+                "expiryProbe_" + UUID.randomUUID().toString().substring(0, 8));
+        Automations.withStateExpiry(
+                System.currentTimeMillis() - 1L,
+                () -> {
+                    Automations.update(key, "fresh", true);
+                    return null;
+                });
+        assertNull(Automations.getStateValue(key));
+
+        Automations.update(key, "fresh", true);
+        assertEquals("fresh", Automations.getStateValue(key).toString());
     }
 
     private void resetProbe() {

@@ -156,9 +156,15 @@ public class RecordingsApiHandler {
             // Storage-volume narrowing — comma-separated INTERNAL/SD_CARD/USB.
             // Missing = all volumes (the index already spans every location).
             String storage = params.get("storage");
+            // Parking Intelligence (v5 index columns): exact session id, CSV of
+            // quadrant names, minimum non-static actor confidence (0..1).
+            String parkingSessionId = params.get("parkingSessionId");
+            String camera = params.get("camera");
+            String minConfidence = params.get("minConfidence");
             listRecordings(out, type, date, page, pageSize,
                     classes, severities, proximities, place,
-                    placeContains, country, storage);
+                    placeContains, country, storage,
+                    parkingSessionId, camera, minConfidence);
             return true;
         }
 
@@ -742,7 +748,7 @@ public class RecordingsApiHandler {
      * regular-file checks stay in the routes so stream/thumb keep their
      * 404-vs-410 distinction (lazy-delete UI depends on 410).
      */
-    private static boolean indexPathAllowed(File file) {
+    static boolean indexPathAllowed(File file) {
         if (file == null) return false;
         if (!file.getName().endsWith(".mp4")) return false;
         try {
@@ -863,6 +869,23 @@ public class RecordingsApiHandler {
                                        String placeContainsFilter,
                                        String countryFilter,
                                        String storageFilter) throws Exception {
+        listRecordings(out, typeFilter, dateFilter, page, pageSize, classFilter, severityFilter,
+                proximityFilter, placeFilter, placeContainsFilter, countryFilter, storageFilter,
+                null, null, null);
+    }
+
+    /** Full variant including the Parking Intelligence narrowing params. */
+    private static void listRecordings(OutputStream out, String typeFilter, String dateFilter,
+                                       int page, int pageSize,
+                                       String classFilter, String severityFilter,
+                                       String proximityFilter,
+                                       String placeFilter,
+                                       String placeContainsFilter,
+                                       String countryFilter,
+                                       String storageFilter,
+                                       String parkingSessionIdFilter,
+                                       String cameraFilter,
+                                       String minConfidenceFilter) throws Exception {
         RecordingsIndex idx = RecordingsIndex.getInstance();
 
         // Index down (H2 closed the store and it could not be re-opened).
@@ -896,6 +919,7 @@ public class RecordingsApiHandler {
         RecordingsIndex.Filter f = buildFilter(typeFilter, dateFilter,
                 classFilter, severityFilter, proximityFilter, placeFilter,
                 placeContainsFilter, countryFilter, storageFilter);
+        applyParkingExtras(f, parkingSessionIdFilter, cameraFilter, minConfidenceFilter);
 
         int totalCount = idx.queryCount(f);
         int totalPages = (int) Math.ceil((double) totalCount / pageSize);
@@ -919,7 +943,9 @@ public class RecordingsApiHandler {
                 && isEmptyFilterValue(classFilter) && isEmptyFilterValue(severityFilter)
                 && isEmptyFilterValue(proximityFilter) && isEmptyFilterValue(placeFilter)
                 && isEmptyFilterValue(placeContainsFilter) && isEmptyFilterValue(countryFilter)
-                && isEmptyFilterValue(storageFilter);
+                && isEmptyFilterValue(storageFilter)
+                && isEmptyFilterValue(parkingSessionIdFilter) && isEmptyFilterValue(cameraFilter)
+                && isEmptyFilterValue(minConfidenceFilter);
         boolean reconcileKicked = false;
         // NOTE (audit: repair-on-read gate): the old condition was
         // `rows.isEmpty() && totalCount == 0` — redundant (a zero-count query
@@ -967,6 +993,40 @@ public class RecordingsApiHandler {
     /** True when a raw query-string filter value narrows nothing. */
     private static boolean isEmptyFilterValue(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    /**
+     * Parking Intelligence narrowing: exact session id, CSV quadrant names,
+     * and a 0..1 minimum confidence. Invalid numbers are ignored (no narrowing)
+     * rather than 400'd so an older client can't break the list.
+     */
+    static void applyParkingExtras(RecordingsIndex.Filter f, String parkingSessionId,
+                                   String cameras, String minConfidence) {
+        if (f == null) return;
+        if (!isEmptyFilterValue(parkingSessionId)) {
+            String sid = parkingSessionId.trim();
+            // Session ids are daemon-generated ("park_yyyyMMdd_HHmmss"); reject
+            // anything that isn't a plain token so the value can't be abused.
+            if (sid.matches("[A-Za-z0-9_\\-]{1,64}")) f.parkingSessionId = sid;
+        }
+        if (!isEmptyFilterValue(cameras)) {
+            java.util.Set<String> set = new java.util.HashSet<>();
+            for (String c : cameras.split(",")) {
+                String t = c.trim().toLowerCase(Locale.US);
+                if (t.equals("front") || t.equals("right") || t.equals("rear") || t.equals("left")) {
+                    set.add(t);
+                }
+            }
+            if (!set.isEmpty()) f.cameras = set;
+        }
+        if (!isEmptyFilterValue(minConfidence)) {
+            try {
+                double v = Double.parseDouble(minConfidence.trim());
+                if (v > 0.0 && v <= 1.0) f.minConfidence = v;
+            } catch (NumberFormatException ignored) {
+                // no narrowing
+            }
+        }
     }
 
     /**
@@ -1464,26 +1524,19 @@ public class RecordingsApiHandler {
             return;
         }
 
-        // Handle Range request for video seeking
         try {
-            if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
-                String rangeSpec = rangeHeader.substring(6);
-                String[] parts = rangeSpec.split("-");
-                long start = parts[0].isEmpty() ? 0 : Long.parseLong(parts[0]);
-                long end = parts.length > 1 && !parts[1].isEmpty() ? Long.parseLong(parts[1]) : -1;
-
-                // Validate range
-                long fileLength = file.length();
-                if (start < 0 || start >= fileLength) {
-                    HttpResponse.sendError(out, 416, Messages.get("errors.recordings_range_not_satisfiable"));
-                    return;
-                }
-
-                HttpResponse.sendVideoRange(out, file, start, end, etag);
+            long[] range = HttpResponse.parseSingleByteRange(rangeHeader, file.length());
+            if (range != null) {
+                HttpResponse.sendVideoRange(out, file, range[0], range[1], etag);
             } else {
                 HttpResponse.sendVideo(out, file, etag);
             }
-        } catch (NumberFormatException e) {
+        } catch (IndexOutOfBoundsException e) {
+            HttpResponse.sendRangeNotSatisfiable(
+                    out,
+                    file.length(),
+                    Messages.get("errors.recordings_range_not_satisfiable"));
+        } catch (IllegalArgumentException e) {
             HttpResponse.sendError(out, 400, Messages.get("errors.recordings_invalid_range_header"));
         } catch (java.io.FileNotFoundException e) {
             // File disappeared between check and read (SD card unmount)

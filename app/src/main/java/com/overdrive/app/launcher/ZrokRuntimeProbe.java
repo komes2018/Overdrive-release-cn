@@ -92,6 +92,10 @@ public final class ZrokRuntimeProbe {
         return status != null && (status == 502 || status == 503 || status == 504);
     }
 
+    public static boolean isHealthyStatus(Integer status) {
+        return status != null && status > 0 && !isStaleStatus(status);
+    }
+
     static int nextEdgeFailureCount(boolean localAvailable, Integer status, int current) {
         if (!localAvailable) return 0;
         if (status == null || status <= 0) return current;
@@ -291,7 +295,7 @@ public final class ZrokRuntimeProbe {
         }
     }
 
-    static Integer probeStatus(String url) {
+    public static Integer probeStatus(String url) {
         HttpURLConnection connection = null;
         try {
             Proxy proxy = portOpen(PROXY_PORT, PORT_TIMEOUT_MS)
@@ -370,7 +374,7 @@ public final class ZrokRuntimeProbe {
         return last;
     }
 
-    static String extractLastShareName(String text) {
+    public static String extractLastShareName(String text) {
         if (text == null) return "";
         String last = "";
         for (String line : text.split("\r?\n")) {

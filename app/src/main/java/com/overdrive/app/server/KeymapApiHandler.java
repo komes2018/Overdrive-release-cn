@@ -57,7 +57,7 @@ import java.io.OutputStream;
  *       Routed through {@link HttpServer#automationApiRequest} — the SAME auth-free,
  *       allowlisted path automations use — so it can only ever reach the curated
  *       control surface, never the sensitive /api/debug|backup|update|... endpoints.
- *       The authoritative reachable set is HttpServer.AUTOMATION_ALLOWED_PREFIXES;
+ *       The authoritative reachable set is HttpServer's isAutomationAllowed policy;
  *       don't restate it here, it drifts.
  *   { "kind":"automation", "id":"&lt;uuid&gt;" }
  *       Run a saved automation's actions on a keypress — the physical-key
@@ -109,6 +109,12 @@ public final class KeymapApiHandler {
     // binds cleanly every time; the only reliable recovery is to kill the wedged
     // process so AMS re-binds into a new one (a toggle of the Secure setting does
     // NOT un-wedge it — verified on-device).
+    //
+    // WHY the toggle does not help, and the restart does: BYD's start gate refuses
+    // the system's bind for a third-party app whose uid is marked blocked while its
+    // process is not running, and it is consulted from bindServiceLocked. A settings
+    // toggle does not create a process; a restart does. See
+    // BYD_ACCESSIBILITY_BIND_GATE_DISCOVERY.md.
     //
     // This daemon runs as UID 2000, a DIFFERENT uid than the app, so it survives
     // `am force-stop com.overdrive.app` (same reason SocCutoffMonitor pkills the
@@ -294,8 +300,14 @@ public final class KeymapApiHandler {
      * Kill the wedged app process and respawn it headlessly. `am force-stop`
      * clears the wedged ServiceRecord and puts the package in the stopped state;
      * an explicit component start then clears that flag and spawns a fresh
-     * process, on whose startup AMS re-binds the (still-enabled) accessibility
-     * service — the clean bind we verified a fresh process always gets.
+     * process. App startup re-asserts the accessibility settings, after which
+     * AMS binds the service into the live process — the clean bind we verified
+     * a fresh process always gets.
+     *
+     * The mechanism behind "a fresh process always binds" is BYD's start gate:
+     * ActivityManagerService.isTargetAppEnabledStartedBy3rd permits the bind when
+     * isAppRunning(uid) is true, so the relaunch satisfies the gate rather than
+     * clearing anything in AMS. See BYD_ACCESSIBILITY_BIND_GATE_DISCOVERY.md.
      *
      * We respawn via the keep-alive foreground service (NOT MainActivity) so the
      * UI isn't pulled to the foreground mid-drive; OverdriveApplication.onCreate
@@ -835,42 +847,6 @@ public final class KeymapApiHandler {
                 && !a11yBoundProbeResult) {
             return false;
         }
-        // DEFINITIVE NEGATIVE, checked before the ServiceRecord heuristic below.
-        //
-        // AccessibilityManagerService keeps three separate lists, and the one that
-        // matters here is the one the heuristic cannot see: a service whose bind was
-        // started but never completed sits in "Binding services" and NEVER in
-        // "Bound services". onServiceConnected has not run for it, so everything it
-        // starts — the keymap key filter, and BluetoothStateMonitor with it — does
-        // not exist, while the process itself is alive and healthy-looking.
-        //
-        // The ServiceRecord probe below reports this state as BOUND. Its three
-        // contains() tests are evaluated against one flat dump and nothing requires
-        // them to describe the SAME record: on a wedged unit the dump carried a
-        // ServiceRecord for an unrelated service (.overlay.StatusOverlayService)
-        // with its own non-null app=, plus ConnectionRecord lines that merely
-        // mention our component (one of them marked DEAD). All three matched, so
-        // the watchdog concluded "healthy", stopped escalating, and never issued
-        // the force-restart that is the only thing that clears the wedge. Field
-        // capture: a11y stuck Binding for 11+ minutes across a power cycle, zero
-        // BluetoothStateMonitor lines, phone connected the whole time.
-        //
-        // So ask the component that owns the truth. This can only ever turn a false
-        // "bound" into "not bound", and only when AMS itself says the bind is still
-        // in flight — a genuinely bound service is not listed under Binding
-        // services, so no healthy unit can be pushed into a spurious restart.
-        try {
-            String a11y = execBounded("dumpsys accessibility 2>/dev/null");
-            if (a11y != null && isBindPending(a11y)) {
-                a11yBoundProbeResult = false;
-                a11yBoundProbeAtMs = android.os.SystemClock.elapsedRealtime();
-                return false;
-            }
-        } catch (Throwable ignored) {
-            // Dump unavailable — fall through to the heuristic, i.e. exactly the
-            // pre-existing behaviour. This check only ever adds detection.
-        }
-
         // Daemon path (UID 2000): an active ServiceRecord for the component proves
         // AMS has bound it. Mirrors ServiceLauncher.isLocationSidecarRunning's
         // "non-empty && !app=null" test. 2s ceiling so a slow dumpsys can never
@@ -893,6 +869,29 @@ public final class KeymapApiHandler {
             boolean bound = dump.contains("ServiceRecord")
                     && dump.contains("KeepAliveAccessibilityService")
                     && !dump.contains("app=null");
+            // VETO on a bind AMS says is still in flight. The three contains() tests above
+            // are evaluated against one flat dump and nothing requires them to describe the
+            // SAME record, so a wedged unit (an unrelated ServiceRecord with a non-null app=,
+            // plus ConnectionRecord lines that merely mention our component) reads as BOUND
+            // and the watchdog stops escalating — the observed 11-minute a11y wedge with the
+            // key filter and BluetoothStateMonitor both dead. A service stuck mid-bind sits in
+            // AMS's "Binding services" list and never in "Bound services", so asking the owner
+            // of that truth can only ever turn a false "bound" into "not bound".
+            //
+            // Asked ONLY when the cheap probe already claims bound: it exists purely to
+            // overturn that answer, so running it first (as the change that added it did) paid
+            // a second dumpsys fork on every request that was already going to answer "not
+            // bound" — the cost A11Y_BOUND_PROBE_TTL_MS was introduced to remove. The truth
+            // table is identical either way.
+            if (bound) {
+                try {
+                    String a11y = execBounded("dumpsys accessibility 2>/dev/null");
+                    if (a11y != null && isBindPending(a11y)) bound = false;
+                } catch (Throwable ignored) {
+                    // Dump unavailable — keep the heuristic's answer, i.e. exactly the
+                    // pre-existing behaviour. This check only ever adds detection.
+                }
+            }
             // Publish RESULT before TIMESTAMP, and never the other way round. The two volatiles
             // are unsynchronised, so a concurrent reader can observe a torn pair; this order
             // makes the only possible tear "new result, old timestamp", which just expires the
@@ -1273,7 +1272,7 @@ public final class KeymapApiHandler {
      * allowlist — NOT this handler — is the boundary, and everything on it is a curated
      * vehicle/camera control, unlike the arbitrary-command shell escape hatch. Note a
      * hand-written binding may name any allowlisted path, not just the ones the UI
-     * offers; see HttpServer.AUTOMATION_ALLOWED_PREFIXES for the authoritative set.
+     * offers; see HttpServer.isAutomationAllowed for the authoritative policy.
      */
     private static JSONObject runApi(JSONObject req) throws org.json.JSONException {
         JSONObject response = new JSONObject();

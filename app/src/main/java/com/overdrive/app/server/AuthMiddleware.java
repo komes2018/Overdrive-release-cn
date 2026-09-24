@@ -117,6 +117,21 @@ public class AuthMiddleware {
                 }
             }
         }
+        // Same mechanism for Parking Intelligence stills used as push banner
+        // images: /parking/asset/<sessionId>/<file>?t=<jws>, token subject
+        // "<sessionId>/<file>". A JWT-carrying page load falls through to Tier 1.
+        if (path.startsWith("/parking/asset/")) {
+            String[] split = splitPathAndQuery(path);
+            String token = queryParam(split[1], "t");
+            if (token != null) {
+                String subject = split[0].substring("/parking/asset/".length());
+                String decoded = urlDecode(subject);
+                if (AuthManager.validateThumbToken(decoded, token)
+                        || AuthManager.validateThumbToken(subject, token)) {
+                    return true;
+                }
+            }
+        }
 
         // Tier 1 — JWT validation. This is the primary path: WebView (cookie),
         // frontend pages (Authorization header via auth.js), native callers

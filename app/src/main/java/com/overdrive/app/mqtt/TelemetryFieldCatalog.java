@@ -87,7 +87,10 @@ public final class TelemetryFieldCatalog {
         add("elevation",  "海拔高度",         SENSOR, "distance",    MEAS, "m",    "mdi:image-filter-hdr",   true,  1);
         add("heading",    "行驶航向",         SENSOR, null,          MEAS, "°",    "mdi:compass",            true,  1);
         add("gear",       "当前挡位",         SENSOR, "enum",        null, null,   "mdi:car-shift-pattern",  false, 0);
-        add("odometer",   "总里程",           SENSOR, "distance",    TOTI, "km",   "mdi:counter",            false, 1);
+        // 0.1 deadband, matching the finest resolution the odometer register offers. At the
+        // previous 1 km step a decimal change was not a "change", so in HA change-only mode the
+        // decimals only refreshed on a whole-km crossing or the heartbeat.
+        add("odometer",   "总里程",           SENSOR, "distance",    TOTI, "km",   "mdi:counter",            false, 0.1);
 
         // ---------- Charging ----------
         add("is_charging",          "充电状态",            BINARY, "battery_charging", null, null, null,                 false, 0);

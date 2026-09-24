@@ -44,6 +44,15 @@ public class DashboardDriveStateAssetTest {
         assertTrue(resolver.contains("gps.isStale !== true"));
         assertTrue(resolver.contains("gps.isCached !== true"));
         assertTrue(resolver.contains("if (!powerOn && gear !== 'P') gear = '--';"));
+        assertTrue(resolver.contains(
+                "Number(charging.powerKw || charging.chargingPowerKW || 0) > 0"));
+        assertTrue(resolver.contains("charging.gunConnected === true"));
+        assertTrue(resolver.contains("charging.plugged === true"));
+
+        String handler = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/charging/ChargingApiHandler.java");
+        assertTrue(handler.contains(
+                "boolean hasLiveDetectorSample = after.observedAtMs > 0;"));
 
         int fault = resolver.indexOf("charging.fault === true");
         int charging = resolver.indexOf("charging.charging === true");
@@ -52,7 +61,7 @@ public class DashboardDriveStateAssetTest {
                 "powerOn && (gear === 'D' || gear === 'M' || gear === 'S')");
         int neutral = resolver.indexOf("powerOn && gear === 'N'");
         int park = resolver.indexOf("powerOn && gear === 'P'");
-        int plugged = resolver.indexOf("charging.plugged === true");
+        int plugged = resolver.indexOf("charging.plugged === true", park);
         assertTrue(fault >= 0 && charging > fault);
         assertTrue(reverse > charging && drive > reverse);
         assertTrue(neutral > drive && park > neutral);

@@ -2011,9 +2011,7 @@
     "screen_deterrent_video_too_large": "Видео слишком большое (максимум 10 МБ)",
     "screen_deterrent_video_upload_ok": "Видео загружено",
     "disabled_deferred": "Наблюдение отключено — оно не начнется на следующем парке",
-    "enabled_deferred": "Наблюдение начнется, когда автомобиль будет выключен",
-    "screen_deterrent_video_too_long": "Видео слишком длинное (макс 10 с) — оно зацикливается, поэтому держите его коротким",
-    "screen_deterrent_video_too_big": "Слишком высокое разрешение видео (макс 1920x1080)"
+    "enabled_deferred": "Наблюдение начнется, когда автомобиль будет выключен"
   },
   "mqtt": {
     "tab_connections": "Подключения",
@@ -2816,7 +2814,6 @@
       "kofi_url": "https://ko-fi.com/E1E71XALHX"
     },
     "thanks_subtitle": "Создано с помощью контрибьюторов и сторонников.",
-    "ack_chimes": "Предупреждение о RoadSense — звуки из библиотеки Google Sound",
     "vehicle_title": "Транспортное средство и головное устройство",
     "vehicle_sub": "Информация о версии, сообщенная этим автомобилем.",
     "vehicle_firmware": "Прошивка",

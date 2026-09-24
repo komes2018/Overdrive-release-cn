@@ -38,7 +38,7 @@ public class WebSocketStreamServer extends WebSocketServer
     
     private final Set<WebSocket> clients = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private Timer idleTimer;
-    private volatile long lastClientDisconnectTime = 0;
+    private volatile long lastClientDisconnectElapsedMs = 0;
     private volatile boolean idleShutdownTriggered = false;
     private Runnable idleShutdownCallback;
     private long frameCount = 0;
@@ -95,7 +95,8 @@ public class WebSocketStreamServer extends WebSocketServer
         externalClientCount = Math.max(0, externalClientCount - 1);
         logger.info("External client unregistered (remaining: " + externalClientCount + ")");
         if (clients.isEmpty() && externalClientCount == 0) {
-            lastClientDisconnectTime = System.currentTimeMillis();
+            lastClientDisconnectElapsedMs =
+                    android.os.SystemClock.elapsedRealtime();
             startIdleTimer();
         }
     }
@@ -128,7 +129,8 @@ public class WebSocketStreamServer extends WebSocketServer
         clients.remove(conn);
         logger.info("WS Client disconnected (remaining: " + clients.size() + ")");
         if (clients.isEmpty()) {
-            lastClientDisconnectTime = System.currentTimeMillis();
+            lastClientDisconnectElapsedMs =
+                    android.os.SystemClock.elapsedRealtime();
             startIdleTimer();
         }
     }
@@ -220,7 +222,8 @@ public class WebSocketStreamServer extends WebSocketServer
             clients.remove(conn);
             logger.error("WS Error: " + ex.getMessage());
             if (clients.isEmpty()) {
-                lastClientDisconnectTime = System.currentTimeMillis();
+                lastClientDisconnectElapsedMs =
+                        android.os.SystemClock.elapsedRealtime();
                 startIdleTimer();
             }
         } else {
@@ -231,7 +234,8 @@ public class WebSocketStreamServer extends WebSocketServer
     @Override
     public void onStart() {
         logger.info("WebSocket Stream Server started on port " + PORT);
-        lastClientDisconnectTime = System.currentTimeMillis();
+        lastClientDisconnectElapsedMs =
+                android.os.SystemClock.elapsedRealtime();
         startIdleTimer();
     }
 
@@ -259,7 +263,8 @@ public class WebSocketStreamServer extends WebSocketServer
             cancelIdleTimer();
             return;
         }
-        long idleTime = System.currentTimeMillis() - lastClientDisconnectTime;
+        long idleTime = android.os.SystemClock.elapsedRealtime()
+                - lastClientDisconnectElapsedMs;
         if (idleTime >= IDLE_TIMEOUT_MS && !idleShutdownTriggered) {
             idleShutdownTriggered = true;
             logger.info("Idle timeout (" + (idleTime / 1000) + "s) - triggering shutdown");

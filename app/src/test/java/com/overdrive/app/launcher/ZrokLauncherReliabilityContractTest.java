@@ -14,6 +14,8 @@ public class ZrokLauncherReliabilityContractTest {
     @Test
     public void watchdogUsesIpv4AppProcessAndLocalOriginGate() throws Exception {
         String source = read("app/src/main/java/com/overdrive/app/launcher/ZrokLauncher.kt");
+        String probe = read(
+                "app/src/main/java/com/overdrive/app/launcher/ZrokRuntimeProbe.java");
 
         assertTrue(source.contains(
                 "private const val ZROK_BACKEND_URL = \"http://127.0.0.1:8080\""));
@@ -21,7 +23,7 @@ public class ZrokLauncherReliabilityContractTest {
         assertFalse(source.contains("curl -s"));
         assertTrue(source.contains("ZROK_RUNTIME_PROBE_CLASS"));
         assertTrue(source.contains("app_process /system/bin"));
-        assertTrue(source.contains("ProxyHelper.probePort(ZROK_BACKEND_PORT)"));
+        assertTrue(probe.contains("portOpen(BACKEND_PORT, PORT_TIMEOUT_MS)"));
         assertTrue(source.contains("val probeNameFile = if (reserved)"));
         assertTrue(source.contains("else \"/dev/null\""));
         assertTrue(source.contains(
@@ -82,13 +84,30 @@ public class ZrokLauncherReliabilityContractTest {
         assertTrue(startup.contains(
                 "'disabled by ui'*|'disabled by telegram'*"));
         assertTrue(startup.contains("echo MACHINE"));
-        assertTrue(startup.contains("writeSentinel = false"));
-        assertTrue(startup.contains(
-                "Edge-stale recovery: relaunching Zrok after stop completed"));
-        assertTrue(startup.contains("handler.post { relaunchDaemon(type) }"));
         assertTrue(read(
                 "app/src/main/java/com/overdrive/app/launcher/ZrokLauncher.kt")
                 .contains("writeSentinel: Boolean = true"));
+    }
+
+    @Test
+    public void shellWatchdogExclusivelyOwnsEdgeRecoveryAndRateLimitBackoff()
+            throws Exception {
+        String zrok = read(
+                "app/src/main/java/com/overdrive/app/launcher/ZrokLauncher.kt");
+        String probe = read(
+                "app/src/main/java/com/overdrive/app/launcher/ZrokRuntimeProbe.java");
+        String startup = read(
+                "app/src/main/java/com/overdrive/app/ui/daemon/DaemonStartupManager.kt");
+
+        assertTrue(zrok.contains("private const val ZROK_RATE_LIMIT_COOLDOWN_SEC = 300"));
+        assertTrue(zrok.contains("SERVER_TOO_MANY_REQUESTS"));
+        assertTrue(zrok.contains("DELAY=\\$RATE_LIMIT_COOLDOWN_SEC"));
+        assertTrue(zrok.contains("fun isTunnelManaged"));
+        assertFalse(zrok.contains("fun checkTunnelHealth"));
+        assertTrue(startup.contains("zrokLauncherForHealthCheck.isTunnelManaged"));
+        assertTrue(startup.contains("a live start_zrok.sh means \"recovering\""));
+        assertFalse(startup.contains("EDGE_STALE"));
+        assertTrue(probe.contains("Edge stale confirmed; terminating zrok pid"));
     }
 
     @Test
@@ -109,7 +128,9 @@ public class ZrokLauncherReliabilityContractTest {
 
         assertTrue(adb.contains("fun execute(command: String, callback: ShellCallback)"));
         assertTrue(adb.contains("fun executeSensitive("));
-        assertTrue(adb.contains("val result = dadb.shell(command)"));
+        // The raw command must reach dadb unchanged (shellGuarded runs it on
+        // the generation-tagged connection); logs see only $commandForLog.
+        assertTrue(adb.contains("conn.dadb.shell(command)"));
         assertTrue(adb.contains("$commandForLog"));
 
         assertTrue(telegram.contains("ZrokRuntimeProbe.shellQuote(enableToken)"));

@@ -2,6 +2,7 @@
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Call-state automations ("mute media on incoming call"). Detection only — the
          app-process CallStateMonitor listens for RINGING/OFFHOOK/IDLE and relays them
          to the daemon. No call CONTROL (that would need ANSWER_PHONE_CALLS). Self-gated:
@@ -124,6 +125,7 @@
     <uses-permission android:name="android.permission.BYDAUTO_SEAT_GET" />
     <uses-permission android:name="android.permission.BYDAUTO_SEAT_SET" />
     <!-- Sensor (slope) -->
+    <uses-permission android:name="android.permission.BYDAUTO_SENSOR_COMMON" />
     <uses-permission android:name="android.permission.BYDAUTO_SENSOR_GET" />
     <uses-permission android:name="android.permission.BYDAUTO_SENSOR_SET" />
     <!-- PM2.5 (air quality) -->
@@ -147,9 +149,11 @@
     <uses-permission android:name="android.permission.BYDAUTO_TIME_GET" />
     <uses-permission android:name="android.permission.BYDAUTO_TIME_SET" />
     <!-- OTA -->
+    <uses-permission android:name="android.permission.BYDAUTO_OTA_COMMON" />
     <uses-permission android:name="android.permission.BYDAUTO_OTA_GET" />
     <uses-permission android:name="android.permission.BYDAUTO_OTA_SET" />
     <!-- Power -->
+    <uses-permission android:name="android.permission.BYDAUTO_POWER_COMMON" />
     <uses-permission android:name="android.permission.BYDAUTO_POWER_GET" />
     <uses-permission android:name="android.permission.BYDAUTO_POWER_SET" />
     <!-- ADAS -->
@@ -159,8 +163,13 @@
     <uses-permission android:name="android.permission.BYDAUTO_WIPER_GET" />
     <uses-permission android:name="android.permission.BYDAUTO_WIPER_SET" />
     <!-- Rear View Mirror -->
+    <uses-permission android:name="android.permission.BYDAUTO_REAR_VIEW_MIRROR_COMMON" />
     <uses-permission android:name="android.permission.BYDAUTO_REAR_VIEW_MIRROR_GET" />
     <uses-permission android:name="android.permission.BYDAUTO_REAR_VIEW_MIRROR_SET" />
+    <!-- DI5 motor and vehicle-health telemetry -->
+    <uses-permission android:name="android.permission.BYDAUTO_MOTOR_COMMON" />
+    <uses-permission android:name="android.permission.BYDAUTO_VEHICLEHEALTH_COMMON" />
+    <uses-permission android:name="android.permission.BYDAUTO_VEHICLEHEALTH_GET" />
     <!-- Vehicle Data -->
     <uses-permission android:name="android.permission.BYDAUTO_VEHICLE_DATA_GET" />
     <uses-permission android:name="android.permission.BYDAUTO_VEHICLE_DATA_SET" />
@@ -249,7 +258,7 @@
         android:usesCleartextTraffic="true">
 
         <!-- Persist AppCompat per-app language on API 28–32. API 33+ uses
-             localeConfig + platform LocaleManager instead. -->
+             localeConfig + the platform LocaleManager. -->
         <service
             android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"
             android:enabled="false"
@@ -433,6 +442,13 @@
             android:launchMode="singleInstance"
             android:excludeFromRecents="true"
             android:exported="true" />
+        <activity
+            android:name="com.overdrive.app.launcher.AppLauncherSecondaryGhostActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:resizeableActivity="true"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:exported="true" />
 
         <!-- Location Starter Activity - Transparent, starts Location service and finishes immediately -->
         <!-- Used by SentryDaemon to restart Location service without bringing app to foreground -->
@@ -513,14 +529,14 @@
              KeymapApiHandler.forceRestartAppForA11y() (the a11y-bind-wedge
              recovery). AMS rejects a non-exported component launched from a
              foreign uid, so exported=false would let the watchdog force-stop the
-             app but silently fail to respawn it — the same constraint
-             LocationSidecarService / RoadSenseImuSidecarService document above.
-             The service self-guards in onStartCommand (post-update defer +
-             permission checks), so exporting it carries the same low risk. -->
+             app but silently fail to respawn it. DUMP is held by shell but not
+             ordinary apps, preserving daemon launches without exposing service
+             actions to third-party packages. -->
         <service
             android:name="com.overdrive.app.services.DaemonKeepaliveService"
             android:foregroundServiceType="specialUse|dataSync"
-            android:exported="true" />
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
 
         <!-- RoadSense IMU Sidecar - the ONLY app-side RoadSense component (D-023).
              Acquires -iner accel+gyro at ~100 Hz and batches them to the daemon
@@ -553,7 +569,7 @@
         <!-- Status Overlay Service - Floating recording/trip status indicator -->
         <service
             android:name="com.overdrive.app.overlay.StatusOverlayService"
-            android:foregroundServiceType="specialUse"
+            android:foregroundServiceType="specialUse|dataSync"
             android:exported="false" />
 
         <!-- Media Playback Service - plays the "Play Audio" automation/keymap sound
@@ -619,7 +635,7 @@
             android:permission="android.permission.DUMP">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Owner-initiated BYD vehicle control (mirror fold, HUD, charging current) from the app process" />
+                android:value="Owner-initiated BYD vehicle and Bluetooth control from the app process" />
         </service>
 
         <!-- Powertrain is isolated so its BYD-compatible process identity cannot change

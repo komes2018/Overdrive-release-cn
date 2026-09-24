@@ -46,6 +46,7 @@ BYD.stream = {
     streamStarted: false,
     selectedQuality: 'MEDIUM',
     activeFps: 10,  // Updated from /api/stream/quality response; default matches MEDIUM preset
+    isDiLink5: false,
     // Last view mode the backend accepted; currentViewMode is set optimistically.
     confirmedViewMode: -1,
     // Bumped by stopStream. An async start/view-switch compares its captured
@@ -73,6 +74,12 @@ BYD.stream = {
     
     // Check WebCodecs support
     hasWebCodecs: typeof VideoDecoder !== 'undefined',
+
+    _willUseBroadway() {
+        return this.decoderMode === 'broadway' ||
+            (!(this.hasWebCodecs && typeof SotaPlayer !== 'undefined') &&
+             (this.isIOS || !window.MediaSource || typeof JMuxer === 'undefined'));
+    },
     
     /**
      * Poll until the backend returns a terminal response (success=true, or
@@ -196,16 +203,18 @@ BYD.stream = {
     },
 
     _viewRouteUrl(mode, selectionToken) {
+        let url = '/api/stream/view/' + mode;
         if (typeof selectionToken !== 'number') {
-            return '/api/stream/view/' + mode;
+            return url + (this._willUseBroadway() ? '?decoder=broadway' : '');
+        } else {
+            if (!this._viewRouteClientId) {
+                this._viewRouteClientId = 'live' + Date.now().toString(36)
+                    + Math.random().toString(36).substring(2);
+            }
+            url += '?client=' + encodeURIComponent(this._viewRouteClientId)
+                + '&selection=' + selectionToken;
         }
-        if (!this._viewRouteClientId) {
-            this._viewRouteClientId = 'live' + Date.now().toString(36)
-                + Math.random().toString(36).substring(2);
-        }
-        return '/api/stream/view/' + mode
-            + '?client=' + encodeURIComponent(this._viewRouteClientId)
-            + '&selection=' + selectionToken;
+        return url + (this._willUseBroadway() ? '&decoder=broadway' : '');
     },
 
     _viewStatusUrl(mode, selectionToken) {
@@ -318,8 +327,11 @@ BYD.stream = {
      */
     async enableStreaming() {
         try {
-            const res = await fetch('/api/stream/enable', { method: 'POST' });
+            const endpoint = '/api/stream/enable' +
+                (this._willUseBroadway() ? '?decoder=broadway' : '');
+            const res = await fetch(endpoint, { method: 'POST' });
             const data = await res.json();
+            this.isDiLink5 = data.dilink5 === true;
             return data.success;
         } catch (e) {
             console.error('[Stream] Enable error:', e);
@@ -560,6 +572,7 @@ BYD.stream = {
                 useWorker: true,
                 workerFile: workerUrl,
                 webgl: true,
+                reuseMemory: this.isDiLink5 === true,
                 size: { width: 1280, height: 960 }
             });
             
@@ -687,9 +700,14 @@ BYD.stream = {
         // Append JWT as ?token= for tunnel compatibility (see WebCodecs path above).
         const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
         let wsUrl = `${protocol}//${location.host}/ws`;
+        if (this.decoderMode === 'broadway') {
+            wsUrl += '?decoder=broadway';
+        }
         if (typeof BYDAuth !== 'undefined') {
             const wsToken = BYDAuth.getToken();
-            if (wsToken) wsUrl += `?token=${encodeURIComponent(wsToken)}`;
+            if (wsToken) {
+                wsUrl += `${wsUrl.indexOf('?') >= 0 ? '&' : '?'}token=${encodeURIComponent(wsToken)}`;
+            }
         }
 
         console.log('[Stream] Connecting:', wsUrl);

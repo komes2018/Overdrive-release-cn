@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.StatFs;
 import android.util.Log;
 
 import com.overdrive.app.BuildConfig;
@@ -91,8 +92,28 @@ public class AppUpdater {
     // pre-spawn bail and on onError so a failed install before process death
     // doesn't wedge the gate.
     private static volatile boolean installInFlight = false;
-    private static volatile long installStartedAt = 0;
-    private static final long INSTALL_STALE_MS = 5 * 60 * 1000L;
+    // MONOTONIC (System.nanoTime) — this head unit picks up cell time, and a
+    // forward wall-clock correction mid-install would instantly "age" the
+    // gate past staleness, handing a second update the right to clobber the
+    // first (a backward jump would merely delay recovery). 0 == unset.
+    private static volatile long installStartedAtNanos = 0;
+    // Staleness MUST exceed the complete legitimate workflow, otherwise a
+    // second update can seize the gate mid-first and clobber the shared
+    // /data/local/tmp staging (the exact race the gate exists to prevent).
+    // Worst case: GitHub API (~30s) + download DOWNLOAD_DEADLINE_MS (640s)
+    // + wait margin + size check (~60s) + kill cascade prep (~60s) +
+    // install INSTALL_DEADLINE_MS (300s) + wait margin + rollback shell
+    // commands ≈ 1150s. 30 minutes clears that with real margin.
+    //
+    // Age-based takeover is only sound because EVERY leg is absolutely
+    // bounded: the ADB tunnel via the bulk-lane watchdogs, the direct
+    // OkHttp download via doStreamingDownload's shared monotonic budget
+    // (per-read timeouts alone never bound a slow-but-flowing stream), and
+    // direct process execution via runShellDirect's destroy-at-deadline
+    // reaper. The flag is static/in-JVM — process death (the SUCCESS path
+    // of a core install) clears it instantly — so this threshold only
+    // delays recovery from a missed endInstall() bug, never normal use.
+    private static final long INSTALL_STALE_MS = 30 * 60 * 1000L;
 
     /**
      * Try to acquire the single-install gate. Returns true if the caller now
@@ -104,16 +125,15 @@ public class AppUpdater {
             // Self-recover a wedged flag: if the prior install started more than
             // INSTALL_STALE_MS ago and this process is still alive, the kill
             // cascade clearly missed us — let a new attempt through.
-            if (installStartedAt > 0
-                    && System.currentTimeMillis() - installStartedAt > INSTALL_STALE_MS) {
-                Log.w(TAG, "Clearing stale installInFlight (started "
-                        + (System.currentTimeMillis() - installStartedAt) + "ms ago)");
+            long ageMs = (System.nanoTime() - installStartedAtNanos) / 1_000_000L;
+            if (installStartedAtNanos != 0 && ageMs > INSTALL_STALE_MS) {
+                Log.w(TAG, "Clearing stale installInFlight (started " + ageMs + "ms ago)");
             } else {
                 return false;
             }
         }
         installInFlight = true;
-        installStartedAt = System.currentTimeMillis();
+        installStartedAtNanos = System.nanoTime();
         return true;
     }
 
@@ -139,6 +159,35 @@ public class AppUpdater {
         return "MY_PID=$$; ps -A -o PID,ARGS | grep -F '" + pattern + "' | grep -v grep "
             + "| awk '{print $1}' | while read pid; do "
             + "if [ \"$pid\" != \"$MY_PID\" ]; then kill -9 $pid 2>/dev/null; fi; done\n";
+    }
+
+    private static boolean isDiLink5ModeSelected() {
+        try {
+            com.overdrive.app.camera.dilink5.DiLink5Platform
+                    .refreshActiveMode();
+            return com.overdrive.app.camera.dilink5.DiLink5Platform
+                    .isSelected();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static String diLink5CaptureKillScript() {
+        if (!isDiLink5ModeSelected()) return "";
+        return psAwkKillLine("fast_cam_capture")
+                + psAwkKillLine("qcarcam_test")
+                + "killall -9 fast_cam_capture 2>/dev/null\n"
+                + "killall -9 qcarcam_test 2>/dev/null\n";
+    }
+
+    private static String diLink5CaptureVerificationScript() {
+        if (!isDiLink5ModeSelected()) return "";
+        return "CAPTURE_PIDS=$(ps -A -o PID,ARGS | awk -v self=$$ "
+                + "'$1 != self && ($0 ~ /fast_cam_capture/ || "
+                + "$0 ~ /qcarcam_test/) {print $1}')\n"
+                + "if [ -n \"$CAPTURE_PIDS\" ]; then "
+                + "echo \"camera capture child still running: $CAPTURE_PIDS\" >&2; "
+                + "exit 1; fi\n";
     }
     private static final String POST_UPDATE_FILE = UpdateLifecycle.POST_UPDATE_FILE;
 
@@ -213,6 +262,7 @@ public class AppUpdater {
     private com.overdrive.app.launcher.AdbDaemonLauncher adbLauncher; // For daemon management
 
     private String latestDownloadUrl;
+    private long latestApkSizeBytes;
     private String releaseNotes;
     private String remoteVersion;
     private String remoteUpdatedAt;
@@ -229,11 +279,22 @@ public class AppUpdater {
 
     /**
      * Build an OkHttpClient that routes through whichever proxy the rest of
-     * the app is using — sing-box on 8119 first, Tailscale on 8539 as a
-     * fallback. Delegates to {@link com.overdrive.app.mqtt.ProxyHelper} so
-     * we share a single 60s probe cache with MQTT, ABRP, BYD Cloud, and
+     * the app is using — probed via {@link com.overdrive.app.mqtt.ProxyHelper}
+     * so we share a single probe cache with MQTT, ABRP, BYD Cloud, and
      * the Telegram daemon (no separate timing windows where one consumer
      * thinks the proxy is up and another doesn't).
+     *
+     * The proxy is installed as a per-call selector returning
+     * {@code ProxyHelper.proxyRouteChain(...)} — the live proxy first, DIRECT
+     * second — never a frozen {@code builder.proxy(...)}. The probe is a blind
+     * loopback connect and prefers the Tailscale SOCKS port, which on most
+     * cars is tailnet-only: api.github.com is unreachable THROUGH it while the
+     * listener itself stays healthy. A frozen proxy therefore wedged every
+     * update check for as long as that listener was up (the streaming APK
+     * download already carried its own manual proxy→direct retry; the
+     * metadata client used to fail before ever reaching it). With the chain,
+     * OkHttp falls through to direct in the same call, and sing-box /
+     * exit-node cars keep proxy-first behavior.
      *
      * Both timeouts are in seconds. Pass {@code 0} for {@code readTimeout}
      * when streaming a large body — we still want a connect deadline but
@@ -242,17 +303,34 @@ public class AppUpdater {
      * non-zero.
      */
     private static OkHttpClient buildClient(long connectTimeout, long readTimeout) {
-        OkHttpClient.Builder builder = new OkHttpClient.Builder()
+        return new OkHttpClient.Builder()
                 .connectTimeout(connectTimeout, TimeUnit.SECONDS)
                 .readTimeout(readTimeout, TimeUnit.SECONDS)
-                .followRedirects(true);
+                .followRedirects(true)
+                .proxySelector(new java.net.ProxySelector() {
+                    @Override
+                    public java.util.List<java.net.Proxy> select(java.net.URI uri) {
+                        java.net.Proxy proxy =
+                                com.overdrive.app.mqtt.ProxyHelper.getHttpProxy();
+                        if (proxy != null && proxy.type() != java.net.Proxy.Type.DIRECT) {
+                            Log.d(TAG, "AppUpdater HTTP via proxy " + proxy.address()
+                                    + " (direct fallback armed)");
+                        }
+                        return com.overdrive.app.mqtt.ProxyHelper.proxyRouteChain(proxy);
+                    }
 
-        java.net.Proxy proxy = com.overdrive.app.mqtt.ProxyHelper.getHttpProxy();
-        if (proxy != null && proxy.type() != java.net.Proxy.Type.DIRECT) {
-            builder.proxy(proxy);
-            Log.d(TAG, "AppUpdater HTTP via proxy " + proxy.address());
-        }
-        return builder.build();
+                    @Override
+                    public void connectFailed(
+                            java.net.URI uri,
+                            java.net.SocketAddress address,
+                            java.io.IOException failure) {
+                        // Proxy leg failed (OkHttp never reports DIRECT here):
+                        // re-probe on the next call instead of pinning a dead
+                        // route for the rest of the cache window.
+                        com.overdrive.app.mqtt.ProxyHelper.invalidateCache();
+                    }
+                })
+                .build();
     }
 
     public interface UpdateCallback {
@@ -345,6 +423,40 @@ public class AppUpdater {
      * onLog gets the combined stdout/stderr, then onLaunched fires on success
      * (exit 0) or onError on a non-zero exit / spawn failure.
      */
+    // ── Bulk-lane deadlines and their caller-side wait ceilings ─────────
+    // INVARIANT: every Java-side wait on a bulk command MUST outlast that
+    // command's executor deadline. If the wait expires first, the updater
+    // declares failure, deletes staged files and rolls back version
+    // metadata while wget / pm install is STILL RUNNING on the dedicated
+    // connection — the two halves then fight (a "failed" download completes
+    // into a just-deleted path; a "failed" install lands anyway after the
+    // rollback). The executor guarantees a callback within its deadline
+    // (the watchdog closes the dedicated connection), so waiting
+    // deadline+margin can never hang.
+    private static final long DOWNLOAD_DEADLINE_MS = 640_000L; // cmd self-caps at 600s
+    private static final long INSTALL_DEADLINE_MS = 300_000L;
+    private static final long WAIT_MARGIN_MS = 20_000L;
+
+    /**
+     * Deadline-bounded wait on the boolean-array flag/monitor idiom used by
+     * every shell callback in this class. Loops (spurious wakeups and stray
+     * notifies must not be read as completion) and re-checks the flag under
+     * the monitor.
+     */
+    private static void awaitFlag(boolean[] flag, long timeoutMs) throws InterruptedException {
+        // Monotonic clock: currentTimeMillis() jumps with NTP/user clock
+        // changes (this head unit picks up cell time mid-drive), which would
+        // silently stretch or collapse the wait.
+        final long deadlineNanos = System.nanoTime() + timeoutMs * 1_000_000L;
+        synchronized (flag) {
+            while (!flag[0]) {
+                long remainingMs = (deadlineNanos - System.nanoTime()) / 1_000_000L;
+                if (remainingMs <= 0) return;
+                flag.wait(remainingMs);
+            }
+        }
+    }
+
     private void runShell(String command,
                           com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback callback) {
         // Tunnel through ADB if this process can't write /data/local/tmp
@@ -354,28 +466,111 @@ public class AppUpdater {
             getAdbLauncher().executeShellCommand(command, callback);
             return;
         }
-        // Daemon path — exec directly. Runs SYNCHRONOUSLY on the caller's
-        // thread (don't bounce onto AppUpdater.executor — downloadAndInstall
-        // already runs there and is single-threaded, so queueing more work
-        // would deadlock against the wait() that follows each call site).
-        // The synchronous callback fires before return, so the caller's
-        // notify/wait pattern still works (the wait sees the done flag
-        // already true and short-circuits).
+        runShellDirect(command, callback);
+    }
+
+    /**
+     * Variant of {@link #runShell} for LONG-RUNNING commands — the APK
+     * download ({@code timeout 600 wget -q …}: up to 600s with zero output)
+     * and {@code pm install} (tens of seconds to minutes on slow flash).
+     *
+     * On the ADB-tunnel path these go over the BULK lane: a dedicated,
+     * per-operation dadb connection bounded by {@code deadlineMs}. The shared
+     * control connection has a per-command deadline and a socket read timeout
+     * sized for control traffic; a long-quiet transfer there would either be
+     * severed early or serialize every daemon health-check/stop command
+     * behind it for minutes. The dedicated connection removes both failure
+     * modes without loosening the control lane's bounds.
+     *
+     * The daemon-process path (direct exec) is unchanged — no dadb involved.
+     */
+    private void runShellLong(String command, long deadlineMs,
+                              com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback callback) {
+        if (!canWriteLocalTmp()) {
+            getAdbLauncher().executeShellCommandBulk(command, deadlineMs, callback);
+            return;
+        }
+        // Direct leg gets the SAME absolute deadline as the tunnel leg: a
+        // wedged `pm install` would otherwise hold runShellLong (and the
+        // install gate) forever, and the gate's age-based takeover would
+        // eventually hand a second update the right to clobber this one.
+        runShellDirect(command, deadlineMs, callback);
+    }
+
+    /** Daemon-process leg of {@link #runShell} (unbounded, short commands). */
+    private void runShellDirect(String command,
+                                com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback callback) {
+        runShellDirect(command, 0, callback);
+    }
+
+    /**
+     * Daemon-process leg shared by {@link #runShell} / {@link #runShellLong}.
+     *
+     * Runs SYNCHRONOUSLY on the caller's thread (don't bounce onto
+     * AppUpdater.executor — downloadAndInstall already runs there and is
+     * single-threaded, so queueing more work would deadlock against the
+     * wait() that follows each call site). The synchronous callback fires
+     * before return, so the caller's notify/wait pattern still works.
+     *
+     * With {@code deadlineMs > 0}, a reaper thread kills the ENTIRE process
+     * tree at the deadline. destroyForcibly() alone is insufficient twice
+     * over: it SIGKILLs only the outer `sh -c` wrapper, so its `pm install`
+     * child keeps running (and can land an install AFTER the caller reported
+     * failure and rolled back), and that surviving child also inherits the
+     * wrapper's pipe fds, so the readLine loops below stay blocked despite
+     * the wrapper being dead. The wrapper therefore records its own PID
+     * ($$) to a nonce file at spawn, and the reaper kills the transitive
+     * subtree rooted there (see {@link #buildTreeKillScript}) before the
+     * destroyForcibly belt — killing every fd holder is also what actually
+     * EOFs the pipes. deadlineMs == 0 preserves the historical unbounded
+     * behavior for {@link #runShell}'s short commands.
+     */
+    private void runShellDirect(String command, long deadlineMs,
+                                com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback callback) {
+        String pidFile = null;
         try {
-            Process p = Runtime.getRuntime().exec(new String[]{"sh", "-c", command});
+            String execCommand = command;
+            if (deadlineMs > 0) {
+                pidFile = "/data/local/tmp/.appupdater_pid_" + System.nanoTime();
+                execCommand = "echo $$ > " + pidFile + "; " + command;
+            }
+            final String pidFileForReaper = pidFile;
+            Process p = Runtime.getRuntime().exec(new String[]{"sh", "-c", execCommand});
+            Thread reaper = null;
+            if (deadlineMs > 0) {
+                reaper = new Thread(() -> {
+                    try {
+                        if (!p.waitFor(deadlineMs, TimeUnit.MILLISECONDS)) {
+                            Log.w(TAG, "Direct command exceeded " + deadlineMs
+                                    + "ms deadline — killing its process tree");
+                            killProcessTree(pidFileForReaper);
+                            p.destroyForcibly();   // belt for the wrapper itself
+                        }
+                    } catch (InterruptedException ignored) {
+                        // Normal completion interrupts the reaper.
+                    }
+                }, "AppUpdater-cmdDeadline");
+                reaper.setDaemon(true);
+                reaper.start();
+            }
             StringBuilder out = new StringBuilder();
-            java.io.BufferedReader stdout = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(p.getInputStream()));
-            java.io.BufferedReader stderr = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(p.getErrorStream()));
-            String line;
-            while ((line = stdout.readLine()) != null) {
-                out.append(line).append('\n');
+            int exit;
+            try {
+                java.io.BufferedReader stdout = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(p.getInputStream()));
+                java.io.BufferedReader stderr = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(p.getErrorStream()));
+                String line;
+                while ((line = stdout.readLine()) != null) {
+                    out.append(line).append('\n');
+                }
+                while ((line = stderr.readLine()) != null) {
+                    out.append(line).append('\n');
+                }
+                exit = p.waitFor();
+            } finally {
+                if (reaper != null) reaper.interrupt();
             }
-            while ((line = stderr.readLine()) != null) {
-                out.append(line).append('\n');
-            }
-            int exit = p.waitFor();
             String combined = out.toString().trim();
             if (!combined.isEmpty()) callback.onLog(combined);
             if (exit == 0) {
@@ -385,7 +580,52 @@ public class AppUpdater {
             }
         } catch (Exception e) {
             callback.onError("Execution failed: " + e.getMessage());
+        } finally {
+            // The kill script also rm's it on the timeout path; the success
+            // path of a core install kills this process before reaching here
+            // and leaks one ~8-byte file, cleaned by the next update's
+            // leftover sweep.
+            if (pidFile != null) {
+                try { new java.io.File(pidFile).delete(); } catch (Exception ignored) {}
+            }
         }
+    }
+
+    /**
+     * Kill the transitive process subtree rooted at the PID stored in
+     * {@code pidFile}, then the root itself. One `ps -A -o PID,PPID`
+     * snapshot; awk computes the descendant closure (a `pm`/`am` wrapper
+     * exec()s into app_process at the same depth, but the closure walk makes
+     * no depth assumption). Runs as a separate bounded shell so a wedged
+     * `ps` can't strand the reaper thread.
+     */
+    private static void killProcessTree(String pidFile) {
+        try {
+            Process killer = Runtime.getRuntime().exec(
+                    new String[]{"sh", "-c", buildTreeKillScript(pidFile)});
+            if (!killer.waitFor(10, TimeUnit.SECONDS)) {
+                killer.destroyForcibly();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "process-tree kill failed: " + e.getMessage());
+        }
+    }
+
+    /** See {@link #killProcessTree}. */
+    private static String buildTreeKillScript(String pidFile) {
+        return "P=$(cat " + pidFile + " 2>/dev/null); "
+                + "if [ -n \"$P\" ]; then "
+                +   "ps -A -o PID,PPID 2>/dev/null | awk -v root=\"$P\" '"
+                +     "NR>1 { pid[NR]=$1; ppid[NR]=$2 } "
+                +     "END { mark[root]=1; added=1; "
+                +       "while (added) { added=0; "
+                +         "for (i=2;i<=NR;i++) if (!mark[pid[i]] && mark[ppid[i]]) { mark[pid[i]]=1; added=1 } "
+                +       "} "
+                +       "for (i=2;i<=NR;i++) if (mark[pid[i]] && pid[i]!=root) print pid[i] "
+                +     "}' | while read k; do kill -9 \"$k\" 2>/dev/null; done; "
+                +   "kill -9 \"$P\" 2>/dev/null; "
+                + "fi; "
+                + "rm -f " + pidFile;
     }
 
     /**
@@ -463,6 +703,11 @@ public class AppUpdater {
     }
 
     private static final String APK_PATH = "/data/local/tmp/overdrive_update.apk";
+    private static final long MIB = 1024L * 1024L;
+    private static final long MIN_UPDATE_FREE_BYTES = 350L * MIB;
+    private static final long UPDATE_INSTALL_HEADROOM_BYTES = 128L * MIB;
+    private static final String STORAGE_ERROR_MESSAGE =
+            "Not enough storage to update Overdrive. Free space on the head unit and try again.";
 
     private String getApkPath() {
         return APK_PATH;
@@ -487,7 +732,7 @@ public class AppUpdater {
 
     /**
      * Locate the first {@code .apk} asset in a release's {@code assets} array.
-     * Returns {@code {browser_download_url, name, updated_at}} or {@code null}
+     * Returns {@code {browser_download_url, name, updated_at, size}} or {@code null}
      * when the release carries no APK (notes-only / draft). Shared by
      * {@link #checkForUpdate} (braveheart) and {@link #listVersions} (alpha)
      * so the single-asset find lives in exactly one place.
@@ -501,10 +746,52 @@ public class AppUpdater {
             if (name.endsWith(".apk")) {
                 String url = asset.optString("browser_download_url", "");
                 if (url.isEmpty()) continue;
-                return new String[]{url, name, asset.optString("updated_at", "")};
+                return new String[]{
+                        url,
+                        name,
+                        asset.optString("updated_at", ""),
+                        String.valueOf(Math.max(0L, asset.optLong("size", 0L)))
+                };
             }
         }
         return null;
+    }
+
+    static long requiredUpdateFreeBytes(long apkSizeBytes) {
+        return Math.max(MIN_UPDATE_FREE_BYTES,
+                Math.max(0L, apkSizeBytes) * 3L + UPDATE_INSTALL_HEADROOM_BYTES);
+    }
+
+    /**
+     * Returns a user-facing storage error, or {@code null} when there is enough
+     * room to stage and install the resolved APK.
+     */
+    public String getUpdateStorageError() {
+        try {
+            // Reclaim a partial APK before measuring. This also leaves enough
+            // room for callers to persist the error when a prior download filled
+            // the partition.
+            File stagedApk = new File(APK_PATH);
+            if (stagedApk.exists() && !stagedApk.delete()) {
+                Log.w(TAG, "Could not delete stale update APK before storage check");
+            }
+
+            long available = new StatFs("/data/local/tmp").getAvailableBytes();
+            long required = requiredUpdateFreeBytes(latestApkSizeBytes);
+            if (available >= required) return null;
+
+            long requiredMiB = (required + MIB - 1L) / MIB;
+            long availableMiB = Math.max(0L, available) / MIB;
+            return "Not enough storage to update Overdrive. Only " + availableMiB
+                    + " MB is free; " + requiredMiB
+                    + " MB is required. Free space on the head unit and try again.";
+        } catch (Exception e) {
+            // A failed stat must not block updates on vendor ROMs with unusual
+            // /data/local/tmp permissions; the download/install errors remain
+            // the fallback.
+            Log.w(TAG, "Unable to check update storage", e);
+            return null;
+        }
     }
 
     /**
@@ -583,6 +870,7 @@ public class AppUpdater {
                     String updatedAt = apk[2];
 
                     latestDownloadUrl = apkUrl;
+                    latestApkSizeBytes = Long.parseLong(apk[3]);
                     remoteUpdatedAt = updatedAt;
                     // Bind the pending install to THIS channel at the seed
                     // point so downloadAndInstall advances the right baseline
@@ -672,15 +960,6 @@ public class AppUpdater {
                                 + " regardless of timestamp baseline");
                         runCallback(() -> callback.onUpdateAvailable(
                                 currentVersion, remoteVersion, releaseNotes));
-                        return;
-                    }
-
-                    // Downgrade protection: if running build is strictly newer than remote, suppress offer
-                    if (!remoteNumeric.isEmpty() && !installedNumeric.isEmpty()
-                            && isNewerVersion(remoteNumeric, installedNumeric)) {
-                        Log.i(TAG, "Installed version " + installedNumeric
-                                + " is newer than remote " + remoteNumeric + " — suppressing downgrade offer");
-                        runCallback(() -> callback.onNoUpdate(currentVersion));
                         return;
                     }
 
@@ -798,7 +1077,7 @@ public class AppUpdater {
     public void downloadAndInstall(InstallCallback callback) {
         cancelled = false;
         executor.execute(() -> {
-            boolean cameraRestartPrepared = false;
+            boolean rollbackMetadataOnException = false;
             String preparedChannel = null;
             String preparedPriorTimestamp = null;
             String preparedPriorDisplayVersion = null;
@@ -816,6 +1095,12 @@ public class AppUpdater {
                 // on disk. Re-running cleanup here is the cheap safe call.
                 cleanupLeftoverApk();
 
+                String storageError = getUpdateStorageError();
+                if (storageError != null) {
+                    postInstallError(callback, storageError);
+                    return;
+                }
+
                 // Step 1: Download APK.
                 //
                 // Two paths:
@@ -832,11 +1117,11 @@ public class AppUpdater {
                 //   - App process (UID 10xxx): falls back to the shell tunnel
                 //     because the app UID can't write to /data/local/tmp/.
                 //     Shell command now carries explicit timeout flags so a
-                //     blocked CDN fails cleanly within ~30s instead of the
-                //     5-minute Java waiter.
+                //     blocked CDN fails cleanly instead of hanging the waiter.
                 //
-                // The 5-minute wait below is now an outer ceiling — both
-                // paths self-cap much earlier on failure.
+                // The awaitFlag below is an outer ceiling sized to outlast the
+                // bulk-lane deadline — both paths self-cap much earlier on
+                // failure (see the deadline-invariant note near awaitFlag).
                 postProgress(callback, "Downloading update...");
                 runCallback(() -> callback.onDownloadProgress(-1));
 
@@ -854,7 +1139,9 @@ public class AppUpdater {
                     dlDone[0] = true;
                 } else {
                     String downloadCmd = buildDownloadCommand(latestDownloadUrl, APK_PATH);
-                    runShell(downloadCmd, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
+                    // Bulk lane: the command itself deadlines at 600s (timeout/
+                    // --max-time inside buildDownloadCommand); 640s of margin.
+                    runShellLong(downloadCmd, DOWNLOAD_DEADLINE_MS, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
                         @Override public void onLog(String message) {
                             dlResult[0] = message;
                         }
@@ -869,11 +1156,12 @@ public class AppUpdater {
                         }
                     });
 
-                    // Outer ceiling — only relevant for the shell path.
-                    // OkHttp path already returned synchronously above.
-                    synchronized (dlDone) {
-                        if (!dlDone[0]) dlDone.wait(300000);
-                    }
+                    // Outer ceiling — only relevant for the shell path (the
+                    // OkHttp path already returned synchronously above). MUST
+                    // outlast DOWNLOAD_DEADLINE_MS: a shorter wait here used
+                    // to declare failure and delete the APK while wget was
+                    // still writing it (see the deadline-invariant note).
+                    awaitFlag(dlDone, DOWNLOAD_DEADLINE_MS + WAIT_MARGIN_MS);
                 }
 
                 if (cancelled) {
@@ -927,32 +1215,14 @@ public class AppUpdater {
                     return;
                 }
 
-                // The updater terminates CameraDaemon with SIGKILL below. Its
-                // shutdown hook cannot protect an active trip in that case, so
-                // require the daemon's restart contract to durably checkpoint
-                // and quiesce trip sampling before either kill path is armed.
-                // The endpoint intentionally succeeds without quiescing when
-                // trip recording is disabled, preserving the existing updater
-                // behavior for users who do not record trips.
-                postProgress(callback, "Preparing trip data...");
-                String prepareFailure = prepareCameraDaemonForUpdate();
-                if (prepareFailure != null) {
-                    // A transport failure can happen after the server prepared
-                    // successfully but before its response reached us. Abort is
-                    // therefore required even for an apparent prepare failure.
-                    abortPreparedCameraRestart();
-                    // The APK is deliberately KEPT. Preparation failures are
-                    // retryable conditions, and the download is the expensive
-                    // part — deleting it made every retry re-fetch the whole
-                    // package. cleanupLeftoverApk() at the start of the next
-                    // attempt still replaces it, and the constructor's cleanup
-                    // removes it if the user gives up.
-                    postInstallError(callback,
-                            "Update stopped safely: " + prepareFailure
-                                    + abortRestartWarning());
-                    return;
-                }
-                cameraRestartPrepared = true;
+                // OTA is intentionally force-forward: do not gate installation
+                // on /prepare-restart. On the legacy camera path a planned
+                // teardown can emit HAL event 1002, race the automatic camera
+                // restart, and make the daemon self-exit before the detached
+                // installer has been armed. The kill paths below are the
+                // authoritative handoff: they stop daemon families best-effort
+                // and installation continues even when graceful camera teardown
+                // or post-kill verification cannot be confirmed.
 
                 // Step 3: Save update info BEFORE we touch any daemon (the daemon
                 // process — if we're running inside it — is about to die, and the
@@ -983,6 +1253,7 @@ public class AppUpdater {
                 preparedChannel = channel;
                 preparedPriorTimestamp = priorUpdateTimestamp;
                 preparedPriorDisplayVersion = priorDisplayVersion;
+                rollbackMetadataOnException = true;
                 // Set the just-updated MARKER. Only store remoteVersion as the
                 // label when it's canonical — a bare/version-less "unknown"
                 // must not clobber a prior valid label.
@@ -1027,45 +1298,44 @@ public class AppUpdater {
                             callback, channel, priorUpdateTimestamp,
                             priorDisplayVersion);
                     if (!detachedStarted) {
-                        abortPreparedCameraRestart();
                         rollbackPreparedUpdateMetadata(
                                 channel, priorUpdateTimestamp,
                                 priorDisplayVersion);
                     }
-                    // On success the detached script owns the imminent kill.
-                    // On failure abortPreparedCameraRestart resumed sampling.
-                    cameraRestartPrepared = false;
+                    // On success the detached script owns the imminent kill. On
+                    // failure metadata was rolled back above.
+                    rollbackMetadataOnException = false;
                     return;
                 }
 
                 postProgress(callback, "Stopping daemons...");
                 boolean cameraStopped = stopAllDaemons();
+                // stopAllDaemons has issued every hard-kill sweep. From this
+                // point the transition cannot be cancelled even if verification
+                // was inconclusive, so do not roll metadata back from the outer
+                // exception handler.
+                rollbackMetadataOnException = false;
                 if (!cameraStopped) {
-                    abortPreparedCameraRestart();
-                    rollbackPreparedUpdateMetadata(
-                            channel, priorUpdateTimestamp,
-                            priorDisplayVersion);
-                    cameraRestartPrepared = false;
-                    postInstallError(callback,
-                            "Update stopped safely: camera daemon did not stop"
-                                    + abortRestartWarning());
-                    return;
+                    Log.w(TAG, "Camera daemon stop was not confirmed; "
+                            + "continuing OTA install by force");
+                    postProgress(callback,
+                            "Installing update despite unconfirmed daemon stop...");
                 }
-                // stopAllDaemons has now issued both prepared camera kill
-                // sweeps; this process can no longer cancel that transition.
-                cameraRestartPrepared = false;
                 Thread.sleep(3000);
 
                 postProgress(callback, "Installing...");
                 final boolean[] done = {false};
                 final String[] result = {null};
 
+                // Bulk lane: pm install of a ~60MB APK can run minutes on slow
+                // flash with no output; must not hold or sever the control lane.
                 String installCmd = "pm install -r -d " + APK_PATH +
                     "; rm -f " + APK_PATH +
                     "; sleep 2; am start -n com.overdrive.app/.ui.MainActivity" +
-                    " --ez " + UpdateLifecycle.EXTRA_POST_UPDATE + " true";
+                    " --ez " + UpdateLifecycle.EXTRA_POST_UPDATE + " true" +
+                    " --ez minimize_on_start true";
 
-                runShell(installCmd, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
+                runShellLong(installCmd, INSTALL_DEADLINE_MS, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
                     @Override public void onLog(String message) {
                         Log.i(TAG, "Install: " + message);
                         result[0] = message;
@@ -1081,9 +1351,11 @@ public class AppUpdater {
                     }
                 });
 
-                synchronized (done) {
-                    if (!done[0]) done.wait(60000);
-                }
+                // MUST outlast INSTALL_DEADLINE_MS: a 60s wait here used to
+                // roll back version metadata while pm install (up to minutes
+                // on slow flash) then landed anyway. On success this process
+                // is killed by the install mid-wait, which is fine.
+                awaitFlag(done, INSTALL_DEADLINE_MS + WAIT_MARGIN_MS);
 
                 // If we reach here, install may have failed (process should be dead on success)
                 String output = result[0] != null ? result[0] : "";
@@ -1158,14 +1430,11 @@ public class AppUpdater {
                     runCallback(callback::onSuccess);
                 }
             } catch (Exception e) {
-                if (cameraRestartPrepared) {
-                    abortPreparedCameraRestart();
-                    if (preparedChannel != null) {
-                        rollbackPreparedUpdateMetadata(
-                                preparedChannel,
-                                preparedPriorTimestamp,
-                                preparedPriorDisplayVersion);
-                    }
+                if (rollbackMetadataOnException && preparedChannel != null) {
+                    rollbackPreparedUpdateMetadata(
+                            preparedChannel,
+                            preparedPriorTimestamp,
+                            preparedPriorDisplayVersion);
                 }
                 Log.e(TAG, "Install error: " + e.getMessage());
                 postInstallError(callback, e.getMessage());
@@ -1281,12 +1550,13 @@ public class AppUpdater {
                 } else {
                     final boolean[] dlDone = {false};
                     String downloadCmd = buildDownloadCommand(downloadUrl, COMPANION_APK_PATH);
-                    runShell(downloadCmd, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
+                    runShellLong(downloadCmd, DOWNLOAD_DEADLINE_MS, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
                         @Override public void onLog(String m) { dlResult[0] = m; }
                         @Override public void onLaunched() { dlDone[0] = true; synchronized (dlDone) { dlDone.notify(); } }
                         @Override public void onError(String e) { dlResult[0] = "ERROR: " + e; dlDone[0] = true; synchronized (dlDone) { dlDone.notify(); } }
                     });
-                    synchronized (dlDone) { if (!dlDone[0]) dlDone.wait(300000); }
+                    // Wait must outlast the deadline — see the invariant note.
+                    awaitFlag(dlDone, DOWNLOAD_DEADLINE_MS + WAIT_MARGIN_MS);
                 }
 
                 if (cancelled) {
@@ -1327,12 +1597,13 @@ public class AppUpdater {
                 final String[] result = {null};
                 String installCmd = "pm install -r " + COMPANION_APK_PATH
                         + "; rm -f " + COMPANION_APK_PATH;
-                runShell(installCmd, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
+                runShellLong(installCmd, INSTALL_DEADLINE_MS, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
                     @Override public void onLog(String m) { Log.i(TAG, "Companion install: " + m); result[0] = m; }
                     @Override public void onLaunched() { done[0] = true; synchronized (done) { done.notify(); } }
                     @Override public void onError(String e) { result[0] = "ERROR: " + e; done[0] = true; synchronized (done) { done.notify(); } }
                 });
-                synchronized (done) { if (!done[0]) done.wait(120000); }
+                // Wait must outlast the deadline — see the invariant note.
+                awaitFlag(done, INSTALL_DEADLINE_MS + WAIT_MARGIN_MS);
 
                 String output = result[0] != null ? result[0] : "";
                 if (output.toLowerCase().contains("success")) {
@@ -1376,9 +1647,11 @@ public class AppUpdater {
                "output=\"" + outputPath + "\"; " +
                "rm -f \"$output\"; " +
                "if command -v wget >/dev/null 2>&1; then " +
-               "  timeout 600 wget -q -O \"$output\" \"$java_url\" && echo OK; " +
+               "  if timeout 600 wget -q -O \"$output\" \"$java_url\"; then echo OK; " +
+               "  else rc=$?; rm -f \"$output\"; echo \"ERROR: Download failed (exit $rc)\"; fi; " +
                "elif command -v curl >/dev/null 2>&1; then " +
-               "  curl -sL --connect-timeout 15 --max-time 600 -o \"$output\" \"$java_url\" && echo OK; " +
+               "  if curl -sL --connect-timeout 15 --max-time 600 -o \"$output\" \"$java_url\"; then echo OK; " +
+               "  else rc=$?; rm -f \"$output\"; echo \"ERROR: Download failed (exit $rc)\"; fi; " +
                "else " +
                "  echo \"ERROR: No download tool available\"; " +
                "fi'";
@@ -1412,32 +1685,40 @@ public class AppUpdater {
         // can't be confused with a complete one if we fail mid-stream.
         new File(outputPath).delete();
 
-        java.net.Proxy proxy = com.overdrive.app.mqtt.ProxyHelper.getHttpProxy();
-        boolean usedProxy = proxy != null && proxy.type() != java.net.Proxy.Type.DIRECT;
+        // ONE absolute monotonic budget across BOTH attempts (primary +
+        // no-proxy retry). OkHttp's 15s readTimeout is per-read: a stream
+        // that trickles a packet every few seconds resets it forever, so
+        // without an absolute cap a slow CDN could hold the install gate
+        // past its staleness window — letting a second update seize the
+        // gate and delete this APK mid-download. Sharing the budget across
+        // the retry keeps the whole download phase ≤ DOWNLOAD_DEADLINE_MS,
+        // which the gate's staleness math relies on.
+        final long deadlineNanos = System.nanoTime() + DOWNLOAD_DEADLINE_MS * 1_000_000L;
+
+        boolean completed = false;
         try {
-            doStreamingDownload(url, outputPath, proxy, callback);
-        } catch (Exception primary) {
-            // If we tried via sing-box/Tailscale and failed, the proxy may
-            // have died mid-flight (sing-box restart, Tailscale link drop).
-            // Invalidate the probe cache so MQTT and friends re-detect on
-            // their next call, then retry once direct. If the network
-            // truly requires the proxy (CN-firmware on the SIM, GitHub
-            // CDN blocked), the direct retry still fails and we surface
-            // the original error — better than silently swallowing a
-            // recoverable proxy blip.
-            if (cancelled) throw primary;
-            if (!usedProxy) throw primary;
-            Log.w(TAG, "Download via proxy failed (" + primary.getMessage() + "); retrying direct");
-            com.overdrive.app.mqtt.ProxyHelper.invalidateCache();
+            java.net.Proxy proxy = com.overdrive.app.mqtt.ProxyHelper.getHttpProxy();
+            boolean usedProxy = proxy != null && proxy.type() != java.net.Proxy.Type.DIRECT;
             try {
-                doStreamingDownload(url, outputPath, java.net.Proxy.NO_PROXY, callback);
-            } catch (Exception retry) {
-                // Surface the proxy-attempt error since that's what the user
-                // is more likely to recognize (sing-box / tunnel issue), but
-                // append the direct-retry detail for diagnostics.
-                throw new java.io.IOException(
-                        primary.getMessage() + " (direct retry: " + retry.getMessage() + ")");
+                doStreamingDownload(url, outputPath, proxy, callback, deadlineNanos);
+            } catch (Exception primary) {
+                // If we tried via sing-box/Tailscale and failed, the proxy may
+                // have died mid-flight (sing-box restart, Tailscale link drop).
+                if (cancelled) throw primary;
+                if (!usedProxy) throw primary;
+                Log.w(TAG, "Download via proxy failed (" + primary.getMessage()
+                        + "); retrying direct");
+                com.overdrive.app.mqtt.ProxyHelper.invalidateCache();
+                try {
+                    doStreamingDownload(url, outputPath, java.net.Proxy.NO_PROXY, callback, deadlineNanos);
+                } catch (Exception retry) {
+                    throw new java.io.IOException(
+                            primary.getMessage() + " (direct retry: " + retry.getMessage() + ")");
+                }
             }
+            completed = true;
+        } finally {
+            if (!completed) new File(outputPath).delete();
         }
     }
 
@@ -1445,8 +1726,12 @@ public class AppUpdater {
      * Single-shot streaming download. Caller decides whether to retry.
      */
     private void doStreamingDownload(String url, String outputPath,
-                                     java.net.Proxy proxy, InstallCallback callback)
+                                     java.net.Proxy proxy, InstallCallback callback,
+                                     long deadlineNanos)
             throws Exception {
+        if (System.nanoTime() > deadlineNanos) {
+            throw new java.io.IOException("Download deadline exceeded before attempt");
+        }
         OkHttpClient.Builder builder = new OkHttpClient.Builder()
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(15, TimeUnit.SECONDS)
@@ -1485,6 +1770,12 @@ public class AppUpdater {
                 while ((n = in.read(buf)) != -1) {
                     if (cancelled) {
                         throw new java.io.IOException("Cancelled");
+                    }
+                    // Absolute cap — per-read timeouts reset on every packet
+                    // and never bound a slow-but-flowing stream (see caller).
+                    if (System.nanoTime() > deadlineNanos) {
+                        throw new java.io.IOException("Download exceeded "
+                                + (DOWNLOAD_DEADLINE_MS / 1000) + "s deadline");
                     }
                     fos.write(buf, 0, n);
                     bytesRead += n;
@@ -1588,8 +1879,12 @@ public class AppUpdater {
                     3000,
                     10000);
             connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json");
             try (java.io.OutputStream body = connection.getOutputStream()) {
-                body.write(new byte[0]);
+                body.write(new JSONObject()
+                        .put("reason", "app_update")
+                        .toString()
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
             }
             int statusCode = connection.getResponseCode();
             if (isSuccessfulCameraPrepareStatus(statusCode)) {
@@ -1801,6 +2096,7 @@ public class AppUpdater {
                                        String priorDisplayVersion) {
         String scriptPath = "/data/local/tmp/overdrive_install.sh";
         String logPath = "/data/local/tmp/overdrive_install.log";
+        String diLink5CaptureCleanup = diLink5CaptureKillScript();
 
         StringBuilder script = new StringBuilder();
         script.append("#!/system/bin/sh\n");
@@ -1836,6 +2132,7 @@ public class AppUpdater {
                 + "echo \"disabled for update at $(date)\" > /data/local/tmp/acc_sentry_daemon.disabled\n");
         script.append("chmod 666 /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null\n");
         script.append(psAwkKillLine("cam_daemon"));
+        script.append(diLink5CaptureCleanup);
         script.append(psAwkKillLine("acc_sentry"));
         script.append(psAwkKillLine("start_telegram"));
         script.append("killall -9 byd_cam_daemon 2>/dev/null\n");
@@ -1850,8 +2147,12 @@ public class AppUpdater {
         script.append("killall -9 sing-box 2>/dev/null\n");
         script.append(psAwkKillLine("tailscaled"));
         script.append("killall -9 tailscaled 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/start_acc_sentry.sh /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n");
+        script.append("rm -f /data/local/tmp/start_cam_daemon.sh "
+                + "/data/local/tmp/cam_watchdog.pid 2>/dev/null\n");
+        script.append("rm -rf /data/local/tmp/cam_watchdog.lock 2>/dev/null\n");
+        script.append("rm -f /data/local/tmp/start_acc_sentry.sh "
+                + "/data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n");
+        script.append("rm -rf /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null\n");
         script.append("rm -f /data/local/tmp/start_zrok.sh 2>/dev/null\n");
         script.append("rm -f /data/local/tmp/start_telegram.sh 2>/dev/null\n");
 
@@ -1904,6 +2205,11 @@ public class AppUpdater {
         // restart that follows `am start` re-writes phase=installing/100 and
         // eventually a fresh daemon overwrites with idle.
         script.append("if [ \"$INSTALL_RC\" != \"0\" ]; then\n");
+        script.append("  case \"$PM_OUT\" in *INSTALL_FAILED_INSUFFICIENT_STORAGE*|");
+        script.append("*'No space left on device'*|*'not enough space'*|");
+        script.append("*'insufficient storage'*) PM_OUT='")
+              .append(STORAGE_ERROR_MESSAGE)
+              .append("';; esac\n");
         // Escape special chars in PM_OUT for JSON. toybox lacks `jq`, but we
         // can substitute backslashes, double-quotes, and newlines via
         // parameter expansion (POSIX) — covers the ~99% case of pm install's
@@ -2044,7 +2350,8 @@ public class AppUpdater {
         // the old APK + an error toast on failure).
         script.append("sleep 2\n");
         script.append("am start -n com.overdrive.app/.ui.MainActivity --ez ");
-        script.append(UpdateLifecycle.EXTRA_POST_UPDATE).append(" true\n");
+        script.append(UpdateLifecycle.EXTRA_POST_UPDATE)
+                .append(" true --ez minimize_on_start true\n");
         script.append("echo \"[install] done rc=$INSTALL_RC at $(date)\"\n");
 
         try {
@@ -2124,6 +2431,9 @@ public class AppUpdater {
         Log.i(TAG, "Stopping all daemons...");
 
         com.overdrive.app.launcher.AdbDaemonLauncher launcher = getAdbLauncher();
+        String diLink5CaptureCleanup = diLink5CaptureKillScript();
+        String diLink5CaptureVerification =
+                diLink5CaptureVerificationScript();
 
         // Step 0: Plant the post-update sentinels so the new process knows to
         // run a hard-reset before starting daemons (see UpdateLifecycle). The
@@ -2172,9 +2482,12 @@ public class AppUpdater {
                 "[ -f /data/local/tmp/camera_daemon.disabled ] || " +
                 "echo 'disabled for update at $(date)' > /data/local/tmp/camera_daemon.disabled\n" +
                 psAwkKillLine("cam_daemon") +
+                diLink5CaptureCleanup +
                 psAwkKillLine("acc_sentry") +
                 "rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid /data/local/tmp/camera_daemon.lock 2>/dev/null\n" +
+                "rm -rf /data/local/tmp/cam_watchdog.lock 2>/dev/null\n" +
                 "rm -f /data/local/tmp/start_acc_sentry.sh /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n" +
+                "rm -rf /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null\n" +
                 "echo done\n";
 
         final boolean[] wdDone = {false};
@@ -2272,6 +2585,7 @@ public class AppUpdater {
                 "rm -f /data/local/tmp/cam_watchdog.pid 2>/dev/null\n" +
                 "rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/start_acc_sentry.sh /data/local/tmp/start_zrok.sh /data/local/tmp/start_telegram.sh 2>/dev/null\n" +
                 psAwkKillLine("cam_daemon") +
+                diLink5CaptureCleanup +
                 psAwkKillLine("acc_sentry") +
                 psAwkKillLine("sentry_daemon") +
                 psAwkKillLine("telegram_bot_daemon") +
@@ -2285,12 +2599,14 @@ public class AppUpdater {
                 "killall -9 tailscaled 2>/dev/null\n" +
                 "killall -9 sing-box 2>/dev/null\n" +
                 "sleep 1\n" +
+                "rm -rf /data/local/tmp/cam_watchdog.lock /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null\n" +
                 "rm -f /data/local/tmp/*_daemon.lock 2>/dev/null\n" +
                 "CAMERA_PIDS=$(ps -A -o PID,ARGS | grep -F 'cam_daemon' "
                 + "| grep -v grep | awk -v self=$$ '$1 != self {print $1}')\n" +
                 "if [ -n \"$CAMERA_PIDS\" ]; then "
                 + "echo \"camera daemon still running: $CAMERA_PIDS\" >&2; "
                 + "exit 1; fi\n" +
+                diLink5CaptureVerification +
                 "echo done\n";
 
         final boolean[] sweepDone = {false};
@@ -2319,7 +2635,8 @@ public class AppUpdater {
         if (cameraStopConfirmed[0]) {
             Log.i(TAG, "All daemons and watchdogs stopped");
         } else {
-            Log.w(TAG, "Camera daemon stop was not confirmed; update aborted");
+            Log.w(TAG, "Camera daemon stop was not confirmed; "
+                    + "OTA will continue with package installation");
         }
         return cameraStopConfirmed[0];
     }
@@ -2675,7 +2992,21 @@ public class AppUpdater {
         runCallback(() -> cb.onError(msg));
     }
     private void postInstallError(InstallCallback cb, String msg) {
-        runCallback(() -> cb.onError(msg));
+        String error = userFacingInstallError(msg);
+        runCallback(() -> cb.onError(error));
+    }
+    static String userFacingInstallError(String msg) {
+        String error = msg == null || msg.trim().isEmpty() ? "Update failed" : msg.trim();
+        if (error.startsWith("Not enough storage to update Overdrive.")) return error;
+        String lower = error.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains("no space left")
+                || lower.contains("enospc")
+                || lower.contains("install_failed_insufficient_storage")
+                || lower.contains("insufficient storage")
+                || lower.contains("not enough space")) {
+            return STORAGE_ERROR_MESSAGE;
+        }
+        return error;
     }
     private void postProgress(InstallCallback cb, String msg) {
         runCallback(() -> cb.onProgress(msg));
@@ -3179,6 +3510,7 @@ public class AppUpdater {
             }
             releaseNotes = release.optString("body", "");
             latestDownloadUrl = apk[0];
+            latestApkSizeBytes = Long.parseLong(apk[3]);
             remoteUpdatedAt = apk[2];
             // Canonicalize to "alpha-v<semver>" (this path is alpha-only) so a
             // filename missing the channel prefix still persists a label the

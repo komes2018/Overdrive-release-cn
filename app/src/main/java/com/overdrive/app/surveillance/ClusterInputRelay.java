@@ -30,10 +30,11 @@ import java.util.concurrent.TimeUnit;
  * even if the pane is dragged/resized on the head unit.
  *
  * <h3>Safety — never clobber the head unit</h3>
- * The live fission {@code displayId} is resolved per-call from {@code dumpsys display}
- * (never hardcoded — SurfaceFlinger assigns it per projection-open and it is NOT reliably
- * 1). We HARD-REFUSE to inject unless the id is {@code > 0} (0 == head unit): a stale/absent
- * id must never fall through to display 0 and actuate the infotainment screen.
+ * The live fission {@code displayId} is never hardcoded — SurfaceFlinger assigns it per
+ * projection-open and it is NOT reliably 1. DI5 uses the validated display snapshot retained by
+ * the active mirror session (avoiding a multi-second dumpsys on every tap); legacy mode keeps its
+ * existing live resolver. We HARD-REFUSE to inject unless the id is {@code > 0} (0 == head unit):
+ * a stale/absent id must never fall through to display 0 and actuate the infotainment screen.
  *
  * <h3>Two injection strategies</h3>
  * Primary is the fork-free reflected {@code InputManager.injectInputEvent} +
@@ -105,16 +106,23 @@ public final class ClusterInputRelay {
     private static ProjectionMapping currentProjectionMapping() {
         try {
             ClusterViewMirrorService m = ClusterViewMirrorService.getInstance();
-            if (m.currentState() != ClusterViewMirrorService.STATE_ACTIVE) return null;
-            int panelW = m.currentClusterW();
-            int panelH = m.currentClusterH();
-            int mode = m.currentScaleMode();
-            int[] src = m.projectionSrc();
-            int[] dst = m.projectionDst();
-            if (m.currentState() != ClusterViewMirrorService.STATE_ACTIVE
-                    || src == null || src.length < 4 || dst == null || dst.length < 4
+            int[] snapshot = m.inputSnapshot();
+            if (snapshot == null || snapshot.length < 13
+                    || snapshot[0] != ClusterViewMirrorService.STATE_ACTIVE) {
+                return null;
+            }
+            int panelW = snapshot[1];
+            int panelH = snapshot[2];
+            int mode = snapshot[3];
+            int inputDisplayId = snapshot[4];
+            int[] src = new int[] {
+                    snapshot[5], snapshot[6], snapshot[7], snapshot[8]
+            };
+            int[] dst = new int[] {
+                    snapshot[9], snapshot[10], snapshot[11], snapshot[12]
+            };
+            if (src[0] < 0 || src[1] < 0 || src[2] <= 0 || src[3] <= 0
                     || panelW <= 0 || panelH <= 0
-                    || src[0] < 0 || src[1] < 0 || src[2] <= 0 || src[3] <= 0
                     || dst[2] <= 0 || dst[3] <= 0
                     || (long) src[0] + src[2] > panelW
                     || (long) src[1] + src[3] > panelH) {
@@ -126,7 +134,8 @@ public final class ClusterInputRelay {
                         + src[3] + " dst=" + dst[2] + "x" + dst[3] + " mode=" + mode);
                 return null;
             }
-            return new ProjectionMapping(src, dst, panelW, panelH);
+            return new ProjectionMapping(
+                    src, dst, panelW, panelH, inputDisplayId);
         } catch (Throwable ignored) {}
         return null;
     }
@@ -148,8 +157,11 @@ public final class ClusterInputRelay {
         final int dstH;
         final int panelW;
         final int panelH;
+        final int inputDisplayId;
 
-        ProjectionMapping(int[] src, int[] dst, int panelW, int panelH) {
+        ProjectionMapping(
+                int[] src, int[] dst, int panelW, int panelH,
+                int inputDisplayId) {
             this.srcX = src[0];
             this.srcY = src[1];
             this.srcW = src[2];
@@ -160,6 +172,7 @@ public final class ClusterInputRelay {
             this.dstH = dst[3];
             this.panelW = panelW;
             this.panelH = panelH;
+            this.inputDisplayId = inputDisplayId;
         }
 
         double mapX(double surfaceX) {
@@ -178,6 +191,32 @@ public final class ClusterInputRelay {
     /** {@code [fissionDisplayId, panelW, panelH]}, or null if no safe cluster target.
      *  HARD-REFUSES id <= 0 (0 = head unit) so injection can never hit the infotainment. */
     private static int[] resolvePanel(ProjectionMapping mapping) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            int targetId = com.overdrive.app.launcher.DiLink5ClusterCast
+                    .currentTargetDisplayId();
+            int w = com.overdrive.app.launcher.DiLink5ClusterCast
+                    .currentTargetDisplayWidth();
+            int h = com.overdrive.app.launcher.DiLink5ClusterCast
+                    .currentTargetDisplayHeight();
+            int id = mapping.inputDisplayId;
+            if (targetId <= 0 || id <= 0 || w <= 0 || h <= 0) {
+                logger.warn("relay refused — no active DI5 OEM target (id="
+                        + targetId + " composed=" + id + " size="
+                        + w + "x" + h + ")");
+                return null;
+            }
+            if (w != mapping.panelW || h != mapping.panelH) {
+                logger.warn("relay refused — DI5 target size " + w + "x" + h
+                        + " differs from projection " + mapping.panelW + "x"
+                        + mapping.panelH);
+                return null;
+            }
+            // DI5 uses two different endpoints by design: the app task lives on
+            // shared_fission..._0/_1 (targetId), while input and panel composition
+            // are owned by the exact plain fission display (id). Injecting into the
+            // shadow target is accepted but never reaches the visible app.
+            return new int[] { id, w, h };
+        }
         BsNativeLayer.FissionDisplay fd = BsNativeLayer.resolveFissionDisplay();
         if (fd.displayId <= 0) {
             logger.warn("relay refused — no positive fission displayId (id=" + fd.displayId + ")");

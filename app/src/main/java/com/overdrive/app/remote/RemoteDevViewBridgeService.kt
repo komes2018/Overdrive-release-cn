@@ -91,13 +91,18 @@ class RemoteDevViewBridgeService : Service() {
                         val launch = RemoteDevVirtualDisplay.start(application)
                         response.put("success", launch.success)
                         response.put("launchRequested", launch.success)
-                        response.put("captureBackend", RemoteDevVirtualDisplay.BACKEND_NAME)
+                        response.put("captureBackend", launch.backend)
+                        response.put("compatibilityMode", launch.compatibilityMode)
                         response.put("displayId", launch.displayId)
                         if (launch.detail != null) response.put("detail", launch.detail)
                     }
                     "status" -> {
                         putInputResult(response, RemoteDevViewController.status())
-                        response.put("captureBackend", RemoteDevVirtualDisplay.BACKEND_NAME)
+                        response.put("captureBackend", RemoteDevVirtualDisplay.currentBackendName())
+                        response.put(
+                            "compatibilityMode",
+                            RemoteDevVirtualDisplay.isCompatibilityMode(),
+                        )
                         response.put("virtualDisplayRunning", RemoteDevVirtualDisplay.isRunning())
                         response.put("displayId", RemoteDevVirtualDisplay.displayId())
                     }

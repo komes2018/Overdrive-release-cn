@@ -33,6 +33,28 @@ public class CameraProfilesTest {
 
         assertEquals(CameraProfiles.PROFILE_LEGACY_SEAL_ATTO, profile.getId());
         assertEquals(1, profile.getPanoCameraId());
+        assertEquals(2560, profile.getEncoderWidth());
+        assertEquals(1920, profile.getEncoderHeight());
+    }
+
+    @Test
+    public void dilink5RequiresExplicitProfileAndUsesNativeMosaicGeometry() {
+        assertEquals(CameraProfiles.PROFILE_LEGACY_SEAL_ATTO,
+                CameraProfiles.infer("BYD Sealion 7").getId());
+
+        CameraProfile profile = CameraProfiles.get(
+                CameraProfiles.PROFILE_DILINK5_SEALION7);
+        assertEquals(0, profile.getPanoCameraId());
+        assertEquals(1920, profile.getPanoWidth());
+        assertEquals(1080, profile.getPanoHeight());
+        assertEquals(1920, profile.getEncoderWidth());
+        assertEquals(1080, profile.getEncoderHeight());
+        assertEquals(PanoramicSlice.SLICE_4,
+                profile.getDefaultRoleMappings().get(CameraRole.PANO_FRONT)
+                        .getPanoramicSlice());
+        assertEquals(PanoramicSlice.SLICE_1,
+                profile.getDefaultRoleMappings().get(CameraRole.PANO_REAR)
+                        .getPanoramicSlice());
     }
 
     @Test
@@ -43,5 +65,15 @@ public class CameraProfilesTest {
                 CameraConfigResolver.preferSelectedVehicleModel("", "BYD AUTO"));
         assertEquals("unknown",
                 CameraConfigResolver.preferSelectedVehicleModel(null, null));
+    }
+
+    @Test
+    public void dilink5ProfileCannotLeakIntoOtherCameraModes() {
+        assertEquals(CameraProfiles.PROFILE_AUTO,
+                CameraConfigResolver.profileForMode(
+                        CameraProfiles.PROFILE_DILINK5_SEALION7, false));
+        assertEquals(CameraProfiles.PROFILE_DILINK5_SEALION7,
+                CameraConfigResolver.profileForMode(
+                        CameraProfiles.PROFILE_DILINK5_SEALION7, true));
     }
 }

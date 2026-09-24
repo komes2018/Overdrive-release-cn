@@ -18,6 +18,10 @@
         android:icon="@drawable/ic_recording"
         android:title="@string/rail_recordings" />
     <item
+        android:id="@+id/parkingFragment"
+        android:icon="@drawable/ic_parking"
+        android:title="@string/rail_parking" />
+    <item
         android:id="@+id/vehicleControlFragment"
         android:icon="@drawable/ic_vehicle_control"
         android:title="@string/rail_vehicle" />

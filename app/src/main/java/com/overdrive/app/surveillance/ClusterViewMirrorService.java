@@ -183,18 +183,22 @@ public final class ClusterViewMirrorService extends Binder {
      * the caller is already performing an authoritative close that clears every token.
      * Releasing here could recursively enter {@code forceClose("sustained-release")}.
      */
-    static void detachBeforeProjectionClose(String reason) {
+    public static boolean detachBeforeProjectionClose(String reason) {
         ClusterViewMirrorService i = instance;
-        if (i == null) return;
+        if (i == null) return true;
         synchronized (i.lock) {
             if (i.state == STATE_STOPPED && i.mirrorToken == null
                     && i.outputSurface == null && i.ownerToken == null
                     && !i.holdsProjection) {
-                return;
+                return true;
             }
             logger.info("detachBeforeProjectionClose(" + reason + ")");
             i.holdsProjection = false;
             i.detachCurrentLocked();
+            return i.state == STATE_STOPPED
+                    && i.mirrorToken == null
+                    && i.outputSurface == null
+                    && i.ownerToken == null;
         }
     }
 
@@ -203,6 +207,23 @@ public final class ClusterViewMirrorService extends Binder {
     public int currentClusterW() { synchronized (lock) { return clusterW; } }
     public int currentClusterH() { synchronized (lock) { return clusterH; } }
     public int currentScaleMode() { synchronized (lock) { return scaleMode; } }
+    /**
+     * Atomic touch-relay snapshot:
+     * state,w,h,scaleMode,inputDisplayId,src(x,y,w,h),dst(x,y,w,h).
+     */
+    public int[] inputSnapshot() {
+        synchronized (lock) {
+            return new int[] {
+                    state,
+                    clusterW,
+                    clusterH,
+                    scaleMode,
+                    fissionDisplayId,
+                    projSrc[0], projSrc[1], projSrc[2], projSrc[3],
+                    projDst[0], projDst[1], projDst[2], projDst[3]
+            };
+        }
+    }
     /** Last projection source rect (cluster px) — copy. {@code w==0} when not projected. */
     public int[] projectionSrc() { int[] s = projSrc; return new int[] { s[0], s[1], s[2], s[3] }; }
     /** Last projection destination rect (surface px) — copy. {@code w==0} when not projected. */
@@ -342,20 +363,39 @@ public final class ClusterViewMirrorService extends Binder {
             try {
                 ClusterProjectionController projection =
                         ClusterProjectionController.getInstance();
+                boolean diLink5 =
+                        com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
                 // A hard close marks the source non-open before detaching us. Refuse an attach
                 // that arrives in the detach→close window so it cannot bind a fresh mirror to a
                 // fission display that is about to be destroyed.
-                if (!projection.isOpen()) {
+                if (!projectionSourceOpen(projection, diLink5)) {
                     logger.info("attach: projection is not open");
                     releaseSurface(surface);
                     return STATE_NO_PROJECTION;
                 }
-                BsNativeLayer.FissionDisplay fd = BsNativeLayer.resolveFissionDisplay();
+                int diLink5TargetId = diLink5
+                        ? com.overdrive.app.launcher.DiLink5ClusterCast
+                                .currentTargetDisplayId()
+                        : -1;
+                BsNativeLayer.FissionDisplay fd = diLink5
+                        ? BsNativeLayer.resolveDiLink5MirrorDisplay(diLink5TargetId)
+                        : BsNativeLayer.resolveFissionDisplay();
                 Context ctx = resolveContext();
-                Point panel = (ctx != null)
-                        ? BsNativeLayer.clusterDisplaySize(ctx, fd) : new Point(1920, 720);
+                int diLink5Width = diLink5
+                        ? com.overdrive.app.launcher.DiLink5ClusterCast
+                                .currentTargetDisplayWidth()
+                        : 0;
+                int diLink5Height = diLink5
+                        ? com.overdrive.app.launcher.DiLink5ClusterCast
+                                .currentTargetDisplayHeight()
+                        : 0;
+                Point panel = diLink5Width > 1 && diLink5Height > 1
+                        ? new Point(diLink5Width, diLink5Height)
+                        : ((ctx != null)
+                            ? BsNativeLayer.clusterDisplaySize(ctx, fd)
+                            : new Point(1920, 720));
                 teardownLocked();
-                if (!projection.isOpen()) {
+                if (!projectionSourceOpen(projection, diLink5)) {
                     logger.info("attach: projection closed while replacing mirror");
                     releaseSurface(surface);
                     state = STATE_NO_PROJECTION;
@@ -382,17 +422,25 @@ public final class ClusterViewMirrorService extends Binder {
                     return state;
                 }
 
-                try {
-                    projection.acquireSustained("viewmirror");
-                    holdsProjection = true;
-                } catch (Throwable t) {
-                    logger.warn("attach: acquireSustained failed: " + t.getMessage());
-                    releaseSurface(surface);
-                    teardownLocked();
-                    state = STATE_UNSUPPORTED;
-                    return state;
+                if (!diLink5) {
+                    try {
+                        if (!projection.acquireSustained("viewmirror")) {
+                            logger.info("attach: projection hold was not admitted");
+                            releaseSurface(surface);
+                            teardownLocked();
+                            state = STATE_NO_PROJECTION;
+                            return state;
+                        }
+                        holdsProjection = true;
+                    } catch (Throwable t) {
+                        logger.warn("attach: acquireSustained failed: " + t.getMessage());
+                        releaseSurface(surface);
+                        teardownLocked();
+                        state = STATE_UNSUPPORTED;
+                        return state;
+                    }
                 }
-                if (!projection.isOpen()) {
+                if (!projectionSourceOpen(projection, diLink5)) {
                     logger.info("attach: projection began closing during attach");
                     releaseSurface(surface);
                     teardownLocked();
@@ -434,6 +482,14 @@ public final class ClusterViewMirrorService extends Binder {
                 return state;
             }
         }
+    }
+
+    private static boolean projectionSourceOpen(
+            ClusterProjectionController projection, boolean diLink5) {
+        return diLink5
+                ? com.overdrive.app.launcher.DiLink5ClusterCast
+                        .isProjectionSourceActive()
+                : projection.isOpen();
     }
 
     /** Re-letterbox the live token into a new box rect (resize fast path — no teardown).
@@ -559,6 +615,7 @@ public final class ClusterViewMirrorService extends Binder {
         unlinkOwnerLocked();
         activeSessionId = 0L;
         ownerCastGeneration = 0L;
+        fissionDisplayId = -1;
         projSrc = new int[] { 0, 0, 0, 0 };
         projDst = new int[] { 0, 0, 0, 0 };
         // Release ONLY if we actually acquired — releaseSustained on an unheld token whose

@@ -66,6 +66,57 @@ BYD.recording = {
     savedConfig: null,
     hasUnsavedChanges: false,
     lastConfigTimestamp: 0,  // Track config file timestamp for sync
+    _hydrated: false,
+    _writeQueue: Promise.resolve(),
+    _cdrReady: false,
+    _cdrWritesPending: 0,
+    _cdrWriteVersion: 0,
+    _cdrTogglePending: false,
+    _cdrCleanupPending: false,
+    _cdrSaveTimer: null,
+    _cdrDirty: {},
+    _layoutWritePending: false,
+    _layoutWriteVersion: 0,
+    _recordingLayout: 'standard',
+    _dashcamUseWindshield: false,
+    _windshieldAvailable: false,
+    _telemetryWriteVersion: 0,
+    _audioWritesPending: 0,
+    _audioWriteVersion: 0,
+    _geocodingWritesPending: 0,
+    _geocodingWriteVersion: 0,
+
+    _enqueueWrite(task) {
+        const run = () => task();
+        const next = this._writeQueue.then(run, run);
+        this._writeQueue = next.catch(() => {});
+        return next;
+    },
+
+    async _postJson(url, body) {
+        return this._enqueueWrite(async () => {
+            try {
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data || data.success !== true) {
+                    throw new Error(data && data.error ? data.error : 'Request rejected');
+                }
+                return data;
+            } catch (e) {
+                console.warn('Recording settings POST failed (' + url + '):', e);
+                return null;
+            }
+        });
+    },
+
+    _postTelemetry(body) {
+        this._telemetryWriteVersion++;
+        return this._postJson('/api/settings/telemetry-overlay', body);
+    },
 
     async init() {
         // loadConfig already chains into loadStorageSettings (line 245);
@@ -85,8 +136,13 @@ BYD.recording = {
         ]);
         this.savedConfig = JSON.parse(JSON.stringify(this.config));
         this.updateUI();
-        
-        // Load CDR cleanup config if SD card is selected
+        this._hydrated = true;
+        if (BYD.utils && BYD.utils.unlockSettingsHydration) {
+            BYD.utils.unlockSettingsHydration();
+        }
+
+        // CDR status can recursively scan a slow or unhealthy SD card. Keep
+        // its controls gated by _cdrReady instead of holding the whole page.
         if (this.config.recordingsStorageType === 'SD_CARD') {
             this.updateCdrCleanupVisibility();
         }
@@ -779,14 +835,25 @@ BYD.recording = {
     },
     
     async loadCdrConfig() {
+        if (this._cdrWritesPending > 0) return false;
+        const writeVersion = this._cdrWriteVersion;
         try {
             const resp = await fetch('/api/storage/external');
             const data = await resp.json();
-            if (data.success) {
-                this.cdrConfig.enabled = data.cleanupEnabled || false;
-                this.cdrConfig.reservedSpaceMb = data.reservedSpaceMb || 2000;
-                this.cdrConfig.protectedHours = data.protectedHours || 24;
-                this.cdrConfig.minFilesKeep = data.minFilesKeep || 10;
+            if (data.success
+                    && this._cdrWritesPending === 0
+                    && writeVersion === this._cdrWriteVersion) {
+                this._cdrReady = true;
+                this.cdrConfig.enabled = !!data.cleanupEnabled;
+                if (typeof data.reservedSpaceMb === 'number') {
+                    this.cdrConfig.reservedSpaceMb = data.reservedSpaceMb;
+                }
+                if (typeof data.protectedHours === 'number') {
+                    this.cdrConfig.protectedHours = data.protectedHours;
+                }
+                if (typeof data.minFilesKeep === 'number') {
+                    this.cdrConfig.minFilesKeep = data.minFilesKeep;
+                }
                 
                 // Store CDR info
                 this.cdrInfo = {
@@ -803,28 +870,46 @@ BYD.recording = {
                 };
 
                 this.updateCdrUI();
+                return true;
             }
         } catch (e) {
             console.warn('Failed to load CDR config:', e);
         }
+        return false;
     },
     
     updateCdrCleanupVisibility() {
         const card = document.getElementById('cdrCleanupCard');
         if (card) {
+            const wasVisible = card.style.display !== 'none';
             const showCard = this.config.recordingsStorageType === 'SD_CARD' && this.storageInfo.sdCardAvailable;
             card.style.display = showCard ? 'block' : 'none';
             
             if (showCard) {
-                this.loadCdrConfig();
+                if (!wasVisible) this._cdrReady = false;
+                this.updateCdrUI();
+                return this.loadCdrConfig();
             }
         }
+        return Promise.resolve(false);
     },
     
     updateCdrUI() {
         // Update toggle
         const toggle = document.getElementById('cdrCleanupEnabled');
-        if (toggle) toggle.checked = this.cdrConfig.enabled;
+        if (toggle) {
+            if (!this._cdrTogglePending) toggle.checked = this.cdrConfig.enabled;
+            toggle.disabled = !this._cdrReady
+                || this._cdrTogglePending || this._cdrCleanupPending
+                || this._cdrWritesPending > 0 || !!this._cdrSaveTimer
+                || Object.keys(this._cdrDirty).length > 0;
+        }
+        const cleanupButton = document.getElementById('cdrCleanupNow');
+        if (cleanupButton) {
+            cleanupButton.disabled = !this._cdrReady || !this.cdrConfig.enabled
+                || this._cdrCleanupPending || this._cdrWritesPending > 0
+                || !!this._cdrSaveTimer || Object.keys(this._cdrDirty).length > 0;
+        }
         
         // Update badge
         const badge = document.getElementById('cdrCleanupBadge');
@@ -836,19 +921,31 @@ BYD.recording = {
         // Update sliders
         const reservedSlider = document.getElementById('cdrReservedSlider');
         const reservedValue = document.getElementById('cdrReservedValue');
-        if (reservedSlider) reservedSlider.value = this.cdrConfig.reservedSpaceMb;
+        if (reservedSlider) {
+            reservedSlider.value = this.cdrConfig.reservedSpaceMb;
+            reservedSlider.disabled = !this._cdrReady || this._cdrCleanupPending
+                || this._cdrTogglePending || this._cdrWritesPending > 0;
+        }
         if (reservedValue) reservedValue.textContent = this.cdrConfig.reservedSpaceMb >= 1000
             ? BYD.i18n.t('recording.unit_gb', {n: (this.cdrConfig.reservedSpaceMb / 1000)})
             : BYD.i18n.t('recording.unit_mb', {n: this.cdrConfig.reservedSpaceMb});
 
         const protectedSlider = document.getElementById('cdrProtectedSlider');
         const protectedValue = document.getElementById('cdrProtectedValue');
-        if (protectedSlider) protectedSlider.value = this.cdrConfig.protectedHours;
+        if (protectedSlider) {
+            protectedSlider.value = this.cdrConfig.protectedHours;
+            protectedSlider.disabled = !this._cdrReady || this._cdrCleanupPending
+                || this._cdrTogglePending || this._cdrWritesPending > 0;
+        }
         if (protectedValue) protectedValue.textContent = BYD.i18n.t('recording.unit_hours', {n: this.cdrConfig.protectedHours});
         
         const minKeepSlider = document.getElementById('cdrMinKeepSlider');
         const minKeepValue = document.getElementById('cdrMinKeepValue');
-        if (minKeepSlider) minKeepSlider.value = this.cdrConfig.minFilesKeep;
+        if (minKeepSlider) {
+            minKeepSlider.value = this.cdrConfig.minFilesKeep;
+            minKeepSlider.disabled = !this._cdrReady || this._cdrCleanupPending
+                || this._cdrTogglePending || this._cdrWritesPending > 0;
+        }
         if (minKeepValue) minKeepValue.textContent = this.cdrConfig.minFilesKeep;
         
         // Update info
@@ -907,23 +1004,65 @@ BYD.recording = {
     },
     
     async toggleCdrCleanup() {
-        const enabled = document.getElementById('cdrCleanupEnabled').checked;
+        const toggle = document.getElementById('cdrCleanupEnabled');
+        if (!toggle || !this._hydrated || !this._cdrReady
+                || this._cdrTogglePending || this._cdrCleanupPending
+                || this._cdrWritesPending > 0 || this._cdrSaveTimer
+                || Object.keys(this._cdrDirty).length > 0) return;
+        const enabled = toggle.checked;
+        const previous = this.cdrConfig.enabled;
+        let saved = false;
+        this._cdrTogglePending = true;
+        this._cdrWriteVersion++;
+        this._cdrWritesPending++;
+        this.updateCdrUI();
         try {
-            await fetch('/api/storage/external/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled })
-            });
-            this.cdrConfig.enabled = enabled;
+            const data = await this._postJson('/api/storage/external/config', { enabled });
+            if (!data) {
+                this.cdrConfig.enabled = previous;
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast(BYD.i18n.t('recording.cdr_toggle_failed'), 'error');
+                }
+                return;
+            }
+            saved = true;
+            this.cdrConfig.enabled = data.cleanupEnabled == null
+                ? enabled : !!data.cleanupEnabled;
+            if (typeof data.reservedSpaceMb === 'number') {
+                this.cdrConfig.reservedSpaceMb = data.reservedSpaceMb;
+            }
+            if (typeof data.protectedHours === 'number') {
+                this.cdrConfig.protectedHours = data.protectedHours;
+            }
+            if (typeof data.minFilesKeep === 'number') {
+                this.cdrConfig.minFilesKeep = data.minFilesKeep;
+            }
             this.updateCdrUI();
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(enabled ? BYD.i18n.t('recording.cdr_enabled') : BYD.i18n.t('recording.cdr_disabled'), 'success');
-        } catch (e) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.cdr_toggle_failed'), 'error');
+            if (BYD.utils && BYD.utils.toast) {
+                BYD.utils.toast(
+                    this.cdrConfig.enabled
+                        ? BYD.i18n.t('recording.cdr_enabled')
+                        : BYD.i18n.t('recording.cdr_disabled'),
+                    'success'
+                );
+            }
+        } finally {
+            this._cdrWritesPending--;
+            this._cdrTogglePending = false;
+            if (!saved) this._cdrReady = false;
+            this.updateCdrUI();
+            if (!this._cdrReady && this._cdrWritesPending === 0 && !this._cdrSaveTimer) {
+                this.loadCdrConfig();
+            }
         }
     },
     
     updateCdrReserved(value) {
+        if (!this._hydrated || !this._cdrReady || this._cdrCleanupPending
+                || this._cdrTogglePending || this._cdrWritesPending > 0) return;
         this.cdrConfig.reservedSpaceMb = parseInt(value);
+        this._cdrDirty.reservedSpaceMb = this.cdrConfig.reservedSpaceMb;
+        this._cdrWriteVersion++;
         const el = document.getElementById('cdrReservedValue');
         const v = parseInt(value);
         if (el) el.textContent = v >= 1000 ? BYD.i18n.t('recording.unit_gb', {n: (v / 1000)}) : BYD.i18n.t('recording.unit_mb', {n: v});
@@ -931,36 +1070,75 @@ BYD.recording = {
     },
 
     updateCdrProtected(value) {
+        if (!this._hydrated || !this._cdrReady || this._cdrCleanupPending
+                || this._cdrTogglePending || this._cdrWritesPending > 0) return;
         this.cdrConfig.protectedHours = parseInt(value);
+        this._cdrDirty.protectedHours = this.cdrConfig.protectedHours;
+        this._cdrWriteVersion++;
         const el = document.getElementById('cdrProtectedValue');
         if (el) el.textContent = BYD.i18n.t('recording.unit_hours', {n: parseInt(value)});
         this.saveCdrConfig();
     },
     
     updateCdrMinKeep(value) {
+        if (!this._hydrated || !this._cdrReady || this._cdrCleanupPending
+                || this._cdrTogglePending || this._cdrWritesPending > 0) return;
         this.cdrConfig.minFilesKeep = parseInt(value);
+        this._cdrDirty.minFilesKeep = this.cdrConfig.minFilesKeep;
+        this._cdrWriteVersion++;
         const el = document.getElementById('cdrMinKeepValue');
         if (el) el.textContent = value;
         this.saveCdrConfig();
     },
     
-    async saveCdrConfig() {
+    saveCdrConfig() {
+        if (this._cdrSaveTimer) clearTimeout(this._cdrSaveTimer);
+        this._cdrSaveTimer = setTimeout(() => {
+            this._cdrSaveTimer = null;
+            this._flushCdrConfig();
+        }, 200);
+        this.updateCdrUI();
+    },
+
+    async _flushCdrConfig() {
+        if (!this._hydrated || !this._cdrReady) return;
+        const body = this._cdrDirty;
+        this._cdrDirty = {};
+        if (Object.keys(body).length === 0) return;
+        const writeVersion = this._cdrWriteVersion;
+        this._cdrWritesPending++;
+        this.updateCdrUI();
+        let saved = false;
         try {
-            await fetch('/api/storage/external/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    reservedSpaceMb: this.cdrConfig.reservedSpaceMb,
-                    protectedHours: this.cdrConfig.protectedHours,
-                    minFilesKeep: this.cdrConfig.minFilesKeep
-                })
-            });
-        } catch (e) {
-            console.warn('Failed to save CDR config:', e);
+            const data = await this._postJson('/api/storage/external/config', body);
+            if (!data) return;
+            saved = true;
+            if (writeVersion !== this._cdrWriteVersion) return;
+            if (data.cleanupEnabled != null) {
+                this.cdrConfig.enabled = !!data.cleanupEnabled;
+            }
+            this.cdrConfig.reservedSpaceMb = data.reservedSpaceMb;
+            this.cdrConfig.protectedHours = data.protectedHours;
+            this.cdrConfig.minFilesKeep = data.minFilesKeep;
+            this.updateCdrUI();
+        } finally {
+            this._cdrWritesPending--;
+            if (!saved) this._cdrReady = false;
+            this.updateCdrUI();
+            if (!this._cdrReady && this._cdrWritesPending === 0 && !this._cdrSaveTimer) {
+                this.loadCdrConfig();
+            }
         }
     },
     
     async triggerCdrCleanup() {
+        const button = document.getElementById('cdrCleanupNow');
+        if (!this._hydrated || !this._cdrReady || !this.cdrConfig.enabled
+                || this._cdrCleanupPending || this._cdrWritesPending > 0
+                || this._cdrSaveTimer || Object.keys(this._cdrDirty).length > 0
+                || (button && button.disabled)) return;
+        this._cdrCleanupPending = true;
+        this.updateCdrUI();
         try {
             if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.cdr_cleaning'), 'info');
 
@@ -984,6 +1162,9 @@ BYD.recording = {
             }
         } catch (e) {
             if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.cdr_trigger_failed'), 'error');
+        } finally {
+            this._cdrCleanupPending = false;
+            this.updateCdrUI();
         }
     },
     
@@ -1031,16 +1212,10 @@ BYD.recording = {
         if (this._rectifyDebounce) clearTimeout(this._rectifyDebounce);
         var self = this;
         this._rectifyDebounce = setTimeout(function () {
-            try {
-                fetch('/api/settings/unified', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        section: 'recording',
-                        data: { rectifyStrength: v }
-                    })
-                });
-            } catch (_) { /* live preview is best-effort */ }
+            self._postJson('/api/settings/unified', {
+                section: 'recording',
+                data: { rectifyStrength: v }
+            });
         }, 200);
     },
 
@@ -1349,9 +1524,15 @@ BYD.recording = {
         return 'capture';
     },
 
-    async saveSettings() {
+    saveSettings() {
+        return this._enqueueWrite(() => this._saveSettingsNow());
+    },
+
+    async _saveSettingsNow() {
         const btn = document.getElementById('btnApply');
         const origHtml = btn ? btn.innerHTML : null;
+        const savedBefore = this.savedConfig
+            ? JSON.parse(JSON.stringify(this.savedConfig)) : null;
         if (btn) {
             btn.disabled = true;
             btn.innerHTML = BYD.i18n.t('common.saving') || 'Saving…';
@@ -1385,16 +1566,16 @@ BYD.recording = {
                         segmentDurationMinutes: this.config.segmentDurationMinutes
                     })
                 });
-                if (!qResp.ok) throw new Error('quality ' + qResp.status);
+                const qData = await qResp.json();
+                if (!qResp.ok || !qData || qData.success !== true) {
+                    throw new Error((qData && qData.error) || ('quality ' + qResp.status));
+                }
                 // Surface field-level rejections in the final toast (instead
                 // of firing a separate warn toast that collides with the
                 // success toast at the end of saveSettings).
-                try {
-                    const qData = await qResp.clone().json();
-                    if (qData && qData.rejected && qData.rejected.length) {
-                        qualityRejectedFields = qData.rejected.map(function (r) { return r.field; });
-                    }
-                } catch (e) { /* response body parse — non-fatal */ }
+                if (qData.rejected && qData.rejected.length) {
+                    qualityRejectedFields = qData.rejected.map(function (r) { return r.field; });
+                }
                 // Mirror codec + tier into the unified store so other pages
                 // that read from there see the new values. Note: legacy
                 // `bitrate` key is no longer written; the single `quality`
@@ -1406,27 +1587,37 @@ BYD.recording = {
                     ? this.config.rectifyStrength : 0;
                 if (rectifyToSave < 0) rectifyToSave = 0;
                 if (rectifyToSave > 100) rectifyToSave = 100;
-                await fetch('/api/settings/unified', {
+                const unifiedData = { rectifyStrength: rectifyToSave };
+                if (qualityRejectedFields.indexOf('recordingCodec') === -1) {
+                    unifiedData.codec = this.config.recordingCodec;
+                }
+                if (qualityRejectedFields.indexOf('recordingQuality') === -1) {
+                    unifiedData.quality = this.config.recordingQuality;
+                    unifiedData.recordingQuality = this.config.recordingQuality;
+                }
+                const uResp = await fetch('/api/settings/unified', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         section: 'recording',
-                        data: {
-                            codec: this.config.recordingCodec,
-                            quality: this.config.recordingQuality,
-                            recordingQuality: this.config.recordingQuality,
-                            rectifyStrength: rectifyToSave
-                        }
+                        data: unifiedData
                     })
                 });
+                const uData = await uResp.json();
+                if (!uResp.ok || !uData || uData.success !== true) {
+                    throw new Error((uData && uData.error) || ('unified ' + uResp.status));
+                }
             } else if (activeTab === 'capture') {
                 const mResp = await fetch('/api/recording/mode', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ mode: this.config.recordingMode })
                 });
-                if (!mResp.ok) throw new Error('mode ' + mResp.status);
-                await fetch('/api/settings/unified', {
+                const mData = await mResp.json();
+                if (!mResp.ok || !mData || mData.status !== 'ok') {
+                    throw new Error((mData && mData.message) || ('mode ' + mResp.status));
+                }
+                const modeResp = await fetch('/api/settings/unified', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1434,7 +1625,11 @@ BYD.recording = {
                         data: { mode: this.config.recordingMode }
                     })
                 });
-                await fetch('/api/settings/unified', {
+                const modeData = await modeResp.json();
+                if (!modeResp.ok || !modeData || modeData.success !== true) {
+                    throw new Error((modeData && modeData.error) || ('mode mirror ' + modeResp.status));
+                }
+                const proxResp = await fetch('/api/settings/unified', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1442,6 +1637,10 @@ BYD.recording = {
                         data: this.config.proximityGuard
                     })
                 });
+                const proxData = await proxResp.json();
+                if (!proxResp.ok || !proxData || proxData.success !== true) {
+                    throw new Error((proxData && proxData.error) || ('proximity guard ' + proxResp.status));
+                }
             } else if (activeTab === 'storage') {
                 const storageResp = await fetch('/api/settings/storage', {
                     method: 'POST',
@@ -1451,7 +1650,6 @@ BYD.recording = {
                         recordingsStorageType: this.config.recordingsStorageType
                     })
                 });
-                if (!storageResp.ok) throw new Error('storage ' + storageResp.status);
                 storageData = await storageResp.json();
                 // The daemon answers HTTP 200 with {success:false} when a
                 // requested storage-TYPE change is rejected (target volume
@@ -1461,14 +1659,15 @@ BYD.recording = {
                 // last-applied baseline, re-render, and throw so the catch shows
                 // an error toast instead of a false "applied" + baking the
                 // rejected value into savedConfig.
-                if (storageData && storageData.success === false) {
+                if (!storageResp.ok || !storageData || storageData.success !== true) {
                     if (this.savedConfig) {
                         this.config.recordingsStorageType = this.savedConfig.recordingsStorageType;
                         this.config.recordingsLimitMb = this.savedConfig.recordingsLimitMb;
                     }
                     this.updateStorageLimitUI();
                     this.updateStorageTypeUI();
-                    throw new Error(storageData.error || 'storage change rejected');
+                    throw new Error((storageData && storageData.error)
+                        || ('storage ' + storageResp.status));
                 }
                 // Re-sync config to the value the daemon actually committed
                 // (it clamps to the active volume ceiling). This closes the
@@ -1490,10 +1689,10 @@ BYD.recording = {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ recordingMode: oemMode })
                     });
-                    if (!oemResp.ok) throw new Error('oem ' + oemResp.status);
                     const oemData = await oemResp.json();
-                    if (oemData && oemData.success === false) {
-                        throw new Error(oemData.error || 'OEM save rejected');
+                    if (!oemResp.ok || !oemData || oemData.success !== true) {
+                        throw new Error((oemData && oemData.error)
+                            || ('oem ' + oemResp.status));
                     }
                 } catch (e) {
                     oemErr = e;
@@ -1512,6 +1711,13 @@ BYD.recording = {
             }
 
             this.savedConfig = JSON.parse(JSON.stringify(this.config));
+            if (activeTab === 'quality' && savedBefore) {
+                qualityRejectedFields.forEach(field => {
+                    if (Object.prototype.hasOwnProperty.call(savedBefore, field)) {
+                        this.savedConfig[field] = savedBefore[field];
+                    }
+                });
+            }
             this.hasUnsavedChanges = false;
             // Update timestamp to prevent immediate reload overwriting our changes
             this.lastConfigTimestamp = Date.now();
@@ -1584,10 +1790,11 @@ BYD.recording = {
     _telemetryFieldPostInFlight: 0,
 
     async loadTelemetryOverlay() {
+        const writeVersion = this._telemetryWriteVersion;
         try {
             const resp = await fetch('/api/settings/telemetry-overlay');
             const data = await resp.json();
-            if (data.success) {
+            if (data.success && writeVersion === this._telemetryWriteVersion) {
                 const toggle = document.getElementById('telemetryOverlayEnabled');
                 if (toggle) toggle.checked = data.enabled || false;
                 this._telemetryCatalog = data.fieldCatalog || null;
@@ -1673,38 +1880,41 @@ BYD.recording = {
     },
 
     async toggleTelemetryField(flow, key, checked, gridId) {
+        if (!this._hydrated) return;
+        const field = document.getElementById('telField_' + flow + '_' + key);
+        if (field) field.disabled = true;
         const keys = this._collectFlowFields(flow, gridId);
         this._telemetryFields[flow] = keys;
         const body = { fields: {} };
         body.fields[flow] = keys;
         this._telemetryFieldPostInFlight++;
+        let failed = false;
         try {
-            const resp = await fetch('/api/settings/telemetry-overlay', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-            const data = await resp.json();
-            if (data.success && data.fields) this._telemetryFields = data.fields;
-        } catch (e) {
-            console.warn('Failed to update telemetry fields:', e);
+            const data = await this._postTelemetry(body);
+            failed = !data;
+            if (data && data.fields) this._telemetryFields = data.fields;
         } finally {
             this._telemetryFieldPostInFlight--;
+            if (field) field.disabled = false;
+            if (this._telemetryFieldPostInFlight === 0) {
+                if (failed) {
+                    await this.loadTelemetryOverlay();
+                } else {
+                    this.renderTelemetryFields('accOn', 'telemetryFieldsAccOnGrid');
+                    this.renderTelemetryFields('oemDashcam', 'telemetryFieldsOemDashcamGrid');
+                }
+            }
         }
     },
 
     async toggleTelemetryOverlay() {
         const toggle = document.getElementById('telemetryOverlayEnabled');
-        if (!toggle) return;
+        if (!toggle || !this._hydrated || toggle.disabled) return;
         const enabled = toggle.checked;
+        toggle.disabled = true;
         try {
-            const resp = await fetch('/api/settings/telemetry-overlay', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled })
-            });
-            const data = await resp.json();
-            if (data.success) {
+            const data = await this._postTelemetry({ enabled });
+            if (data) {
                 toggle.checked = data.enabled;
                 this.updateTelemetryFieldsVisibility('accOn', !!data.enabled);
                 if (BYD.utils && BYD.utils.toast) {
@@ -1717,6 +1927,8 @@ BYD.recording = {
         } catch (e) {
             toggle.checked = !enabled;
             if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.overlay_update_failed'), 'error');
+        } finally {
+            toggle.disabled = false;
         }
     },
 
@@ -1727,10 +1939,14 @@ BYD.recording = {
     // recordings are never audio-muxed regardless of this toggle.
 
     async loadAudioRecording() {
+        if (this._audioWritesPending > 0) return;
+        const writeVersion = this._audioWriteVersion;
         try {
             const resp = await fetch('/api/settings/audio-recording');
             const data = await resp.json();
-            if (data.success) {
+            if (data.success
+                    && this._audioWritesPending === 0
+                    && writeVersion === this._audioWriteVersion) {
                 const toggle = document.getElementById('audioRecordingEnabled');
                 if (toggle) toggle.checked = data.enabled || false;
             }
@@ -1741,16 +1957,14 @@ BYD.recording = {
 
     async toggleAudioRecording() {
         const toggle = document.getElementById('audioRecordingEnabled');
-        if (!toggle) return;
+        if (!toggle || !this._hydrated || toggle.disabled) return;
         const enabled = toggle.checked;
+        this._audioWriteVersion++;
+        this._audioWritesPending++;
+        toggle.disabled = true;
         try {
-            const resp = await fetch('/api/settings/audio-recording', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled })
-            });
-            const data = await resp.json();
-            if (data.success) {
+            const data = await this._postJson('/api/settings/audio-recording', { enabled });
+            if (data) {
                 toggle.checked = data.enabled;
                 if (BYD.utils && BYD.utils.toast) {
                     const key = data.enabled ? 'recording.audio_enabled_toast' : 'recording.audio_disabled_toast';
@@ -1763,6 +1977,9 @@ BYD.recording = {
         } catch (e) {
             toggle.checked = !enabled;
             if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.audio_update_failed'), 'error');
+        } finally {
+            this._audioWritesPending--;
+            toggle.disabled = false;
         }
     },
 
@@ -1778,10 +1995,14 @@ BYD.recording = {
     // takes effect at the next rotation/start.
 
     async loadGeocoding() {
+        if (this._geocodingWritesPending > 0) return false;
+        const writeVersion = this._geocodingWriteVersion;
         try {
             const resp = await fetch('/api/settings/geocoding');
             const data = await resp.json();
-            if (!data.success) return;
+            if (!data.success
+                    || this._geocodingWritesPending > 0
+                    || writeVersion !== this._geocodingWriteVersion) return false;
             const recCfg = data.recording || {};
             const advCfg = data.advanced || {};
             const swEnabled = document.getElementById('geocodingEnabled');
@@ -1796,77 +2017,106 @@ BYD.recording = {
                 inputUrl.value = advCfg.customNominatimBase || '';
                 inputUrl.disabled = !recCfg.enabled;
             }
+            return true;
         } catch (e) {
             console.warn('Failed to load geocoding state:', e);
+            return false;
         }
     },
 
     async _postGeocoding(delta) {
+        this._geocodingWriteVersion++;
+        this._geocodingWritesPending++;
         try {
-            const resp = await fetch('/api/settings/geocoding', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(delta)
-            });
-            const data = await resp.json();
-            return data && data.success ? data : null;
-        } catch (e) {
-            console.warn('Geocoding POST failed:', e);
-            return null;
+            return await this._postJson('/api/settings/geocoding', delta);
+        } finally {
+            this._geocodingWritesPending--;
         }
+    },
+
+    async _reloadGeocodingWhenIdle() {
+        let queue;
+        do {
+            queue = this._writeQueue;
+            await queue;
+            await Promise.resolve();
+        } while (queue !== this._writeQueue || this._geocodingWritesPending > 0);
+        return this.loadGeocoding();
     },
 
     async toggleGeocodingEnabled() {
         const sw = document.getElementById('geocodingEnabled');
         const swOnline = document.getElementById('geocodingOnline');
         const inputUrl = document.getElementById('geocodingCustomUrl');
-        if (!sw) return;
+        if (!sw || !this._hydrated || sw.disabled) return;
         const enabled = sw.checked;
-        const result = await this._postGeocoding({ recording: { enabled } });
-        if (result) {
-            // Echoed authoritative state — UI mirrors what the daemon wrote.
-            const rec = result.recording || {};
-            sw.checked = !!rec.enabled;
-            if (swOnline) swOnline.disabled = !rec.enabled;
-            if (inputUrl) inputUrl.disabled = !rec.enabled;
-            if (BYD.utils && BYD.utils.toast) {
-                const key = rec.enabled
-                    ? 'recording.geocoding_enabled_toast'
-                    : 'recording.geocoding_disabled_toast';
-                BYD.utils.toast(BYD.i18n.t(key), 'success');
+        sw.disabled = true;
+        if (swOnline) swOnline.disabled = true;
+        if (inputUrl) inputUrl.disabled = true;
+        try {
+            const result = await this._postGeocoding({ recording: { enabled } });
+            if (result) {
+                // Echoed authoritative state — UI mirrors what the daemon wrote.
+                const rec = result.recording || {};
+                sw.checked = !!rec.enabled;
+                if (BYD.utils && BYD.utils.toast) {
+                    const key = rec.enabled
+                        ? 'recording.geocoding_enabled_toast'
+                        : 'recording.geocoding_disabled_toast';
+                    BYD.utils.toast(BYD.i18n.t(key), 'success');
+                }
+            } else {
+                sw.checked = !enabled;
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast(BYD.i18n.t('recording.geocoding_update_failed'), 'error');
+                }
             }
-        } else {
-            sw.checked = !enabled;
-            if (BYD.utils && BYD.utils.toast) {
-                BYD.utils.toast(BYD.i18n.t('recording.geocoding_update_failed'), 'error');
-            }
+        } finally {
+            sw.disabled = false;
+            if (swOnline) swOnline.disabled = !sw.checked;
+            if (inputUrl) inputUrl.disabled = !sw.checked;
         }
     },
 
     async toggleGeocodingOnline() {
         const sw = document.getElementById('geocodingOnline');
-        if (!sw) return;
+        if (!sw || !this._hydrated || sw.disabled) return;
         const allowOnline = sw.checked;
-        const result = await this._postGeocoding({ recording: { allowOnline } });
-        if (result && result.recording) {
-            sw.checked = !!result.recording.allowOnline;
-        } else {
-            sw.checked = !allowOnline;
-            if (BYD.utils && BYD.utils.toast) {
-                BYD.utils.toast(BYD.i18n.t('recording.geocoding_update_failed'), 'error');
+        sw.disabled = true;
+        try {
+            const result = await this._postGeocoding({ recording: { allowOnline } });
+            if (result && result.recording) {
+                sw.checked = !!result.recording.allowOnline;
+            } else {
+                sw.checked = !allowOnline;
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast(BYD.i18n.t('recording.geocoding_update_failed'), 'error');
+                }
             }
+        } finally {
+            sw.disabled = !document.getElementById('geocodingEnabled').checked;
         }
     },
 
     async saveGeocodingCustomUrl() {
         const input = document.getElementById('geocodingCustomUrl');
-        if (!input) return;
+        if (!input || !this._hydrated || input.disabled) return;
         const url = (input.value || '').trim();
-        const result = await this._postGeocoding({
-            advanced: { customNominatimBase: url }
-        });
-        if (result && result.advanced) {
-            input.value = result.advanced.customNominatimBase || '';
+        input.disabled = true;
+        try {
+            const result = await this._postGeocoding({
+                advanced: { customNominatimBase: url }
+            });
+            if (result && result.advanced) {
+                input.value = result.advanced.customNominatimBase || '';
+            } else {
+                await this._reloadGeocodingWhenIdle();
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast(BYD.i18n.t('recording.geocoding_update_failed'), 'error');
+                }
+            }
+        } finally {
+            input.disabled = !document.getElementById('geocodingEnabled').checked;
         }
     },
 
@@ -2038,6 +2288,7 @@ BYD.recording = {
             if (idUnsetBadge) idUnsetBadge.style.display = idUnset ? 'none' : '';
             if (idUnset) { runIsIdUnset = true; return; }
 
+            const telemetryWriteVersion = this._telemetryWriteVersion;
             const [sdata, tdata] = await Promise.all([
                 fetch('/api/oem-dashcam/config').then(r => r.json()).catch(() => ({})),
                 fetch('/api/settings/telemetry-overlay').then(r => r.json()).catch(() => ({})),
@@ -2071,15 +2322,17 @@ BYD.recording = {
             }
 
             const telCb = document.getElementById('oemTelemetryOverlay');
-            if (telCb) telCb.checked = !!(tdata && tdata.oemDashcamEnabled);
-            // OEM field checklist mirrors the ACC-on one but its own flow.
-            // Seed the shared cache from this response: both loaders run in one
-            // Promise.all, so loadTelemetryOverlay may not have populated it yet
-            // and the grid would render empty with nothing to retry it.
-            if (tdata && tdata.fieldCatalog) this._telemetryCatalog = tdata.fieldCatalog;
-            if (tdata && tdata.fields) this._telemetryFields = tdata.fields;
-            this.renderTelemetryFields('oemDashcam', 'telemetryFieldsOemDashcamGrid');
-            this.updateTelemetryFieldsVisibility('oemDashcam', !!(telCb && telCb.checked));
+            if (telemetryWriteVersion === this._telemetryWriteVersion) {
+                if (telCb) telCb.checked = !!(tdata && tdata.oemDashcamEnabled);
+                // OEM field checklist mirrors the ACC-on one but its own flow.
+                // Seed the shared cache from this response: both loaders run in one
+                // Promise.all, so loadTelemetryOverlay may not have populated it yet
+                // and the grid would render empty with nothing to retry it.
+                if (tdata && tdata.fieldCatalog) this._telemetryCatalog = tdata.fieldCatalog;
+                if (tdata && tdata.fields) this._telemetryFields = tdata.fields;
+                this.renderTelemetryFields('oemDashcam', 'telemetryFieldsOemDashcamGrid');
+                this.updateTelemetryFieldsVisibility('oemDashcam', !!(telCb && telCb.checked));
+            }
 
             // Surface pipeline + recording state. Status badge + status row
             // both reflect the same source so the user sees one consistent
@@ -2297,25 +2550,26 @@ BYD.recording = {
 
     async toggleOemTelemetryOverlay() {
         const cb = document.getElementById('oemTelemetryOverlay');
-        if (!cb) return;
+        if (!cb || !this._hydrated || cb.disabled) return;
         const enabled = !!cb.checked;
+        cb.disabled = true;
         try {
             // Write only the OEM-specific key. Pano's panoEnabled stays at
             // whatever the user set elsewhere — that's the entire point of
             // the per-pipeline split.
-            const resp = await fetch('/api/settings/telemetry-overlay', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ oemDashcamEnabled: enabled })
+            const data = await this._postTelemetry({
+                oemDashcamEnabled: enabled
             });
-            const data = await resp.json();
-            if (!data || !data.success) {
+            if (!data) {
                 cb.checked = !enabled;
                 if (BYD.utils && BYD.utils.toast) {
                     BYD.utils.toast(BYD.i18n.t('common.error'), 'error');
                 }
             } else {
-                this.updateTelemetryFieldsVisibility('oemDashcam', enabled);
+                const applied = data.oemDashcamEnabled == null
+                    ? enabled : !!data.oemDashcamEnabled;
+                cb.checked = applied;
+                this.updateTelemetryFieldsVisibility('oemDashcam', applied);
             }
         } catch (e) {
             cb.checked = !enabled;
@@ -2325,6 +2579,8 @@ BYD.recording = {
             if (BYD.utils && BYD.utils.toast) {
                 BYD.utils.toast(BYD.i18n.t('common.error'), 'error');
             }
+        } finally {
+            cb.disabled = false;
         }
     },
 
@@ -2346,21 +2602,28 @@ BYD.recording = {
     // Recordings only; telemetry overlay is preserved in both layouts.
 
     async loadRecordingLayout() {
+        if (this._layoutWritePending) return;
+        const writeVersion = this._layoutWriteVersion;
         try {
             const resp = await fetch('/api/settings/recording-layout');
             const data = await resp.json();
-            if (data.success) {
-                this._applyRecordingLayoutButtons(data.layout || 'standard');
+            if (data.success
+                    && !this._layoutWritePending
+                    && writeVersion === this._layoutWriteVersion) {
+                this._recordingLayout = data.layout || 'standard';
+                this._dashcamUseWindshield = !!data.dashcamUseWindshield;
+                this._windshieldAvailable = !!data.windshieldAvailable;
+                this._applyRecordingLayoutButtons(this._recordingLayout);
 
                 const wsToggle = document.getElementById('dashcamUseWindshield');
                 if (wsToggle) {
-                    wsToggle.checked = data.dashcamUseWindshield || false;
-                    wsToggle.disabled = !data.windshieldAvailable;
+                    wsToggle.checked = this._dashcamUseWindshield;
+                    wsToggle.disabled = !this._windshieldAvailable;
                 }
 
                 const infoLine = document.getElementById('windshieldCameraInfo');
                 if (infoLine) {
-                    if (!data.windshieldAvailable) {
+                    if (!this._windshieldAvailable) {
                         infoLine.textContent = BYD.i18n.t('recording.layout_windshield_unavailable');
                         infoLine.style.display = 'block';
                     } else {
@@ -2368,7 +2631,7 @@ BYD.recording = {
                     }
                 }
 
-                this._updateWindshieldToggleVisibility(data.layout || 'standard');
+                this._updateWindshieldToggleVisibility(this._recordingLayout);
             }
         } catch (e) {
             console.warn('Failed to load recording layout:', e);
@@ -2390,12 +2653,14 @@ BYD.recording = {
     },
 
     async setRecordingLayout(layout) {
+        if (!this._hydrated || this._layoutWritePending) return;
         this._applyRecordingLayoutButtons(layout);
         this._updateWindshieldToggleVisibility(layout);
         await this._saveRecordingLayout();
     },
 
     async toggleDashcamWindshield() {
+        if (!this._hydrated || this._layoutWritePending) return;
         await this._saveRecordingLayout();
     },
 
@@ -2407,31 +2672,48 @@ BYD.recording = {
         const wsToggle = document.getElementById('dashcamUseWindshield');
         const dashcamUseWindshield = wsToggle ? wsToggle.checked : false;
 
+        this._layoutWriteVersion++;
+        this._layoutWritePending = true;
+        if (group) {
+            group.querySelectorAll('.btn-toggle').forEach(btn => { btn.disabled = true; });
+        }
+        if (wsToggle) wsToggle.disabled = true;
         try {
-            const resp = await fetch('/api/settings/recording-layout', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ layout, dashcamUseWindshield })
+            const data = await this._postJson('/api/settings/recording-layout', {
+                layout,
+                dashcamUseWindshield
             });
-            const data = await resp.json();
-            if (data.success) {
-                this._applyRecordingLayoutButtons(data.layout);
-                this._updateWindshieldToggleVisibility(data.layout);
+            if (data) {
+                this._recordingLayout = data.layout || 'standard';
+                this._dashcamUseWindshield = !!data.dashcamUseWindshield;
+                this._windshieldAvailable = !!data.windshieldAvailable;
+                this._applyRecordingLayoutButtons(this._recordingLayout);
+                this._updateWindshieldToggleVisibility(this._recordingLayout);
 
                 if (wsToggle) {
-                    wsToggle.checked = data.dashcamUseWindshield;
-                    wsToggle.disabled = !data.windshieldAvailable;
+                    wsToggle.checked = this._dashcamUseWindshield;
                 }
 
                 if (BYD.utils && BYD.utils.toast) {
-                    const key = data.layout === 'dashcam' ? 'recording.layout_dashcam_toast' : 'recording.layout_standard_toast';
+                    const key = this._recordingLayout === 'dashcam'
+                        ? 'recording.layout_dashcam_toast'
+                        : 'recording.layout_standard_toast';
                     BYD.utils.toast(BYD.i18n.t(key), 'success');
                 }
-            } else if (BYD.utils && BYD.utils.toast) {
-                BYD.utils.toast(BYD.i18n.t('recording.layout_update_failed'), 'error');
+            } else {
+                this._applyRecordingLayoutButtons(this._recordingLayout);
+                this._updateWindshieldToggleVisibility(this._recordingLayout);
+                if (wsToggle) wsToggle.checked = this._dashcamUseWindshield;
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast(BYD.i18n.t('recording.layout_update_failed'), 'error');
+                }
             }
-        } catch (e) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.layout_update_failed'), 'error');
+        } finally {
+            this._layoutWritePending = false;
+            if (group) {
+                group.querySelectorAll('.btn-toggle').forEach(btn => { btn.disabled = false; });
+            }
+            if (wsToggle) wsToggle.disabled = !this._windshieldAvailable;
         }
     },
 

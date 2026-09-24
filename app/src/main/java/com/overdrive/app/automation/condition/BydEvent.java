@@ -62,6 +62,7 @@ public class BydEvent {
     public static final EventData SEAT_HEAT_PASSENGER = new EventData("seatClimate", Map.of("type", "heat", "area", "passenger"));
     public static final EventData SEAT_COOL_DRIVER = new EventData("seatClimate", Map.of("type", "cool", "area", "driver"));
     public static final EventData SEAT_COOL_PASSENGER = new EventData("seatClimate", Map.of("type", "cool", "area", "passenger"));
+    public static final EventData STEERING_HEAT = new EventData("steeringHeat");
     public static final EventData AC = new EventData("ac");
     // Measured CABIN temperature, parked as well as driving. Never substitute the exterior
     // sensor or AC dial setpoint: those are separate automation signals below.
@@ -276,6 +277,7 @@ public class BydEvent {
             DRIVE_MODE,                            // DriveModeEvent  (1s)
             SEAT_COOL_DRIVER, SEAT_COOL_PASSENGER, // ClimateEvent    (500ms)
             SEAT_HEAT_DRIVER, SEAT_HEAT_PASSENGER, // ClimateEvent    (500ms)
+            STEERING_HEAT,                         // ClimateEvent    (500ms)
             LIGHTS_LOW_BEAM, LIGHTS_HIGH_BEAM,     // ClimateEvent    (500ms)
             LIGHTS_DRL, AUTO_LIGHTS,               // ClimateEvent    (500ms)
             AUTO_WIPER, WIPER_ACTIVE,              // ClimateEvent    (500ms)
@@ -700,16 +702,27 @@ public class BydEvent {
         } else if (data.bodyworkRangeKm != BydVehicleData.UNAVAILABLE) {
             Automations.update(ESTIMATED_RANGE, data.bodyworkRangeKm);
         }
-        publishFromSnapshot(LIGHTS_LOW_BEAM, data.lowBeam ? "on" : "off");
-        publishFromSnapshot(LIGHTS_HIGH_BEAM, data.highBeam ? "on" : "off");
-        publishFromSnapshot(LIGHTS_HAZARD, data.hazard ? "on" : "off");
-        publishFromSnapshot(LIGHTS_DRL, data.dayTimeLight ? "on" : "off");
+        if (data.isLightKnown(BydVehicleData.LIGHT_KNOWN_LOW_BEAM)) {
+            publishFromSnapshot(LIGHTS_LOW_BEAM, data.lowBeam ? "on" : "off");
+        }
+        if (data.isLightKnown(BydVehicleData.LIGHT_KNOWN_HIGH_BEAM)) {
+            publishFromSnapshot(LIGHTS_HIGH_BEAM, data.highBeam ? "on" : "off");
+        }
+        if (data.isLightKnown(BydVehicleData.LIGHT_KNOWN_TURN_HAZARD)) {
+            publishFromSnapshot(LIGHTS_HAZARD, data.hazard ? "on" : "off");
+        }
+        if (data.isLightKnown(BydVehicleData.LIGHT_KNOWN_DRL)) {
+            publishFromSnapshot(LIGHTS_DRL, data.dayTimeLight ? "on" : "off");
+        }
         // Ambient main switch — only on a real reading (UNAVAILABLE → publish nothing, so an
         // unreadable switch cannot fire a spurious "off" trigger on every poll).
         if (data.ambientEnabled != BydVehicleData.UNAVAILABLE) {
             Automations.update(AMBIENT_STATE, data.ambientEnabled == 1 ? "on" : "off");
         }
-        Automations.update(SLW, data.speedLimitWarning ? "on" : "off");
+        if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                || data.speedLimitWarningKnown) {
+            Automations.update(SLW, data.speedLimitWarning ? "on" : "off");
+        }
         // Skip a non-reading: cpdToString returns null outside the three real states, and
         // update(key, String) would wrap it in a StringValue(null) — non-null to the guard in
         // update(), so it would store a null and publish a value no condition can match.
@@ -723,6 +736,8 @@ public class BydEvent {
             if (data.seatCool.length > 0) publishFromSnapshot(SEAT_COOL_DRIVER, seatClimateToString(data.seatCool[0]));
             if (data.seatCool.length > 1) publishFromSnapshot(SEAT_COOL_PASSENGER, seatClimateToString(data.seatCool[1]));
         }
+        publishFromSnapshot(STEERING_HEAT,
+                steeringHeatStateToString(data.steeringWheelHeat));
         // AC power is owned by ClimateEvent's live getter. Do not gate it on vehicle power:
         // remote/parked preconditioning legitimately reports AC=on while the head unit is below
         // POWER_LEVEL_ON. Also do not turn an invalid/sentinel reading into a confident "off".
@@ -731,7 +746,7 @@ public class BydEvent {
         // publishes the measured cabin sensor only when a valid cabin reading exists; it never
         // substitutes the exterior sensor or weather estimate for a missing cabin measurement.
         updateTemperature(data);
-        // speedKmh is canonical km/h (already scaled by distanceToKmFactor at ingestion),
+        // speedKmh is canonical km/h (already scaled by the speed-specific factor at ingestion),
         // so the mph value is a straight km→mi conversion. Guard NaN (unreadable speed).
         if (!Double.isNaN(data.speedKmh)) {
             publishFromSnapshot(SPEED_KMPH, (int) Math.round(data.speedKmh));
@@ -1171,7 +1186,7 @@ public class BydEvent {
     }
 
     /**
-     * Publish per-seat seat-heat / seat-cool AND high/low beam from LIVE reads, for the fast
+     * Publish per-seat seat-heat / seat-cool, steering-wheel heat, and high/low beam from LIVE reads, for the fast
      * {@link ClimateEvent} poller — so a "when driver seat cooling turns off" (the reported
      * seat-cooling ELSE) or "when high beam on" trigger fires promptly instead of riding the
      * ~5s telemetry snapshot ({@code bydEvent}'s collectSettings / collectLight path). Each
@@ -1210,6 +1225,11 @@ public class BydEvent {
         if (Automations.isEventReferenced(SEAT_HEAT_PASSENGER) || Automations.editorSeedActive()) {
             int v = collector.readSeatClimateNow(true, 2);
             if (v != BydVehicleData.UNAVAILABLE) Automations.update(SEAT_HEAT_PASSENGER, seatClimateToString(v));
+        }
+        if (Automations.isEventReferenced(STEERING_HEAT) || Automations.editorSeedActive()) {
+            String state = steeringHeatStateToString(
+                    collector.getSteeringWheelHeatingState());
+            if (state != null) Automations.update(STEERING_HEAT, state);
         }
         // AC dial setpoint — only read when a rule actually references it (same gate as every
         // other entry here), so a car whose dial is unreadable pays nothing.
@@ -1582,6 +1602,13 @@ public class BydEvent {
     static String acStateToString(int state) {
         if (state == 0) return "off";
         if (state == 1) return "on";
+        return null;
+    }
+
+    /** Raw steering-wheel heater value to the automation vocabulary, or null on a miss. */
+    static String steeringHeatStateToString(int state) {
+        if (state == 1) return "off";
+        if (state == 2) return "on";
         return null;
     }
 

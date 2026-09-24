@@ -835,16 +835,6 @@ public class ChargingApiHandler {
                 }
             }
 
-            com.overdrive.app.byd.cloud.VehicleCloudSnapshot cloudSnap = null;
-            try {
-                com.overdrive.app.byd.cloud.BydCloudDataProvider cp = com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance();
-                if (cp != null) cloudSnap = cp.getSnapshot();
-            } catch (Exception ignored) {}
-
-            if (timeToFullMin <= 0 && cloudSnap != null && (cloudSnap.remainingHours >= 0 || cloudSnap.remainingMinutes >= 0)) {
-                timeToFullMin = Math.max(0, cloudSnap.remainingHours * 60 + Math.max(0, cloudSnap.remainingMinutes));
-            }
-
             ChargingDetector.StateSnapshot after = null;
             try {
                 after = ChargingDetector.getInstance().getStateSnapshot();
@@ -854,29 +844,19 @@ public class ChargingApiHandler {
                 continue;
             }
 
-            boolean isCloudCharging = cloudSnap != null && cloudSnap.getChargingStateAsSdk() == 1;
-            boolean isCloudPlugged = isCloudCharging || (cloudSnap != null && cloudSnap.chargingState == 15);
-
-            boolean hasLocalDetector = after != null && after.observedAtMs > 0;
-            boolean effectiveCharging = hasLocalDetector ? after.charging : (isCloudCharging && gunState != 1 && gunState != BydVehicleData.UNAVAILABLE);
-
             ChargingStateData.ChargingStatus status = state != null
-                    ? state.status : (effectiveCharging ? ChargingStateData.ChargingStatus.CHARGING : ChargingStateData.ChargingStatus.UNKNOWN);
+                    ? state.status : ChargingStateData.ChargingStatus.UNKNOWN;
+            boolean hasLiveDetectorSample = after.observedAtMs > 0;
             LiveStateFlags flags = normalizeLiveState(
-                    effectiveCharging,
+                    hasLiveDetectorSample && after.charging,
                     status,
-                    state != null && state.isTaperCharging,
+                    hasLiveDetectorSample
+                            && state != null && state.isTaperCharging,
                     gunState,
                     vtolCharging);
-            if (!hasLocalDetector && (isCloudCharging || isCloudPlugged)) {
-                flags = new LiveStateFlags(
-                    flags.charging || isCloudCharging,
-                    flags.plugged || isCloudPlugged,
-                    flags.full
-                );
-            }
             PowerPublication power =
                     normalizePowerPublication(flags.charging, state);
+            boolean full = qualifiesAsFull(flags.full, socPercent);
             if (!flags.charging) {
                 // An open row may remain during the bounded final-counter drain. It is persistence
                 // state, not proof that power is still flowing.
@@ -886,14 +866,11 @@ public class ChargingApiHandler {
                 sessionEnergySource = SessionEnergyResolver.SRC_NONE;
                 timeToFullMin = -1;
             }
-            if (state == null && (isCloudCharging || isCloudPlugged)) {
-                state = new ChargingStateData(isCloudCharging ? 1 : 0);
-            }
             return new LivePublication(
                     state,
                     flags.charging,
                     flags.plugged,
-                    flags.full,
+                    full,
                     state != null && state.isError,
                     socPercent,
                     sessionKwh,
@@ -907,6 +884,13 @@ public class ChargingApiHandler {
                     after);
         }
         return LivePublication.cleared(lastSnapshot);
+    }
+
+    static boolean qualifiesAsFull(boolean finished, double socPercent) {
+        return finished
+                && Double.isFinite(socPercent)
+                && socPercent >= 99.0
+                && socPercent <= 100.0;
     }
 
     private static void putPower(

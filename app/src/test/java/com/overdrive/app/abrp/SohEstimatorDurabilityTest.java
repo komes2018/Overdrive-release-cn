@@ -457,6 +457,32 @@ public class SohEstimatorDurabilityTest {
     }
 
     @Test
+    public void fiveKwhConfiguredNominalRestoresAndLowerValueDefers()
+            throws Exception {
+        SohEstimator.PersistenceWriter writer = (file, properties) -> {
+            store(file, properties);
+            return SohEstimator.PersistenceOutcome.DURABLE;
+        };
+
+        SohEstimator accepted = new SohEstimator(
+                new File(temporaryFolder.newFolder("five-kwh"), "soh.properties"),
+                writer,
+                fixedConfig(5.0, true));
+        accepted.init();
+        assertTrue(accepted.isInitializationReady());
+        assertEquals(5.0, accepted.getNominalCapacityKwh(), 0.0);
+        assertEquals("user", accepted.getNominalSource());
+
+        SohEstimator rejected = new SohEstimator(
+                new File(temporaryFolder.newFolder("below-five"), "soh.properties"),
+                writer,
+                fixedConfig(4.9, true));
+        rejected.init();
+        assertFalse(rejected.isInitializationReady());
+        assertEquals(0.0, rejected.getNominalCapacityKwh(), 0.0);
+    }
+
+    @Test
     public void clearedConfigDoesNotRestoreNominalOnlyUserSnapshot()
             throws Exception {
         File directory = temporaryFolder.newFolder("cleared-config");
@@ -1159,6 +1185,15 @@ public class SohEstimatorDurabilityTest {
                 "UnifiedConfigManager.setVehicle(patch)",
                 "estimator.autoDetectCarModelFromConfigSnapshot",
                 "estimator.seedInitialEstimate");
+        assertTrue(selection.contains(
+                "double floor = selectedModelPhev ? 5.0 : 15.0;"));
+        assertOrdered(
+                selection,
+                "patch.put(\"nominalKwh\", requestedNominalKwh)",
+                "changesNominal",
+                "? replacementNominal",
+                "estimator.resetFromConfigSnapshot(configuredUserNominal)",
+                "UnifiedConfigManager.setVehicle(patch)");
         String lookup = between(
                 models,
                 "public static double nominalKwhForSelectedModel",
@@ -1319,7 +1354,7 @@ public class SohEstimatorDurabilityTest {
                 "public double getNominalCapacityKwh()");
         String setUserNominal = between(
                 source,
-                "public void setNominalCapacityKwhFromUser",
+                "public boolean setNominalCapacityKwhFromUser",
                 "public void clearUserNominal()");
         String reset = between(
                 source,

@@ -827,6 +827,159 @@ public final class BsNativeLayer {
         }
     }
 
+    /**
+     * Resolve the layer stack that actually feeds DI5 app projection.
+     *
+     * <p>On trinket the projected task lives on
+     * {@code shared_fission_bg_XDJAScreenProjection_0/_1}, while the physical panel
+     * composition (and therefore the head-unit preview source) is the exact plain
+     * {@code fission_bg_XDJAScreenProjection} display. The generic resolver above
+     * deliberately accepts every fission line and can therefore finish on shared
+     * {@code _1}, which is the wrong stack when the app is on {@code _0}. Prefer the
+     * exact plain composition source; on older DI5 firmware where it is absent,
+     * fall back only to the selected OEM target display id.
+     */
+    public static FissionDisplay resolveDiLink5MirrorDisplay(int targetDisplayId) {
+        Process p = null;
+        try {
+            p = new ProcessBuilder("dumpsys", "display")
+                    .redirectErrorStream(true)
+                    .start();
+            final Process running = p;
+            final java.util.concurrent.atomic.AtomicReference<String> dump =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            final java.util.concurrent.atomic.AtomicReference<Throwable> failure =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            Thread readerThread = new Thread(() -> {
+                StringBuilder captured = new StringBuilder();
+                try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(running.getInputStream()))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        if (captured.length() < 2_000_000) {
+                            captured.append(line).append('\n');
+                        }
+                    }
+                    dump.set(captured.toString());
+                } catch (Throwable t) {
+                    failure.set(t);
+                }
+            }, "DiLink5MirrorDisplayScan");
+            readerThread.setDaemon(true);
+            readerThread.start();
+            try {
+                readerThread.join(3_000L);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return new FissionDisplay(-1, -1);
+            }
+            if (readerThread.isAlive()) {
+                try { running.destroyForcibly(); } catch (Throwable ignored) {}
+                try { readerThread.join(250L); }
+                catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+                logger.warn("resolveDiLink5MirrorDisplay timed out");
+                return new FissionDisplay(-1, -1);
+            }
+            if (failure.get() != null || dump.get() == null) {
+                logger.warn("resolveDiLink5MirrorDisplay read failed: "
+                        + (failure.get() == null ? "empty output"
+                        : failure.get().getMessage()));
+                return new FissionDisplay(-1, -1);
+            }
+            FissionDisplay resolved =
+                    parseDiLink5MirrorDisplay(dump.get(), targetDisplayId);
+            logger.info("resolveDiLink5MirrorDisplay result: targetId="
+                    + targetDisplayId + " displayId=" + resolved.displayId
+                    + " layerStack=" + resolved.layerStack + " real="
+                    + resolved.width + "x" + resolved.height);
+            return resolved;
+        } catch (Throwable t) {
+            logger.warn("resolveDiLink5MirrorDisplay failed: " + t.getMessage());
+            return new FissionDisplay(-1, -1);
+        } finally {
+            if (p != null) try { p.destroy(); } catch (Throwable ignored) {}
+        }
+    }
+
+    static FissionDisplay parseDiLink5MirrorDisplay(
+            String dump, int targetDisplayId) {
+        if (dump == null || dump.isEmpty()) return new FissionDisplay(-1, -1);
+        FissionDisplay plain = null;
+        FissionDisplay target = null;
+        boolean targetIsSharedShadow = false;
+        java.util.regex.Pattern stackPattern =
+                java.util.regex.Pattern.compile("(?i)layerstack[ =]+(\\d+)");
+        for (String line : dump.split("\\r?\\n")) {
+            String low = line.toLowerCase(java.util.Locale.US);
+            if (!low.contains("displayinfo{\"")
+                    || low.matches(".*\\bstate[ =]+(off|unknown)\\b.*")) {
+                continue;
+            }
+            String name = extractDisplayNameOnLine(line);
+            if (name == null) continue;
+            int id = extractDisplayIdOnLine(line);
+            java.util.regex.Matcher stackMatcher = stackPattern.matcher(line);
+            if (id <= 0 || !stackMatcher.find()) continue;
+            int stack = parseIntSafe(stackMatcher.group(1));
+            if (stack <= 0) continue;
+            int[] size = parseSizeFromDumpsysLine(line);
+            FissionDisplay candidate = new FissionDisplay(
+                    id,
+                    stack,
+                    size != null ? size[0] : 0,
+                    size != null ? size[1] : 0);
+            if (isDiLink5PlainProjectionDisplayName(name)) {
+                plain = candidate;
+            }
+            if (id == targetDisplayId
+                    && isDiLink5ProjectionDisplayName(name)) {
+                target = candidate;
+                targetIsSharedShadow =
+                        name.trim().toLowerCase(java.util.Locale.US)
+                                .startsWith("shared_");
+            }
+        }
+        if (plain != null) return plain;
+        // A trinket shared target is a logical render shadow (typically stack 3/4,
+        // framebuffer 1x1), not the composed panel source. Returning it here would
+        // turn a parser miss into a confidently ACTIVE but black preview. Older DI5
+        // firmware exposes a numbered, non-shared production target directly; that
+        // target remains a valid fallback when no plain composition display exists.
+        if (target != null && !targetIsSharedShadow) return target;
+        return new FissionDisplay(-1, -1);
+    }
+
+    static boolean isDiLink5PlainProjectionDisplayName(String name) {
+        return name != null
+                && "fission_bg_XDJAScreenProjection".equalsIgnoreCase(name.trim());
+    }
+
+    private static boolean isDiLink5ProjectionDisplayName(String name) {
+        if (name == null) return false;
+        String low = name.trim().toLowerCase(java.util.Locale.US);
+        return low.contains("xdjascreenprojection")
+                || "remote_dashboard".equals(low);
+    }
+
+    private static String extractDisplayNameOnLine(String line) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(?i)DisplayInfo\\{\\\"([^\\\"]+)")
+                .matcher(line);
+        if (!matcher.find()) return null;
+        String name = matcher.group(1).trim();
+        // DMS uses both DisplayInfo{"name", displayId N", ...} and
+        // DisplayInfo{"name, displayId N", ...} across BYD Android builds.
+        // The latter keeps the id inside the quoted header; strip it before
+        // exact-name matching so the composed plain display is still selected.
+        java.util.regex.Matcher suffix = java.util.regex.Pattern
+                .compile("(?i),\\s*displayId\\s*[= ]+\\s*\\d+\\s*$")
+                .matcher(name);
+        if (suffix.find()) name = name.substring(0, suffix.start()).trim();
+        return name;
+    }
+
     /** Pull the integer after "displayid" (followed by ' ' or '=') on a single line,
      *  or -1. Mirrors ClusterMapProjector.extractDisplayIdOnLine — the displayId is
      *  embedded in the fission DisplayInfo name string ("fission..., displayId 1"). */

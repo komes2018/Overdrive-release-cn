@@ -29,6 +29,11 @@ import java.util.concurrent.Executors;
  * key mappings; no window content is inspected. The foreground notification
  * provides user visibility.
  *
+ * On DiLink 3.0 this service can only bind while the app process is already
+ * running: BYD's start gate silently refuses the system's bind otherwise, leaving
+ * the service in "Binding services" indefinitely. It binds reliably here because
+ * the daemon keeps the process alive. See BYD_ACCESSIBILITY_BIND_GATE_DISCOVERY.md.
+ *
  * Enable via ADB (one-time):
  *   settings put secure enabled_accessibility_services com.overdrive.app/com.overdrive.app.services.KeepAliveAccessibilityService
  *   settings put secure accessibility_enabled 1

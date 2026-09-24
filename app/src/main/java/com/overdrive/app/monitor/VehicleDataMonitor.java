@@ -375,6 +375,24 @@ public class VehicleDataMonitor {
     }
 
     /**
+     * Reject the captured 359.x idle signature only when the connector itself
+     * proves this is an AC session. This guard runs after source-specific unit
+     * resolution, immediately before source precedence, so every downstream
+     * consumer (coarse history, fast samples, energy and cost) sees the same
+     * decision.
+     *
+     * <p>Do not broaden this into a session-median or magnitude-only filter:
+     * roughly 359 kW is a plausible BEV DC rate. Gun states 3/4 therefore keep
+     * the value, as does an unavailable gun state until the vehicle provides
+     * enough context to reject it safely.
+     */
+    static double filterKnownImpossibleAcChargingPower(
+            double powerKw, int gunState) {
+        return gunState == 2 && isChargePowerIdleGarbage(powerKw)
+                ? Double.NaN : powerKw;
+    }
+
+    /**
      * The instrument cluster shares the direct getter's known ~359.x idle value on PHEV/AC.
      *
      * <p>A missing gun sample must not make this known PHEV sentinel admissible. BEV DC remains
@@ -807,23 +825,31 @@ public class VehicleDataMonitor {
                 : ChargeRateResolver.rateKw(
                         com.overdrive.app.byd.ChargeSourceClassifier.SRC_CLUSTER,
                         vd.clusterChargePowerKw, taperPackFlowKw);
+        taperClusterKw = filterKnownImpossibleAcChargingPower(
+                taperClusterKw, vd.chargingGunState);
         double taperDeviceKw = ChargeRateResolver.isKnownPhevRawPowerJunk(
                         vd.chargingPowerKw, phevForTaper)
                 || !deviceHasIndependentTaperEvidence ? Double.NaN
                 : ChargeRateResolver.rateKw(
                         com.overdrive.app.byd.ChargeSourceClassifier.SRC_DEVICE,
                         vd.chargingPowerKw, taperPackFlowKw);
+        taperDeviceKw = filterKnownImpossibleAcChargingPower(
+                taperDeviceKw, vd.chargingGunState);
         double taperExternalKw = ChargeRateResolver.isKnownPhevRawPowerJunk(
                         vd.externalChargingPowerKw, phevForTaper)
                 || !externalHasIndependentTaperEvidence ? Double.NaN
                 : ChargeRateResolver.rateKw(
                         com.overdrive.app.byd.ChargeSourceClassifier.SRC_EXTERNAL,
                         vd.externalChargingPowerKw, taperPackFlowKw);
+        taperExternalKw = filterKnownImpossibleAcChargingPower(
+                taperExternalKw, vd.chargingGunState);
         boolean taperDirectIdleGarbage = isDirectChargePowerIdleGarbage(
                 vd.chargePowerKw, phevForTaper, vd.chargingGunState);
         double taperDirectKw = taperDirectIdleGarbage || !directHasIndependentTaperEvidence
                 ? Double.NaN
                 : resolveDirectChargePower(vd.chargePowerKw, taperPackFlowKw);
+        taperDirectKw = filterKnownImpossibleAcChargingPower(
+                taperDirectKw, vd.chargingGunState);
         if (shouldWithholdUnverifiedDirectRate(
                 taperDirectKw, taperPackFlowKw, phevForTaper)) {
             taperDirectKw = Double.NaN;
@@ -933,6 +959,8 @@ public class VehicleDataMonitor {
                             com.overdrive.app.byd.ChargeSourceClassifier.SRC_CLUSTER,
                             clusterResolvedKw, clusterPackFlowRef)
                     ? Double.NaN : clusterResolvedKw;
+            clusterKw = filterKnownImpossibleAcChargingPower(
+                    clusterKw, vd.chargingGunState);
             boolean extFromCurrentSession = isFreshPowerObservation(
                     vd.externalChargingPowerAtMs, powerObservationBoundaryMs,
                     powerResolutionNowMs);
@@ -948,6 +976,8 @@ public class VehicleDataMonitor {
             double extKw = shouldRejectCandidateBeforeSelection(
                     com.overdrive.app.byd.ChargeSourceClassifier.SRC_EXTERNAL,
                     extResolvedKw, extPackFlowRef) ? Double.NaN : extResolvedKw;
+            extKw = filterKnownImpossibleAcChargingPower(
+                    extKw, vd.chargingGunState);
             boolean deferExternalToEstimator = shouldDeferExternalToGroundedEstimate(
                     extKw, extPackFlowRef, phev, estUsable);
             boolean devFromCurrentSession = isFreshPowerObservation(
@@ -963,10 +993,14 @@ public class VehicleDataMonitor {
             double devKw = shouldRejectCandidateBeforeSelection(
                     com.overdrive.app.byd.ChargeSourceClassifier.SRC_DEVICE,
                     devResolvedKw, devPackFlowRef) ? Double.NaN : devResolvedKw;
+            devKw = filterKnownImpossibleAcChargingPower(
+                    devKw, vd.chargingGunState);
             // The per-session charged-energy counter is a known-cumulative kWh meter, so its slope
             // is a genuine measured rate. Available on trims where every rate accessor is dead.
             double capKw = ChargeRateResolver.rateKw(
                     com.overdrive.app.byd.ChargeSourceClassifier.SRC_CAPACITY, vd.chargingCapacityKwh);
+            capKw = filterKnownImpossibleAcChargingPower(
+                    capKw, vd.chargingGunState);
             boolean capacityScaleSuspect = com.overdrive.app.charging.CounterScaleCalibrator
                     .isScaleSuspect(
                             com.overdrive.app.byd.ChargeSourceClassifier.SRC_CAPACITY);
@@ -992,6 +1026,8 @@ public class VehicleDataMonitor {
                     || shouldWithholdUnverifiedDirectRate(
                             directResolvedKw, directScaleRef, phev)
                     ? Double.NaN : directResolvedKw;
+            directKw = filterKnownImpossibleAcChargingPower(
+                    directKw, vd.chargingGunState);
             boolean directOutranksCapacity = !Double.isNaN(directKw)
                     && (!phev || Double.isNaN(capKw) || capacityRateUntrusted);
 

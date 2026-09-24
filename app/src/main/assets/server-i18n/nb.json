@@ -1073,11 +1073,7 @@
     "thursday": "Torsdag",
     "friday": "Fredag",
     "saturday": "Lørdag",
-    "sunday": "Søndag",
-      "save_seat_position": "Lagre setet posisjon",
-      "save_seat_position_description": "Lagre gjeldende førerset-posisjon i minnespor.",
-      "set_seat_position": "Kontroller setets posisjon",
-      "set_seat_position_description": "Last inn en seteminne posisjon. Sørg for at minnet er lagret først fra bilen. Denne kontrollen fungerer ikke mens bilen er slått av."
+    "sunday": "Søndag"
   },
   "messages": {
     "logged_out": "Logget av",

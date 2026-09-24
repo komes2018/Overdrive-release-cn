@@ -19,11 +19,19 @@ public class AdbShellExecutorTimeoutAssetTest {
                 "app/src/main/java/com/overdrive/app/launcher/AdbShellExecutor.kt")
                 .replace("\r\n", "\n");
 
-        assertTrue(source.contains("private const val ADB_CONNECT_TIMEOUT_MS = 3_000"));
-        assertTrue(source.contains("private const val ADB_SOCKET_TIMEOUT_MS = 45_000"));
-        assertTrue(source.contains("ADB_CONNECT_TIMEOUT_MS,\n                    ADB_SOCKET_TIMEOUT_MS"));
+        assertTrue(source.contains("private const val CONNECT_TIMEOUT_MS = 2_000"));
+        assertTrue(source.contains("private const val SOCKET_TIMEOUT_MS = 60_000"));
+
+        // The invariant, independent of constant names: no Dadb.create may use the
+        // 3-arg overload, which leaves connect and SO_TIMEOUT at Dadb's infinite
+        // defaults. Every call site must pass both bounds explicitly.
         assertFalse(source.contains(
                 "Dadb.create(\"127.0.0.1\", ADB_PORT, keyPair)"));
+        for (String call : source.split("Dadb\\.create\\(\"127\\.0\\.0\\.1\"")) {
+            if (!call.startsWith(", ADB_PORT, keyPair,")) continue;
+            assertTrue("every Dadb.create must pass CONNECT_TIMEOUT_MS",
+                    call.startsWith(", ADB_PORT, keyPair, CONNECT_TIMEOUT_MS,"));
+        }
     }
 
     private static String readRepositoryFile(String relativePath) throws IOException {

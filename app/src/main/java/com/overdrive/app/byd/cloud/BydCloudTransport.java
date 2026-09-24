@@ -39,6 +39,62 @@ public final class BydCloudTransport {
     private static final String TAG = "BydCloudTransport";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
     private static final MediaType JSON_TYPE = MediaType.parse("application/json; charset=UTF-8");
+    /**
+     * Resolve the local sing-box/Tailscale route for every new HTTP call.
+     *
+     * <p>The cloud client is intentionally long-lived and shared by MQTT,
+     * realtime polling, remote commands, and the parked DI5 heartbeat. Freezing
+     * a {@link java.net.Proxy} in the constructor would strand that client on
+     * the old route when a proxy starts or stops later in the same daemon
+     * process. ProxyHelper already caches probes, so per-call selection is
+     * inexpensive while still reacting promptly to route changes.
+     *
+     * <p>The selection is a chain — the live proxy first, then a DIRECT
+     * fallback. The probe behind {@code ProxyHelper.getHttpProxy()} is a blind
+     * loopback TCP connect: it cannot distinguish a general-egress proxy
+     * (sing-box, or Tailscale fronting an exit node) from the tailnet-only
+     * Tailscale SOCKS listener that the MQTT settings expose for private
+     * brokers. BYD's cloud hosts are public internet, so when the selected
+     * proxy cannot carry public traffic every cloud operation (login, remote
+     * commands, realtime polling, the DI5 parked heartbeat) used to fail for
+     * as long as the listener was up — re-probing couldn't help because the
+     * listener itself stays healthy. With the chain, OkHttp attempts the
+     * routes in order and its route database remembers failures, so traffic
+     * settles on the working route instead of re-paying the dead one on every
+     * call, while sing-box/exit-node setups keep their proxy-first behavior.
+     */
+    private static final java.net.ProxySelector DYNAMIC_PROXY_SELECTOR =
+            new java.net.ProxySelector() {
+                @Override
+                public List<java.net.Proxy> select(java.net.URI uri) {
+                    return proxyRouteChain(
+                            com.overdrive.app.mqtt.ProxyHelper.getHttpProxy());
+                }
+
+                @Override
+                public void connectFailed(
+                        java.net.URI uri,
+                        java.net.SocketAddress address,
+                        IOException failure) {
+                    // Only proxy legs are reported here (OkHttp never calls
+                    // connectFailed for DIRECT routes). A cached positive
+                    // probe can outlive a proxy process. Re-probe on the next
+                    // request instead of pinning a dead route for the
+                    // remainder of the cache window.
+                    com.overdrive.app.mqtt.ProxyHelper.invalidateCache();
+                }
+            };
+
+    /**
+     * Route chain for one request: the selected proxy first, then a DIRECT
+     * fallback — or just DIRECT when no proxy is up. Delegates to the
+     * canonical {@link com.overdrive.app.mqtt.ProxyHelper#proxyRouteChain}
+     * shared with AppUpdater so every public-internet consumer falls back
+     * identically.
+     */
+    static List<java.net.Proxy> proxyRouteChain(java.net.Proxy selected) {
+        return com.overdrive.app.mqtt.ProxyHelper.proxyRouteChain(selected);
+    }
 
     private final BydCloudConfig config;
     private final EnvelopeCodec codec;
@@ -71,14 +127,28 @@ public final class BydCloudTransport {
                 : com.overdrive.app.mqtt.ProxyHelper.getHttpProxy();
         logger.info("BYD Cloud transport: baseUrl=" + config.getBaseUrl()
                 + " isChina=" + config.isChinaRegion()
-                + " proxy=" + (proxy.equals(java.net.Proxy.NO_PROXY) ? "direct" : proxy.address()));
+                + " proxy=" + (config.isChinaRegion() ? "direct (cn-optimized)" : "dynamic, direct fallback (current="
+                        + (proxy.equals(java.net.Proxy.NO_PROXY)
+                                ? "direct" : proxy.address())
+                        + ")"));
+
+        java.net.ProxySelector selector = config.isChinaRegion()
+                ? new java.net.ProxySelector() {
+                    @Override
+                    public List<java.net.Proxy> select(java.net.URI uri) {
+                        return Collections.singletonList(java.net.Proxy.NO_PROXY);
+                    }
+                    @Override
+                    public void connectFailed(java.net.URI uri, java.net.SocketAddress address, IOException failure) {}
+                }
+                : DYNAMIC_PROXY_SELECTOR;
 
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(10, TimeUnit.SECONDS)
                 .writeTimeout(10, TimeUnit.SECONDS)
                 .cookieJar(cookieJar)
-                .proxy(proxy)
+                .proxySelector(selector)
                 .build();
     }
 
@@ -91,6 +161,21 @@ public final class BydCloudTransport {
      * @throws IOException on network or protocol errors
      */
     public JSONObject postSecure(String endpoint, JSONObject outerPayload) throws IOException {
+        return postSecure(endpoint, outerPayload, 0L);
+    }
+
+    /**
+     * Send a secure POST with an optional whole-call deadline.
+     *
+     * <p>The normal cloud flows retain their existing connect/read/write
+     * timeouts by passing {@code 0}. The parked keep-alive uses a shorter
+     * whole-call deadline so one degraded network request cannot consume the
+     * entire heartbeat cadence.
+     */
+    public JSONObject postSecure(
+            String endpoint,
+            JSONObject outerPayload,
+            long callTimeoutMs) throws IOException {
         throwIfRequestCancelled();
         // Encode the outer payload into a Bangcle envelope
         String requestEnvelope = codec.encodeEnvelope(outerPayload.toString());
@@ -123,6 +208,9 @@ public final class BydCloudTransport {
 
         Thread owner = Thread.currentThread();
         Call call = httpClient.newCall(request);
+        if (callTimeoutMs > 0L) {
+            call.timeout().timeout(callTimeoutMs, TimeUnit.MILLISECONDS);
+        }
         activeCalls.put(owner, call);
         try {
             // A router timeout can race the Call registration above. Re-check

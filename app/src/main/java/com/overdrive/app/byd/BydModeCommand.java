@@ -80,7 +80,9 @@ public final class BydModeCommand {
         int energyMode = readInt(energy, "getEnergyMode");
         int operationMode = readInt(energy, "getOperationMode");
         int mandatoryElectricState =
-                VehicleActuatorBridge.readMandatoryElectricState(energy);
+                com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                        ? -1
+                        : VehicleActuatorBridge.readMandatoryElectricState(energy);
         boolean listenerRegistered =
                 BydDeviceHelper.registerListener(energy, (method, callbackArgs) -> {});
         System.out.println("OVERDRIVE_ENERGY_INIT=energyMode:" + energyMode
@@ -96,8 +98,11 @@ public final class BydModeCommand {
                         context, mode, generation)) {
             return false;
         }
+        boolean diLink5 =
+                com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
         boolean preferenceAxis =
-                VehicleActuatorBridge.readMandatoryElectricState(energy) > 0;
+                !diLink5
+                        && VehicleActuatorBridge.readMandatoryElectricState(energy) > 0;
         int previousMode = readSelectedEnergyMode(energy, preferenceAxis);
         if (previousMode == mode) {
             return VehicleActuatorBridge.completeEnergyActuation(
@@ -117,15 +122,21 @@ public final class BydModeCommand {
                 context, mode, generation)) {
             return false;
         }
-        int setterValue = preferenceAxis
-                ? VehicleActuatorBridge.mandatoryElectricStateForEnergyMode(mode) : mode;
-        if (preferenceAxis) {
-            int result = VehicleActuatorBridge.writeMandatoryElectricState(
-                    energy, setterValue);
-            System.out.println(
-                    "OVERDRIVE_setMandatoryElectricPreference_RETURN=" + result);
+        if (diLink5) {
+            int result = VehicleActuatorBridge.writeEnergyModeRaw(energy, mode);
+            System.out.println("OVERDRIVE_setEnergyModeRaw_RETURN=" + result);
         } else {
-            invoke(energy, "setEnergyMode", setterValue);
+            int setterValue = preferenceAxis
+                    ? VehicleActuatorBridge.mandatoryElectricStateForEnergyMode(mode)
+                    : mode;
+            if (preferenceAxis) {
+                int result = VehicleActuatorBridge.writeMandatoryElectricState(
+                        energy, setterValue);
+                System.out.println(
+                        "OVERDRIVE_setMandatoryElectricPreference_RETURN=" + result);
+            } else {
+                invoke(energy, "setEnergyMode", setterValue);
+            }
         }
         long deadline = SystemClock.elapsedRealtime() + APPLY_TIMEOUT_MS;
         do {
@@ -142,7 +153,8 @@ public final class BydModeCommand {
         return false;
     }
 
-    private static int readSelectedEnergyMode(Object energy, boolean preferenceAxis) {
+    private static int readSelectedEnergyMode(
+            Object energy, boolean preferenceAxis) {
         if (!preferenceAxis) return readInt(energy, "getEnergyMode");
         return VehicleActuatorBridge.energyModeForMandatoryElectricState(
                 VehicleActuatorBridge.readMandatoryElectricState(energy));

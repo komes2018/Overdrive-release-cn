@@ -239,7 +239,7 @@
     <string name="onboarding_camera_windshield_skip">Nee, bedankt</string>
     <!-- Vehicle profile chapter -->
     <string name="onboarding_vehicle_title">Vertel Overdrive over je accu</string>
-    <string name="onboarding_vehicle_body">Kies uw model en wij vullen het kWh, of typ het zelf (15–120). Dit maakt de berekening van bereik en oplaadschatting nauwkeurig. U kunt het overslaan en later instellen.</string>
+    <string name="onboarding_vehicle_body">Kies uw model en wij vullen het kWh, of typ het zelf (5–120). Dit maakt de berekening van bereik en oplaadschatting nauwkeurig. U kunt het overslaan en later instellen.</string>
     <string name="onboarding_vehicle_primary">Batterij instellen</string>
     <!-- Dashboard orientation chapter -->
     <string name="onboarding_dash_tiles_title">Je cockpit in een oogopslag</string>
@@ -738,6 +738,7 @@
     <string name="rail_vehicle">Voertuig</string>
     <string name="rail_projection">Projectie</string>
     <string name="rail_trips">Ritten</string>
+    <string name="rail_parking">Parkeren</string>
     <string name="rail_charging">Opladen</string>
     <string name="rail_automations">Automatiseringen</string>
     <string name="rail_key_mapping">Sleutel toewijzen</string>
@@ -906,7 +907,6 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Op wacht</string>
-    <string name="dashboard_modern_vehicle_status">Voertuigstatus</string>
     <string name="dashboard_subtitle_all_systems">Alle systemen online</string>
     <string name="dashboard_subtitle_some_offline">%1$d van %2$d diensten online</string>
     <string name="dashboard_subtitle_no_tunnel">Afgelegen toegang offline</string>
@@ -926,14 +926,11 @@
     <string name="vehicle_dialog_title">Stel de batterijcapaciteit</string>
     <string name="vehicle_dialog_capacity_label">Capaciteit (kWh)</string>
     <string name="vehicle_dialog_capacity_suffix">kWh</string>
-    <string name="vehicle_dialog_capacity_helper">15 tot 120 kWh. Laat het model standaard gebruiken.</string>
+    <string name="vehicle_dialog_capacity_helper">5 tot 120 kWh. Laat het model standaard gebruiken.</string>
     <string name="vehicle_dialog_model_label">Model</string>
     <string name="vehicle_dialog_save">Opslaan</string>
     <string name="vehicle_dialog_reset">Herstellen op automatische detectie</string>
-    <string name="vehicle_dialog_detection">Detectie: %1$s</string>
-    <string name="vehicle_dialog_detection_auto">Automatisch</string>
-    <string name="vehicle_dialog_detection_manual">Handmatig</string>
-    <string name="vehicle_dialog_invalid_capacity">De capaciteit moet 15 - 120 kWh zijn.</string>
+    <string name="vehicle_dialog_invalid_capacity">De capaciteit moet 5 - 120 kWh zijn.</string>
     <string name="vehicle_dialog_summary_effective">Effectief: %1$.1f kWh</string>
     <string name="vehicle_dialog_summary_calibration">Laatste kalibreerde: %1$.1f%% op %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">niet beschikbaar</string>
@@ -1370,6 +1367,10 @@
     <string name="projection_preset_right">Rechts de helft</string>
     <string name="projection_preset_center">Gecentreerd</string>
     <string name="projection_lock_aspect">clusteraspect behouden</string>
+    <string name="dashboard_modern_vehicle_status">Voertuigstatus</string>
+    <string name="vehicle_dialog_detection">Detectie: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automatisch</string>
+    <string name="vehicle_dialog_detection_manual">Handmatig</string>
     <!-- Rail category headers -->
     <string name="rail_section_cameras">Camera\'s</string>
     <string name="rail_section_controls">Bediening</string>

@@ -24,7 +24,7 @@ window.BYD = window.BYD || {};
 BYD.i18n = (function () {
     var SUPPORTED = [
         'en', 'zh-CN', 'zh-TW', 'pt-BR', 'es', 'de', 'fr', 'it',
-        'nb', 'nl', 'ja', 'ko', 'th', 'vi', 'hi', 'tr', 'ru', 'ar', 'he'
+        'nb', 'nl', 'ja', 'ko', 'th', 'vi', 'hi', 'tr', 'ru', 'ar', 'cs', 'he'
     ];
     var DEFAULT_LANG = 'en';
     var STORAGE_KEY = 'overdrive_locale';
@@ -52,6 +52,7 @@ BYD.i18n = (function () {
         'tr':    'Türkçe',
         'ru':    'Русский',
         'ar':    'العربية',
+        'cs':    'Čeština',
         'he':    'עברית'
     };
 
@@ -70,6 +71,10 @@ BYD.i18n = (function () {
                 return 'other';                            // optional plural marker, treat all as other
             case 'hi':
                 return n === 0 || n === 1 ? 'one' : 'other';
+            case 'cs':
+                if (n === 1) return 'one';
+                if (n === i && i >= 2 && i <= 4) return 'few';
+                return n === i ? 'other' : 'many';
             case 'ru':
                 // Russian / Slavic three-form plural per CLDR:
                 //   one  → ends in 1 but not 11           (1, 21, 31, ...; not 11)
@@ -85,9 +90,9 @@ BYD.i18n = (function () {
                 // carries one/other (the common case), plural()'s lookup falls
                 // back to `other`, so these extra forms are harmless until a
                 // translator supplies zero/two/few/many for a key.
-                //   zero: 0        two: 2
-                //   few  : n%100 in 3..10        many: n%100 in 11..99
-                //   one  : 1        other: everything else (incl. fractions)
+                //   zero → 0        two → 2
+                //   few  → n%100 in 3..10        many → n%100 in 11..99
+                //   one  → 1        other → everything else (incl. fractions)
                 if (n === 0) return 'zero';
                 if (n === 1) return 'one';
                 if (n === 2) return 'two';
@@ -116,6 +121,7 @@ BYD.i18n = (function () {
         enCatalog: null,
         loaded: false,
         loadingPromise: null,
+        loadRevision: 0,
         listeners: []
     };
 
@@ -162,10 +168,13 @@ BYD.i18n = (function () {
 
     /** Fetch the catalog JSON for `lang`. Falls back to en on failure. */
     function fetchCatalog(lang) {
+        // The embedded WebView can read the APK asset directly. This avoids a
+        // stale or unavailable daemon extract under /data/local/tmp/web/i18n.
         try {
-            if (window.AndroidBridge && typeof window.AndroidBridge.getI18nCatalog === 'function') {
-                var raw = window.AndroidBridge.getI18nCatalog(lang);
-                if (raw) return Promise.resolve(JSON.parse(raw));
+            if (window.AndroidBridge
+                    && typeof window.AndroidBridge.getI18nCatalog === 'function') {
+                var bundled = window.AndroidBridge.getI18nCatalog(lang);
+                if (bundled) return Promise.resolve(JSON.parse(bundled));
             }
         } catch (e) { /* fall through to HTTP */ }
         return fetch('/i18n/' + lang + '.json', { cache: 'no-cache' })
@@ -279,7 +288,7 @@ BYD.i18n = (function () {
             // null = catalog not loaded yet → leave existing text alone, the
             // listener fired on catalog-ready will re-hydrate. Don't write
             // raw keys to DOM.
-            if (translated == null) continue;
+            if (translated == null || translated === key) continue;
             // If the node has children other than the original text, only replace its
             // first text node so we don't blow away nested icons/SVGs (e.g. nav links).
             if (n.children.length > 0) {
@@ -305,7 +314,8 @@ BYD.i18n = (function () {
                 var pair = spec[s].split(':');
                 if (pair.length === 2) {
                     var translatedAttr = t(pair[1].trim());
-                    if (translatedAttr != null) {
+                    if (translatedAttr != null
+                            && translatedAttr !== pair[1].trim()) {
                         an.setAttribute(pair[0].trim(), translatedAttr);
                     }
                 }
@@ -315,9 +325,8 @@ BYD.i18n = (function () {
         if (document.documentElement) {
             document.documentElement.setAttribute('lang', state.lang);
             // RTL scripts need <html dir="rtl"> so the browser mirrors the
-            // (start/end-based) layout. Arabic and Hebrew are RTL in our set;
-            // every other locale stays 'ltr'. Set it explicitly so switching
-            // AWAY from an RTL locale restores 'ltr' in the same WebView.
+            // (start/end-based) layout. Set it explicitly so switching away
+            // from Arabic or Hebrew restores 'ltr' in the same WebView.
             document.documentElement.setAttribute('dir', RTL_LANGS[state.lang] ? 'rtl' : 'ltr');
         }
     }
@@ -365,37 +374,48 @@ BYD.i18n = (function () {
      * Either way, server writes are fire-and-forget; the catalog refetch
      * is the only thing the UI waits on.
      */
-    function setLang(lang) {
+    function setLang(lang, options) {
+        options = options || {};
         var resolved = resolveLang(lang);
         if (resolved === state.lang && state.loaded) return Promise.resolve();
         state.lang = resolved;
+        var revision = ++state.loadRevision;
         setStored(resolved);
-        if (inAppWebView()) {
-            try { fetch('/api/i18n/lang', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ lang: resolved })
-            }); } catch (e) {}
-        } else {
-            try { fetch('/api/settings/appearance', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ locale: resolved })
-            }); } catch (e) {}
+        // A server/native-origin update has already been persisted. Do not
+        // echo it back: an in-flight stale /status response could otherwise
+        // overwrite the newer app selection in the daemon.
+        if (options.persist !== false) {
+            if (inAppWebView()) {
+                try { fetch('/api/i18n/lang', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lang: resolved })
+                }); } catch (e) {}
+            } else {
+                try { fetch('/api/settings/appearance', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ locale: resolved })
+                }); } catch (e) {}
+            }
         }
         return fetchCatalog(resolved).then(function (cat) {
+            // Locale changes can race catalog fetches. Only the latest request
+            // may publish a catalog or notify subscribers.
+            if (revision !== state.loadRevision || state.lang !== resolved) return;
             state.catalog = cat || {};
             state.loaded = true;
             // AWAIT the en fallback before hydrate/notify, for the same reason
             // init() does: an onChange subscriber re-renders imperative text
             // (dropdown <option>s) that no later hydrate() can repair, so the
             // fallback has to be in place BEFORE we wake them.
-            var fallbackReady = (state.lang !== 'en' && state.enCatalog == null)
+            var fallbackReady = (resolved !== 'en' && state.enCatalog == null)
                 ? fetchCatalog('en').then(function (enCat) {
                       state.enCatalog = enCat || {};
                   }).catch(function () { /* best-effort */ })
                 : Promise.resolve();
             return fallbackReady.then(function () {
+                if (revision !== state.loadRevision || state.lang !== resolved) return;
                 hydrate(document);
                 notify();
             });
@@ -409,8 +429,23 @@ BYD.i18n = (function () {
      * the source of truth). Exposed via the public API so core.js's
      * /status handler can decide whether to call setLang().
      */
-    function shouldFollowServerLocale() {
-        return inAppWebView();
+    function shouldFollowServerLocale(serverLang) {
+        if (!inAppWebView()) return false;
+        // The Android app is authoritative in the embedded WebView. A daemon
+        // that has just restarted can briefly report its old persisted locale
+        // while an app-private pending write is being replayed. On a mismatch,
+        // keep the app locale instead of flashing/reverting to that stale value.
+        try {
+            if (serverLang
+                    && typeof window.AndroidBridge.getAppLocale === 'function') {
+                var appLang = window.AndroidBridge.getAppLocale();
+                if (appLang
+                        && resolveLang(appLang) !== resolveLang(serverLang)) {
+                    return false;
+                }
+            }
+        } catch (e) { /* fall back to the established in-app behavior */ }
+        return true;
     }
 
     /**
@@ -446,8 +481,11 @@ BYD.i18n = (function () {
             } catch (e) { /* fall through to localStorage */ }
         }
         if (!picked) picked = getStored() || detectFromBrowser();
-        state.lang = resolveLang(picked);
-        state.loadingPromise = fetchCatalog(state.lang).then(function (cat) {
+        var initialLang = resolveLang(picked);
+        state.lang = initialLang;
+        var revision = ++state.loadRevision;
+        state.loadingPromise = fetchCatalog(initialLang).then(function (cat) {
+            if (revision !== state.loadRevision || state.lang !== initialLang) return cat;
             state.catalog = cat || {};
             state.loaded = true;
             // Load en as a side-channel fallback when the active locale is non-en.
@@ -460,12 +498,13 @@ BYD.i18n = (function () {
             // That is not hypothetical: web/i18n/ar.json has no keymap or automation
             // section at all (all 188 keymap options), and nb.json is missing 77.
             // Waiting costs one parallel fetch of an already-cached asset.
-            var fallbackReady = (state.lang !== 'en' && state.enCatalog == null)
+            var fallbackReady = (initialLang !== 'en' && state.enCatalog == null)
                 ? fetchCatalog('en').then(function (enCat) {
                       state.enCatalog = enCat || {};
                   }).catch(function () { /* best-effort — active catalog still usable */ })
                 : Promise.resolve();
             return fallbackReady.then(function () {
+                if (revision !== state.loadRevision || state.lang !== initialLang) return cat;
                 hydrate(document);
                 notify();
                 // External mode: pull the server-stored web locale to handle
@@ -480,17 +519,10 @@ BYD.i18n = (function () {
                         if (!serverLang) return;
                         var resolved = resolveLang(serverLang);
                         if (resolved && resolved !== state.lang) {
-                            // Mirror the server pick into localStorage so a
-                            // subsequent reload short-circuits without a fetch.
-                            setStored(resolved);
-                            // setLang() refetches + rehydrates. Skip the
-                            // server POST inside it (we just READ the value).
-                            state.lang = resolved;
-                            fetchCatalog(resolved).then(function (cat2) {
-                                state.catalog = cat2 || {};
-                                hydrate(document);
-                                notify();
-                            });
+                            // setLang() mirrors into localStorage, refetches,
+                            // and race-guards publication. Skip persistence
+                            // because this value was just read from the server.
+                            setLang(resolved, { persist: false });
                         }
                     });
                 }
@@ -1110,9 +1142,9 @@ BYD.core = {
             // value (which is what status.locale carries).
             if (status.locale && BYD.i18n
                     && BYD.i18n.shouldFollowServerLocale
-                    && BYD.i18n.shouldFollowServerLocale()
-                    && status.locale !== BYD.i18n.getLang()) {
-                BYD.i18n.setLang(status.locale);
+                    && status.locale !== BYD.i18n.getLang()
+                    && BYD.i18n.shouldFollowServerLocale(status.locale)) {
+                BYD.i18n.setLang(status.locale, { persist: false });
             }
 
             // Device ID

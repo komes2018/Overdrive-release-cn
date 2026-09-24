@@ -69,6 +69,11 @@ public final class BodyworkSeatProbe {
 
     private BodyworkSeatProbe() {}
 
+    private static boolean useDiLink5AppProcessBridge() {
+        return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                && !"com.overdrive.app".equals(android.app.Application.getProcessName());
+    }
+
     /** A labelled feature id to read. */
     public static final class Id {
         public final String label;
@@ -300,6 +305,9 @@ public final class BodyworkSeatProbe {
      * @return JSON: the gate decision, the resolved set() method, and the raw SDK result code.
      */
     public static JSONObject writeAxes(Context ctx, int[] ids, float[] values) {
+        if (useDiLink5AppProcessBridge()) {
+            return VehicleActuatorBridge.writeDiLink5Position(ctx, ids, values);
+        }
         JSONObject r = new JSONObject();
         try {
             r.put("uid", android.os.Process.myUid());
@@ -315,6 +323,7 @@ public final class BodyworkSeatProbe {
                 r.put("reason", "movement gate blocked (not parked / unknown state)");
                 return r;
             }
+            if (positionPowerUnavailable(r)) return r;
 
             Context permissive = new PermissiveContext(ctx.getApplicationContext() != null
                     ? ctx.getApplicationContext() : ctx);
@@ -322,8 +331,8 @@ public final class BodyworkSeatProbe {
             if (device == null) { r.put("error", "BYDAutoBodyworkDevice null on this firmware"); return r; }
             r.put("permissiveContextInstalled", swapContext(device, permissive));
 
-            // AUTHORITATIVE write recipe (from BydDiLinkAccount spi.p7.i() — the DiLink seat
-            // manager's own apply): ONE batched set(int[] ids, BYDAutoEventValue) where the
+            // The vehicle's seat manager applies one batched set(int[] ids,
+            // BYDAutoEventValue) where the
             // value is a parallel FLOAT ARRAY in ev.floatArrayValue — NOT per-axis, NOT
             // ev.doubleValue. Gated by s7.T() (parked), no separate EXECUTE step. My earlier
             // per-axis ev.doubleValue write returned code 0 but did NOT actuate — wrong field
@@ -340,6 +349,7 @@ public final class BodyworkSeatProbe {
                 r.put("reason", "movement gate became active before actuation");
                 return r;
             }
+            if (positionPowerUnavailable(r)) return r;
             Object res = setM.invoke(device, ids, ev);
             int code = (res instanceof Number) ? ((Number) res).intValue()
                      : (res instanceof Boolean) ? (((Boolean) res) ? 0 : -1) : UNKNOWN_CODE;
@@ -442,6 +452,10 @@ public final class BodyworkSeatProbe {
      * apply round-trips faithfully. This is the read side of the capture-on-long-press feature.
      */
     public static JSONObject readFullBundle(Context ctx) {
+        if (useDiLink5AppProcessBridge()) {
+            JSONObject bridged = VehicleActuatorBridge.readDiLink5Position(ctx);
+            return bridged.has("error") ? new JSONObject() : bridged;
+        }
         JSONObject axes = new JSONObject();
         try {
             Context permissive = new PermissiveContext(ctx.getApplicationContext() != null
@@ -499,6 +513,9 @@ public final class BodyworkSeatProbe {
      * @param overrides label -> value (e.g. {"LEFT_H":15}); axes not overridden keep their current read value.
      */
     public static JSONObject applyFull(Context ctx, Map<String, Float> overrides) {
+        if (useDiLink5AppProcessBridge()) {
+            return VehicleActuatorBridge.applyDiLink5Position(ctx, overrides);
+        }
         JSONObject r = new JSONObject();
         try {
             r.put("uid", android.os.Process.myUid());
@@ -507,6 +524,7 @@ public final class BodyworkSeatProbe {
                 r.put("reason", "movement gate blocked");
                 return r;
             }
+            if (positionPowerUnavailable(r)) return r;
 
             Context permissive = new PermissiveContext(ctx.getApplicationContext() != null ? ctx.getApplicationContext() : ctx);
             Object device = BydDeviceHelper.getDevice(BODYWORK_DEVICE, permissive);
@@ -553,6 +571,7 @@ public final class BodyworkSeatProbe {
                 r.put("reason", "movement gate became active while preparing the position");
                 return r;
             }
+            if (positionPowerUnavailable(r)) return r;
             // Batch 1: group 1 (mirrors + steering).
             JSONObject b1 = writeGroup(setM, evClass, device, axes, valByIdx, 1);
             r.put("batch1", b1);
@@ -581,22 +600,35 @@ public final class BodyworkSeatProbe {
             // batch-1-ok / batch-2-failed apply reported success with the seat unmoved.
             boolean ok = b1.optBoolean("accepted", false) && b2.optBoolean("accepted", false);
             r.put("accepted", ok);
-            // ACC off is not "blocked" (the car is parked), but the motors are unpowered, so
-            // the HAL returns 0 for a write that cannot actuate. Say so rather than claim it moved.
-            try {
-                if (ok && !com.overdrive.app.monitor.AccMonitor.isAccOn()) {
-                    r.put("inert", true);
-                    r.put("reason", "accepted with ACC off: seat motors unpowered, nothing moved");
-                }
-            } catch (Throwable ignored) { }
         } catch (Throwable t) {
             try { r.put("exception", String.valueOf(t)); r.put("accepted", false); } catch (Exception ignored) {}
         }
         return r;
     }
 
+    private static boolean positionPowerUnavailable(JSONObject result) {
+        if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) return false;
+        Boolean accOn = VehicleActuatorBridge.currentDiLink5RequestAccOn();
+        if (Boolean.TRUE.equals(accOn)) return false;
+        try {
+            result.put("accepted", false);
+            result.put("skipped", true);
+            result.put("inert", true);
+            result.put("reason", accOn == null
+                    ? "ACC state unavailable: position write not attempted"
+                    : "ACC off: position motors are unpowered");
+        } catch (Exception ignored) {
+        }
+        return true;
+    }
+
     private static boolean positioningBlocked(JSONObject result) {
         try {
+            if (VehicleActuatorBridge.isDiLink5RequestExpired()) {
+                result.put("movementBlocked", true);
+                result.put("requestExpired", true);
+                return true;
+            }
             boolean blocked = DrivingSafetyGuard.isActionBlocked(
                     DrivingSafetyGuard.GUARD_POSITIONING);
             result.put("movementBlocked", blocked);

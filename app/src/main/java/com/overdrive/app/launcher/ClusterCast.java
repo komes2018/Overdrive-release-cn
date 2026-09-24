@@ -5,6 +5,8 @@ import com.overdrive.app.surveillance.ClusterProjectionController;
 
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Casts an arbitrary installed app onto the BYD driver-cluster (fission) display
@@ -63,6 +65,10 @@ public final class ClusterCast {
     private static final int LAUNCH_VERIFY_ATTEMPTS = 3;
     private static final int LAUNCH_VERIFY_POLLS_PER_ATTEMPT = 6;
     private static final int LAUNCH_VERIFY_POLL_MS = 300;
+    private static final long RESUMED_STATE_TIMEOUT_MS = 1500L;
+    private static final Pattern RESUMED_COMPONENT_PATTERN = Pattern.compile(
+            "([A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)+)"
+                    + "/[A-Za-z0-9_.$]+");
 
     // ── Freeform-on-cluster resize. When ON, the cast app is CONVERTED to freeform at explicit
     // bounds AFTER it resumes fullscreen (the reliable path — never bare `am start
@@ -267,6 +273,9 @@ public final class ClusterCast {
      *   bounds-only update so dragging tracks the finger without a stack scan or shell fork.
      */
     public static boolean resize(int l, int t, int r, int b, boolean commit) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            return DiLink5ClusterCast.resize(l, t, r, b, commit);
+        }
         if (!freeformResizeEnabled()) return false;
         if (r - l <= 0 || b - t <= 0) return false;
         // CLAMP SERVER-SIDE to the real cluster panel. The geometry engine that produces this rect
@@ -411,8 +420,29 @@ public final class ClusterCast {
      * so the several-second {@code dumpsys}+{@code am} reparent never blocks daemon boot.
      * Idempotent — {@link AppLauncher#reparentToDisplay0} is a no-op when the task is gone or
      * already on display 0.
-     */
+    */
     public static void reparentStrandedCastAtBoot() {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            // DI5 recovery owns the cross-mode fence. Once its compositor
+            // ownership is proven clear it must also consume any stranded
+            // legacy task/gauge marker before leaving RECOVERING.
+            DiLink5ClusterCast.recoverAtBoot(true);
+            return;
+        }
+        // Always probe durable DI5 ownership before admitting the currently
+        // selected legacy stack. This survives a second daemon restart after
+        // the mode marker has already changed away from DI5.
+        DiLink5ClusterCast.recoverAtBoot(true);
+    }
+
+    /**
+     * Completes the legacy stranded-task half of boot recovery while the
+     * DI5 cross-mode admission fence is still held. Synchronous by design:
+     * opening a new legacy projection before this task move finishes could
+     * let the recovery move that new session back to display 0.
+     */
+    public static boolean
+            reparentLegacyStrandedCastAtBootSynchronously() {
         final String pkg;
         final boolean autoCast;
         final String autoPkg;
@@ -429,9 +459,9 @@ public final class ClusterCast {
             org.json.JSONObject navCfg = cfg.optJSONObject("navMap");
             mapAutoProject = navCfg != null && navCfg.optBoolean("autoProjectCluster", false);
         } catch (Throwable t) {
-            return;
+            return false;
         }
-        if (pkg == null || pkg.isEmpty()) return;
+        if (pkg == null || pkg.isEmpty()) return true;
 
         // If the stranded package is the configured ACC-on auto-cast, DEFER ENTIRELY to that
         // auto-cast — do not reparent. Two reasons, both decisive:
@@ -451,7 +481,7 @@ public final class ClusterCast {
         // fall through to the sweep when the map is going to win.
         if (autoCast && !mapAutoProject && pkg.equals(autoPkg)) {
             logger.info("cluster cast: boot reparent deferred to ACC-on auto-cast (" + pkg + ")");
-            return;
+            return true;
         }
         if (autoCast && mapAutoProject && pkg.equals(autoPkg)) {
             logger.warn("cluster cast: stranded auto-cast package " + pkg + " but map auto-project "
@@ -461,30 +491,29 @@ public final class ClusterCast {
 
         logger.warn("cluster cast: stranded cast package at boot (" + pkg
                 + ") — reparenting to display 0");
-        new Thread(() -> {
-            // Never reparent out from under a cast that (re)started on this boot. A synchronized
-            // start() sets castPkg BEFORE its launch thread places the app on the cluster, so a
-            // null castPkg here means no cast has begun. (reparentToDisplay0 moves only pkg's own
-            // task, so a concurrent cast of a DIFFERENT package is untouched regardless.)
+        // Never reparent out from under a cast that (re)started on this boot.
+        synchronized (ClusterCast.class) {
+            if (castPkg != null) {
+                logger.info("cluster cast: boot reparent skipped — a live "
+                        + "cast owns the cluster");
+                return true;
+            }
+        }
+        boolean rehomed = false;
+        try {
+            rehomed = AppLauncher.reparentToDisplay0(pkg);
+        } catch (Throwable t) {
+            logger.warn("cluster cast: boot reparent failed: "
+                    + t.getMessage());
+        }
+        if (rehomed) {
             synchronized (ClusterCast.class) {
-                if (castPkg != null) {
-                    logger.info("cluster cast: boot reparent skipped — a live cast owns the cluster");
-                    return;   // leave the flag; the live cast now manages it
+                if (castPkg == null) {
+                    clearStrandedCastPkg();
                 }
             }
-            boolean rehomed = false;
-            try { rehomed = AppLauncher.reparentToDisplay0(pkg); }
-            catch (Throwable t) { logger.warn("cluster cast: boot reparent failed: " + t.getMessage()); }
-            // Clear the flag only when the reparent dispatched (app moved off the cluster) AND no
-            // cast raced in. On failure (e.g. dumpsys not ready this early in boot), keep the flag
-            // so the NEXT boot retries. A start() that raced in has persisted its own package and
-            // owns the flag now, so leave it for that cast's stop / the next boot.
-            if (rehomed) {
-                synchronized (ClusterCast.class) {
-                    if (castPkg == null) clearStrandedCastPkg();
-                }
-            }
-        }, "ClusterCastBootReparent").start();
+        }
+        return rehomed;
     }
 
     /**
@@ -500,14 +529,23 @@ public final class ClusterCast {
      */
     /** The package currently (being) cast onto the cluster, or null if none. Read by the
      *  package-removed watcher to tear down a live cast whose app was just uninstalled. */
-    public static synchronized String getCastPackage() { return castPkg; }
+    public static synchronized String getCastPackage() {
+        return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                ? DiLink5ClusterCast.getCastPackage() : castPkg;
+    }
 
     /** Current cast identity for race-safe dependent cleanup, or 0 when no cast is active. */
     public static synchronized long currentSessionGeneration() {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            return DiLink5ClusterCast.currentSessionGeneration();
+        }
         return castPkg != null ? castSessionGeneration : 0L;
     }
 
     public static synchronized boolean isActive() {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            return DiLink5ClusterCast.isActive();
+        }
         String pkg = castPkg;
         if (pkg == null) return false;
         try {
@@ -543,6 +581,15 @@ public final class ClusterCast {
      * the async resume race.
      */
     public static synchronized boolean start(String pkg) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            return DiLink5ClusterCast.start(pkg);
+        }
+        if (ClusterProjectionController
+                .isLegacyProjectionAdmissionBlocked()) {
+            logger.warn("cluster cast: legacy projection blocked by "
+                    + "unresolved cluster recovery ownership");
+            return false;
+        }
         if (castStopInProgress) {
             logger.warn("cluster cast: start deferred while previous cast is stopping");
             return false;
@@ -589,7 +636,12 @@ public final class ClusterCast {
         logger.info("cluster cast: start " + pkg + " (" + component + ")");
         // Acquire our hold FIRST so the projection is pinned before we touch the map.
         try {
-            ClusterProjectionController.getInstance().acquireSustained(TOKEN);
+            if (!ClusterProjectionController.getInstance()
+                    .acquireSustained(TOKEN)) {
+                logger.warn("cluster cast: sustained projection was not admitted");
+                castPkg = null;
+                return false;
+            }
         } catch (Throwable t) {
             logger.warn("cluster cast: acquireSustained failed: " + t.getMessage());
             // acquireSustained adds the token to the holder set as its FIRST step, then
@@ -630,6 +682,28 @@ public final class ClusterCast {
     }
 
     /**
+     * DI5-only verified start used by request/response APIs. The regular
+     * {@link #start(String)} stays asynchronous for ACC auto-start and other
+     * fire-and-forget callers. Legacy platforms keep their established behavior.
+     */
+    public static boolean startAndAwait(String pkg, long timeoutMs) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            return DiLink5ClusterCast.startAndAwait(pkg, timeoutMs);
+        }
+        return start(pkg);
+    }
+
+    public static String getStartPhase() {
+        return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                ? DiLink5ClusterCast.getPhase() : (isActive() ? "active" : "idle");
+    }
+
+    public static String getLastStartFailure() {
+        return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                ? DiLink5ClusterCast.getLastFailureReason() : "";
+    }
+
+    /**
      * Stop casting from a USER-INITIATED, within-session path (the Projection screen's Stop
      * button, {@code cluster_cast_stop}). Releases the sustained hold so the controller
      * restores the gauges (when no other consumer — map / blind-spot — still wants the
@@ -637,7 +711,7 @@ public final class ClusterCast {
      * so the app reopens on the infotainment (see {@link AppLauncher#reparentToDisplay0}).
      * Idempotent.
      */
-    public static void stop() { stop(CLEAR_AFFINITY, 0L); }
+    public static boolean stop() { return stop(CLEAR_AFFINITY, 0L); }
 
     // stop() rehome modes.
     private static final int NO_REHOME     = 0;  // ACC-off / forceClose: touch nothing extra
@@ -653,26 +727,36 @@ public final class ClusterCast {
      * is typically truly removed (AMS auto-reparents) — and a user-initiated
      * {@link #stop()} on the Projection screen clears it explicitly anyway.
      */
-    public static void stopForAccOff() { stop(NO_REHOME, 0L); }
+    public static boolean stopForAccOff() { return stop(NO_REHOME, 0L); }
 
     /**
      * Stop only the cast identified by {@code expectedGeneration}. Used when a Projection UI
      * process dies: the delayed Binder death callback must not terminate a cast started by a
      * replacement process in the meantime.
      */
-    public static void stopIfSession(long expectedGeneration) {
-        if (expectedGeneration > 0L) stop(CLEAR_AFFINITY, expectedGeneration);
+    public static boolean stopIfSession(long expectedGeneration) {
+        return expectedGeneration <= 0L
+                || stop(CLEAR_AFFINITY, expectedGeneration);
     }
 
     /** @param rehomeToHeadUnit true → the explicit "move app back to head unit" foreground
      *   reparent; false → the ACC-off-safe no-rehome path. Retained for the existing
      *   {@code move_display} caller; new call sites should use {@link #stop()} (background
      *   affinity clear) or {@link #stopForAccOff()}. */
-    public static void stop(boolean rehomeToHeadUnit) {
-        stop(rehomeToHeadUnit ? FOREGROUND : NO_REHOME, 0L);
+    public static boolean stop(boolean rehomeToHeadUnit) {
+        return stop(rehomeToHeadUnit ? FOREGROUND : NO_REHOME, 0L);
     }
 
-    private static void stop(int rehomeMode, long expectedGeneration) {
+    private static boolean stop(int rehomeMode, long expectedGeneration) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            if (expectedGeneration > 0L) {
+                return DiLink5ClusterCast.stopIfSession(expectedGeneration);
+            } else if (rehomeMode == NO_REHOME) {
+                return DiLink5ClusterCast.stopForAccOff();
+            } else {
+                return DiLink5ClusterCast.stop(rehomeMode == FOREGROUND);
+            }
+        }
         // Capture + clear state UNDER the lock, but do the slow shell reparent OUTSIDE it:
         // reparentToDisplay0 / launchOnDisplay spawn dumpsys + am (up to several seconds), and
         // holding the ClusterCast monitor that long would block isActive()/getCastPackage()/
@@ -683,7 +767,7 @@ public final class ClusterCast {
             if (castPkg == null
                     || (expectedGeneration > 0L
                     && castSessionGeneration != expectedGeneration)) {
-                return;
+                return true;
             }
             pkg = castPkg;
             logger.info("cluster cast: stop " + pkg + " (rehomeMode=" + rehomeMode + ")");
@@ -739,10 +823,12 @@ public final class ClusterCast {
         if ((rehomeMode == FOREGROUND || rehomeMode == CLEAR_AFFINITY) && rehomed) {
             clearStrandedCastPkg();
         }
+        boolean projectionReleased = true;
         try {
             try {
                 ClusterProjectionController.getInstance().releaseSustained(TOKEN);
             } catch (Throwable t) {
+                projectionReleased = false;
                 logger.warn("cluster cast: releaseSustained failed: " + t.getMessage());
             }
             // After a USER-INITIATED stop (not ACC-off), if the user has the RoadSense map set to
@@ -773,6 +859,7 @@ public final class ClusterCast {
                 }
             }
         }
+        return rehomed && projectionReleased;
     }
 
     /**
@@ -1010,14 +1097,113 @@ public final class ClusterCast {
     }
 
     /**
-     * True iff {@code component} is the RESUMED activity on {@code displayId} per
-     * {@code dumpsys activity activities}. Scans the "Display #N" block for a
-     * ResumedActivity line naming the component's package. Conservative: any parse
-     * failure returns false (→ retry), never a false positive.
+     * Package owning the RESUMED activity on {@code displayId}, an empty string when the
+     * display block explicitly reports no resumed activity, or {@code null} when the state
+     * could not be read unambiguously.
+     *
+     * <p>This is stronger than task placement. On DI5 the OEM can leave our task on the correct
+     * shared display while re-fronting its own translucent MeterActivity above it; the task still
+     * reports visible and a location-only guardian produces a false success. The per-display
+     * resumed activity is the signal that proves who actually owns the panel foreground.
      */
-    private static boolean isResumedOnDisplay(String component, int displayId) {
-        // Match on the package (component is "pkg/act"); the resumed line names the
-        // full component but lower-casing + package containment is robust across builds.
+    static String resumedPackageOnDisplay(int displayId) {
+        if (displayId < 0) return null;
+        Process p = null;
+        try {
+            p = new ProcessBuilder("dumpsys", "activity", "activities")
+                    .redirectErrorStream(true).start();
+            final Process running = p;
+            final java.util.concurrent.atomic.AtomicReference<String> result =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            final java.util.concurrent.atomic.AtomicReference<Throwable> failure =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            Thread reader = new Thread(() -> {
+                try (java.io.BufferedReader buffered = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(running.getInputStream()))) {
+                    result.set(resumedPackageInActivityReader(buffered, displayId));
+                } catch (Throwable t) {
+                    failure.set(t);
+                }
+            }, "ClusterResumedActivityScan");
+            reader.setDaemon(true);
+            reader.start();
+            try {
+                reader.join(RESUMED_STATE_TIMEOUT_MS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+            if (reader.isAlive()) {
+                try { running.destroyForcibly(); } catch (Throwable ignored) {}
+                try { reader.join(250L); } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+                logger.debug("cluster cast: resumed-package read timed out");
+                return null;
+            }
+            Throwable readFailure = failure.get();
+            if (readFailure != null) {
+                logger.debug("cluster cast: resumed-package read failed: "
+                        + readFailure.getMessage());
+                return null;
+            }
+            return result.get();
+        } catch (Throwable t) {
+            logger.debug("cluster cast: resumed-package read failed: " + t.getMessage());
+        } finally {
+            if (p != null) try { p.destroy(); } catch (Throwable ignored) {}
+        }
+        return null;
+    }
+
+    /** Pure parser kept package-visible for replay tests against real dumpsys formats. */
+    static String resumedPackageInActivityDump(String dump, int displayId) {
+        if (dump == null || displayId < 0) return null;
+        try {
+            return resumedPackageInActivityReader(
+                    new java.io.BufferedReader(new java.io.StringReader(dump)),
+                    displayId);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static String resumedPackageInActivityReader(
+            java.io.BufferedReader reader, int displayId) throws java.io.IOException {
+        String line;
+        boolean inTargetDisplay = false;
+        boolean targetDisplaySeen = false;
+        boolean resumedMarkerSeen = false;
+        String displayHeader = "display #" + displayId;
+        while ((line = reader.readLine()) != null) {
+            String low = line.toLowerCase(Locale.US);
+            int hdr = low.indexOf("display #");
+            if (hdr >= 0) {
+                boolean target = low.startsWith(displayHeader, hdr)
+                        && !Character.isDigit(charAt(low, hdr + displayHeader.length()));
+                if (inTargetDisplay && !target) break;
+                inTargetDisplay = target;
+                targetDisplaySeen |= target;
+                continue;
+            }
+            if (!inTargetDisplay || !low.contains("resumedactivity")) continue;
+            resumedMarkerSeen = true;
+            Matcher component = RESUMED_COMPONENT_PATTERN.matcher(line);
+            if (component.find()) return component.group(1);
+            if (low.contains("null") || low.contains("none")) return "";
+        }
+        return targetDisplaySeen && resumedMarkerSeen ? "" : null;
+    }
+
+    /**
+     * True iff {@code component}'s package owns the RESUMED activity on {@code displayId}.
+     *
+     * <p>Keep this legacy verifier byte-for-behaviour compatible outside DI5. The stricter
+     * foreground-owner parser above is called directly only by {@link DiLink5ClusterCast}; changing
+     * this shared method would silently alter DiLink 3/4 launch behavior.
+     */
+    static boolean isResumedOnDisplay(String component, int displayId) {
+        if (component == null) return false;
         String pkg = component;
         int slash = component.indexOf('/');
         if (slash > 0) pkg = component.substring(0, slash);
@@ -1039,7 +1225,8 @@ public final class ClusterCast {
                             && !Character.isDigit(charAt(low, hdr + displayHeader.length()));
                     continue;
                 }
-                if (inTargetDisplay && low.contains("resumedactivity") && low.contains(needle)) {
+                if (inTargetDisplay && low.contains("resumedactivity")
+                        && low.contains(needle)) {
                     return true;
                 }
             }

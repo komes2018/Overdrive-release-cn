@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=7"></script>
-    <script src="../shared/app-shell.js?v=5"></script>
+    <script src="../shared/theme.js?v=8"></script>
+    <script src="../shared/app-shell.js?v=7"></script>
     <!--
       Bottom-tab manifest for Trips. Tabs apply to the LIST VIEW only;
       the DETAIL VIEW (#tripDetailView) is a sequential drill-in and
@@ -28,7 +28,7 @@
         ];
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=24">
+    <link rel="stylesheet" href="../shared/styles.css?v=34">
     <link rel="stylesheet" href="../shared/leaflet.css" />
     <style>
         /* ===== OLD WEBVIEW COMPAT (Chrome <88, Android 7.x) ===== */
@@ -735,6 +735,18 @@
             position: relative;
             overflow: hidden;
         }
+        /* Parking Intelligence footer inside a trip card: where the car then
+           sat and for how long, linking to the parking session. */
+        .trip-park-gap {
+            display: flex; align-items: center;
+            margin-top: 8px; padding-top: 6px;
+            border-top: 1px dashed var(--border-subtle);
+            font-size: 11px; line-height: 1.3; color: var(--text-secondary, #9aa4b2);
+            text-decoration: none; overflow: hidden;
+        }
+        .trip-park-gap span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 6px; }
+        .trip-park-gap b { color: var(--accent, #2fbf9f); font-weight: 600; }
+        .trip-park-gap:hover span { color: var(--text-primary, #fff); }
         .trip-card:hover {
             background: var(--bg-elevated);
             border-color: rgba(0,212,170,0.4);
@@ -998,18 +1010,23 @@
         }
         #timelineSlider {
             width: 100%;
-            height: 6px;
+            height: 44px;
             -webkit-appearance: none;
             appearance: none;
+            background: transparent;
+            outline: none;
+        }
+        #timelineSlider::-webkit-slider-runnable-track {
+            height: 6px;
             background: var(--bg-hover);
             border-radius: var(--radius-full);
-            outline: none;
         }
         #timelineSlider::-webkit-slider-thumb {
             -webkit-appearance: none;
             appearance: none;
             width: 20px;
             height: 20px;
+            margin-top: -7px;
             background: var(--brand-primary);
             border-radius: 50%;
             cursor: pointer;
@@ -1018,6 +1035,20 @@
         }
         #timelineSlider::-webkit-slider-thumb:hover {
             box-shadow: 0 0 16px rgba(0,212,170,0.6);
+        }
+        #timelineSlider::-moz-range-track {
+            height: 6px;
+            background: var(--bg-hover);
+            border: 0;
+            border-radius: var(--radius-full);
+        }
+        #timelineSlider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            background: var(--brand-primary);
+            border: 0;
+            border-radius: 50%;
+            cursor: pointer;
         }
         .timeline-slider-labels {
             display: flex;
@@ -1310,7 +1341,7 @@
         <!-- App shell sidebar (rendered by ../shared/app-shell.js) -->
         <div id="app-shell-mount"></div>
         <!-- Main Content -->
-        <main class="main-content">
+        <main class="main-content" aria-busy="true" inert style="pointer-events:none">
             <div class="mobile-header">
                 <button class="menu-toggle" onclick="toggleSidebar()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
@@ -1760,7 +1791,7 @@
                                 </div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
-                                        <input type="checkbox" id="tripCdrEnabled" onchange="TRIPS.toggleCdrCleanup()">
+                                        <input type="checkbox" id="tripCdrEnabled" disabled onchange="TRIPS.toggleCdrCleanup()">
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
@@ -1789,7 +1820,7 @@
                                 <div class="setting-control">
                                     <div class="slider-control">
                                         <span class="slider-value" id="tripCdrReservedValue">2 GB</span>
-                                        <input type="range" class="slider" id="tripCdrReservedSlider" min="100" max="20000" step="100" value="2000" oninput="TRIPS.updateCdrReserved(this.value)">
+                                        <input type="range" class="slider" id="tripCdrReservedSlider" disabled min="100" max="20000" step="100" value="2000" oninput="TRIPS.updateCdrReserved(this.value)">
                                     </div>
                                 </div>
                             </div>
@@ -1801,7 +1832,7 @@
                                 <div class="setting-control">
                                     <div class="slider-control">
                                         <span class="slider-value" id="tripCdrProtectedValue">24h</span>
-                                        <input type="range" class="slider" id="tripCdrProtectedSlider" min="0" max="168" step="12" value="24" oninput="TRIPS.updateCdrProtected(this.value)">
+                                        <input type="range" class="slider" id="tripCdrProtectedSlider" disabled min="0" max="168" step="12" value="24" oninput="TRIPS.updateCdrProtected(this.value)">
                                     </div>
                                 </div>
                             </div>
@@ -1813,11 +1844,11 @@
                                 <div class="setting-control">
                                     <div class="slider-control">
                                         <span class="slider-value" id="tripCdrMinKeepValue">10</span>
-                                        <input type="range" class="slider" id="tripCdrMinKeepSlider" min="0" max="50" step="5" value="10" oninput="TRIPS.updateCdrMinKeep(this.value)">
+                                        <input type="range" class="slider" id="tripCdrMinKeepSlider" disabled min="0" max="100" step="5" value="10" oninput="TRIPS.updateCdrMinKeep(this.value)">
                                     </div>
                                 </div>
                             </div>
-                            <button class="btn btn-danger" style="width:100%;margin-top:12px;" onclick="TRIPS.triggerCdrCleanup()" data-i18n="trip.cdr.cleanup_now">
+                            <button class="btn btn-danger" id="tripCdrCleanupNow" disabled style="width:100%;margin-top:12px;" onclick="TRIPS.triggerCdrCleanup()" data-i18n="trip.cdr.cleanup_now">
                                 🗑️ Clean Up Now
                             </button>
                             <div class="info-box" style="margin-top:12px;">
@@ -1869,7 +1900,12 @@
                          tiles are empty on a trip rebuilt from GPS telemetry. -->
                     <div class="recovered-banner" id="detailRecoveredBanner" style="display:none;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
-                        <span data-i18n="trip.recovered.detail_note">Recovered from telemetry. Distance, speed and elevation are reconstructed from GPS; battery, energy, cost and driving scores were not recorded for this trip.</span>
+                        <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:0;">
+                            <span id="detailRecoveredNote" data-i18n="trip.recovered.detail_note">Recovered from telemetry. Distance, speed and elevation are reconstructed from GPS; battery, energy, cost and driving scores were not recorded for this trip.</span>
+                            <!-- Shown only when the trip has telemetry but no
+                                 driving scores: POST /api/trips/{id}/rescore -->
+                            <button type="button" class="btn btn-secondary" id="detailRescoreBtn" onclick="TRIPS.rescoreCurrentTrip()" style="display:none;align-self:flex-start;font-size:12px;padding:6px 12px;" data-i18n="trip.partial.rescore_button">Compute driving scores</button>
+                        </div>
                     </div>
 
                     <!-- Timeline Slider -->
@@ -2082,9 +2118,10 @@
     <script src="../shared/auth.js"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js?v=20"></script>
+    <script src="../shared/settings-hydration.js?v=1"></script>
     <script src="../shared/update-flow.js"></script>
     <script src="../shared/storage-budget.js?v=8"></script>
-    <script src="../shared/trips.js?v=budget10"></script>
+    <script src="../shared/trips.js?v=history11"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
