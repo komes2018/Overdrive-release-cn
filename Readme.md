@@ -19,6 +19,8 @@
 
 > 💡 **完全免费、开源的比亚迪 DiLink 车机系统专属行车记录与智能哨兵应用。**  
 > 所有视频、轨迹与行车数据 **100% 保存在车机本地** —— 无需官方云端中转、无强制账号绑定、无任何月租或订阅费用。
+>
+> 🙏 本专版基于优秀上游开源项目 [**yash-srivastava/Overdrive-release**](https://github.com/yash-srivastava/Overdrive-release) 本土化二次开发，**核心创意与绝大部分代码均出自原作者**，详见 [致谢原作者与上游项目](#致谢)。
 
 ---
 
@@ -161,6 +163,29 @@ OverDrive 提供四种远程查看车机画面与状态的通道：
 
 本项目基于 [MIT 许可协议](LICENSE) 开源。所有核心数据与隐私均严格留存在车机本地。
 内置或引用的第三方工具链（如 `cloudflared`、`zrok`、`sing-box`、`tailscale`、`YOLO11n` 等）均严格保留并遵循其原始开源协议，详情参见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+---
+
+<a id="致谢"></a>
+## 🙏 致谢原作者与上游项目
+
+本项目的**核心创意、整体架构与绝大部分代码实现，都来自这个优秀的上游开源项目**：
+
+<p align="center">
+  <a href="https://github.com/yash-srivastava/Overdrive-release">
+    <b>⭐ yash-srivastava / Overdrive-release</b>
+  </a><br>
+  <sub>Advanced Sentry Mode for BYD Vehicles &nbsp;·&nbsp; MIT License &nbsp;·&nbsp; Copyright (c) 2026 Yash Srivastava</sub>
+</p>
+
+**「国内优化专版」是在上游基础上的本土化二次开发**，我们所做的只是中文校对、国内车机网络环境适配、Tailscale 免断联运维等针对性优化 —— **功能与功劳首先属于原作者 [Yash Srivastava（@yash-srivastava）](https://github.com/yash-srivastava) 以及所有上游贡献者。**
+
+- 🙏 由衷感谢原作者将如此实用的项目以 MIT 协议开源，本专版才得以存在；
+- ⭐ 如果你觉得 OverDrive 好用，**请优先给上游项目点一个 Star**：<https://github.com/yash-srivastava/Overdrive-release>
+- 🐛 与国内优化无关的问题（原生功能 Bug、翻译、功能建议），建议优先反馈给 [上游 Issues](https://github.com/yash-srivastava/Overdrive-release/issues)；
+- 📄 上游的 MIT 协议与版权署名已完整保留，详见 [LICENSE](LICENSE)。
+
+> 没有上游的开放与慷慨，就不会有这个专版 —— 请一起尊重并支持原作者的工作。
 
 ---
 
