@@ -2949,17 +2949,25 @@ object UnifiedConfigManager {
         val camera = loadConfig().optJSONObject("camera") ?: return -1
         val mode = camera.optString("cameraMode", "")
         if (mode.contains("dilink5", ignoreCase = true) || com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
-            val oemEnabled = getOemDashcam().optBoolean("enabled", false)
-            if (!oemEnabled) {
-                return -1
-            }
+            return -1
         }
         if (camera.optBoolean("oemDashcamManualOverride", false)) {
-            val id = camera.optInt("oemDashcamCameraId", -1)
-            val oemEnabled = getOemDashcam().optBoolean("enabled", false)
-            return if (oemEnabled && id >= 0) id else -1
+            return camera.optInt("oemDashcamCameraId", -1)
         }
-        return -1
+        val configuredOemId = camera.optInt("oemDashcamCameraId", -1)
+        if (configuredOemId >= 0) {
+            return configuredOemId
+        }
+        val panoId = if (camera.optBoolean("manualOverride", false)) {
+            camera.optInt("manualCameraId", -1)
+        } else {
+            camera.optInt("probedCameraId", -1)
+        }
+        return when (panoId) {
+            0 -> 1                  // Tang-style: pano=0 → OEM=1
+            1 -> 0                  // Seal/Han/Song: pano=1 → OEM=0
+            else -> 0               // Default symmetric to pano's id=1 default
+        }
     }
     
     /**
