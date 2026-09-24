@@ -11,7 +11,8 @@
   <a href="#-国内车机深度优化专版说明重点特性">🇨🇳 国内优化</a> •
   <a href="#零流量远程方案">零流量千里眼</a> •
   <a href="#核心功能特性">功能列表</a> •
-  <a href="#home-assistant-本地双向智能家居联动">Home Assistant 联动</a>
+  <a href="#home-assistant-本地双向智能家居联动">Home Assistant 联动</a> •
+  <a href="#请喝咖啡">☕ 请喝咖啡</a>
 </p>
 
 ---
@@ -160,3 +161,22 @@ OverDrive 提供四种远程查看车机画面与状态的通道：
 
 本项目基于 [MIT 许可协议](LICENSE) 开源。所有核心数据与隐私均严格留存在车机本地。
 内置或引用的第三方工具链（如 `cloudflared`、`zrok`、`sing-box`、`tailscale`、`YOLO11n` 等）均严格保留并遵循其原始开源协议，详情参见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+---
+
+<a id="请喝咖啡"></a>
+## ☕ 请喝咖啡
+
+OverDrive 完全免费、永久开源，没有任何付费墙、会员订阅或功能阉割版。
+如果它帮你守住了爱车、省下了每年的车机流量费，或者只是让你觉得「这项目还不错」，欢迎请作者喝杯咖啡：
+
+<p align="center">
+  <img src="docs/images/donate/alipay.webp" width="230" alt="支付宝收款码">
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/images/donate/wechat.webp" width="230" alt="微信收款码">
+</p>
+
+<p align="center"><b>支付宝</b> &nbsp;·&nbsp; <b>微信支付</b>（扫码请作者喝杯咖啡 ☕）</p>
+
+> 🙏 **打赏完全自愿，不影响任何功能的可用性。**  
+> 如果暂时不方便，给项目点一个 **Star ⭐**、在车友群或论坛里推荐一下，或者顺手提一个 Issue / PR —— 这些同样是让项目走得更远的支持。

@@ -12,7 +12,8 @@
   <a href="#quick-start-use-pre-built-apk">Setup Guide</a> •
   <a href="#home-assistant-integration">Home Assistant</a> •
   <a href="#translations">Translate</a> •
-  <b><a href="Readme.md">🇨🇳 简体中文 (Chinese)</a></b>
+  <b><a href="Readme.md">🇨🇳 简体中文 (Chinese)</a></b> •
+  <a href="#buy-me-a-coffee">☕ Buy Me a Coffee</a>
 </p>
 <p align="center">
   <a href="https://crowdin.com/project/overdrive">
@@ -881,3 +882,24 @@ Open source under MIT License. Your data stays on your device.
 OverDrive's own code is MIT-licensed. Bundled third-party components (cloudflared,
 zrok, sing-box, tailscale, YOLO11n, and others) remain under their own licenses —
 see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+---
+
+<a id="buy-me-a-coffee"></a>
+## ☕ Buy Me a Coffee
+
+OverDrive is completely free and permanently open source — no paywall, no subscription,
+no crippled "lite" edition. If it helped you keep an eye on your car, or saved you the
+yearly data-plan bill, you're welcome to buy the author a coffee:
+
+<p align="center">
+  <img src="docs/images/donate/alipay.webp" width="230" alt="Alipay QR code">
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/images/donate/wechat.webp" width="230" alt="WeChat Pay QR code">
+</p>
+
+<p align="center"><b>Alipay</b> &nbsp;·&nbsp; <b>WeChat Pay</b> (scan to buy a coffee ☕)</p>
+
+> 🙏 **Donations are entirely optional and unlock nothing.**  
+> If now isn't a good time, a **Star ⭐**, a shout-out in your owners' group or forum,
+> or simply filing an Issue / PR is just as valuable a way to keep the project going.
