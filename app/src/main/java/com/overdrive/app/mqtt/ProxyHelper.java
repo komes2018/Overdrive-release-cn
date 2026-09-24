@@ -268,6 +268,8 @@ public class ProxyHelper {
                     invalidateCache();
                 }
             };
+
+    /**
      * HTTP proxy selection for privacy-sensitive traffic. When the user has
      * enabled proxy-only routing but the listener is still unavailable, return
      * the expected local SOCKS endpoint so clients fail closed instead of
