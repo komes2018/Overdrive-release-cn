@@ -1105,6 +1105,11 @@ public class HttpServer {
         if (path.startsWith("/api/telegram/")) {
             return TelegramApiHandler.handle(method, path, body, out);
         }
+
+        // WeCom / Webhook delivery config API
+        if (path.startsWith("/api/notifications/wecom") || path.startsWith("/api/webhook/")) {
+            return WeComApiHandler.handle(method, path, body, out);
+        }
         
         // Trip Analytics API
         if (path.startsWith("/api/trips")) {

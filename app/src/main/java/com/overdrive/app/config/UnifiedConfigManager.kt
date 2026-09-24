@@ -584,6 +584,18 @@ object UnifiedConfigManager {
             config.put("keymap", it)
         }
 
+        // WeCom / Webhook notification section
+        val wecom = config.optJSONObject("wecom") ?: JSONObject().also {
+            config.put("wecom", it)
+        }
+        if (!wecom.has("enabled")) wecom.put("enabled", true)
+        if (!wecom.has("tierNotices")) wecom.put("tierNotices", false)
+        if (!wecom.has("tierAlerts")) wecom.put("tierAlerts", true)
+        if (!wecom.has("tierCritical")) wecom.put("tierCritical", true)
+        if (!wecom.has("motionImages")) wecom.put("motionImages", true)
+        if (!wecom.has("charging")) wecom.put("charging", true)
+        if (!wecom.has("tyre")) wecom.put("tyre", true)
+
         // Surveillance defaults
         if (!surveillance.has("minObjectSize")) surveillance.put("minObjectSize", 0.08)
         if (!surveillance.has("aiConfidence")) surveillance.put("aiConfidence", 0.25)
@@ -2174,6 +2186,15 @@ object UnifiedConfigManager {
     fun getSurveillance(): JSONObject {
         return loadConfig().optJSONObject("surveillance") ?: JSONObject()
     }
+
+    /**
+     * Get WeCom / Webhook notification config section.
+     */
+    @JvmStatic
+    fun getWeCom(): JSONObject = loadConfig().optJSONObject("wecom") ?: JSONObject()
+
+    @JvmStatic
+    fun setWeComValues(values: Map<String, Any>): Boolean = updateValues("wecom", values)
 
     // ---- Deferred "navigate here" (section: deferred_nav) --------------------
     // A phone/OverDrive "Navigate here" that arrives while the car is off is stored

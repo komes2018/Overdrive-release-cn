@@ -47,14 +47,14 @@
         var __OT_ALL_TABS = [
             __OT_LOG_TAB,
             { id: 'push',     label: 'Push',     i18n: 'notif.tab_push',     svg: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>' },
+            { id: 'wecom',    label: 'Webhook',  i18n: 'notif.tab_wecom',    svg: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>' },
             { id: 'telegram', label: 'Telegram', i18n: 'notif.tab_telegram', svg: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>' },
             { id: 'devices',  label: 'Devices',  i18n: 'notif.tab_devices',  svg: '<rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>', readOnly: true }
         ];
-        // The Log tab reads persisted history (no tunnel needed) so it is useful
-        // in the head-unit WebView too — keep it alongside Telegram there. Push
-        // and Devices still make no sense in-car and are filtered out.
+        // The Log and Webhook tabs work on local network / in-car, so they are useful
+        // in the head-unit WebView too — keep them alongside Telegram there.
         window.OT_TABS = (typeof window.AndroidBridge !== 'undefined')
-            ? __OT_ALL_TABS.filter(function (t) { return t.id === 'telegram' || t.id === 'log'; })
+            ? __OT_ALL_TABS.filter(function (t) { return t.id === 'wecom' || t.id === 'telegram' || t.id === 'log'; })
             : __OT_ALL_TABS;
     </script>
     <script src="../shared/app-tabs.js"></script>
@@ -967,6 +967,123 @@
                         </div>
                     </div>
 
+                    <!-- ===== WeCom / Webhook tab ===== -->
+                    <div class="notif-section" data-tab="wecom" id="wecomSection">
+                        <h2 data-i18n="notif.wecom_title">WeCom / Webhook Delivery</h2>
+                        <p class="notif-section-sub" data-i18n="notif.wecom_sub">
+                            Deliver alarms, surveillance captures, and vehicle updates directly to Enterprise WeChat, DingTalk, Feishu, or generic Webhooks. Fast and direct without VPN.
+                        </p>
+
+                        <!-- Main Switch Card -->
+                        <div class="notif-card" style="padding: 6px 0;">
+                            <div class="notif-row">
+                                <div class="notif-row-text">
+                                    <div class="notif-row-label" data-i18n="notif.wecom_enable_label">Enable Webhook Delivery</div>
+                                    <div class="notif-row-note" data-i18n="notif.wecom_enable_desc">Allow OverDrive to push event notifications to the configured Webhook endpoint.</div>
+                                </div>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="wecomEnabled" onchange="WeComPrefs.save()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Webhook URL Configuration Card -->
+                        <div class="notif-card" style="margin-top:14px; padding: 14px 16px;">
+                            <div class="notif-row-label" style="margin-bottom: 8px;" data-i18n="notif.wecom_url_label">Webhook Endpoint URL</div>
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                <input type="url" id="wecomUrlInput" class="form-input" style="flex: 1 1 260px; min-width: 220px; font-family: monospace; font-size: 13px;" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." autocomplete="off">
+                                <button type="button" class="notif-btn" id="wecomSaveBtn" onclick="WeComPrefs.saveUrl()" data-i18n="common.save">Save</button>
+                                <button type="button" class="notif-btn" id="wecomTestBtn" onclick="WeComPrefs.test()" data-i18n="notif.wecom_test_btn">Send Test</button>
+                            </div>
+                            <div class="notif-row-note" style="margin-top: 8px;" data-i18n="notif.wecom_url_hint">Supports Enterprise WeChat, DingTalk, Feishu group bot webhooks, or generic JSON receivers.</div>
+                            <div id="wecomTestFeedback" style="display: none; margin-top: 10px; font-size: 13px; padding: 10px 14px; border-radius: 8px;"></div>
+                        </div>
+
+                        <!-- Severity Tiers Card -->
+                        <div style="margin-top:18px;">
+                            <p class="notif-section-sub" data-i18n="notif.wecom_tiers_desc">Pick which event severities trigger Webhook notifications.</p>
+                            <div class="notif-card" style="padding: 6px 0;">
+                                <div class="notif-row">
+                                    <div class="notif-row-text">
+                                        <div class="notif-row-label">
+                                            <span class="status-dot" style="background:var(--text-muted);"></span>
+                                            <span data-i18n="surveillance.tier_notice">Notice</span>
+                                        </div>
+                                        <div class="notif-row-note" data-i18n="surveillance.tier_notice_desc">Routine activity (parked cars, distant movement)</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="wecomTierNotices" onchange="WeComPrefs.save()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="notif-row">
+                                    <div class="notif-row-text">
+                                        <div class="notif-row-label">
+                                            <span class="status-dot" style="background:#FFB75A;"></span>
+                                            <span data-i18n="surveillance.tier_alert">Alert</span>
+                                        </div>
+                                        <div class="notif-row-note" data-i18n="surveillance.tier_alert_desc">Approaching person, vehicle close enough to warrant attention</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="wecomTierAlerts" onchange="WeComPrefs.save()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="notif-row">
+                                    <div class="notif-row-text">
+                                        <div class="notif-row-label">
+                                            <span class="status-dot" style="background:#FF6B6B;"></span>
+                                            <span data-i18n="surveillance.tier_critical">Critical</span>
+                                        </div>
+                                        <div class="notif-row-note" data-i18n="surveillance.tier_critical_desc">Person at very close range — likely tampering / loitering</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="wecomTierCritical" onchange="WeComPrefs.save()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Delivery Categories Card -->
+                        <div style="margin-top:18px;">
+                            <p class="notif-section-sub" data-i18n="notif.wecom_categories_desc">Fine-tune specific notification categories pushed via Webhook.</p>
+                            <div class="notif-card" style="padding: 6px 0;">
+                                <div class="notif-row">
+                                    <div class="notif-row-text">
+                                        <div class="notif-row-label" data-i18n="notif.wecom_motion_images">Surveillance Snapshot Images</div>
+                                        <div class="notif-row-note" data-i18n="notif.wecom_motion_images_desc">Include detection snapshot photo (Base64 JPEG) directly in the bot message.</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="wecomMotionImages" onchange="WeComPrefs.save()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="notif-row">
+                                    <div class="notif-row-text">
+                                        <div class="notif-row-label" data-i18n="notif.wecom_charging">Charging & Power Alerts</div>
+                                        <div class="notif-row-note" data-i18n="notif.wecom_charging_desc">Notifications for charge completed, charge interrupted, or critical low battery.</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="wecomCharging" onchange="WeComPrefs.save()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="notif-row">
+                                    <div class="notif-row-text">
+                                        <div class="notif-row-label" data-i18n="notif.wecom_tyre">Tyre Pressure Alerts</div>
+                                        <div class="notif-row-note" data-i18n="notif.wecom_tyre_desc">Alert when tyre pressure falls below or exceeds safe thresholds.</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="wecomTyre" onchange="WeComPrefs.save()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- ===== Telegram tab ===== -->
                     <div class="notif-section" data-tab="telegram" id="telegramSection">
                         <h2 data-i18n="notif.telegram">Telegram delivery</h2>
@@ -1230,6 +1347,7 @@
                 // Telegram delivery preferences (critical / connectivity /
                 // motion text / videos) — persisted via /api/telegram/preferences.
                 if (window.TelegramPrefs) TelegramPrefs.load();
+                if (window.WeComPrefs) WeComPrefs.load();
                 // Vehicle layout (LHD / RHD). Lives in the same vehicle
                 // config section as model + body color, so it goes through
                 // /api/models/selected.
@@ -1344,6 +1462,141 @@
                 });
             }
             return { load: load, save: save };
+        }());
+
+        // ===== WeCom / Webhook delivery preferences module =====
+        window.WeComPrefs = (function () {
+            'use strict';
+            function $(id) { return document.getElementById(id); }
+            function tr(k, fb) {
+                var v = (window.BYD && BYD.i18n && BYD.i18n.t) ? BYD.i18n.t(k) : null;
+                return v || fb || k;
+            }
+            function toast(msg, kind) {
+                if (window.BYD && BYD.utils && BYD.utils.toast) BYD.utils.toast(msg, kind || 'info');
+            }
+            function _repaint(state) {
+                var ids = ['wecomEnabled', 'wecomTierNotices', 'wecomTierAlerts', 'wecomTierCritical', 'wecomMotionImages', 'wecomCharging', 'wecomTyre'];
+                ids.forEach(function (id) {
+                    if (!(id in state)) return;
+                    var el = $(id); if (!el) return;
+                    var slider = el.parentNode && el.parentNode.querySelector('.toggle-slider');
+                    var want = !!state[id];
+                    el.checked = !want;
+                    if (slider) { void slider.offsetHeight; }
+                    el.checked = want;
+                });
+            }
+            function load() {
+                fetch('/api/notifications/wecom', { cache: 'no-store' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (s) {
+                        if (!s || !s.success) return;
+                        if ($('wecomUrlInput') && s.url) {
+                            $('wecomUrlInput').value = s.url;
+                        }
+                        _repaint({
+                            wecomEnabled: s.enabled !== false,
+                            wecomTierNotices: !!s.tierNotices,
+                            wecomTierAlerts: s.tierAlerts !== false,
+                            wecomTierCritical: s.tierCritical !== false,
+                            wecomMotionImages: s.motionImages !== false,
+                            wecomCharging: s.charging !== false,
+                            wecomTyre: s.tyre !== false
+                        });
+                    })
+                    .catch(function () {});
+            }
+            function save() {
+                var payload = {
+                    enabled: $('wecomEnabled') ? $('wecomEnabled').checked : true,
+                    tierNotices: $('wecomTierNotices') ? $('wecomTierNotices').checked : false,
+                    tierAlerts: $('wecomTierAlerts') ? $('wecomTierAlerts').checked : true,
+                    tierCritical: $('wecomTierCritical') ? $('wecomTierCritical').checked : true,
+                    motionImages: $('wecomMotionImages') ? $('wecomMotionImages').checked : true,
+                    charging: $('wecomCharging') ? $('wecomCharging').checked : true,
+                    tyre: $('wecomTyre') ? $('wecomTyre').checked : true
+                };
+                if ($('wecomUrlInput')) {
+                    payload.url = $('wecomUrlInput').value.trim();
+                }
+                fetch('/api/notifications/wecom', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                })
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    if (res && res.success) {
+                        toast(tr('notif.wecom_saved', 'Webhook settings saved'), 'success');
+                    } else {
+                        toast(tr('common.error', 'Error') + ': ' + (res.error || 'Failed'), 'error');
+                    }
+                })
+                .catch(function (e) {
+                    toast(tr('common.error', 'Error') + ': ' + e.message, 'error');
+                });
+            }
+            function saveUrl() {
+                save();
+            }
+            function test() {
+                var btn = $('wecomTestBtn');
+                var fb = $('wecomTestFeedback');
+                var urlInput = $('wecomUrlInput');
+                var url = urlInput ? urlInput.value.trim() : '';
+                if (!url) {
+                    toast(tr('notif.wecom_url_required', 'Please enter a Webhook URL first'), 'error');
+                    return;
+                }
+                if (btn) btn.disabled = true;
+                if (fb) {
+                    fb.style.display = 'block';
+                    fb.style.background = 'rgba(0,229,255,0.08)';
+                    fb.style.color = '#00E5FF';
+                    fb.style.border = '1px solid rgba(0,229,255,0.2)';
+                    fb.textContent = tr('common.testing', 'Sending test notification...');
+                }
+                fetch('/api/notifications/wecom/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url })
+                })
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    if (btn) btn.disabled = false;
+                    if (!fb) return;
+                    if (res && res.success) {
+                        fb.style.background = 'rgba(0,212,170,0.12)';
+                        fb.style.color = '#00D4AA';
+                        fb.style.border = '1px solid rgba(0,212,170,0.3)';
+                        fb.textContent = '✓ ' + tr('notif.wecom_test_success', 'Test message sent successfully! Check your chat group.');
+                        toast(tr('notif.wecom_test_success', 'Test message sent successfully!'), 'success');
+                    } else {
+                        fb.style.background = 'rgba(255,107,107,0.12)';
+                        fb.style.color = '#FF6B6B';
+                        fb.style.border = '1px solid rgba(255,107,107,0.3)';
+                        fb.textContent = '✗ ' + (res.error || tr('notif.wecom_test_fail', 'Test failed'));
+                        toast(tr('notif.wecom_test_fail', 'Test failed'), 'error');
+                    }
+                })
+                .catch(function (e) {
+                    if (btn) btn.disabled = false;
+                    if (fb) {
+                        fb.style.background = 'rgba(255,107,107,0.12)';
+                        fb.style.color = '#FF6B6B';
+                        fb.style.border = '1px solid rgba(255,107,107,0.3)';
+                        fb.textContent = '✗ ' + e.message;
+                    }
+                    toast(tr('common.error', 'Error') + ': ' + e.message, 'error');
+                });
+            }
+            return {
+                load: load,
+                save: save,
+                saveUrl: saveUrl,
+                test: test
+            };
         }());
 
         // ===== Vehicle layout (LHD / RHD) =====
