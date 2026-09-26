@@ -598,11 +598,17 @@ var CommunicatePage = {
                         : status.audioState === 'busy'
                             ? this.tt('communicate.talk_unavailable', 'Talk unavailable')
                             : this.tt('communicate.setup_required', 'Setup required');
+                var audioReason = (status.audioState && this.tt('communicate.reason_' + status.audioState, ''))
+                    || status.audioReason
+                    || this.tt('communicate.car_unavailable', 'Car is unavailable');
+                var audioGuidance = (status.audioState && this.tt('communicate.guidance_' + status.audioState, ''))
+                    || status.audioGuidance
+                    || '';
                 this.setTalkState(
                     'disabled',
                     title,
-                    status.audioReason || this.tt('communicate.car_unavailable', 'Car is unavailable'),
-                    status.audioGuidance || '');
+                    audioReason,
+                    audioGuidance);
             }
         }
         this.renderMessageAvailability(carState);
@@ -633,11 +639,16 @@ var CommunicatePage = {
                 : unreachable ? this.tt('communicate.car_unreachable', 'Car unreachable') : this.tt('communicate.messages_unavailable', 'Messages unavailable');
         }
         if (reason) {
-            reason.textContent =
-                status.messageReason || this.tt('communicate.remote_messages_unavailable', 'Remote messages are unavailable');
+            var msgReason = (status.messageState && this.tt('communicate.reason_' + status.messageState, ''))
+                || status.messageReason
+                || this.tt('communicate.remote_messages_unavailable', 'Remote messages are unavailable');
+            reason.textContent = msgReason;
         }
         if (guidance) {
-            guidance.textContent = status.messageGuidance || '';
+            var msgGuidance = (status.messageState && this.tt('communicate.guidance_' + status.messageState, ''))
+                || status.messageGuidance
+                || '';
+            guidance.textContent = msgGuidance;
         }
     },
 

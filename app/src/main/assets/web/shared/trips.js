@@ -4196,32 +4196,48 @@ const TRIPS = {
         }
 
         const items = [];
-        const tooltips = {
-            'Launch Events': 'Number of hard accelerations from standstill (0→30+ km/h). Fewer = more efficient starts.',
-            'Coast-Brake Events': 'Times you went directly from coasting to braking. More events = less anticipation of stops.',
-            'Avg Coast Gap': 'Average time between lifting the accelerator and pressing the brake. Longer gaps = better anticipation.',
-            'Pedal Smoothness (σ)': 'Standard deviation of pedal input changes. Lower σ = smoother, more consistent pedal work.'
-        };
-        if (moments.launchProfiles) items.push({ icon: '🚀', label: 'Launch Events', value: moments.launchProfiles.length });
+        if (moments.launchProfiles) {
+            items.push({
+                icon: '🚀',
+                label: BYD.i18n.t('trip.moment_launch_title', 'Launch Events'),
+                tip: BYD.i18n.t('trip.moment_launch_desc', 'Number of hard accelerations from standstill (0→30+ km/h). Fewer = more efficient starts.'),
+                value: moments.launchProfiles.length
+            });
+        }
         if (moments.coastBrakeEvents) {
-            items.push({ icon: '🛑', label: 'Coast-Brake Events', value: moments.coastBrakeEvents.length });
+            items.push({
+                icon: '🛑',
+                label: BYD.i18n.t('trip.moment_coast_brake_title', 'Coast-Brake Events'),
+                tip: BYD.i18n.t('trip.moment_coast_brake_desc', 'Times you went directly from coasting to braking. More events = less anticipation of stops.'),
+                value: moments.coastBrakeEvents.length
+            });
             if (moments.coastBrakeEvents.length > 0) {
                 const avgGap = moments.coastBrakeEvents.reduce((s, e) => s + (e.coastGapMs || e.coast_gap_ms || 0), 0) / moments.coastBrakeEvents.length / 1000;
-                items.push({ icon: '⏳', label: 'Avg Coast Gap', value: avgGap.toFixed(1) + 's' });
+                items.push({
+                    icon: '⏳',
+                    label: BYD.i18n.t('trip.moment_coast_gap_title', 'Avg Coast Gap'),
+                    tip: BYD.i18n.t('trip.moment_coast_gap_desc', 'Average time between lifting the accelerator and pressing the brake. Longer gaps = better anticipation.'),
+                    value: avgGap.toFixed(1) + 's'
+                });
             }
         }
         if (moments.pedalSmoothnessWindows) {
             const avgSmooth = moments.pedalSmoothnessWindows.length > 0
                 ? moments.pedalSmoothnessWindows.reduce((s, w) => s + (w.stdDev || w.std_dev || 0), 0) / moments.pedalSmoothnessWindows.length
                 : 0;
-            items.push({ icon: '📊', label: 'Pedal Smoothness (σ)', value: avgSmooth.toFixed(1) });
+            items.push({
+                icon: '📊',
+                label: BYD.i18n.t('trip.moment_smoothness_title', 'Pedal Smoothness (σ)'),
+                tip: BYD.i18n.t('trip.moment_smoothness_desc', 'Standard deviation of pedal input changes. Lower σ = smoother, more consistent pedal work.'),
+                value: avgSmooth.toFixed(1)
+            });
         }
 
         items.forEach(item => {
             const el = document.createElement('div');
             el.className = 'moment-item';
             el.style.position = 'relative';
-            const tip = tooltips[item.label] || '';
+            const tip = item.tip || '';
             el.innerHTML = '<span class="moment-icon">' + item.icon + '</span>' +
                 '<div style="flex:1;"><span>' + item.label + '</span>' +
                 (tip ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;line-height:1.3;">' + tip + '</div>' : '') +
@@ -4976,10 +4992,10 @@ const TRIPS = {
             const summaryEl = document.getElementById('speedHistSummary');
             if (summaryEl) {
                 summaryEl.innerHTML =
-                    '<span class="speed-hist-stat">Avg: <span class="shval">' + BYD.units.speed(avg) + '</span></span>' +
-                    '<span class="speed-hist-stat">Max: <span class="shval">' + BYD.units.speed(max) + '</span></span>' +
-                    '<span class="speed-hist-stat">Low speed: <span class="shval">' + lowPct + '%</span></span>' +
-                    '<span class="speed-hist-stat">High speed: <span class="shval">' + highPct + '%</span></span>';
+                    '<span class="speed-hist-stat">' + BYD.i18n.t('trip.speed_stat_avg', 'Avg') + ': <span class="shval">' + BYD.units.speed(avg) + '</span></span>' +
+                    '<span class="speed-hist-stat">' + BYD.i18n.t('trip.speed_stat_max', 'Max') + ': <span class="shval">' + BYD.units.speed(max) + '</span></span>' +
+                    '<span class="speed-hist-stat">' + BYD.i18n.t('trip.speed_stat_low', 'Low speed') + ': <span class="shval">' + lowPct + '%</span></span>' +
+                    '<span class="speed-hist-stat">' + BYD.i18n.t('trip.speed_stat_high', 'High speed') + ': <span class="shval">' + highPct + '%</span></span>';
             }
         }
     },
