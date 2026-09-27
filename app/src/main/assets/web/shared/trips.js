@@ -3711,15 +3711,18 @@ const TRIPS = {
             var isBetter = energyDelta < 0;
 
             if (avgEnergy > 0 && tripEnergy > 0) {
+                var rankSummary = BYD.i18n.t('trip.route_rank_summary', { rank: rank, total: totalOnRoute });
                 if (isBetter) {
+                    var bannerText = BYD.i18n.t('trip.route_used_less_energy', { pct: energyPct });
                     html += '<div style="padding:12px 14px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:12px;margin-bottom:12px;">';
-                    html += '<div style="font-size:14px;font-weight:600;color:#22C55E;">🎉 Used ' + energyPct + '% less energy than usual</div>';
-                    html += '<div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">#' + rank + ' of ' + totalOnRoute + ' trips on this route</div>';
+                    html += '<div style="font-size:14px;font-weight:600;color:#22C55E;">' + bannerText + '</div>';
+                    html += '<div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">' + rankSummary + '</div>';
                     html += '</div>';
                 } else {
+                    var bannerText = BYD.i18n.t('trip.route_used_more_energy', { pct: energyPct });
                     html += '<div style="padding:12px 14px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:12px;margin-bottom:12px;">';
-                    html += '<div style="font-size:14px;font-weight:600;color:var(--warning);">📊 Used ' + energyPct + '% more energy than usual</div>';
-                    html += '<div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">#' + rank + ' of ' + totalOnRoute + ' trips on this route</div>';
+                    html += '<div style="font-size:14px;font-weight:600;color:var(--warning);">' + bannerText + '</div>';
+                    html += '<div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">' + rankSummary + '</div>';
                     html += '</div>';
                 }
             }
@@ -3728,14 +3731,14 @@ const TRIPS = {
             html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">';
             // This trip
             html += '<div style="padding:12px;background:var(--bg-elevated);border-radius:10px;border:1px solid var(--border-subtle);">';
-            html += '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">This trip</div>';
+            html += '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">' + BYD.i18n.t('trip.route_this_trip') + '</div>';
             if (tripEnergy > 0) html += '<div style="font-size:13px;color:var(--text-primary);margin-bottom:4px;">' + this.ICON_ELECTRIC + ' ' + tripEnergy.toFixed(1) + ' kWh</div>';
             html += '<div style="font-size:13px;color:var(--text-primary);margin-bottom:4px;">⏱ ' + Math.round(tripDur/60) + ' min</div>';
             if (tripCost > 0) html += '<div style="font-size:13px;color:var(--text-primary);">💰 ' + currency + tripCost.toFixed(1) + '</div>';
             html += '</div>';
             // Route avg
             html += '<div style="padding:12px;background:var(--bg-elevated);border-radius:10px;border:1px solid var(--border-subtle);">';
-            html += '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Route average</div>';
+            html += '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">' + BYD.i18n.t('trip.route_average') + '</div>';
             if (avgEnergy > 0) html += '<div style="font-size:13px;color:var(--text-secondary);margin-bottom:4px;">' + this.ICON_ELECTRIC + ' ' + avgEnergy.toFixed(1) + ' kWh</div>';
             html += '<div style="font-size:13px;color:var(--text-secondary);margin-bottom:4px;">⏱ ' + Math.round(avgDur/60) + ' min</div>';
             if (avgCost > 0) html += '<div style="font-size:13px;color:var(--text-secondary);">💰 ' + currency + avgCost.toFixed(1) + '</div>';
@@ -3744,17 +3747,17 @@ const TRIPS = {
 
             // Sparkline
             if (similar.length >= 2) {
-                html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Energy trend (oldest → newest)</div>';
+                html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">' + BYD.i18n.t('trip.route_energy_trend') + '</div>';
                 html += '<canvas id="routeSparkline" class="sparkline-container" style="width:100%;height:40px;"></canvas>';
             }
 
             // Compare on Map button
             if (stats.bestTripId > 0) {
-                html += '<button onclick="TRIPS.showRouteMapComparison(' + tripId + ',' + stats.bestTripId + ',' + (stats.worstTripId > 0 ? stats.worstTripId : -1) + ')" style="width:100%;padding:10px;margin:8px 0;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:8px;color:var(--brand-primary);font-size:13px;font-weight:600;cursor:pointer;">🗺️ Compare on Map</button>';
+                html += '<button onclick="TRIPS.showRouteMapComparison(' + tripId + ',' + stats.bestTripId + ',' + (stats.worstTripId > 0 ? stats.worstTripId : -1) + ')" style="width:100%;padding:10px;margin:8px 0;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:8px;color:var(--brand-primary);font-size:13px;font-weight:600;cursor:pointer;">' + BYD.i18n.t('trip.route_compare_on_map') + '</button>';
             }
 
             // Recent trips — clickable links
-            html += '<div style="font-size:11px;color:var(--text-muted);margin:8px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">Trips on this route (' + data.count + ')</div>';
+            html += '<div style="font-size:11px;color:var(--text-muted);margin:8px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">' + BYD.i18n.t('trip.route_trips_on_this_route', { count: data.count }) + '</div>';
             similar.slice(0, 5).forEach(function(t) {
                 var curLang = BYD.i18n.getLang();
                 var dObj = new Date(t.startTime || t.start_time);

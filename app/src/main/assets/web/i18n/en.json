@@ -1293,7 +1293,15 @@
     "moment_coast_gap_title": "Avg Coast Gap",
     "moment_coast_gap_desc": "Average time between lifting the accelerator and pressing the brake. Longer gaps = better anticipation.",
     "moment_smoothness_title": "Pedal Smoothness (σ)",
-    "moment_smoothness_desc": "Standard deviation of pedal input changes. Lower σ = smoother, more consistent pedal work."
+    "moment_smoothness_desc": "Standard deviation of pedal input changes. Lower σ = smoother, more consistent pedal work.",
+    "route_used_less_energy": "🎉 Used {pct}% less energy than usual",
+    "route_used_more_energy": "📊 Used {pct}% more energy than usual",
+    "route_rank_summary": "#{rank} of {total} trips on this route",
+    "route_this_trip": "This trip",
+    "route_average": "Route average",
+    "route_energy_trend": "Energy trend (oldest → newest)",
+    "route_compare_on_map": "🗺️ Compare on Map",
+    "route_trips_on_this_route": "Trips on this route ({count})"
   },
   "automation": {
     "mode_label": "Execution mode",

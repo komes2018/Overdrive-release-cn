@@ -1065,7 +1065,15 @@
     "moment_coast_gap_title": "平均滑行间隔",
     "moment_coast_gap_desc": "松开油门到踩下刹车之间的平均时间。间隔越长，代表驾驶预判越从容。",
     "moment_smoothness_title": "踏板平顺度 (σ)",
-    "moment_smoothness_desc": "踏板开度变化的标准差。σ 值越低，代表踏板控制越平滑细腻。"
+    "moment_smoothness_desc": "踏板开度变化的标准差。σ 值越低，代表踏板控制越平滑细腻。",
+    "route_used_less_energy": "🎉 能耗比平时低 {pct}%",
+    "route_used_more_energy": "📊 能耗比平时高 {pct}%",
+    "route_rank_summary": "本路线 {total} 次行程中能效排名第 {rank}",
+    "route_this_trip": "本次行程",
+    "route_average": "路线历史平均",
+    "route_energy_trend": "能耗走势（最早 → 最新）",
+    "route_compare_on_map": "🗺️ 地图对比路线",
+    "route_trips_on_this_route": "本路线历史行程 ({count})"
   },
   "automation": {
     "tab_automations": "自动化",
