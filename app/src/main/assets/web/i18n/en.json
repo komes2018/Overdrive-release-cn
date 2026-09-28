@@ -1944,6 +1944,8 @@
     "operating_mode_postoff_disabled_note": "These settings control surveillance after the car is off. In On Only mode Overdrive shuts down when parked, so they don't apply. Switch to On & Off to use them.",
     "keep_usb_power": "Keep USB powered while parked",
     "keep_usb_power_desc": "Keeps the USB ports powered after the car is switched off (for example to charge a phone or power an accessory). Turn off to let the head unit sleep and save the 12V battery. Note: the SD-card slot shares the USB power rail, so turning this off also powers down the SD card while parked — surveillance will record to Internal storage instead. Takes effect the next time the car is switched off.",
+    "keep_awake_title": "Keep head unit awake while parked",
+    "keep_awake_desc": "Uses Android CPU and network locks after the car is switched off. The vehicle firmware may still remove USB or SD-card power.",
     "mobile_data_keepalive": "Keep mobile data awake while parked",
     "mobile_data_keepalive_desc": "On some models the mobile data module goes to sleep a while after the car is switched off, so the car drops off the network while parked. Turn this on to keep it awake. It is recommended to leave this off unless you actually lose cellular while parked, because keeping the connection alive uses extra battery and mobile data. Only takes effect if mobile data is already on when you park. Takes effect the next time the car is switched off.",
     "mobile_data_keepalive_saved_on": "Mobile data will stay awake while parked (next ACC-OFF)",

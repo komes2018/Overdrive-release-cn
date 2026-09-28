@@ -3315,7 +3315,7 @@ BYD.surveillance = {
                 keepUsbName.dataset.vehiclePowerText = keepUsbName.textContent;
             }
             keepUsbName.textContent = wakeOnly
-                ? 'Keep head unit awake while parked'
+                ? (window.BYD?.i18n?.t ? window.BYD.i18n.t('surveillance.keep_awake_title') : '驻车时保持车机唤醒')
                 : keepUsbName.dataset.vehiclePowerText;
         }
         if (keepUsbDesc) {
@@ -3323,8 +3323,7 @@ BYD.surveillance = {
                 keepUsbDesc.dataset.vehiclePowerText = keepUsbDesc.textContent;
             }
             keepUsbDesc.textContent = wakeOnly
-                ? 'Uses Android CPU and network locks after the car is switched off. '
-                    + 'The vehicle firmware may still remove USB or SD-card power.'
+                ? (window.BYD?.i18n?.t ? window.BYD.i18n.t('surveillance.keep_awake_desc') : '在车辆熄火后保持 Android CPU 和网络唤醒锁。车辆固件可能仍会切断 USB 或 SD 卡供电。')
                 : keepUsbDesc.dataset.vehiclePowerText;
         }
         if (keepUsbNote) keepUsbNote.style.display = wakeOnly ? 'block' : 'none';

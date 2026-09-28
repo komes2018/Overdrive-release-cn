@@ -849,10 +849,10 @@ class VideoPlayerFragment : Fragment() {
         val legend = buildString {
             if (stats != null) {
                 val parts = mutableListOf<String>()
-                stats.optInt("person", 0).takeIf { it > 0 }?.let { parts.add("$it person") }
-                stats.optInt("car", 0).takeIf { it > 0 }?.let { parts.add("$it car") }
-                stats.optInt("bike", 0).takeIf { it > 0 }?.let { parts.add("$it bike") }
-                stats.optInt("motion", 0).takeIf { it > 0 }?.let { parts.add("$it motion") }
+                stats.optInt("person", 0).takeIf { it > 0 }?.let { parts.add("${it}人") }
+                stats.optInt("car", 0).takeIf { it > 0 }?.let { parts.add("${it}车") }
+                stats.optInt("bike", 0).takeIf { it > 0 }?.let { parts.add("${it}骑行") }
+                stats.optInt("motion", 0).takeIf { it > 0 }?.let { parts.add("${it}移动") }
                 append(parts.joinToString(" · "))
             }
         }

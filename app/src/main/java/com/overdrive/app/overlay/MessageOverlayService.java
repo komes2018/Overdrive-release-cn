@@ -99,7 +99,7 @@ public final class MessageOverlayService extends Service {
         if (!OverlayPermissionChecker.isGranted(this)) {
             logger.warn("SYSTEM_ALERT_WINDOW not granted; cannot show message");
             sendAcknowledgement(intent, false,
-                    "Display-over-other-apps permission is not granted in the car");
+                    "车机尚未授予「显示在其他应用上层」悬浮窗权限");
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -112,11 +112,11 @@ public final class MessageOverlayService extends Service {
                 displayed = showToast(intent);
             }
             sendAcknowledgement(intent, displayed,
-                    displayed ? "" : "The car could not add the message overlay");
+                    displayed ? "" : "车机无法添加消息悬浮层");
         } catch (Throwable t) {
             logger.warn("Show failed: " + t.getMessage());
             sendAcknowledgement(intent, false,
-                    t.getMessage() == null ? "Message display failed" : t.getMessage());
+                    t.getMessage() == null ? "消息显示失败" : t.getMessage());
             stopSelf();
         }
         return START_NOT_STICKY;
@@ -400,7 +400,7 @@ public final class MessageOverlayService extends Service {
             NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
             if (nm != null && nm.getNotificationChannel(CHANNEL_ID) == null) {
                 NotificationChannel ch = new NotificationChannel(
-                        CHANNEL_ID, "On-screen messages", NotificationManager.IMPORTANCE_MIN);
+                        CHANNEL_ID, getString(R.string.notif_channel_on_screen_messages), NotificationManager.IMPORTANCE_MIN);
                 ch.setShowBadge(false);
                 nm.createNotificationChannel(ch);
             }
@@ -431,7 +431,7 @@ public final class MessageOverlayService extends Service {
         Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
-        return b.setContentTitle("On-screen message")
+        return b.setContentTitle(getString(R.string.notif_on_screen_message_title))
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setPriority(Notification.PRIORITY_MIN)
                 .build();

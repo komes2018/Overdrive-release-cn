@@ -1186,7 +1186,7 @@ public final class RemoteVoiceService extends Service {
                 (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (manager == null || manager.getNotificationChannel(CHANNEL_ID) != null) return;
         NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID, "Remote voice", NotificationManager.IMPORTANCE_MIN);
+                CHANNEL_ID, getString(R.string.notif_channel_remote_voice), NotificationManager.IMPORTANCE_MIN);
         channel.setShowBadge(false);
         manager.createNotificationChannel(channel);
     }

@@ -1106,7 +1106,7 @@ public final class ScreenDeterrent {
         p.setTextSize(144f * minRatio);
         DaemonFonts.apply(p, Typeface.BOLD);
         p.setLetterSpacing(0.04f);
-        String headline = readMessage("YOU ARE ON CAMERA");
+        String headline = readMessage("您已进入监控范围");
         c.drawText(headline, dispW / 2f, dispH * 0.70f, p);
 
         // 4. Subtitle.
@@ -1114,7 +1114,7 @@ public final class ScreenDeterrent {
         DaemonFonts.apply(p, Typeface.NORMAL);
         p.setLetterSpacing(0.04f);
         p.setAlpha(220);
-        c.drawText("Surveillance recording in progress",
+        c.drawText("哨兵防盗录像进行中",
             dispW / 2f, dispH * 0.82f, p);
     }
 

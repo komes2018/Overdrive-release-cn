@@ -298,7 +298,7 @@ public final class RoadSenseChimePlaybackService extends Service {
     private void createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID, "Media Playback", NotificationManager.IMPORTANCE_LOW);
+                CHANNEL_ID, getString(R.string.notif_channel_media_playback), NotificationManager.IMPORTANCE_LOW);
         channel.setShowBadge(false);
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager != null) manager.createNotificationChannel(channel);
@@ -309,8 +309,8 @@ public final class RoadSenseChimePlaybackService extends Service {
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
         return builder
-                .setContentTitle("RoadSense warning")
-                .setContentText("Playing a safety chime")
+                .setContentTitle(getString(R.string.notif_roadsense_warning_title))
+                .setContentText(getString(R.string.notif_roadsense_chime_text))
                 .setSmallIcon(R.drawable.ic_play_circle)
                 .setOngoing(true)
                 .setGroup(DaemonKeepaliveService.NOTIFICATION_GROUP_KEY)

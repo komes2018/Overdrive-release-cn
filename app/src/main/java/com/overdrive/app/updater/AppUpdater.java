@@ -707,7 +707,7 @@ public class AppUpdater {
     private static final long MIN_UPDATE_FREE_BYTES = 350L * MIB;
     private static final long UPDATE_INSTALL_HEADROOM_BYTES = 128L * MIB;
     private static final String STORAGE_ERROR_MESSAGE =
-            "Not enough storage to update Overdrive. Free space on the head unit and try again.";
+            "车机存储空间不足，无法更新 OverDrive。请清理车机空间后重试。";
 
     private String getApkPath() {
         return APK_PATH;
@@ -782,9 +782,9 @@ public class AppUpdater {
 
             long requiredMiB = (required + MIB - 1L) / MIB;
             long availableMiB = Math.max(0L, available) / MIB;
-            return "Not enough storage to update Overdrive. Only " + availableMiB
-                    + " MB is free; " + requiredMiB
-                    + " MB is required. Free space on the head unit and try again.";
+            return "车机存储空间不足，无法更新 OverDrive。仅剩余 " + availableMiB
+                    + " MB，需要 " + requiredMiB
+                    + " MB。请清理车机空间后重试。";
         } catch (Exception e) {
             // A failed stat must not block updates on vendor ROMs with unusual
             // /data/local/tmp permissions; the download/install errors remain
@@ -850,19 +850,19 @@ public class AppUpdater {
 
                 try (Response res = response) {
                     if (!res.isSuccessful()) {
-                        postError(callback, "GitHub API error: HTTP " + res.code());
+                        postError(callback, "GitHub API 错误: HTTP " + res.code());
                         return;
                     }
 
                     String body = res.body().string();
                     JSONObject release = new JSONObject(body);
 
-                    releaseNotes = release.optString("body", "Bug fixes and improvements.");
+                    releaseNotes = release.optString("body", "问题修复与性能优化。");
 
                     // Find the APK asset
                     String[] apk = firstApkAsset(release.optJSONArray("assets"));
                     if (apk == null) {
-                        postError(callback, "No APK found in release");
+                        postError(callback, "发布版本中未找到 APK");
                         return;
                     }
                     String apkUrl = apk[0];
@@ -2996,8 +2996,8 @@ public class AppUpdater {
         runCallback(() -> cb.onError(error));
     }
     static String userFacingInstallError(String msg) {
-        String error = msg == null || msg.trim().isEmpty() ? "Update failed" : msg.trim();
-        if (error.startsWith("Not enough storage to update Overdrive.")) return error;
+        String error = msg == null || msg.trim().isEmpty() ? "更新失败" : msg.trim();
+        if (error.startsWith("车机存储空间不足，无法更新 OverDrive") || error.startsWith("Not enough storage to update Overdrive.")) return error;
         String lower = error.toLowerCase(java.util.Locale.ROOT);
         if (lower.contains("no space left")
                 || lower.contains("enospc")

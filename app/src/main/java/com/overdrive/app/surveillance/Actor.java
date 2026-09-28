@@ -336,4 +336,32 @@ public final class Actor {
             default:       return "NOTICE";
         }
     }
+
+    public static String groupLabelZh(ClassGroup g) {
+        switch (g) {
+            case PERSON:  return "人";
+            case VEHICLE: return "车辆";
+            case BIKE:    return "骑行";
+            case ANIMAL:  return "动物";
+            default:      return "物体";
+        }
+    }
+
+    public static String proximityLabelZh(Proximity p) {
+        switch (p) {
+            case VERY_CLOSE: return "极近";
+            case CLOSE:      return "近";
+            case MID:        return "中等";
+            case FAR:        return "远";
+            default:         return "未知";
+        }
+    }
+
+    public static String severityLabelZh(Severity s) {
+        switch (s) {
+            case CRITICAL: return "严重告警";
+            case ALERT:    return "一般告警";
+            default:       return "常规提示";
+        }
+    }
 }

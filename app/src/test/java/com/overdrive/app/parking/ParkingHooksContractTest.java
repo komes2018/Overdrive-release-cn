@@ -91,7 +91,7 @@ public class ParkingHooksContractTest {
         }
         for (JSONObject c : new JSONObject[] {started, ended}) {
             assertTrue(c != null);
-            assertEquals("Parking", c.getString("group"));
+            assertEquals("停车", c.getString("group"));
             assertEquals("info", c.getString("severity"));
             assertTrue(c.getBoolean("defaultEnabled"));
             assertEquals("/parking.html", c.getString("defaultClickUrl"));

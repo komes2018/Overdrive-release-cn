@@ -48,7 +48,7 @@
     <string name="cd_battery">电池</string>
     <string name="cd_step_completed">完成的步骤</string>
     <string name="cd_permission_granted">授权</string>
-    <string name="overlay_rec_inactive_label">其他国家</string>
+    <string name="overlay_rec_inactive_label">录制</string>
     <string name="overlay_trip_inactive_label">行程</string>
     <string name="overlay_mic_inactive_label">麦克风</string>
     <string name="overlay_replay_label" translatable="false">回放</string>
@@ -285,10 +285,10 @@
     <string name="language_auto_title">自动</string>
     <string name="language_auto_subtitle">追踪系统 · %1$s</string>
     <string name="language_label_auto_fmt">%1$s · 自动</string>
-    <string name="adb_prompt">其他类型</string>
+    <string name="adb_prompt">$</string>
     <string name="adb_command_hint">输入命令…</string>
     <string name="adb_preset_commands_header">默认命令</string>
-    <string name="adb_output_header">产量</string>
+    <string name="adb_output_header">输出</string>
     <string name="adb_output_ready">$ 就绪，可输入命令…</string>
     <string name="adb_console_hero_title">电脑控制台</string>
     <string name="adb_console_hero_subtitle">在设备上运行 shell 命令</string>
@@ -883,7 +883,7 @@
     <string name="diagnostics_health_storage">存储</string>
     <string name="diagnostics_health_camera">摄像头</string>
     <string name="diagnostics_health_battery">电池</string>
-    <string name="diagnostics_metric_pending"> 其他国家</string>
+    <string name="diagnostics_metric_pending">—</string>
     <string name="diagnostics_metric_online">在线</string>
     <string name="diagnostics_network_tunnel_label">道 · %1$s</string>
     <string name="diagnostics_tunnel_state_online">在线</string>
@@ -923,7 +923,7 @@
     <string name="dashboard_metric_storage">使用的存储</string>
     <string name="dashboard_metric_tunnel">远程访问</string>
     <string name="dashboard_metric_services">背景服务</string>
-    <string name="dashboard_metric_value_pending"> 其他国家</string>
+    <string name="dashboard_metric_value_pending">—</string>
     <string name="dashboard_metric_vehicle">车辆</string>
     <string name="dashboard_chip_recording_active">收音</string>
     <string name="dashboard_chip_recording_idle">空闲</string>
@@ -1466,4 +1466,36 @@
     <string name="error_unknown">未知错误</string>
     <string name="projection_dilink5_mode_required">请在“故障诊断”中将车辆模式设为 DiLink 5，然后重启摄像头服务。</string>
     <string name="roi_tap_to_add_points">点击添加标定点 (%1$d-%2$d)</string>
+
+    <!-- Notification channels and foreground service notifications -->
+    <string name="notif_channel_status_overlay">状态悬浮层</string>
+    <string name="notif_channel_status_overlay_desc">录像与行程状态屏幕悬浮显示</string>
+    <string name="notif_channel_on_screen_messages">屏幕浮窗消息</string>
+    <string name="notif_on_screen_message_title">屏幕消息</string>
+    <string name="notif_channel_location_service">定位服务</string>
+    <string name="notif_channel_location_service_desc">用于哨兵与防盗的 GPS 定位追踪</string>
+    <string name="notif_location_active_title">定位服务运行中</string>
+    <string name="notif_location_active_text">GPS 追踪持续运行</string>
+    <string name="notif_channel_media_playback">媒体与音效播放</string>
+    <string name="notif_playing_audio_title">正在播放音频</string>
+    <string name="notif_media_automation_text">OverDrive 自动化任务</string>
+    <string name="notif_channel_vehicle_control">车辆控制服务</string>
+    <string name="notif_vehicle_control_title">车辆控制服务</string>
+    <string name="notif_channel_daemon_keepalive">守护进程保活</string>
+    <string name="notif_channel_daemon_keepalive_desc">保持后台守护进程持续运行</string>
+    <string name="notif_channel_overdrive_status">OverDrive 运行状态</string>
+    <string name="notif_channel_overdrive_status_desc">OverDrive 后台服务聚合状态栏</string>
+    <string name="notif_channel_network_hotspot">网络与热点桥接</string>
+    <string name="notif_channel_remote_voice">远程对讲与语音</string>
+    <string name="notif_channel_roadsense_overlay">RoadSense 路况悬浮层</string>
+    <string name="notif_roadsense_overlay_active">路况隐患预警层运行中</string>
+    <string name="notif_channel_roadsense_imu">RoadSense 惯导传感器</string>
+    <string name="notif_roadsense_imu_active">路面感知系统运行中</string>
+    <string name="notif_roadsense_warning_title">RoadSense 安全预警</string>
+    <string name="notif_roadsense_chime_text">正在播放安全提示音</string>
+    <!-- Overlay pill labels -->
+    <string name="overlay_prox_label">雷达</string>
+    <string name="overlay_rec_label">录制</string>
+    <string name="overlay_clip_label">片段</string>
+    <string name="overlay_trip_label">行程</string>
 </resources>

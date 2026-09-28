@@ -68,14 +68,15 @@ class LogsPanelFragment : Fragment() {
     }
     
     private fun setupFilterSpinner() {
-        val filters = listOf("All", "Camera", "Sentry", "Proxy", "Tunnel", "System")
-        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, filters)
+        val displayFilters = listOf("全部", "相机", "哨兵", "代理", "隧道", "系统")
+        val filterTags = listOf(null, "Camera", "Sentry", "Proxy", "Tunnel", "System")
+        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, displayFilters)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinnerFilter.adapter = adapter
         
         spinnerFilter.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val filter = if (position == 0) null else filters[position]
+                val filter = if (position in filterTags.indices) filterTags[position] else null
                 logsViewModel.setFilter(filter)
             }
             

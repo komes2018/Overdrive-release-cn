@@ -1776,7 +1776,7 @@ class RecordingsFragment : Fragment() {
                 )
                 v.findViewById<TextView>(R.id.tvRecordingsSummary)?.text = when {
                     indexDown -> activeCtx.getString(R.string.recordings_summary_index_down)
-                    warming -> "$baseSummary  ·  (building index)"
+                    warming -> "$baseSummary  ·  (正在建立索引)"
                     else -> baseSummary
                 }
 

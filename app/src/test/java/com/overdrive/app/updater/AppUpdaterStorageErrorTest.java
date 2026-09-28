@@ -15,7 +15,7 @@ public class AppUpdaterStorageErrorTest {
 
         assertTrue(AppUpdater.userFacingInstallError(
                 "Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]")
-                .startsWith("Not enough storage to update Overdrive."));
+                .startsWith("车机存储空间不足，无法更新 OverDrive。"));
         assertEquals("Network failed",
                 AppUpdater.userFacingInstallError("Network failed"));
     }

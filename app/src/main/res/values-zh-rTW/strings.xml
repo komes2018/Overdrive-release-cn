@@ -66,9 +66,9 @@
     <string name="cd_step_completed">完成步骤</string>
     <string name="cd_permission_granted">授予許可</string>
     <!-- overlay_status -->
-    <string name="overlay_rec_inactive_label">其他國家</string>
+    <string name="overlay_rec_inactive_label">錄製</string>
     <string name="overlay_trip_inactive_label">旅行</string>
-    <string name="overlay_mic_inactive_label">其他國家</string>
+    <string name="overlay_mic_inactive_label">麥克風</string>
     <!-- Quick-action chips revealed by tapping the REC pill: switch
          recording mode without opening the app. Short labels read fine
          cross-locale (matches existing REC/MIC/TRIP precedent), so
@@ -175,9 +175,9 @@
     <!-- dialog_setup_guide -->
     <string name="setup_guide_title">開始工作</string>
     <string name="setup_guide_subtitle">快速取得最佳體驗的三步:</string>
-    <string name="setup_step_one_label">其他國家</string>
-    <string name="setup_step_two_label">其他國家</string>
-    <string name="setup_step_three_label">其他國家</string>
+    <string name="setup_step_one_label">1</string>
+    <string name="setup_step_two_label">2</string>
+    <string name="setup_step_three_label">3</string>
     <string name="setup_language_title">選擇自己的語言</string>
     <string name="setup_language_body">預設使用您車機主機的語言。輕觸即可為 OverDrive 應用程式和網頁通道選擇其他語言。</string>
     <string name="setup_language_button">選擇語言</string>
@@ -202,10 +202,10 @@
     <!-- Drawer footer subtitle when on Auto, e.g. "English · Auto". -->
     <string name="language_label_auto_fmt">%1$s · 自動</string>
     <!-- fragment_adb_console -->
-    <string name="adb_prompt">其他國家</string>
+    <string name="adb_prompt">$</string>
     <string name="adb_command_hint">進入指令...</string>
     <string name="adb_preset_commands_header">預設命令</string>
-    <string name="adb_output_header">產量</string>
+    <string name="adb_output_header">輸出</string>
     <string name="adb_output_ready">准备使用命令.</string>
     <string name="adb_console_hero_title">網路控制台</string>
     <string name="adb_console_hero_subtitle">在裝置上執行 shell 命令</string>
@@ -691,7 +691,7 @@
     <string name="recordings_segment_dashcam_count">幕 · %d</string>
     <string name="recordings_segment_surveillance_count">監控 · %d</string>
     <!-- Layout-time placeholder for the counts subtitle before the scan completes. -->
-    <string name="recordings_summary_pending"> 其他國家</string>
+    <string name="recordings_summary_pending">—</string>
     <!-- Landscape recordings preview placeholder (right pane). -->
     <string name="recordings_preview_placeholder_title">選擇錄音</string>
     <string name="recordings_preview_placeholder_body">請按左邊任何項目的鍵,</string>
@@ -710,7 +710,7 @@
     <string name="diagnostics_health_storage">存儲時間</string>
     <string name="diagnostics_health_camera">攝影機</string>
     <string name="diagnostics_health_battery">沒有電池</string>
-    <string name="diagnostics_metric_pending"> 其他國家</string>
+    <string name="diagnostics_metric_pending">—</string>
     <string name="diagnostics_metric_online">在網路上</string>
     <!-- Network tile: bottom line tunnel state (e.g. "Tunnel · Online"). %1$s is one of
          tunnel_state_online / tunnel_state_offline / tunnel_state_connecting. -->
@@ -766,7 +766,7 @@
     <string name="dashboard_metric_storage">使用的儲存</string>
     <string name="dashboard_metric_tunnel">遠端接入</string>
     <string name="dashboard_metric_services">背景服務</string>
-    <string name="dashboard_metric_value_pending"> 其他國家</string>
+    <string name="dashboard_metric_value_pending">—</string>
     <string name="dashboard_metric_vehicle">汽車</string>
     <!-- Hero chips: at-a-glance pills under the greeting that summarize the
          three most important live signals (tunnel, services, recording). -->
@@ -1339,4 +1339,36 @@
     <string name="rail_section_automation">自動化</string>
     <string name="rail_section_system">系統</string>
     <string name="rail_collapse_label">收合</string>
+
+    <!-- Notification channels and foreground service notifications -->
+    <string name="notif_channel_status_overlay">狀態浮動層</string>
+    <string name="notif_channel_status_overlay_desc">錄製與行程狀態螢幕浮動顯示</string>
+    <string name="notif_channel_on_screen_messages">螢幕浮動訊息</string>
+    <string name="notif_on_screen_message_title">螢幕訊息</string>
+    <string name="notif_channel_location_service">定位服務</string>
+    <string name="notif_channel_location_service_desc">用於哨兵與防盜的 GPS 定位追蹤</string>
+    <string name="notif_location_active_title">定位服務運行中</string>
+    <string name="notif_location_active_text">GPS 追蹤持續運行</string>
+    <string name="notif_channel_media_playback">媒體與音效播放</string>
+    <string name="notif_playing_audio_title">正在播放音訊</string>
+    <string name="notif_media_automation_text">OverDrive 自動化任務</string>
+    <string name="notif_channel_vehicle_control">車輛控制服務</string>
+    <string name="notif_vehicle_control_title">車輛控制服務</string>
+    <string name="notif_channel_daemon_keepalive">守護進程保活</string>
+    <string name="notif_channel_daemon_keepalive_desc">保持背景守護進程持續運行</string>
+    <string name="notif_channel_overdrive_status">OverDrive 運行狀態</string>
+    <string name="notif_channel_overdrive_status_desc">OverDrive 背景服務聚合狀態列</string>
+    <string name="notif_channel_network_hotspot">網路與熱點橋接</string>
+    <string name="notif_channel_remote_voice">遠端對講與語音</string>
+    <string name="notif_channel_roadsense_overlay">RoadSense 路況浮動層</string>
+    <string name="notif_roadsense_overlay_active">路況隱患預警層運行中</string>
+    <string name="notif_channel_roadsense_imu">RoadSense 慣導感測器</string>
+    <string name="notif_roadsense_imu_active">路面感知系統運行中</string>
+    <string name="notif_roadsense_warning_title">RoadSense 安全預警</string>
+    <string name="notif_roadsense_chime_text">正在播放安全提示音</string>
+    <!-- Overlay pill labels -->
+    <string name="overlay_prox_label">雷達</string>
+    <string name="overlay_rec_label">錄製</string>
+    <string name="overlay_clip_label">片段</string>
+    <string name="overlay_trip_label">行程</string>
 </resources>

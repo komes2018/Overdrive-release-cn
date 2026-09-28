@@ -3,175 +3,175 @@
   "categories": [
     {
       "id": "surveillance.motion",
-      "label": "Motion detected (legacy)",
-      "group": "Surveillance",
+      "label": "检测到移动 (旧版)",
+      "group": "哨兵监控",
       "defaultEnabled": false,
       "severity": "auto",
       "defaultClickUrl": "/events.html?filter=sentry",
-      "note": "Legacy single-stream category, kept for backwards compatibility. Prefer the three Notice / Alert / Critical tiers below."
+      "note": "旧版单流移动检测分类，仅保留用于向下兼容。建议使用下方的「提示/警告/紧急」三级分类。"
     },
     {
       "id": "surveillance.motion.notice",
-      "label": "Surveillance — Notice",
-      "group": "Surveillance",
+      "label": "哨兵监控 — 提示",
+      "group": "哨兵监控",
       "defaultEnabled": false,
       "severity": "info",
       "defaultClickUrl": "/events.html?filter=sentry",
-      "note": "Routine motion or passing-by. Off by default — turn on if you want a record of every event."
+      "note": "日常轻微移动或远处路过。默认关闭 — 如需记录所有微小事件可开启。"
     },
     {
       "id": "surveillance.motion.alert",
-      "label": "Surveillance — Alert",
-      "group": "Surveillance",
+      "label": "哨兵监控 — 警告",
+      "group": "哨兵监控",
       "defaultEnabled": true,
       "severity": "warn",
       "defaultClickUrl": "/events.html?filter=sentry",
-      "note": "Person near the vehicle, vehicle approaching, or close-range activity."
+      "note": "靠近车辆的人员、接近的车辆或近距离活动。"
     },
     {
       "id": "surveillance.motion.critical",
-      "label": "Surveillance — Critical",
-      "group": "Surveillance",
+      "label": "哨兵监控 — 紧急",
+      "group": "哨兵监控",
       "defaultEnabled": true,
       "severity": "critical",
       "defaultClickUrl": "/events.html?filter=sentry",
-      "note": "Person at very close range or sustained dwell at the vehicle. Drop-everything alert."
+      "note": "极近距离人员或在车旁长时间徘徊，最高优先级严重告警。"
     },
     {
       "id": "surveillance.proximity",
-      "label": "Proximity alert",
-      "group": "Surveillance",
+      "label": "雷达近距警报",
+      "group": "哨兵监控",
       "defaultEnabled": true,
       "severity": "auto",
       "defaultClickUrl": "/events.html?filter=proximity",
-      "note": "Range and trigger depend on Recording settings"
+      "note": "测距范围与触发机制取决于录像设置中的雷达配置"
     },
     {
       "id": "vehicle.health.tyre.pressure",
-      "label": "Tyre pressure alarm",
-      "group": "Vehicle",
+      "label": "胎压告警",
+      "group": "车辆",
       "defaultEnabled": true,
       "severity": "warn",
       "defaultClickUrl": "/vehicle-control.html",
-      "note": "Underpressure or overpressure detected by TPMS"
+      "note": "胎压监测系统 (TPMS) 检测到胎压过低或过高"
     },
     {
       "id": "vehicle.health.tyre.leak",
-      "label": "Tyre leak detected",
-      "group": "Vehicle",
+      "label": "轮胎漏气检测",
+      "group": "车辆",
       "defaultEnabled": true,
       "severity": "auto",
       "defaultClickUrl": "/vehicle-control.html",
-      "note": "Slow or fast leak detected by TPMS sensor"
+      "note": "胎压传感器检测到轮胎慢撒气或快速漏气"
     },
     {
       "id": "vehicle.security.door.opened",
-      "label": "Door opened",
-      "group": "Security",
+      "label": "车门开启",
+      "group": "安全",
       "defaultEnabled": false,
       "severity": "warn",
       "defaultClickUrl": "/vehicle-control.html",
-      "note": "Fires when any door, hood, or trunk is opened while parked (ACC OFF)"
+      "note": "驻车熄火 (ACC 关闭) 状态下任何车门、前机盖或后备箱被打开时触发"
     },
     {
       "id": "vehicle.security.door.closed",
-      "label": "Door closed",
-      "group": "Security",
+      "label": "车门关闭",
+      "group": "安全",
       "defaultEnabled": false,
       "severity": "info",
       "defaultClickUrl": "/vehicle-control.html",
-      "note": "Fires when any door, hood, or trunk is closed while parked (ACC OFF)"
+      "note": "驻车熄火 (ACC 关闭) 状态下任何车门、前机盖或后备箱关闭时触发"
     },
     {
       "id": "vehicle.charging.started",
-      "label": "Charging started",
-      "group": "Charging",
+      "label": "充电开始",
+      "group": "充电",
       "defaultEnabled": true,
       "severity": "info",
       "defaultClickUrl": "/vehicle-control.html",
-      "note": "Fires when the BMS reports a charging session has begun"
+      "note": "电池管理系统 (BMS) 报告充电会话已开始时触发"
     },
     {
       "id": "vehicle.charging.stopped",
-      "label": "Charging stopped",
-      "group": "Charging",
+      "label": "充电停止",
+      "group": "充电",
       "defaultEnabled": true,
       "severity": "info",
       "defaultClickUrl": "/vehicle-control.html",
-      "note": "Debounced 10s to ride out brief gaps during plug-in or DC charger handshakes"
+      "note": "10 秒防抖延迟，以滤除插枪连接或快充握手时的短暂中断"
     },
     {
       "id": "vehicle.charging.full",
-      "label": "Charging complete",
-      "group": "Charging",
+      "label": "充电完成",
+      "group": "充电",
       "defaultEnabled": true,
       "severity": "warn",
       "bypassQuietHours": true,
       "defaultClickUrl": "/vehicle-control.html",
-      "note": "Fires once per session when the pack reaches near-full or the BMS marks the session FINISHED. Suppressed if you plug in an already-full car. Bypasses quiet hours so you wake up to an unplug reminder."
+      "note": "每充电会话当电池接近充满或 BMS 标记完成时触发一次。若插枪时已满电则静默。该通知可绕过免打扰时段，便于及时拔枪挪车。"
     },
     {
       "id": "vehicle.charging.fault",
-      "label": "Charging fault",
-      "group": "Charging",
+      "label": "充电故障",
+      "group": "充电",
       "defaultEnabled": true,
       "severity": "critical",
       "defaultClickUrl": "/vehicle-control.html",
-      "note": "AC, DC charger, charging gun, or C10 breakdown reported by BMS"
+      "note": "BMS 报告交流/直流充电桩、充电枪故障或 C10 异常"
     },
     {
       "id": "vehicle.health.soh.frame_mismatch",
-      "label": "Battery capacity mismatch",
-      "group": "Vehicle",
+      "label": "电池容量不匹配",
+      "group": "车辆",
       "defaultEnabled": true,
       "severity": "warn",
       "defaultClickUrl": "/performance.html#soh-fix",
-      "note": "Fires once per anchor lifetime when the BMS's full-charge kWh disagrees with the user-set pack capacity by >15% — usually a nameplate-vs-usable mix-up on PHEV (e.g. Tang DM-i 21.5 nominal vs ~13 usable). The Battery Health dialog has a one-tap fix."
+      "note": "当 BMS 满电度数与用户设定的电池容量差异超过 15% 时触发（多见于混动车型的标称容量与可用容量混淆，如唐 DM-i 标称 21.5kWh vs 实际可用 ~13kWh）。在电池健康对话框中可一键修正。"
     },
     {
       "id": "automation.action",
-      "label": "Automation fired",
-      "group": "Automation",
+      "label": "自动化触发",
+      "group": "自动化",
       "defaultEnabled": true,
       "severity": "info",
       "defaultClickUrl": "/automations.html",
-      "note": "Can be sent by creating an automation action to send a notification."
+      "note": "通过在自动化任务中添加发送通知动作时触发。"
     },
     {
       "id": "genai.insight",
-      "label": "AI insight ready",
-      "group": "Assistant",
+      "label": "AI 洞察就绪",
+      "group": "智能助手",
       "defaultEnabled": true,
       "severity": "info",
       "defaultClickUrl": "/assistant",
-      "note": "Sent only when AI insight notification delivery is explicitly enabled."
+      "note": "仅在显式开启 AI 洞察通知推送时发送。"
     },
     {
       "id": "parking.session.started",
-      "label": "Parked — where and what's around",
-      "group": "Parking",
+      "label": "已停车 — 位置与周边环境",
+      "group": "停车",
       "defaultEnabled": true,
       "severity": "info",
       "defaultClickUrl": "/parking.html",
-      "note": "About 90 s after switch-off: place, GPS freshness, whether sentry armed, and the four-camera still. Requires Parking Intelligence to be enabled in Surveillance settings."
+      "note": "熄火约 90 秒后：泊车位置、GPS 新鲜度、哨兵设防状态及四路相机环视画面。需在哨兵设置中启用驻车感知。"
     },
     {
       "id": "parking.session.ended",
-      "label": "Back at car — what happened",
-      "group": "Parking",
+      "label": "返回车旁 — 离车事件摘要",
+      "group": "停车",
       "defaultEnabled": true,
       "severity": "info",
       "defaultClickUrl": "/parking.html",
-      "note": "On the first unlock / door open: time away, number of sentry events and how many neighbouring vehicles came or went."
+      "note": "在首次解锁/开门时触发：离车时长、哨兵事件数量以及相邻车辆变动情况。"
     },
     {
       "id": "network.hotspot.limit",
-      "label": "Hotspot data limit reached",
-      "group": "Network",
+      "label": "热点流量超限",
+      "group": "网络",
       "defaultEnabled": true,
       "severity": "warn",
       "defaultClickUrl": "/network.html",
-      "note": "Fires when the hotspot passes its configured total data limit; the hotspot is turned off at the same time. Raise or reset the limit to use it again."
+      "note": "当车机热点消耗超过设定的流量限额时触发，并同时自动关闭热点。提高或重置限额后可恢复使用。"
     }
   ]
 }

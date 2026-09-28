@@ -1036,9 +1036,9 @@ public final class ThumbnailBuffer {
             label.setShadowLayer(3f, 0f, 0f, Color.BLACK);
             DaemonFonts.apply(label, Typeface.NORMAL);
             if (DaemonFonts.canDrawText()) {
-                String text = Actor.severityLabel(s.severity) + " · "
-                        + Actor.groupLabel(s.classGroup) + " · "
-                        + Actor.proximityLabel(s.proximity);
+                String text = Actor.severityLabelZh(s.severity) + " · "
+                        + Actor.groupLabelZh(s.classGroup) + " · "
+                        + Actor.proximityLabelZh(s.proximity);
                 canvas.drawText(text, Math.max(8, r.left), Math.max(32, r.top - 8), label);
             }
 

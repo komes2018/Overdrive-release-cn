@@ -135,7 +135,7 @@ public final class TelenavIpcServer {
             // main thread — WindowManager overlay + Telenav bind live here.
             JSONObject o = new JSONObject();
             if (appCtx == null) { o.put("success", false); o.put("error", "no app context"); return o; }
-            final String name = req.optString("name", "Shared location");
+            final String name = req.optString("name", "分享的位置");
             final double lat = req.getDouble("lat");
             final double lng = req.getDouble("lng");
             TelenavActions.validateCoordinates(lat, lng);

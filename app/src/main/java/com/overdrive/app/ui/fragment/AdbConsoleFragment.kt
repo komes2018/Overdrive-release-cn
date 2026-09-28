@@ -122,7 +122,7 @@ class AdbConsoleFragment : Fragment() {
             
             override fun onError(error: String) {
                 activity?.runOnUiThread {
-                    appendOutput("Error: $error")
+                    appendOutput("错误: $error")
                     btnExecute.isEnabled = true
                 }
             }
@@ -139,7 +139,7 @@ class AdbConsoleFragment : Fragment() {
     
     private fun clearOutput() {
         outputBuilder.clear()
-        outputBuilder.append("$ Ready for commands...")
+        outputBuilder.append(getString(R.string.adb_output_ready))
         tvOutput.text = outputBuilder.toString()
     }
     

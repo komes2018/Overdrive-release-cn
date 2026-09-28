@@ -89,7 +89,7 @@ object DeferredNavManager {
                     return@Thread
                 }
 
-                val name = d.optString("name", "Shared location")
+                val name = d.optString("name", "分享的位置")
                 val lat = d.optDouble("lat", Double.NaN)
                 val lng = d.optDouble("lng", Double.NaN)
                 try {

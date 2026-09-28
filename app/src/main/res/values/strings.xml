@@ -1924,4 +1924,36 @@
     <string name="vehicle_dialog_value_pending">—</string>
 
     <string name="roi_tap_to_add_points">Tap to add points (%1$d-%2$d)</string>
+
+    <!-- Notification channels and foreground service notifications -->
+    <string name="notif_channel_status_overlay">Status Overlay</string>
+    <string name="notif_channel_status_overlay_desc">Recording and trip status overlay</string>
+    <string name="notif_channel_on_screen_messages">On-screen messages</string>
+    <string name="notif_on_screen_message_title">On-screen message</string>
+    <string name="notif_channel_location_service">Location Service</string>
+    <string name="notif_channel_location_service_desc">GPS tracking for surveillance</string>
+    <string name="notif_location_active_title">Location Active</string>
+    <string name="notif_location_active_text">GPS tracking running</string>
+    <string name="notif_channel_media_playback">Media Playback</string>
+    <string name="notif_playing_audio_title">Playing audio</string>
+    <string name="notif_media_automation_text">OverDrive automation</string>
+    <string name="notif_channel_vehicle_control">Vehicle Control</string>
+    <string name="notif_vehicle_control_title">Vehicle control</string>
+    <string name="notif_channel_daemon_keepalive">Daemon Keepalive</string>
+    <string name="notif_channel_daemon_keepalive_desc">Keeps daemons running in background</string>
+    <string name="notif_channel_overdrive_status">Overdrive Status</string>
+    <string name="notif_channel_overdrive_status_desc">Combined status row for Overdrive\'s background services</string>
+    <string name="notif_channel_network_hotspot">Network &amp; Hotspot</string>
+    <string name="notif_channel_remote_voice">Remote voice</string>
+    <string name="notif_channel_roadsense_overlay">RoadSense overlay</string>
+    <string name="notif_roadsense_overlay_active">Hazard overlay active</string>
+    <string name="notif_channel_roadsense_imu">RoadSense IMU</string>
+    <string name="notif_roadsense_imu_active">Road sensing active</string>
+    <string name="notif_roadsense_warning_title">RoadSense warning</string>
+    <string name="notif_roadsense_chime_text">Playing a safety chime</string>
+    <!-- Overlay pill labels -->
+    <string name="overlay_prox_label">PROX</string>
+    <string name="overlay_rec_label">REC</string>
+    <string name="overlay_clip_label">CLIP</string>
+    <string name="overlay_trip_label">TRIP</string>
 </resources>

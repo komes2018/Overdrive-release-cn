@@ -1710,11 +1710,11 @@ class DashboardFragment : Fragment() {
 
                 summarySoh.text = when {
                     finalDisplaySoh > 0 && finalDisplaySource == "oem" ->
-                        String.format("%.1f%% (vehicle)", finalDisplaySoh)
+                        String.format("%.1f%% (车机)", finalDisplaySoh)
                     finalDisplaySoh > 0 && finalDisplaySource == "live" ->
-                        String.format("%.1f%% (live)", finalDisplaySoh)
+                        String.format("%.1f%% (实时)", finalDisplaySoh)
                     finalDisplaySoh > 0 && finalDisplaySource == "calibration" ->
-                        String.format("%.1f%% (from last charge)", finalDisplaySoh)
+                        String.format("%.1f%% (上次充电)", finalDisplaySoh)
                     finalDisplaySoh > 0 -> String.format("%.1f%%", finalDisplaySoh)
                     else -> getString(R.string.vehicle_dialog_soh_unavailable)
                         .replaceFirstChar { it.uppercase() }
@@ -1918,7 +1918,7 @@ class DashboardFragment : Fragment() {
                     ?: "HTTP $status"
             }
         } catch (t: Throwable) {
-            t.message?.takeIf { it.isNotBlank() } ?: "Network error"
+            t.message?.takeIf { it.isNotBlank() } ?: "网络错误"
         } finally {
             conn?.disconnect()
         }

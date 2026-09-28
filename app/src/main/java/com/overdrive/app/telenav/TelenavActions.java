@@ -66,7 +66,7 @@ public final class TelenavActions {
             String name, double lat, double lng, String favoriteType,
             String placeId, String formattedAddress) {
         validateCoordinates(lat, lng);
-        String safeName = (name == null || name.trim().isEmpty()) ? "Shared location" : name.trim();
+        String safeName = (name == null || name.trim().isEmpty()) ? "分享的位置" : name.trim();
         String pid = (placeId == null || placeId.trim().isEmpty())
                 ? "OD-" + lat + "_" + lng : placeId.trim();
         String addr = (formattedAddress == null || formattedAddress.trim().isEmpty())

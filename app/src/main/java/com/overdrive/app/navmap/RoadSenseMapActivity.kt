@@ -5506,7 +5506,13 @@ open class RoadSenseMapActivity : AppCompatActivity() {
 
     private fun formatEta(seconds: Double): String {
         val mins = (seconds / 60.0).toInt()
-        return if (mins >= 60) "${mins / 60} h ${mins % 60} min" else "$mins min"
+        val h = mins / 60
+        val m = mins % 60
+        return when {
+            h > 0 && m > 0 -> "${h}小时${m}分钟"
+            h > 0 -> "${h}小时"
+            else -> "${m}分钟"
+        }
     }
 
     // ---------------------------------------------------------------------

@@ -187,7 +187,7 @@ public final class GenAiIncidentPacks {
                 .put("filename", video.getName())
                 .put("recordingType", inferType(video.getName()))
                 .put("title", report.optString(
-                        "title", "OverDrive Incident Evidence Report"))
+                        "title", "OverDrive 事件证据报告"))
                 .put("video", json()
                         .put("sizeBytes", videoSize)
                         .put("mtimeMs", videoMtime)
@@ -927,7 +927,7 @@ public final class GenAiIncidentPacks {
         }
 
         SafeJson body = json()
-                .put("title", "OverDrive Incident Evidence Report")
+                .put("title", "OverDrive 事件证据报告")
                 .put("summary", summary.toString())
                 .put("observations", observations)
                 .put("unknowns", new JSONArray()
@@ -1132,7 +1132,7 @@ public final class GenAiIncidentPacks {
                 .put("schemaVersion", SCHEMA_VERSION)
                 .put("createdAtMs", createdAt)
                 .put("generation", generation)
-                .put("title", "OverDrive Incident Evidence Report")
+                .put("title", "OverDrive 事件证据报告")
                 .put("summary", body.optString("summary", ""))
                 .put("timeline", body.optJSONArray("timeline") == null
                         ? new JSONArray() : body.optJSONArray("timeline"))

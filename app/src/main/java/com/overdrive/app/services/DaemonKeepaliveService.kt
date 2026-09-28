@@ -342,10 +342,10 @@ class DaemonKeepaliveService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Daemon Keepalive",
+                getString(R.string.notif_channel_daemon_keepalive),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Keeps daemons running in background"
+                description = getString(R.string.notif_channel_daemon_keepalive_desc)
                 setShowBadge(false)
             }
             
@@ -413,10 +413,10 @@ class DaemonKeepaliveService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 SUMMARY_CHANNEL_ID,
-                "Overdrive Status",
+                getString(R.string.notif_channel_overdrive_status),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Combined status row for Overdrive's background services"
+                description = getString(R.string.notif_channel_overdrive_status_desc)
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)

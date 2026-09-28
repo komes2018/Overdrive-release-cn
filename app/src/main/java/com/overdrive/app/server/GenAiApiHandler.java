@@ -796,7 +796,7 @@ public final class GenAiApiHandler {
                 ? metadata.optString("title", "").trim()
                 : report.optString("title", "").trim();
         if (title.isEmpty()) {
-            title = "OverDrive Incident Evidence Report";
+            title = "OverDrive 事件证据报告";
         }
         return new JSONObject()
                 .put("success", true)

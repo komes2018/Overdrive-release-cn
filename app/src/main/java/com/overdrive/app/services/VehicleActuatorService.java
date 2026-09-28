@@ -2829,7 +2829,7 @@ public class VehicleActuatorService extends Service {
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel ch = new NotificationChannel(
-                    CHANNEL_ID, "Vehicle Control", NotificationManager.IMPORTANCE_LOW);
+                    CHANNEL_ID, getString(R.string.notif_channel_vehicle_control), NotificationManager.IMPORTANCE_LOW);
             ch.setShowBadge(false);
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm != null) nm.createNotificationChannel(ch);
@@ -2840,7 +2840,7 @@ public class VehicleActuatorService extends Service {
         Notification.Builder b = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
-        return b.setContentTitle("Vehicle control")
+        return b.setContentTitle(getString(R.string.notif_vehicle_control_title))
                 .setContentText("OverDrive")
                 .setSmallIcon(R.drawable.ic_play_circle)
                 .setOngoing(false)
