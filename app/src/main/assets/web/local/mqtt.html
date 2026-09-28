@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -193,7 +193,7 @@
             </div>
 
             <header class="page-header">
-                <h1 class="page-title" data-i18n="mqtt.page_title">MQTT Connections</h1>
+                <h1 class="page-title" data-i18n="mqtt.page_title">MQTT 连接配置</h1>
                 <!-- The form lives on the Add tab (see window.OT_TABS above);
                      the empty-state below has a CTA that switches to it. -->
             </header>
@@ -206,8 +206,8 @@
                 <div id="emptyState" class="card" data-tab="connections" style="display:none;">
                     <div class="empty-state">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="2"/><path d="M8.46 15.54A5 5 0 0 1 7 12a5 5 0 0 1 1.46-3.54"/><path d="M15.54 8.46A5 5 0 0 1 17 12a5 5 0 0 1-1.46 3.54"/><path d="M5.64 18.36A9 9 0 0 1 3 12a9 9 0 0 1 2.64-6.36"/><path d="M18.36 5.64A9 9 0 0 1 21 12a9 9 0 0 1-2.64 6.36"/></svg>
-                        <p data-i18n="mqtt.empty_p">No MQTT connections configured. Add a connection to start publishing vehicle telemetry.</p>
-                        <button class="btn btn-primary" onclick="MQTT.showAddForm()" data-i18n="mqtt.add_connection">Add Connection</button>
+                        <p data-i18n="mqtt.empty_p">尚未配置 MQTT 连接。添加连接后即可开始向代理服务器发布车辆遥测数据。</p>
+                        <button class="btn btn-primary" onclick="MQTT.showAddForm()" data-i18n="mqtt.add_connection">添加连接</button>
                     </div>
                 </div>
 
@@ -217,54 +217,54 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                            <span id="formTitle" data-i18n="mqtt.add_connection">Add Connection</span>
+                            <span id="formTitle" data-i18n="mqtt.add_connection">添加连接</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <input type="hidden" id="formId" value="">
-                        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;margin-bottom:2px;" data-i18n="mqtt.tailscale_hint">For private brokers on your tailnet: enable Tailscale proxy in the tailscale daemon settings to connect without port forwarding. Note: while enabled, public brokers (HiveMQ, AWS IoT, etc.) will not be reachable.</div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;margin-bottom:2px;" data-i18n="mqtt.tailscale_hint">如需连接 Tailnet 上的私有 MQTT 代理服务器：请在 Tailscale 守护进程设置中启用 Tailscale 代理，无需端口转发即可连接。注意：启用后公共代理服务器将无法访问。</div>
                         <div class="form-grid">
                             <div class="form-group" style="grid-column: span 2;">
-                                <label data-i18n="mqtt.field_name">Connection Name</label>
-                                <input type="text" id="formName" placeholder="e.g. Home Assistant, Fleet Server" data-i18n-attr="placeholder:mqtt.name_placeholder">
+                                <label data-i18n="mqtt.field_name">连接名称</label>
+                                <input type="text" id="formName" placeholder="例如 Home Assistant、车队管理服务器" data-i18n-attr="placeholder:mqtt.name_placeholder">
                             </div>
                             <div class="form-group">
-                                <label data-i18n="mqtt.field_broker">Broker URL</label>
+                                <label data-i18n="mqtt.field_broker">代理服务 (Broker) 地址</label>
                                 <input type="text" id="formBrokerUrl" placeholder="tcp://broker.hivemq.com">
                             </div>
                             <div class="form-group">
-                                <label data-i18n="mqtt.field_port">Port</label>
+                                <label data-i18n="mqtt.field_port">端口</label>
                                 <input type="number" id="formPort" value="1883" min="1" max="65535">
                             </div>
                             <div class="form-group" style="grid-column: span 2;">
-                                <label data-i18n="mqtt.field_topic">Topic</label>
+                                <label data-i18n="mqtt.field_topic">主题 (Topic)</label>
                                 <input type="text" id="formTopic" placeholder="overdrive/vehicle/telemetry" value="overdrive/vehicle/telemetry">
                             </div>
                             <div class="form-group">
-                                <label data-i18n="mqtt.field_user">Username (optional)</label>
-                                <input type="text" id="formUsername" placeholder="Leave empty if not required" data-i18n-attr="placeholder:mqtt.opt_placeholder">
+                                <label data-i18n="mqtt.field_user">用户名 (可选)</label>
+                                <input type="text" id="formUsername" placeholder="如无需认证请留空" data-i18n-attr="placeholder:mqtt.opt_placeholder">
                             </div>
                             <div class="form-group">
-                                <label data-i18n="mqtt.field_pass">Password (optional)</label>
-                                <input type="password" id="formPassword" placeholder="Leave empty if not required" data-i18n-attr="placeholder:mqtt.opt_placeholder">
+                                <label data-i18n="mqtt.field_pass">密码 (可选)</label>
+                                <input type="password" id="formPassword" placeholder="如无需认证请留空" data-i18n-attr="placeholder:mqtt.opt_placeholder">
                             </div>
                             <div class="form-group">
-                                <label data-i18n="mqtt.field_client_id">Client ID (auto if empty)</label>
-                                <input type="text" id="formClientId" placeholder="Auto-generated" data-i18n-attr="placeholder:mqtt.auto_gen">
+                                <label data-i18n="mqtt.field_client_id">客户端 ID (留空则自动生成)</label>
+                                <input type="text" id="formClientId" placeholder="自动生成" data-i18n-attr="placeholder:mqtt.auto_gen">
                             </div>
                             <div class="form-group">
-                                <label data-i18n="mqtt.label_qos">QoS</label>
+                                <label data-i18n="mqtt.label_qos">QoS 等级</label>
                                 <select id="formQos">
-                                    <option value="0" data-i18n="mqtt.qos_0">0 - Fire &amp; Forget</option>
-                                    <option value="1" data-i18n="mqtt.qos_1">1 - At Least Once</option>
+                                    <option value="0" data-i18n="mqtt.qos_0">0 - 最多交付一次 (Fire &amp; Forget)</option>
+                                    <option value="1" data-i18n="mqtt.qos_1">1 - 至少交付一次 (At Least Once)</option>
                                 </select>
                             </div>
                             <div class="form-group" style="grid-column: span 2;">
-                                <label><span data-i18n="mqtt.field_min_interval">Min interval — fastest</span>: <span id="formMinLabel" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">5s</span></label>
+                                <label><span data-i18n="mqtt.field_min_interval">最小间隔 — 极速模式</span>: <span id="formMinLabel" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">5s</span></label>
                                 <input type="range" class="slider" id="formMinInterval" min="1" max="60" step="1" value="5" oninput="MQTT.onSlider()">
                             </div>
                             <div class="form-group" style="grid-column: span 2;">
-                                <label><span data-i18n="mqtt.field_max_interval">Max interval — heartbeat</span>: <span id="formMaxLabel" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">5m</span></label>
+                                <label><span data-i18n="mqtt.field_max_interval">最大间隔 — 基础心跳</span>: <span id="formMaxLabel" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">5m</span></label>
                                 <input type="range" class="slider" id="formMaxInterval" min="30" max="3600" step="30" value="300" oninput="MQTT.onSlider()">
                             </div>
                             <!-- Per-state heartbeat overrides (issue #132). Optional: when set, they
@@ -273,14 +273,14 @@
                                  behave exactly as before. Parked lets telemetry slow right down to save
                                  data during the ACC-off network blackout; charging can keep stats lively. -->
                             <div class="form-group" style="grid-column: span 2;">
-                                <label><span data-i18n="mqtt.field_parked_interval">Parked heartbeat (ACC off)</span>: <span id="formParkedLabel" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">Off</span></label>
+                                <label><span data-i18n="mqtt.field_parked_interval">驻车心跳间隔 (ACC 熄火)</span>: <span id="formParkedLabel" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">Off</span></label>
                                 <input type="range" class="slider" id="formParkedInterval" min="0" max="3600" step="30" value="0" oninput="MQTT.onSlider()">
-                                <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.field_parked_interval_desc">Heartbeat cadence while the car is parked. Off = use the max interval. Higher = fewer publishes, less data.</div>
+                                <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.field_parked_interval_desc">车辆驻车（ACC 熄火）后的心跳发送频率。设为“关闭”时采用最大间隔；数值越大发布次数越少、耗费流量也越少。</div>
                             </div>
                             <div class="form-group" style="grid-column: span 2;">
-                                <label><span data-i18n="mqtt.field_charging_interval">Charging heartbeat</span>: <span id="formChargingLabel" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">Off</span></label>
+                                <label><span data-i18n="mqtt.field_charging_interval">充电心跳间隔</span>: <span id="formChargingLabel" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">Off</span></label>
                                 <input type="range" class="slider" id="formChargingInterval" min="0" max="3600" step="30" value="0" oninput="MQTT.onSlider()">
-                                <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.field_charging_interval_desc">Heartbeat cadence while charging. Off = use the max interval. Takes precedence over the parked cadence.</div>
+                                <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.field_charging_interval_desc">充电时的心跳发送频率。设为“关闭”时采用最大间隔；其优先级高于驻车心跳频率。</div>
                             </div>
                         </div>
 
@@ -288,8 +288,8 @@
                         <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px;padding-top:16px;border-top:1px solid var(--border-subtle);">
                             <div style="display:flex;align-items:center;justify-content:space-between;">
                                 <div>
-                                    <div style="font-size:14px;color:var(--text-primary);font-weight:500;" data-i18n="mqtt.change_only">Publish only on change</div>
-                                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.change_only_desc">Skip publishing when no values changed (heartbeat still fires at the max interval)</div>
+                                    <div style="font-size:14px;color:var(--text-primary);font-weight:500;" data-i18n="mqtt.change_only">仅在数据变更时发布</div>
+                                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.change_only_desc">当没有数值发生变化时跳过发布（仍会在最大间隔时发送心跳保持连接）</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="formChangeOnly" checked>
@@ -298,8 +298,8 @@
                             </div>
                             <div style="display:flex;align-items:center;justify-content:space-between;">
                                 <div>
-                                    <div style="font-size:14px;color:var(--text-primary);font-weight:500;" data-i18n="mqtt.ha_discovery">Home Assistant discovery</div>
-                                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.ha_discovery_desc">Auto-create entities in Home Assistant. Publishes per-field retained topics (no aggregate JSON).</div>
+                                    <div style="font-size:14px;color:var(--text-primary);font-weight:500;" data-i18n="mqtt.ha_discovery">Home Assistant 自动发现</div>
+                                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.ha_discovery_desc">在 Home Assistant 中自动建立车辆实体与传感器。针对每个遥测字段发布保留主题（非聚合大 JSON）。</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="formHaDiscovery" onchange="MQTT.onHaToggle()">
@@ -307,13 +307,13 @@
                                 </label>
                             </div>
                             <div class="form-group" id="formDiscoveryPrefixRow" style="display:none;">
-                                <label data-i18n="mqtt.ha_prefix">Discovery prefix</label>
+                                <label data-i18n="mqtt.ha_prefix">自动发现前缀</label>
                                 <input type="text" id="formDiscoveryPrefix" value="homeassistant" placeholder="homeassistant">
                             </div>
                             <div id="formHeartbeatSendAllRow" style="display:none;align-items:center;justify-content:space-between;">
                                 <div>
-                                    <div style="font-size:14px;color:var(--text-primary);font-weight:500;" data-i18n="mqtt.heartbeat_send_all">Full-sync at heartbeat</div>
-                                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.heartbeat_send_all_desc">Re-send every value at the heartbeat interval even if nothing changed. Recovers state lost to a connection drop.</div>
+                                    <div style="font-size:14px;color:var(--text-primary);font-weight:500;" data-i18n="mqtt.heartbeat_send_all">心跳时全量同步</div>
+                                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.heartbeat_send_all_desc">即使数值无变化，也在每个心跳周期重新发送所有实体状态，自动修复因网络闪断导致的状态丢失。</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="formHeartbeatSendAll">
@@ -322,8 +322,8 @@
                             </div>
                             <div id="formFlushOnStateChangeRow" style="display:none;align-items:center;justify-content:space-between;">
                                 <div>
-                                    <div style="font-size:14px;color:var(--text-primary);font-weight:500;" data-i18n="mqtt.flush_on_state_change">Flush on mode change</div>
-                                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.flush_on_state_change_desc">Re-send every value when the car changes mode (engine on/off, charging start/stop), so the new state always reaches HA even if a single update is lost at a network handoff. Light — fires only on transitions.</div>
+                                    <div style="font-size:14px;color:var(--text-primary);font-weight:500;" data-i18n="mqtt.flush_on_state_change">模式切换时即时刷新</div>
+                                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.flush_on_state_change_desc">当车辆模式切换时（启动/熄火、充电开始/停止）立即重新发布全部数值，这样即使在网络切换时丢失单次更新，新状态也总能送达 HA。开销很低——仅在状态跃迁时触发。</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="formFlushOnStateChange">
@@ -332,8 +332,8 @@
                             </div>
                             <div id="formAllowControlRow" style="display:none;align-items:center;justify-content:space-between;">
                                 <div>
-                                    <div style="font-size:14px;color:var(--text-primary);font-weight:500;" data-i18n="mqtt.allow_control">Allow vehicle control</div>
-                                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.allow_control_desc">Expose controllable entities (climate, windows, seats, settings…) and act on commands from Home Assistant. Local SDK only — never the BYD cloud. Off by default.</div>
+                                    <div style="font-size:14px;color:var(--text-primary);font-weight:500;" data-i18n="mqtt.allow_control">允许远程车辆控制</div>
+                                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.allow_control_desc">在 Home Assistant 中暴露可控制实体（空调、车窗、座椅加热通风、相关设置等）并执行下发指令。完全基于本地车机 SDK，绝不经过比亚迪云端。默认关闭。</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="formAllowControl">
@@ -342,8 +342,8 @@
                             </div>
                             <div style="display:flex;align-items:center;justify-content:space-between;">
                                 <div>
-                                    <div style="font-size:14px;color:var(--text-primary);font-weight:500;" data-i18n="mqtt.retain">Retain Messages</div>
-                                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.retain_desc">Broker keeps last message for new subscribers</div>
+                                    <div style="font-size:14px;color:var(--text-primary);font-weight:500;" data-i18n="mqtt.retain">保留消息 (Retain)</div>
+                                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.retain_desc">Broker 将保留最后一条消息推送给新订阅者</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="formRetain">
@@ -352,8 +352,8 @@
                             </div>
                             <div style="display:flex;align-items:center;justify-content:space-between;">
                                 <div>
-                                    <div style="font-size:14px;color:var(--text-primary);font-weight:500;" data-i18n="mqtt.enable_conn">Enable Connection</div>
-                                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.enable_desc">Start publishing immediately after saving</div>
+                                    <div style="font-size:14px;color:var(--text-primary);font-weight:500;" data-i18n="mqtt.enable_conn">启用连接</div>
+                                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" data-i18n="mqtt.enable_desc">保存后立即开始发布</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="formEnabled" checked>
@@ -363,8 +363,8 @@
                         </div>
 
                         <div class="form-actions">
-                            <button class="btn btn-secondary" onclick="MQTT.hideForm()" data-i18n="common.cancel">Cancel</button>
-                            <button class="btn btn-primary" onclick="MQTT.saveForm()" data-i18n="mqtt.save_connection">Save Connection</button>
+                            <button class="btn btn-secondary" onclick="MQTT.hideForm()" data-i18n="common.cancel">取消</button>
+                            <button class="btn btn-primary" onclick="MQTT.saveForm()" data-i18n="mqtt.save_connection">保存连接</button>
                         </div>
                     </div>
                 </div>
@@ -374,13 +374,13 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                            <span data-i18n="mqtt.telemetry_title">Live Telemetry Preview</span>
+                            <span data-i18n="mqtt.telemetry_title">实时遥测数据预览</span>
                         </div>
                     </div>
                     <div class="card-body telemetry-scroll" style="padding:0;">
                         <table class="telemetry-table">
                             <tbody id="telemetryBody">
-                                <tr><td colspan="2" style="text-align:center;color:var(--text-muted);padding:24px;" data-i18n="mqtt.telemetry_waiting">Waiting for telemetry data…</td></tr>
+                                <tr><td colspan="2" style="text-align:center;color:var(--text-muted);padding:24px;" data-i18n="mqtt.telemetry_waiting">正在等待遥测数据…</td></tr>
                             </tbody>
                         </table>
                     </div>

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.communicate_title">Communicate - OverDrive</title>
+    <title data-i18n="app.communicate_title">远程通信与对讲 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#00876C">
@@ -17,38 +17,38 @@
         <div id="app-shell-mount"></div>
         <main class="main-content">
             <div class="mobile-header">
-                <button class="menu-toggle" type="button" onclick="toggleSidebar()" aria-label="Open menu" data-i18n-attr="aria-label:genai.aria_open_menu">
+                <button class="menu-toggle" type="button" onclick="toggleSidebar()" aria-label="打开操作菜单" data-i18n-attr="aria-label:genai.aria_open_menu">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <line x1="4" x2="20" y1="12" y2="12"/>
                         <line x1="4" x2="20" y1="6" y2="6"/>
                         <line x1="4" x2="20" y1="18" y2="18"/>
                     </svg>
                 </button>
-                <span class="communicate-mobile-title" data-i18n="communicate.title">Communicate</span>
+                <span class="communicate-mobile-title" data-i18n="communicate.title">远程通信与对讲</span>
                 <div class="communicate-mobile-state" id="mobileConnectionDot" aria-hidden="true"></div>
             </div>
 
             <header class="page-header communicate-header">
-                <h1 class="page-title" data-i18n="communicate.title">Communicate</h1>
+                <h1 class="page-title" data-i18n="communicate.title">远程通信与对讲</h1>
                 <div class="communicate-availability" id="availability" role="status" aria-live="polite">
                     <span class="communicate-availability-dot" id="availabilityDot"></span>
-                    <span id="availabilityText" data-i18n="communicate.checking_car">Checking car...</span>
+                    <span id="availabilityText" data-i18n="communicate.checking_car">正在检查车辆连通性…</span>
                 </div>
             </header>
 
-            <div class="communicate-mobile-tabs" role="tablist" aria-label="Communication mode" data-i18n-attr="aria-label:communicate.title">
+            <div class="communicate-mobile-tabs" role="tablist" aria-label="远程通信与对讲" data-i18n-attr="aria-label:communicate.title">
                 <button type="button" class="communicate-tab is-active" id="talkTab" role="tab" aria-selected="true" aria-controls="talkPanel">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
                         <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/>
                     </svg>
-                    <span data-i18n="communicate.talk">Talk</span>
+                    <span data-i18n="communicate.talk">远程对讲喊话</span>
                 </button>
                 <button type="button" class="communicate-tab" id="messageTab" role="tab" aria-selected="false" aria-controls="messagePanel">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"/>
                     </svg>
-                    <span data-i18n="communicate.message">Message</span>
+                    <span data-i18n="communicate.message">文字弹幕消息</span>
                 </button>
             </div>
 
@@ -56,7 +56,7 @@
                 <div class="communicate-grid">
                     <section class="communicate-tool talk-tool is-mobile-active" id="talkPanel" aria-labelledby="talkHeading">
                         <div class="communicate-tool-header">
-                            <h2 id="talkHeading" data-i18n="communicate.talk">Talk</h2>
+                            <h2 id="talkHeading" data-i18n="communicate.talk">远程对讲喊话</h2>
                             <div class="talk-header-actions">
                                 <button type="button"
                                         class="cabin-listener-toggle"
@@ -68,17 +68,17 @@
                                         <path d="M15.5 8.5a5 5 0 0 1 0 7"/>
                                         <path d="M18.5 5.5a9 9 0 0 1 0 13"/>
                                     </svg>
-                                    <span data-i18n="communicate.listen">Listen</span>
+                                    <span data-i18n="communicate.listen">车内收音监听</span>
                                 </button>
                                 <span class="talk-live-badge" id="liveBadge">
                                     <span class="talk-live-dot"></span>
-                                    <span data-i18n="communicate.live">LIVE</span>
+                                    <span data-i18n="communicate.live">实时通话中</span>
                                 </span>
                             </div>
                         </div>
 
                         <div class="talk-stage">
-                            <button type="button" class="ptt-button is-disabled" id="pttButton" aria-label="Hold to talk" aria-disabled="true" data-i18n-attr="aria-label:communicate.hold_to_talk">
+                            <button type="button" class="ptt-button is-disabled" id="pttButton" aria-label="按住喊话" aria-disabled="true" data-i18n-attr="aria-label:communicate.hold_to_talk">
                                 <span class="ptt-ring" aria-hidden="true"></span>
                                 <svg class="ptt-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                                     <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
@@ -87,12 +87,12 @@
                             </button>
 
                             <div class="talk-state-copy" aria-live="polite">
-                                <div class="talk-state-title" id="talkStateTitle" data-i18n="communicate.checking_car">Checking car...</div>
+                                <div class="talk-state-title" id="talkStateTitle" data-i18n="communicate.checking_car">正在检查车辆连通性…</div>
                                 <div class="talk-state-reason" id="talkStateReason"></div>
                                 <div class="talk-state-guidance" id="talkStateGuidance"></div>
                             </div>
 
-                            <div class="talk-meter" id="talkMeter" aria-label="Microphone level" data-i18n-attr="aria-label:communicate.mic_level">
+                            <div class="talk-meter" id="talkMeter" aria-label="麦克风音量" data-i18n-attr="aria-label:communicate.mic_level">
                                 <div class="talk-meter-track">
                                     <div class="talk-meter-fill" id="talkMeterFill"></div>
                                 </div>
@@ -107,9 +107,9 @@
 
                             <div class="talk-output-control">
                                 <div class="talk-output-option">
-                                    <label for="remoteOutputOverride" data-i18n="communicate.output_override">Use custom voice level</label>
+                                    <label for="remoteOutputOverride" data-i18n="communicate.output_override">使用自定义语音音量</label>
                                     <label class="toggle-switch talk-output-toggle">
-                                        <input type="checkbox" id="remoteOutputOverride" aria-label="Use custom voice level" data-i18n-attr="aria-label:communicate.output_override" disabled>
+                                        <input type="checkbox" id="remoteOutputOverride" aria-label="使用自定义语音音量" data-i18n-attr="aria-label:communicate.output_override" disabled>
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
@@ -127,7 +127,7 @@
                                         max="100"
                                         step="5"
                                         value="70"
-                                        aria-label="Voice output level"
+                                        aria-label="自定义语音音量"
                                         data-i18n-attr="aria-label:communicate.output_level"
                                         disabled>
                                     <output id="remoteOutputValue" for="remoteOutputLevel">70%</output>
@@ -139,7 +139,7 @@
 
                     <section class="communicate-tool message-tool" id="messagePanel" aria-labelledby="messageHeading">
                         <div class="communicate-tool-header">
-                            <h2 id="messageHeading" data-i18n="communicate.message">Message</h2>
+                            <h2 id="messageHeading" data-i18n="communicate.message">文字弹幕消息</h2>
                             <div class="message-ack" id="messageAck" role="status" aria-live="polite"></div>
                         </div>
 
@@ -151,14 +151,14 @@
                             </div>
 
                             <fieldset class="message-fieldset">
-                                <legend data-i18n="communicate.presentation">Presentation</legend>
-                                <div class="communicate-segmented" id="messageKind" role="radiogroup" aria-label="Message presentation" data-i18n-attr="aria-label:communicate.presentation">
-                                    <button type="button" class="is-selected" data-value="toast" role="radio" aria-checked="true" data-i18n="communicate.toast">Toast</button>
-                                    <button type="button" data-value="dialog" role="radio" aria-checked="false" data-i18n="communicate.dialog">Dialog</button>
+                                <legend data-i18n="communicate.presentation">弹窗呈现形式</legend>
+                                <div class="communicate-segmented" id="messageKind" role="radiogroup" aria-label="弹窗呈现形式" data-i18n-attr="aria-label:communicate.presentation">
+                                    <button type="button" class="is-selected" data-value="toast" role="radio" aria-checked="true" data-i18n="communicate.toast">轻量气泡 (Toast)</button>
+                                    <button type="button" data-value="dialog" role="radio" aria-checked="false" data-i18n="communicate.dialog">居中对话框 (Dialog)</button>
                                 </div>
                             </fieldset>
 
-                            <label class="message-label" for="messageText" data-i18n="communicate.message">Message</label>
+                            <label class="message-label" for="messageText" data-i18n="communicate.message">文字弹幕消息</label>
                             <div class="message-input-wrap">
                                 <textarea id="messageText" maxlength="200" rows="5" required></textarea>
                                 <span class="message-counter" id="messageCounter">0 / 200</span>
@@ -166,26 +166,26 @@
 
                             <div class="message-options">
                                 <label>
-                                    <span data-i18n="communicate.severity">Severity</span>
+                                    <span data-i18n="communicate.severity">紧急级别</span>
                                     <select id="messageSeverity">
-                                        <option value="info" data-i18n="communicate.info">Info</option>
-                                        <option value="warning" data-i18n="communicate.warning">Warning</option>
-                                        <option value="alert" data-i18n="communicate.alert">Alert</option>
+                                        <option value="info" data-i18n="communicate.info">普通信息</option>
+                                        <option value="warning" data-i18n="communicate.warning">警示提醒</option>
+                                        <option value="alert" data-i18n="communicate.alert">紧急通告</option>
                                     </select>
                                 </label>
                                 <label>
-                                    <span data-i18n="communicate.position">Position</span>
+                                    <span data-i18n="communicate.position">屏幕位置</span>
                                     <select id="messagePosition">
-                                        <option value="top" data-i18n="communicate.top">Top</option>
-                                        <option value="center" data-i18n="communicate.center">Center</option>
-                                        <option value="bottom" selected data-i18n="communicate.bottom">Bottom</option>
+                                        <option value="top" data-i18n="communicate.top">顶部</option>
+                                        <option value="center" data-i18n="communicate.center">居中</option>
+                                        <option value="bottom" selected data-i18n="communicate.bottom">底部</option>
                                     </select>
                                 </label>
                                 <label>
-                                    <span data-i18n="communicate.duration">Duration</span>
+                                    <span data-i18n="communicate.duration">显示时长</span>
                                     <select id="messageDuration">
-                                        <option value="short" data-i18n="communicate.short">Short</option>
-                                        <option value="long" data-i18n="communicate.long">Long</option>
+                                        <option value="short" data-i18n="communicate.short">较短（3 秒）</option>
+                                        <option value="long" data-i18n="communicate.long">较长（6 秒）</option>
                                     </select>
                                 </label>
                             </div>
@@ -196,7 +196,7 @@
                                         <path d="m22 2-7 20-4-9-9-4Z"/>
                                         <path d="M22 2 11 13"/>
                                     </svg>
-                                    <span data-i18n="communicate.send">Send</span>
+                                    <span data-i18n="communicate.send">发送</span>
                                 </button>
                             </div>
                         </form>

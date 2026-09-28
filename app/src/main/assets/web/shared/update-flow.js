@@ -115,7 +115,7 @@
         a.className = 'nav-link nav-link-update';
         a.id = 'navUpdateLink';
         // aria-label doubles as the tooltip text in collapsed-rail variants.
-        a.setAttribute('aria-label', 'Check for Updates');
+        a.setAttribute('aria-label', (window.BYD && BYD.i18n && BYD.i18n.t('update.check_for_updates')) || '查看更新');
         a.innerHTML =
             '<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
             '<polyline points="23 4 23 10 17 10"/>' +
@@ -127,10 +127,10 @@
             // initial t() call returns the literal key ("update.check_for_updates")
             // when run before BYD.i18n.init() resolves, and there's nothing to
             // re-evaluate later. BYD.i18n.t() returns null while the catalog
-            // is still loading — guard with the English fallback so we never
+            // is still loading — guard with the default fallback so we never
             // render the literal "null" while the user waits for the first
             // hydrate() pass.
-            '<span data-i18n="update.check_for_updates">' + ((window.BYD && BYD.i18n && BYD.i18n.t('update.check_for_updates')) || 'Check for Updates') + '</span>';
+            '<span data-i18n="update.check_for_updates">' + ((window.BYD && BYD.i18n && BYD.i18n.t('update.check_for_updates')) || '查看更新') + '</span>';
         a.addEventListener('click', function (e) {
             e.preventDefault();
             startCheckFlow();

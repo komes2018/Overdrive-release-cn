@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.road_sense_title">RoadSense - OverDrive</title>
+    <title data-i18n="app.road_sense_title">RoadSense 路况感知 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <script src="../shared/theme.js?v=8"></script>
     <script src="../shared/app-shell.js?v=7"></script>
@@ -84,12 +84,12 @@
                         <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
                     </svg>
                 </button>
-                <span style="font-weight:600;" data-i18n="nav.road_sense">RoadSense</span>
+                <span style="font-weight:600;" data-i18n="nav.road_sense">RoadSense 路况</span>
                 <div style="width:40px;"></div>
             </div>
 
             <header class="page-header">
-                <h1 class="page-title" data-i18n="road_sense.page_title">RoadSense Settings</h1>
+                <h1 class="page-title" data-i18n="road_sense.page_title">RoadSense 设置</h1>
             </header>
 
             <div class="page-body">
@@ -98,15 +98,15 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 20.2 L8.6 11 L15.4 11 L20.8 20.2 Z"/><path d="M12 12.4v1.3M12 15.7v1.6M12 18.7v1.1"/><path d="M12 3.2v2.4"/><path d="M12 7.6h.01"/></svg>
-                            <span data-i18n="road_sense.master_title">RoadSense</span>
+                            <span data-i18n="road_sense.master_title">RoadSense 路况感知</span>
                         </div>
-                        <span class="status-badge inactive" id="rsStatusBadge" data-i18n="status.off">OFF</span>
+                        <span class="status-badge inactive" id="rsStatusBadge" data-i18n="status.off">关</span>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.master_enable">Enable RoadSense</div>
-                                <div class="setting-desc" data-i18n="road_sense.master_enable_desc">Detects road hazards (bumps, potholes, speed breakers) from motion and GPS, and warns you ahead of known ones. All other RoadSense settings only take effect while this is on.</div>
+                                <div class="setting-name" data-i18n="road_sense.master_enable">启用 RoadSense</div>
+                                <div class="setting-desc" data-i18n="road_sense.master_enable_desc">透过动态与 GPS 检测道路危害（颠簸、坑洞、减速带），并在接近已知危害前发出警告。仅在此功能启用时，所有其他 RoadSense 设置才会生效。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -123,17 +123,17 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l-6 3V6l6-3 6 3 6-3v15l-6 3-6-3z"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
-                            <span data-i18n="road_sense.map_title">Map</span>
+                            <span data-i18n="road_sense.map_title">地图</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.map_open">Open map</div>
-                                <div class="setting-desc" data-i18n="road_sense.map_open_desc">Open the full-screen map to search routes, navigate, and see road hazards along the way. Tap any hazard to confirm it or remove it.</div>
+                                <div class="setting-name" data-i18n="road_sense.map_open">打开地图</div>
+                                <div class="setting-desc" data-i18n="road_sense.map_open_desc">打开全屏地图来搜索路线，导航并看到道路上的道路危险。点击任何危险来确认或删除它。</div>
                             </div>
                             <div class="setting-control">
-                                <button type="button" id="rsOpenMapBtn" class="btn btn-primary" onclick="RoadSenseSettings.openHazardMap()" data-i18n="road_sense.map_open_btn">Open Map</button>
+                                <button type="button" id="rsOpenMapBtn" class="btn btn-primary" onclick="RoadSenseSettings.openHazardMap()" data-i18n="road_sense.map_open_btn">打开地图</button>
                             </div>
                         </div>
                     </div>
@@ -147,12 +147,12 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg>
-                            <span data-i18n="road_sense.routing_title">Routing</span>
+                            <span data-i18n="road_sense.routing_title">路由</span>
                         </div>
-                        <span class="status-badge inactive" id="rsRoutingBadge" data-i18n="road_sense.routing_status_unset">No routing key</span>
+                        <span class="status-badge inactive" id="rsRoutingBadge" data-i18n="road_sense.routing_status_unset">没有路由键</span>
                     </div>
                     <div class="card-body">
-                        <div class="setting-hint" data-i18n="road_sense.routing_help">The map basemap is free. Turn-by-turn routing needs a free personal key from a Valhalla provider — paste yours here. It is optional: the map and hazards work without it. Your key is stored encrypted on-device.</div>
+                        <div class="setting-hint" data-i18n="road_sense.routing_help">底图数据完全免费。逐向路线规划需要填写来自 Valhalla 服务商的免费个人 API 密钥。此项为选填：即使未配置密钥，地图与路况警示仍可正常工作。你的密钥将加密保存在车机本地。</div>
 
                         <!-- BYOK guide: a "Get a free key" CTA (opens the Stadia Maps
                              signup in the default browser via openExternal) + numbered
@@ -160,37 +160,37 @@
                              not another setting row. -->
                         <div class="routing-guide" style="margin:4px 0 12px;padding:14px 16px;border-radius:14px;background:var(--md-sys-color-surface-container-high,rgba(127,127,127,0.10));">
                             <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;flex-wrap:wrap;">
-                                <div class="setting-name" data-i18n="road_sense.routing_guide_title">How to get a free routing key</div>
-                                <button type="button" class="btn btn-primary" onclick="RoadSenseSettings.openRoutingSignup()" data-i18n="road_sense.routing_get_key">Get a free key (Stadia Maps)</button>
+                                <div class="setting-name" data-i18n="road_sense.routing_guide_title">如何获得免费路由密钥</div>
+                                <button type="button" class="btn btn-primary" onclick="RoadSenseSettings.openRoutingSignup()" data-i18n="road_sense.routing_get_key">获取免费密钥 (Stadia Maps)</button>
                             </div>
                             <ol class="routing-steps" style="margin:0;padding-left:20px;line-height:1.6;font-size:13px;color:var(--md-sys-color-on-surface-variant,#666);">
-                                <li data-i18n="road_sense.routing_step1">Tap "Get a free key" to open the Stadia Maps signup, then create a free account (no credit card for the free tier).</li>
-                                <li data-i18n="road_sense.routing_step2">In the dashboard, open Properties and create a Property, then go to Authentication and API Keys.</li>
-                                <li data-i18n="road_sense.routing_step3">Click "Create API key" and copy the key string it shows you.</li>
-                                <li data-i18n="road_sense.routing_step4">Paste it into the "Routing API key" field below and tap Save. Leave the endpoint as the default.</li>
+                                <li data-i18n="road_sense.routing_step1">点击“获取免费密钥”打开 Stadia Maps 注册页面，然后创建免费账户（免费套餐无需信用卡）。</li>
+                                <li data-i18n="road_sense.routing_step2">在仪表盘中，打开属性并创建属性，然后转到身份验证和 API 密钥。</li>
+                                <li data-i18n="road_sense.routing_step3">点击"创建 API 密钥"并复制它显示给你的密钥字符串。</li>
+                                <li data-i18n="road_sense.routing_step4">粘贴到下面的“路由API密钥”字段，然后点击保存。将端点作为默认值。</li>
                             </ol>
                         </div>
 
                         <!-- Endpoint: long URL → label/desc on top, full-width input below. -->
                         <div class="setting-stack">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.routing_endpoint">Routing endpoint</div>
-                                <div class="setting-desc" data-i18n="road_sense.routing_endpoint_desc">The Valhalla-compatible routing URL. Leave as the default unless your provider gives you a different one.</div>
+                                <div class="setting-name" data-i18n="road_sense.routing_endpoint">路由终点</div>
+                                <div class="setting-desc" data-i18n="road_sense.routing_endpoint_desc">Valhalla兼容的路由URL。请保留为默认，除非你的供应商给你一个不同的路由。</div>
                             </div>
                             <input type="url" id="rsRoutingEndpoint" class="text-input" inputmode="url" placeholder="https://api.stadiamaps.com/route/v1" />
                         </div>
                         <!-- API key: secret → password input. -->
                         <div class="setting-stack">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.routing_key">Routing API key</div>
-                                <div class="setting-desc" data-i18n="road_sense.routing_key_desc">Your personal BYOK key. Stored encrypted on-device and never shown again after saving.</div>
+                                <div class="setting-name" data-i18n="road_sense.routing_key">路由 API 密钥</div>
+                                <div class="setting-desc" data-i18n="road_sense.routing_key_desc">你的个人BYOK 密钥。已存储的加密设备，在保存后不再显示。</div>
                             </div>
-                            <input type="password" id="rsRoutingKey" class="text-input" autocomplete="off" placeholder="Paste your routing API key" data-i18n-attr="placeholder:road_sense.routing_key_ph" />
+                            <input type="password" id="rsRoutingKey" class="text-input" autocomplete="off" placeholder="粘贴你的路由API密钥" data-i18n-attr="placeholder:road_sense.routing_key_ph" />
                         </div>
                         <div class="setting-row" style="border-bottom:none;justify-content:flex-end;gap:8px;">
                             <div class="setting-control" style="display:flex;gap:8px;">
-                                <button type="button" class="btn btn-secondary" id="rsRoutingClearBtn" onclick="RoadSenseSettings.clearRouting()" data-i18n="road_sense.routing_clear">Clear</button>
-                                <button type="button" class="btn btn-primary" id="rsRoutingSaveBtn" onclick="RoadSenseSettings.saveRouting()" data-i18n="road_sense.routing_save">Save</button>
+                                <button type="button" class="btn btn-secondary" id="rsRoutingClearBtn" onclick="RoadSenseSettings.clearRouting()" data-i18n="road_sense.routing_clear">清空</button>
+                                <button type="button" class="btn btn-primary" id="rsRoutingSaveBtn" onclick="RoadSenseSettings.saveRouting()" data-i18n="road_sense.routing_save">保存</button>
                             </div>
                         </div>
                     </div>
@@ -204,15 +204,15 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><line x1="8" y1="20" x2="16" y2="20"/><line x1="12" y1="16" x2="12" y2="20"/></svg>
-                            <span data-i18n="road_sense.map_cluster_title">Cluster projection</span>
+                            <span data-i18n="road_sense.map_cluster_title">集群预测</span>
                         </div>
-                        <span class="status-badge inactive" id="rsClusterBadge" data-i18n="road_sense.map_cluster_off">Off</span>
+                        <span class="status-badge inactive" id="rsClusterBadge" data-i18n="road_sense.map_cluster_off">关闭</span>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.map_cluster_project">Project map to instrument cluster</div>
-                                <div class="setting-desc" data-i18n="road_sense.map_cluster_project_desc">Shows the full map on the driver cluster behind the wheel, replacing the gauges while active. The blind-spot camera still appears on top automatically when you turn on a signal.</div>
+                                <div class="setting-name" data-i18n="road_sense.map_cluster_project">将地图投射到仪表盘</div>
+                                <div class="setting-desc" data-i18n="road_sense.map_cluster_project_desc">在方向盘后方的液晶仪表盘上投射完整地图并替换原仪表显示。当开启转向灯时，盲区影像仍会自动在上层浮现。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -223,8 +223,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.map_cluster_auto">Auto-project on ACC-on</div>
-                                <div class="setting-desc" data-i18n="road_sense.map_cluster_auto_desc">Start projecting the map to the cluster automatically each time the car powers on.</div>
+                                <div class="setting-name" data-i18n="road_sense.map_cluster_auto">开启ACC-自动项目</div>
+                                <div class="setting-desc" data-i18n="road_sense.map_cluster_auto_desc">每次车辆通电时自动将地图投射到仪表盘。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -239,14 +239,14 @@
                              cluster aspect. Changing it here updates it there and vice-versa. -->
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.map_cluster_layout">Cluster size</div>
-                                <div class="setting-desc" data-i18n="road_sense.map_cluster_layout_desc">Match this to your instrument cluster. Shared with the blind-spot cluster view. If the projection looks stretched or cropped, try another option.</div>
+                                <div class="setting-name" data-i18n="road_sense.map_cluster_layout">仪表盘尺寸</div>
+                                <div class="setting-desc" data-i18n="road_sense.map_cluster_layout_desc">匹配你的液晶仪表盘尺寸。与盲区影像共用仪表屏区域。若投屏画面出现拉伸或裁剪，请尝试切换其他布局。</div>
                             </div>
                             <div class="setting-control">
                                 <select id="rsClusterLayout" class="text-input" onchange="RoadSenseSettings.mapSetClusterLayout(this.value)">
-                                    <option value="31" data-i18n="road_sense.bs_layout_1025">10.25&quot; cluster</option>
-                                    <option value="30" data-i18n="road_sense.bs_layout_123">12.3&quot; cluster</option>
-                                    <option value="29" data-i18n="road_sense.bs_layout_88">8.8&quot; cluster</option>
+                                    <option value="31" data-i18n="road_sense.bs_layout_1025">10.25”组</option>
+                                    <option value="30" data-i18n="road_sense.bs_layout_123">12.3” 组</option>
+                                    <option value="29" data-i18n="road_sense.bs_layout_88">8.8个群组</option>
                                 </select>
                             </div>
                         </div>
@@ -263,14 +263,14 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
-                            <span data-i18n="road_sense.detect_title">Detection</span>
+                            <span data-i18n="road_sense.detect_title">检测</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.detect_sensitivity">Detection Sensitivity</div>
-                                <div class="setting-desc" data-i18n="road_sense.detect_sensitivity_desc">How easily RoadSense flags a bump, pothole or speed breaker. 50% is the default tuning. Slide toward More to catch gentler features (and a few more false detections); slide toward Less to only flag clear, hard hits. This changes what gets detected — not the same as the warning Minimum Confidence below.</div>
+                                <div class="setting-name" data-i18n="road_sense.detect_sensitivity">检测灵敏度</div>
+                                <div class="setting-desc" data-i18n="road_sense.detect_sensitivity_desc">RoadSense 识别颠簸、坑洼或减速带的灵敏度。默认调校为 50%。滑块调高可捕捉更轻微的路面颠簸（但误报可能会增多）；滑块调低则仅标记明显强烈的路面冲击。此项控制检测识别阈值，与下方的预警最低可信度阈值不同。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -280,8 +280,8 @@
                             </div>
                         </div>
                         <div class="slider-range-labels" style="width:120px;margin-left:auto;padding:0;">
-                            <span data-i18n="road_sense.detect_sensitivity_min">Less</span>
-                            <span data-i18n="road_sense.detect_sensitivity_max">More</span>
+                            <span data-i18n="road_sense.detect_sensitivity_min">最低</span>
+                            <span data-i18n="road_sense.detect_sensitivity_max">最高</span>
                         </div>
                     </div>
                 </div>
@@ -291,14 +291,14 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                            <span data-i18n="road_sense.calibration_title">Calibration Mode</span>
+                            <span data-i18n="road_sense.calibration_title">标定模式</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.calibration_enable">Confirm detections in the overlay</div>
-                                <div class="setting-desc" data-i18n="road_sense.calibration_enable_desc">Shows each detected hazard on the screen overlay with confirm / correct buttons so you can teach RoadSense which detections are real. Use this for a few drives to tune detection for your vehicle, then turn it off.</div>
+                                <div class="setting-name" data-i18n="road_sense.calibration_enable">在悬浮窗口中确认检测结果</div>
+                                <div class="setting-desc" data-i18n="road_sense.calibration_enable_desc">在屏幕悬浮窗口上显示每个检测到的危害，并提供确认/修正按钮，以便你告知 RoadSense 哪些检测是真实的。在几次行驶中使用此功能来微调适合你车辆的检测，然后将其关闭。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -318,14 +318,14 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                            <span data-i18n="road_sense.overlay_title">On-screen overlay</span>
+                            <span data-i18n="road_sense.overlay_title">屏幕叠加显示</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.overlay_show">Show overlay on screen</div>
-                                <div class="setting-desc" data-i18n="road_sense.overlay_show_desc">Shows the floating RoadSense pill and hazard card on the screen. Turn this off to hide it — detection, audio warnings, and crowdsourcing keep running in the background; only the on-screen display is hidden.</div>
+                                <div class="setting-name" data-i18n="road_sense.overlay_show">在屏幕上显示悬浮卡片画面</div>
+                                <div class="setting-desc" data-i18n="road_sense.overlay_show_desc">在屏幕上显示悬浮的 RoadSense 胶囊卡片与路况预警。关闭此项可隐藏浮窗 — 隐患检测、语音告警和路况众包仍会在后台正常运行，仅隐藏屏幕界面显示。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -342,15 +342,15 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                            <span data-i18n="road_sense.warn_title">Warnings</span>
+                            <span data-i18n="road_sense.warn_title">警告</span>
                         </div>
-                        <span class="status-badge inactive" id="rsWarnBadge" data-i18n="status.off">OFF</span>
+                        <span class="status-badge inactive" id="rsWarnBadge" data-i18n="status.off">关</span>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.warn_enable">Warn ahead of known hazards</div>
-                                <div class="setting-desc" data-i18n="road_sense.warn_enable_desc">Alert you as you approach a hazard RoadSense already knows about on your route.</div>
+                                <div class="setting-name" data-i18n="road_sense.warn_enable">在已知危害前发出警告</div>
+                                <div class="setting-desc" data-i18n="road_sense.warn_enable_desc">当你接近路线上 RoadSense 已知的隐患时发出警报。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -363,14 +363,14 @@
                         <!-- Warn delivery mode: visual / audio / both -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.warn_mode">Warning Style</div>
-                                <div class="setting-desc" data-i18n="road_sense.warn_mode_desc">How the warning is delivered when a hazard is ahead.</div>
+                                <div class="setting-name" data-i18n="road_sense.warn_mode">警报样式</div>
+                                <div class="setting-desc" data-i18n="road_sense.warn_mode_desc">前方有危害时，警告的传达方式。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="rsWarnModeBtns">
-                                    <button class="btn-toggle" data-value="visual" onclick="RoadSenseSettings.setWarnMode('visual')" data-i18n="road_sense.warn_mode_visual">Visual</button>
-                                    <button class="btn-toggle" data-value="audio" onclick="RoadSenseSettings.setWarnMode('audio')" data-i18n="road_sense.warn_mode_audio">Audio</button>
-                                    <button class="btn-toggle" data-value="both" onclick="RoadSenseSettings.setWarnMode('both')" data-i18n="road_sense.warn_mode_both">Both</button>
+                                    <button class="btn-toggle" data-value="visual" onclick="RoadSenseSettings.setWarnMode('visual')" data-i18n="road_sense.warn_mode_visual">视觉</button>
+                                    <button class="btn-toggle" data-value="audio" onclick="RoadSenseSettings.setWarnMode('audio')" data-i18n="road_sense.warn_mode_audio">音效</button>
+                                    <button class="btn-toggle" data-value="both" onclick="RoadSenseSettings.setWarnMode('both')" data-i18n="road_sense.warn_mode_both">两者皆有</button>
                                 </div>
                             </div>
                         </div>
@@ -378,15 +378,15 @@
                         <!-- Chime audio channel -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.warn_channel">Sound Channel</div>
-                                <div class="setting-desc" data-i18n="road_sense.warn_channel_desc">Which audio channel the warning chime plays on. Navigation uses the car's guidance channel, so the chime ducks your music instead of competing with it and follows the navigation volume.</div>
+                                <div class="setting-name" data-i18n="road_sense.warn_channel">声音通道</div>
+                                <div class="setting-desc" data-i18n="road_sense.warn_channel_desc">警告提示音播放所用的音频通道。导航使用车辆的导航提示通道，因此提示音会压低音乐而不是与其混杂，并跟随导航音量。</div>
                             </div>
                             <div class="setting-control">
                                 <select id="rsWarnChannel" class="text-input" onchange="RoadSenseSettings.setWarnChannel(this.value)">
-                                    <option value="navigation" data-i18n="road_sense.warn_channel_navigation">Navigation</option>
-                                    <option value="media" data-i18n="road_sense.warn_channel_media">Media</option>
-                                    <option value="voice" data-i18n="road_sense.warn_channel_voice">Voice</option>
-                                    <option value="alarm" data-i18n="road_sense.warn_channel_alarm">Alarm</option>
+                                    <option value="navigation" data-i18n="road_sense.warn_channel_navigation">导航</option>
+                                    <option value="media" data-i18n="road_sense.warn_channel_media">媒体</option>
+                                    <option value="voice" data-i18n="road_sense.warn_channel_voice">语音</option>
+                                    <option value="alarm" data-i18n="road_sense.warn_channel_alarm">闹钟</option>
                                 </select>
                             </div>
                         </div>
@@ -395,8 +395,8 @@
                              and moderate remain proportionally gentler. -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" id="rsWarnVolumeLabel" data-i18n="road_sense.warn_volume">Chime Volume</div>
-                                <div class="setting-desc" data-i18n="road_sense.warn_volume_desc">Sets the loudest RoadSense warning level. Minor and moderate chimes stay gentler than severe warnings.</div>
+                                <div class="setting-name" id="rsWarnVolumeLabel" data-i18n="road_sense.warn_volume">提示音音量</div>
+                                <div class="setting-desc" data-i18n="road_sense.warn_volume_desc">设置 RoadSense 警告的最高音量。轻微和中等提示音会比严重警告更柔和。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -404,8 +404,8 @@
                                     <div class="slider-track-control">
                                         <input type="range" class="slider" id="rsWarnVolumeSlider" min="10" max="100" step="5" value="75" aria-labelledby="rsWarnVolumeLabel rsWarnVolumeValue" oninput="RoadSenseSettings.updateWarnVolume(this.value)" onchange="RoadSenseSettings.commitWarnVolume(this.value)">
                                         <div class="slider-range-labels">
-                                            <span data-i18n="road_sense.warn_volume_min">Quiet</span>
-                                            <span data-i18n="road_sense.warn_volume_max">Loud</span>
+                                            <span data-i18n="road_sense.warn_volume_min">低</span>
+                                            <span data-i18n="road_sense.warn_volume_max">高</span>
                                         </div>
                                     </div>
                                 </div>
@@ -418,19 +418,19 @@
                              path as the live cue. -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.warn_test">Test the chime</div>
-                                <div class="setting-desc" data-i18n="road_sense.warn_test_desc">Plays the warning sound now on the channel above, so you can check you can hear it and set the volume. The real warning only sounds while driving towards a hazard RoadSense already knows about.</div>
+                                <div class="setting-name" data-i18n="road_sense.warn_test">测试提示音</div>
+                                <div class="setting-desc" data-i18n="road_sense.warn_test_desc">立即在上方所选通道播放最强警告提示音，以检查选定的最高音量。实际警告仅会在驶向 RoadSense 已知的危险时响起。</div>
                             </div>
                             <div class="setting-control">
-                                <button type="button" id="rsTestChimeBtn" class="btn btn-secondary" onclick="RoadSenseSettings.testChime()" data-i18n="road_sense.warn_test_btn">Play chime</button>
+                                <button type="button" id="rsTestChimeBtn" class="btn btn-secondary" onclick="RoadSenseSettings.testChime()" data-i18n="road_sense.warn_test_btn">播放提示音</button>
                             </div>
                         </div>
 
                         <!-- Lead time -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.warn_lead">Lead Time</div>
-                                <div class="setting-desc" data-i18n="road_sense.warn_lead_desc">How many seconds before the hazard the warning fires. Higher gives more reaction time; lower fires closer to the hazard.</div>
+                                <div class="setting-name" data-i18n="road_sense.warn_lead">提前时间</div>
+                                <div class="setting-desc" data-i18n="road_sense.warn_lead_desc">在危害发生前几秒触发警告。数值越高，反应时间越充裕；数值越低，则在越接近危害时才触发。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -440,15 +440,15 @@
                             </div>
                         </div>
                         <div class="slider-range-labels" style="width:120px;margin-left:auto;padding:0;">
-                            <span data-i18n="road_sense.warn_lead_min">2s</span>
-                            <span data-i18n="road_sense.warn_lead_max">8s</span>
+                            <span data-i18n="road_sense.warn_lead_min">2 秒</span>
+                            <span data-i18n="road_sense.warn_lead_max">8 秒</span>
                         </div>
 
                         <!-- Warn confidence threshold -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.warn_conf">Minimum Confidence</div>
-                                <div class="setting-desc" data-i18n="road_sense.warn_conf_desc">Only warn about hazards RoadSense is at least this sure of. 0 warns about everything it knows; higher values suppress low-confidence hazards.</div>
+                                <div class="setting-name" data-i18n="road_sense.warn_conf">最低置信度</div>
+                                <div class="setting-desc" data-i18n="road_sense.warn_conf_desc">仅针对 RoadSense 达到此确定度以上的危害发出警告。0 会警告所有已知危害；较高数值则会过滤掉低信心度的危害。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -465,12 +465,12 @@
                         <!-- Per-severity chime toggles -->
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.warn_severity_title">Warn by Severity</div>
-                                <div class="setting-desc" data-i18n="road_sense.warn_severity_desc">Choose which hazard severities trigger a warning. Disable minor ones if you only want alerts for the worst hazards.</div>
+                                <div class="setting-name" data-i18n="road_sense.warn_severity_title">依严重程度警告</div>
+                                <div class="setting-desc" data-i18n="road_sense.warn_severity_desc">选择触发警告的危害严重程度。如果你只想在最严重的危害时收到警报，请停用轻微的危害。</div>
                             </div>
                         </div>
                         <div class="setting-row" style="padding:8px 0;">
-                            <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="road_sense.severity_minor">Minor</div></div>
+                            <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="road_sense.severity_minor">轻微</div></div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="rsSeverityMinor" onchange="RoadSenseSettings.toggleSeverity('minor')">
@@ -479,7 +479,7 @@
                             </div>
                         </div>
                         <div class="setting-row" style="padding:8px 0;">
-                            <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="road_sense.severity_moderate">Moderate</div></div>
+                            <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="road_sense.severity_moderate">中度</div></div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="rsSeverityModerate" onchange="RoadSenseSettings.toggleSeverity('moderate')">
@@ -488,7 +488,7 @@
                             </div>
                         </div>
                         <div class="setting-row" style="border-bottom:none;padding:8px 0;">
-                            <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="road_sense.severity_severe">Severe</div></div>
+                            <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="road_sense.severity_severe">严重</div></div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="rsSeveritySevere" onchange="RoadSenseSettings.toggleSeverity('severe')">
@@ -504,19 +504,19 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-2.83-7.97A6 6 0 0 0 4 12.45a3 3 0 0 0 .5 5.95"/><path d="M17.5 19h-12"/></svg>
-                            <span data-i18n="road_sense.crowd_title">Crowdsource</span>
+                            <span data-i18n="road_sense.crowd_title">路况众包</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="info-box-note">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                            <div class="info-note" data-i18n="road_sense.crowd_note">By default RoadSense keeps everything on this device. Upload and download are separate — turning one on does not turn on the other.</div>
+                            <div class="info-note" data-i18n="road_sense.crowd_note">默认情况下，RoadSense 会将所有内容保存在此设备上。上传与下载是分开的 — 启用其中一项不会启用另一项。</div>
                         </div>
                         <!-- Upload -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.crowd_upload">Upload my detections</div>
-                                <div class="setting-desc" data-i18n="road_sense.crowd_upload_desc">Sends anonymized hazard detections off-device to improve the shared map. Off by default — RoadSense is on-device-only until you enable this.</div>
+                                <div class="setting-name" data-i18n="road_sense.crowd_upload">上传我的检测数据</div>
+                                <div class="setting-desc" data-i18n="road_sense.crowd_upload_desc">将匿名危害检测发送至设备外，以改善共享地图。默认为关闭 — 在你启用此功能前，RoadSense 仅会在设备上运行。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -528,8 +528,8 @@
                         <!-- Download -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.crowd_download">Download shared hazards</div>
-                                <div class="setting-desc" data-i18n="road_sense.crowd_download_desc">Pulls hazards reported by other drivers so you get warned about hazards you haven't driven over yet. Off by default.</div>
+                                <div class="setting-name" data-i18n="road_sense.crowd_download">下载共享的危害</div>
+                                <div class="setting-desc" data-i18n="road_sense.crowd_download_desc">获取其他驾驶员上报的隐患，让你在驶过之前就能收到警告。默认关闭。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -543,8 +543,8 @@
                              narrow side control reads cramped and clips). -->
                         <div class="setting-stack" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.crowd_worker_url">Sync worker URL</div>
-                                <div class="setting-desc" data-i18n="road_sense.crowd_worker_url_desc">Optional. Point upload/download at your own sync worker instead of the default endpoint.</div>
+                                <div class="setting-name" data-i18n="road_sense.crowd_worker_url">同步 Worker 网址</div>
+                                <div class="setting-desc" data-i18n="road_sense.crowd_worker_url_desc">选填。将上传/下载指向你自己的同步 Worker，而非默认端点。</div>
                             </div>
                             <input type="url" id="rsSyncWorkerUrl" class="text-input" inputmode="url" placeholder="https://roadsense.example.workers.dev" onchange="RoadSenseSettings.saveWorkerUrl()" />
                         </div>
@@ -556,28 +556,28 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
-                            <span data-i18n="road_sense.data_title">Calibration Data</span>
+                            <span data-i18n="road_sense.data_title">标定数据</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <!-- Delete local calibrations -->
                         <div class="setting-row">
                             <div class="setting-info" style="flex:1 1 auto;">
-                                <div class="setting-name" data-i18n="road_sense.delete_local_title">Delete local calibrations</div>
-                                <div class="setting-desc" data-i18n="road_sense.delete_local_desc">Removes the hazard detections and calibrations stored on this device. Cannot be undone.</div>
+                                <div class="setting-name" data-i18n="road_sense.delete_local_title">删除本机标定</div>
+                                <div class="setting-desc" data-i18n="road_sense.delete_local_desc">将删除本设备上存储的危险识别结果与标定数据。此操作无法撤销。</div>
                             </div>
                             <div class="setting-control">
                                 <button class="btn btn-danger" id="rsDeleteLocalBtn" onclick="RoadSenseSettings.deleteLocal()">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    <span data-i18n="road_sense.delete_local_btn">Delete local</span>
+                                    <span data-i18n="road_sense.delete_local_btn">删除本机</span>
                                 </button>
                             </div>
                         </div>
                         <!-- Delete cloud calibrations -->
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info" style="flex:1 1 auto;">
-                                <div class="setting-name" data-i18n="road_sense.delete_cloud_title">Delete cloud calibrations</div>
-                                <div class="setting-desc" data-i18n="road_sense.delete_cloud_desc">Removes the detections you uploaded from the shared cloud map. Other drivers' data is unaffected. Cannot be undone.</div>
+                                <div class="setting-name" data-i18n="road_sense.delete_cloud_title">删除云端标定</div>
+                                <div class="setting-desc" data-i18n="road_sense.delete_cloud_desc">从共享云端地图中移除你上传的检测数据。其他驾驶的数据不受影响。此操作无法恢复。</div>
                             </div>
                             <div class="setting-control">
                                 <button class="btn btn-danger" id="rsDeleteCloudBtn" onclick="RoadSenseSettings.deleteCloud()">
@@ -587,7 +587,7 @@
                                          old cloud+X composite was wide-and-short and read ~40%
                                          smaller). Reads as "remove from cloud" — semantically apt. -->
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;" aria-hidden="true"><path d="M16.8 19.2A4.5 4.5 0 0 0 16 11h-1.8A7 7 0 0 0 4 8m-.7 4.5A4.5 4.5 0 0 0 5 19h11"/><path d="m2 2 20 20"/></svg>
-                                    <span data-i18n="road_sense.delete_cloud_btn">Delete cloud</span>
+                                    <span data-i18n="road_sense.delete_cloud_btn">删除云端</span>
                                 </button>
                             </div>
                         </div>
@@ -599,15 +599,15 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
-                            <span data-i18n="road_sense.bs_title">Blind Spot</span>
+                            <span data-i18n="road_sense.bs_title">盲区</span>
                         </div>
-                        <span class="status-badge inactive" id="bsStatusBadge" data-i18n="status.off">OFF</span>
+                        <span class="status-badge inactive" id="bsStatusBadge" data-i18n="status.off">关</span>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.bs_enable">Enable Blind Spot</div>
-                                <div class="setting-desc" data-i18n="road_sense.bs_enable_desc">Shows a merged rear + side camera view in a floating window when you turn on the indicator. Size and position are set below. Left signal shows rear + left; right signal shows right + rear.</div>
+                                <div class="setting-name" data-i18n="road_sense.bs_enable">启用盲区监测</div>
+                                <div class="setting-desc" data-i18n="road_sense.bs_enable_desc">当你打开转向灯时，在浮动窗口中显示一个合并的后方+侧摄像头视图。 尺寸和位置设置在下方。左侧信号显示后方+左；右侧信号显示右侧+后方。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -619,13 +619,13 @@
                         <!-- Camera selection: merge both, or show a single camera. -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.bs_merge_title">Cameras shown</div>
-                                <div class="setting-desc" data-i18n="road_sense.bs_merge_desc">Merge the rear and side cameras into one view, or show just one camera. Single-camera views fill the window with that camera's full field of view; the Blend point and Blend softness sliders only apply to the merged view.</div>
+                                <div class="setting-name" data-i18n="road_sense.bs_merge_title">显示摄像头</div>
+                                <div class="setting-desc" data-i18n="road_sense.bs_merge_desc">将后方摄像头和侧边摄像头合并为一个视图，或只显示一个摄像头。 单摄像头视图用摄像头的整个视场填充窗口；混合点和混合软滑块只适用于合并视图。</div>
                             </div>
                             <div class="setting-control" style="display:flex;flex-wrap:wrap;">
-                                <button class="btn btn-secondary" id="bsMergeBoth" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetMergeMode('both')" data-i18n="road_sense.bs_merge_both">Rear + side</button>
-                                <button class="btn btn-secondary" id="bsMergeSide" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetMergeMode('side')" data-i18n="road_sense.bs_merge_side">Side only</button>
-                                <button class="btn btn-secondary" id="bsMergeRear" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetMergeMode('rear')" data-i18n="road_sense.bs_merge_rear">Rear only</button>
+                                <button class="btn btn-secondary" id="bsMergeBoth" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetMergeMode('both')" data-i18n="road_sense.bs_merge_both">后端 + 侧面</button>
+                                <button class="btn btn-secondary" id="bsMergeSide" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetMergeMode('side')" data-i18n="road_sense.bs_merge_side">仅侧面</button>
+                                <button class="btn btn-secondary" id="bsMergeRear" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetMergeMode('rear')" data-i18n="road_sense.bs_merge_rear">仅后端</button>
                             </div>
                         </div>
                         <!-- Card rotation. Only applies to single-camera views (the merged
@@ -637,64 +637,64 @@
                              bsBase{L,R}*. Single-argument calls no-op. -->
                         <div class="setting-row" id="bsRotationLeftRow" style="display:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.bs_rotation_left_title">Rotate view — left</div>
-                                <div class="setting-desc" data-i18n="road_sense.bs_rotation_left_desc">Rotate the left-turn view on screen. The window reshapes to match.</div>
+                                <div class="setting-name" data-i18n="road_sense.bs_rotation_left_title">旋转视图 — 左侧</div>
+                                <div class="setting-desc" data-i18n="road_sense.bs_rotation_left_desc">旋转屏幕上左转（左侧摄像头）的视图。当左侧摄像头竖过来更易于查看时很有用。窗口会随旋转调整形状。40° 与 310° 是现成的盲区取景默认，各自已内置裁剪、镜像与缩放，无需再做其他调整。</div>
                             </div>
                             <div class="setting-control" style="display:flex;flex-wrap:wrap;">
-                                <button class="btn btn-secondary" id="bsRotL0" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('left', 0)" data-i18n="road_sense.bs_rotation_0">0&deg;</button>
-                                <button class="btn btn-secondary" id="bsRotL40" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('left', 40)" data-i18n="road_sense.bs_rotation_40">40&deg;</button>
-                                <button class="btn btn-secondary" id="bsRotL90" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('left', 90)" data-i18n="road_sense.bs_rotation_90">90&deg;</button>
-                                <button class="btn btn-secondary" id="bsRotL180" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('left', 180)" data-i18n="road_sense.bs_rotation_180">180&deg;</button>
-                                <button class="btn btn-secondary" id="bsRotL270" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('left', 270)" data-i18n="road_sense.bs_rotation_270">270&deg;</button>
-                                <button class="btn btn-secondary" id="bsRotL310" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('left', 310)" data-i18n="road_sense.bs_rotation_310">310&deg;</button>
-                                <button class="btn btn-secondary" id="bsRotLAuto" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetRotation('left', 'auto')" data-i18n="road_sense.bs_rotation_auto">Auto</button>
+                                <button class="btn btn-secondary" id="bsRotL0" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('left', 0)" data-i18n="road_sense.bs_rotation_0">0°</button>
+                                <button class="btn btn-secondary" id="bsRotL40" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('left', 40)" data-i18n="road_sense.bs_rotation_40">40° (盲区默认角度)</button>
+                                <button class="btn btn-secondary" id="bsRotL90" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('left', 90)" data-i18n="road_sense.bs_rotation_90">90°</button>
+                                <button class="btn btn-secondary" id="bsRotL180" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('left', 180)" data-i18n="road_sense.bs_rotation_180">180°</button>
+                                <button class="btn btn-secondary" id="bsRotL270" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('left', 270)" data-i18n="road_sense.bs_rotation_270">270°</button>
+                                <button class="btn btn-secondary" id="bsRotL310" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('left', 310)" data-i18n="road_sense.bs_rotation_310">310° (盲区默认角度)</button>
+                                <button class="btn btn-secondary" id="bsRotLAuto" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetRotation('left', 'auto')" data-i18n="road_sense.bs_rotation_auto">自动</button>
                             </div>
                         </div>
                         <div class="setting-row" id="bsAutoBaseLeftRow" style="display:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.bs_auto_base_left_title">Forward orientation — left</div>
-                                <div class="setting-desc" data-i18n="road_sense.bs_auto_base_desc">The angle used while driving forward. Reverse gear flips the view 180° so it reads naturally when backing up.</div>
+                                <div class="setting-name" data-i18n="road_sense.bs_auto_base_left_title">前进方向 — 左侧</div>
+                                <div class="setting-desc" data-i18n="road_sense.bs_auto_base_desc">前进行驶时使用的角度。挂入倒挡时画面翻转 180°，倒车时看起来更自然。</div>
                             </div>
                             <div class="setting-control" style="display:flex;flex-wrap:wrap;">
-                                <button class="btn btn-secondary" id="bsBaseL0" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('left', 0)" data-i18n="road_sense.bs_rotation_0">0&deg;</button>
-                                <button class="btn btn-secondary" id="bsBaseL90" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('left', 90)" data-i18n="road_sense.bs_rotation_90">90&deg;</button>
-                                <button class="btn btn-secondary" id="bsBaseL180" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('left', 180)" data-i18n="road_sense.bs_rotation_180">180&deg;</button>
-                                <button class="btn btn-secondary" id="bsBaseL270" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('left', 270)" data-i18n="road_sense.bs_rotation_270">270&deg;</button>
+                                <button class="btn btn-secondary" id="bsBaseL0" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('left', 0)" data-i18n="road_sense.bs_rotation_0">0°</button>
+                                <button class="btn btn-secondary" id="bsBaseL90" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('left', 90)" data-i18n="road_sense.bs_rotation_90">90°</button>
+                                <button class="btn btn-secondary" id="bsBaseL180" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('left', 180)" data-i18n="road_sense.bs_rotation_180">180°</button>
+                                <button class="btn btn-secondary" id="bsBaseL270" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('left', 270)" data-i18n="road_sense.bs_rotation_270">270°</button>
                             </div>
                         </div>
                         <div class="setting-row" id="bsRotationRightRow" style="display:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.bs_rotation_right_title">Rotate view — right</div>
-                                <div class="setting-desc" data-i18n="road_sense.bs_rotation_right_desc">Rotate the right-turn view on screen; mirror-imaged from the left.</div>
+                                <div class="setting-name" data-i18n="road_sense.bs_rotation_right_title">旋转视图 — 右侧</div>
+                                <div class="setting-desc" data-i18n="road_sense.bs_rotation_right_desc">旋转屏幕上右转（右侧摄像头）的视图。右侧摄像头与左侧呈镜像，因此通常需要不同的角度。窗口会随旋转调整形状。40° 与 310° 是现成的盲区取景默认，各自已内置裁剪、镜像与缩放，无需再做其他调整。</div>
                             </div>
                             <div class="setting-control" style="display:flex;flex-wrap:wrap;">
-                                <button class="btn btn-secondary" id="bsRotR0" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('right', 0)" data-i18n="road_sense.bs_rotation_0">0&deg;</button>
-                                <button class="btn btn-secondary" id="bsRotR40" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('right', 40)" data-i18n="road_sense.bs_rotation_40">40&deg;</button>
-                                <button class="btn btn-secondary" id="bsRotR90" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('right', 90)" data-i18n="road_sense.bs_rotation_90">90&deg;</button>
-                                <button class="btn btn-secondary" id="bsRotR180" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('right', 180)" data-i18n="road_sense.bs_rotation_180">180&deg;</button>
-                                <button class="btn btn-secondary" id="bsRotR270" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('right', 270)" data-i18n="road_sense.bs_rotation_270">270&deg;</button>
-                                <button class="btn btn-secondary" id="bsRotR310" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('right', 310)" data-i18n="road_sense.bs_rotation_310">310&deg;</button>
-                                <button class="btn btn-secondary" id="bsRotRAuto" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetRotation('right', 'auto')" data-i18n="road_sense.bs_rotation_auto">Auto</button>
+                                <button class="btn btn-secondary" id="bsRotR0" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('right', 0)" data-i18n="road_sense.bs_rotation_0">0°</button>
+                                <button class="btn btn-secondary" id="bsRotR40" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('right', 40)" data-i18n="road_sense.bs_rotation_40">40° (盲区默认角度)</button>
+                                <button class="btn btn-secondary" id="bsRotR90" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('right', 90)" data-i18n="road_sense.bs_rotation_90">90°</button>
+                                <button class="btn btn-secondary" id="bsRotR180" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('right', 180)" data-i18n="road_sense.bs_rotation_180">180°</button>
+                                <button class="btn btn-secondary" id="bsRotR270" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('right', 270)" data-i18n="road_sense.bs_rotation_270">270°</button>
+                                <button class="btn btn-secondary" id="bsRotR310" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotation('right', 310)" data-i18n="road_sense.bs_rotation_310">310° (盲区默认角度)</button>
+                                <button class="btn btn-secondary" id="bsRotRAuto" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetRotation('right', 'auto')" data-i18n="road_sense.bs_rotation_auto">自动</button>
                             </div>
                         </div>
                         <div class="setting-row" id="bsAutoBaseRightRow" style="display:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.bs_auto_base_right_title">Forward orientation — right</div>
-                                <div class="setting-desc" data-i18n="road_sense.bs_auto_base_desc">The angle used while driving forward. Reverse gear flips the view 180° so it reads naturally when backing up.</div>
+                                <div class="setting-name" data-i18n="road_sense.bs_auto_base_right_title">前进方向 — 右侧</div>
+                                <div class="setting-desc" data-i18n="road_sense.bs_auto_base_desc">前进行驶时使用的角度。挂入倒挡时画面翻转 180°，倒车时看起来更自然。</div>
                             </div>
                             <div class="setting-control" style="display:flex;flex-wrap:wrap;">
-                                <button class="btn btn-secondary" id="bsBaseR0" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('right', 0)" data-i18n="road_sense.bs_rotation_0">0&deg;</button>
-                                <button class="btn btn-secondary" id="bsBaseR90" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('right', 90)" data-i18n="road_sense.bs_rotation_90">90&deg;</button>
-                                <button class="btn btn-secondary" id="bsBaseR180" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('right', 180)" data-i18n="road_sense.bs_rotation_180">180&deg;</button>
-                                <button class="btn btn-secondary" id="bsBaseR270" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('right', 270)" data-i18n="road_sense.bs_rotation_270">270&deg;</button>
+                                <button class="btn btn-secondary" id="bsBaseR0" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('right', 0)" data-i18n="road_sense.bs_rotation_0">0°</button>
+                                <button class="btn btn-secondary" id="bsBaseR90" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('right', 90)" data-i18n="road_sense.bs_rotation_90">90°</button>
+                                <button class="btn btn-secondary" id="bsBaseR180" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('right', 180)" data-i18n="road_sense.bs_rotation_180">180°</button>
+                                <button class="btn btn-secondary" id="bsBaseR270" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetRotationBase('right', 270)" data-i18n="road_sense.bs_rotation_270">270°</button>
                             </div>
                         </div>
                         <!-- Single-camera fisheye rectifier; hidden in merged mode
                              (libod dewarps that path itself). -->
                         <div class="setting-row" id="bsRectifyRow" style="border-bottom:none;display:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.bs_rectify_title">Fisheye correction</div>
-                                <div class="setting-desc" data-i18n="road_sense.bs_rectify_desc">Straighten the fisheye/barrel curve of the single-camera side and rear views. Higher values flatten the bulge but crop the edges slightly. Only applies to the single-camera views, not the merged one.</div>
+                                <div class="setting-name" data-i18n="road_sense.bs_rectify_title">鱼眼校正</div>
+                                <div class="setting-desc" data-i18n="road_sense.bs_rectify_desc">校正单摄像头侧方与后方视图的鱼眼／桶形畸变。数值越高，凸起越平，但边缘会略有裁剪。仅适用于单摄像头视图，不适用于合并视图。</div>
                             </div>
                             <div class="setting-control"><div class="slider-control">
                                 <span class="slider-value" id="bsRectifyVal">0</span>
@@ -713,7 +713,7 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                            <span data-i18n="road_sense.bs_when_title">When it appears</span>
+                            <span data-i18n="road_sense.bs_when_title">呈现时机与触发条件</span>
                         </div>
                     </div>
                     <div class="card-body">
@@ -722,21 +722,21 @@
                              instead, separating that group from the reverse toggle. -->
                         <div class="setting-row bs-speed-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.bs_speed_range_title">Speed range</div>
-                                <div class="setting-desc" data-i18n="road_sense.bs_speed_range_desc">Only show the blind-spot view while driving within this speed range. Leave both at 0 (Any) to show it at any speed. Useful to keep the view out of the way in slow traffic or at motorway speeds.</div>
+                                <div class="setting-name" data-i18n="road_sense.bs_speed_range_title">触发车速区间</div>
+                                <div class="setting-desc" data-i18n="road_sense.bs_speed_range_desc">仅在设置的行车速度区间内开启转向盲区影像。两处均设为 0 (不限) 表示在任何车速下打转向灯都弹出。可用于在高速巡航或低速跟车时避免频繁打扰。</div>
                                 <div class="setting-desc bs-speed-hint" id="bsSpeedConv"></div>
                             </div>
                             <div class="setting-control bs-speed-range">
                                 <input class="text-input bs-speed-num" id="bsMinSpeed" type="number" inputmode="numeric"
                                        min="0" max="300" step="1"
                                        data-i18n-attr="aria-label:road_sense.bs_speed_min_aria"
-                                       aria-label="Minimum speed in km/h, 0 for any"
+                                       aria-label="最低车速 (km/h，0 表示不限制)"
                                        oninput="RoadSenseSettings.bsSpeedInput()">
                                 <span class="bs-speed-dash">–</span>
                                 <input class="text-input bs-speed-num" id="bsMaxSpeed" type="number" inputmode="numeric"
                                        min="0" max="300" step="1"
                                        data-i18n-attr="aria-label:road_sense.bs_speed_max_aria"
-                                       aria-label="Maximum speed in km/h, 0 for any"
+                                       aria-label="最高车速 (km/h，0 表示不限制)"
                                        oninput="RoadSenseSettings.bsSpeedInput()">
                                 <span class="bs-speed-unit">km/h</span>
                             </div>
@@ -751,13 +751,12 @@
                         <div class="setting-row bs-apply-row">
                             <button class="btn btn-primary" id="bsSpeedApplyBtn" disabled onclick="RoadSenseSettings.bsApplySpeedWindow()" data-i18n="common.apply_changes">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;vertical-align:middle;margin-right:6px;"><polyline points="20 6 9 17 4 12"/></svg>
-                                Apply Changes
-                            </button>
+                                应用更改</button>
                         </div>
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.bs_reverse_title">Hide in reverse</div>
-                                <div class="setting-desc" data-i18n="road_sense.bs_reverse_desc">Keep the blind-spot view hidden while reverse gear is engaged, so it doesn't cover the reversing camera.</div>
+                                <div class="setting-name" data-i18n="road_sense.bs_reverse_title">倒车时自动隐藏</div>
+                                <div class="setting-desc" data-i18n="road_sense.bs_reverse_desc">倒车挂入 R 挡时自动隐藏盲区影像浮窗，避免遮挡原厂倒车影像及雷达。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -776,35 +775,35 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-                            <span data-i18n="road_sense.bs_layout_title">Size &amp; position</span>
+                            <span data-i18n="road_sense.bs_layout_title">大小和位置</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row"><div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.bs_display">Display</div>
-                                <div class="setting-desc" data-i18n="road_sense.bs_display_desc">Where the blind-spot view appears. Driver cluster shows it on the gauge screen behind the wheel; while a turn signal is active it temporarily replaces the gauges, which return when you stop signalling.</div>
+                                <div class="setting-name" data-i18n="road_sense.bs_display">显示</div>
+                                <div class="setting-desc" data-i18n="road_sense.bs_display_desc">盲区影像的显示位置。液晶仪表盘方式会在方向盘后方的仪表屏上显示；当打转向灯时会临时覆盖仪表显示，关闭转向灯后自动恢复。</div>
                             </div>
                             <div class="setting-control" style="display:flex;flex-wrap:wrap;">
-                                <button class="btn btn-secondary" id="bsTargetHeadunit" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetTarget('head_unit')" data-i18n="road_sense.bs_display_headunit">Infotainment screen</button>
-                                <button class="btn btn-secondary" id="bsTargetCluster" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetTarget('cluster')" data-i18n="road_sense.bs_display_cluster">Driver cluster</button>
+                                <button class="btn btn-secondary" id="bsTargetHeadunit" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetTarget('head_unit')" data-i18n="road_sense.bs_display_headunit">中控大屏</button>
+                                <button class="btn btn-secondary" id="bsTargetCluster" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetTarget('cluster')" data-i18n="road_sense.bs_display_cluster">液晶仪表盘</button>
                             </div>
                         </div>
                         <!-- Cluster projection layout (size profile). Only shown when the
                              Driver-cluster target is selected — picks the OEM projection
                              surface that matches your cluster panel. -->
                         <div class="setting-row" id="bsClusterLayoutRow" style="display:none;"><div class="setting-info">
-                                <div class="setting-name" data-i18n="road_sense.bs_cluster_layout">Cluster layout</div>
-                                <div class="setting-desc" data-i18n="road_sense.bs_cluster_layout_desc">Match this to your instrument cluster size. If the projected view looks stretched or cropped, try another option.</div>
+                                <div class="setting-name" data-i18n="road_sense.bs_cluster_layout">集群布局</div>
+                                <div class="setting-desc" data-i18n="road_sense.bs_cluster_layout_desc">匹配你的液晶仪表盘尺寸。若投屏画面出现拉伸或裁剪，请尝试切换其他分辨率布局。</div>
                             </div>
                             <div class="setting-control">
                                 <select id="bsClusterLayout" class="text-input" onchange="RoadSenseSettings.bsSetClusterLayout(this.value)">
-                                    <option value="31" data-i18n="road_sense.bs_layout_1025">10.25&quot; cluster</option>
-                                    <option value="30" data-i18n="road_sense.bs_layout_123">12.3&quot; cluster</option>
-                                    <option value="29" data-i18n="road_sense.bs_layout_88">8.8&quot; cluster</option>
+                                    <option value="31" data-i18n="road_sense.bs_layout_1025">10.25”组</option>
+                                    <option value="30" data-i18n="road_sense.bs_layout_123">12.3” 组</option>
+                                    <option value="29" data-i18n="road_sense.bs_layout_88">8.8个群组</option>
                                 </select>
                             </div>
                         </div>
-                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_size">Overlay size</div></div>
+                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_size">叠加层尺寸</div></div>
                             <div class="setting-control"><div class="slider-control">
                                 <span class="slider-value" id="bsSizeVal">40%</span>
                                 <input type="range" class="slider" id="bsSize" min="15" max="90" step="1" value="40" oninput="RoadSenseSettings.bsSetSize(this.value)">
@@ -813,22 +812,22 @@
                         <!-- Position is PER SIDE: bsSetCorner(side, corner) writes
                              bsCornerLeft/bsCornerRight (or the *Cluster keys) and
                              highlights bsCorner{L,R}*. One-arg calls no-op. -->
-                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_position_left">Position — left</div></div>
+                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_position_left">位置 — 左侧</div></div>
                             <div class="setting-control" style="display:flex;flex-wrap:wrap;">
-                                <button class="btn btn-secondary" id="bsCornerLTl" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('left', 'tl')" data-i18n="road_sense.bs_corner_tl">Top-left</button>
-                                <button class="btn btn-secondary" id="bsCornerLTr" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('left', 'tr')" data-i18n="road_sense.bs_corner_tr">Top-right</button>
-                                <button class="btn btn-secondary" id="bsCornerLBl" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('left', 'bl')" data-i18n="road_sense.bs_corner_bl">Bottom-left</button>
-                                <button class="btn btn-secondary" id="bsCornerLBr" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('left', 'br')" data-i18n="road_sense.bs_corner_br">Bottom-right</button>
-                                <button class="btn btn-secondary" id="bsCornerLCenter" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetCorner('left', 'center')" data-i18n="road_sense.bs_corner_center">Center</button>
+                                <button class="btn btn-secondary" id="bsCornerLTl" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('left', 'tl')" data-i18n="road_sense.bs_corner_tl">左上</button>
+                                <button class="btn btn-secondary" id="bsCornerLTr" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('left', 'tr')" data-i18n="road_sense.bs_corner_tr">右上</button>
+                                <button class="btn btn-secondary" id="bsCornerLBl" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('left', 'bl')" data-i18n="road_sense.bs_corner_bl">左下角</button>
+                                <button class="btn btn-secondary" id="bsCornerLBr" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('left', 'br')" data-i18n="road_sense.bs_corner_br">右下</button>
+                                <button class="btn btn-secondary" id="bsCornerLCenter" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetCorner('left', 'center')" data-i18n="road_sense.bs_corner_center">居中</button>
                             </div>
                         </div>
-                        <div class="setting-row" style="border-bottom:none;"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_position_right">Position — right</div></div>
+                        <div class="setting-row" style="border-bottom:none;"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_position_right">位置 — 右侧</div></div>
                             <div class="setting-control" style="display:flex;flex-wrap:wrap;">
-                                <button class="btn btn-secondary" id="bsCornerRTl" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('right', 'tl')" data-i18n="road_sense.bs_corner_tl">Top-left</button>
-                                <button class="btn btn-secondary" id="bsCornerRTr" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('right', 'tr')" data-i18n="road_sense.bs_corner_tr">Top-right</button>
-                                <button class="btn btn-secondary" id="bsCornerRBl" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('right', 'bl')" data-i18n="road_sense.bs_corner_bl">Bottom-left</button>
-                                <button class="btn btn-secondary" id="bsCornerRBr" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('right', 'br')" data-i18n="road_sense.bs_corner_br">Bottom-right</button>
-                                <button class="btn btn-secondary" id="bsCornerRCenter" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetCorner('right', 'center')" data-i18n="road_sense.bs_corner_center">Center</button>
+                                <button class="btn btn-secondary" id="bsCornerRTl" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('right', 'tl')" data-i18n="road_sense.bs_corner_tl">左上</button>
+                                <button class="btn btn-secondary" id="bsCornerRTr" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('right', 'tr')" data-i18n="road_sense.bs_corner_tr">右上</button>
+                                <button class="btn btn-secondary" id="bsCornerRBl" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('right', 'bl')" data-i18n="road_sense.bs_corner_bl">左下角</button>
+                                <button class="btn btn-secondary" id="bsCornerRBr" style="margin:0 8px 8px 0;" onclick="RoadSenseSettings.bsSetCorner('right', 'br')" data-i18n="road_sense.bs_corner_br">右下</button>
+                                <button class="btn btn-secondary" id="bsCornerRCenter" style="margin:0 0 8px 0;" onclick="RoadSenseSettings.bsSetCorner('right', 'center')" data-i18n="road_sense.bs_corner_center">居中</button>
                             </div>
                         </div>
                         <!-- Apply for the display+placement group (target/layout/size/position
@@ -837,8 +836,7 @@
                         <div class="setting-row" style="border-bottom:none;justify-content:flex-end;">
                             <button class="btn btn-primary" id="bsApplyBtn" disabled onclick="RoadSenseSettings.bsApplyDisplay()" data-i18n="common.apply_changes">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;vertical-align:middle;margin-right:6px;"><polyline points="20 6 9 17 4 12"/></svg>
-                                Apply Changes
-                            </button>
+                                应用更改</button>
                         </div>
                     </div>
                 </div>
@@ -848,7 +846,7 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                            <span data-i18n="road_sense.bs_calib_title">Alignment</span>
+                            <span data-i18n="road_sense.bs_calib_title">对齐</span>
                         </div>
                     </div>
                     <div class="card-body">
@@ -858,65 +856,65 @@
                              when AndroidBridge is present (not on a tunnel/browser). -->
                         <div id="bsPreviewControls" style="display:none;flex-direction:column;align-items:stretch;padding:16px 0;border-bottom:1px solid var(--border-subtle);">
                             <div class="setting-info" style="margin-bottom:12px;">
-                                <div class="setting-name" data-i18n="road_sense.bs_calib_debug">Live alignment</div>
-                                <div class="setting-desc" data-i18n="road_sense.bs_calib_desc">Tap a side to open a live preview window on the car's screen, then drag the sliders below to align it. The preview floats above this page — drag it aside if it covers the controls. Apply when it looks right.</div>
+                                <div class="setting-name" data-i18n="road_sense.bs_calib_debug">实时对齐</div>
+                                <div class="setting-desc" data-i18n="road_sense.bs_calib_desc">点击任意一侧，即可在车机屏幕上打开实时预览窗口，然后拖动下方滑块进行对齐。预览窗口悬浮在本页面之上——若遮挡了控件，可点击“隐藏预览”，或用上方的位置设置移动它并按“应用更改”。对齐合适后点击应用。</div>
                             </div>
                             <div style="display:flex;flex-wrap:wrap;">
-                                <button class="btn btn-secondary" style="margin:0 10px 10px 0;" onclick="RoadSenseSettings.bsPreview(7)" data-i18n="road_sense.bs_preview_left">Show left view</button>
-                                <button class="btn btn-secondary" style="margin:0 10px 10px 0;" onclick="RoadSenseSettings.bsPreview(8)" data-i18n="road_sense.bs_preview_right">Show right view</button>
-                                <button class="btn btn-secondary" style="margin:0 0 10px 0;" onclick="RoadSenseSettings.bsPreviewStop()" data-i18n="road_sense.bs_preview_stop">Hide preview</button>
+                                <button class="btn btn-secondary" style="margin:0 10px 10px 0;" onclick="RoadSenseSettings.bsPreview(7)" data-i18n="road_sense.bs_preview_left">显示左侧视图</button>
+                                <button class="btn btn-secondary" style="margin:0 10px 10px 0;" onclick="RoadSenseSettings.bsPreview(8)" data-i18n="road_sense.bs_preview_right">显示右侧视图</button>
+                                <button class="btn btn-secondary" style="margin:0 0 10px 0;" onclick="RoadSenseSettings.bsPreviewStop()" data-i18n="road_sense.bs_preview_stop">隐藏预览</button>
                             </div>
                         </div>
 
-                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_rear_fov">Width A</div></div>
+                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_rear_fov">宽度 A</div></div>
                             <div class="setting-control"><div class="slider-control">
                                 <span class="slider-value" id="bsRearFovVal">1.66</span>
                                 <input type="range" class="slider" id="bsRearFov" min="1.0" max="2.2" step="0.02" value="1.66" oninput="RoadSenseSettings.bsTune()">
                             </div></div>
                         </div>
-                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_side_fov">Width B</div></div>
+                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_side_fov">宽度 B</div></div>
                             <div class="setting-control"><div class="slider-control">
                                 <span class="slider-value" id="bsSideFovVal">1.98</span>
                                 <input type="range" class="slider" id="bsSideFov" min="1.0" max="2.2" step="0.02" value="1.98" oninput="RoadSenseSettings.bsTune()">
                             </div></div>
                         </div>
-                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_yaw">Blend point</div></div>
+                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_yaw">融合点</div></div>
                             <div class="setting-control"><div class="slider-control">
                                 <span class="slider-value" id="bsYawVal">1.23</span>
                                 <input type="range" class="slider" id="bsYaw" min="0" max="1.4" step="0.01" value="1.23" oninput="RoadSenseSettings.bsTune()">
                             </div></div>
                         </div>
-                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_roll">Tilt</div></div>
+                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_roll">平移</div></div>
                             <div class="setting-control"><div class="slider-control">
                                 <span class="slider-value" id="bsRollVal">0.25</span>
                                 <input type="range" class="slider" id="bsRoll" min="-0.4" max="0.4" step="0.005" value="0.25" oninput="RoadSenseSettings.bsTune()">
                             </div></div>
                         </div>
-                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_pitch">Height</div></div>
+                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_pitch">高度</div></div>
                             <div class="setting-control"><div class="slider-control">
                                 <span class="slider-value" id="bsPitchVal">-0.275</span>
                                 <input type="range" class="slider" id="bsPitch" min="-0.4" max="0.4" step="0.005" value="-0.275" oninput="RoadSenseSettings.bsTune()">
                             </div></div>
                         </div>
-                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_feather">Blend softness</div></div>
+                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_feather">融合软度</div></div>
                             <div class="setting-control"><div class="slider-control">
                                 <span class="slider-value" id="bsFeatherVal">0.38</span>
                                 <input type="range" class="slider" id="bsFeather" min="0" max="1.0" step="0.02" value="0.38" oninput="RoadSenseSettings.bsTune()">
                             </div></div>
                         </div>
-                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_proj_exp">Side spread</div></div>
+                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_proj_exp">平面传播</div></div>
                             <div class="setting-control"><div class="slider-control">
                                 <span class="slider-value" id="bsProjExpVal">1.00</span>
                                 <input type="range" class="slider" id="bsProjExp" min="0.4" max="1.6" step="0.02" value="1.0" oninput="RoadSenseSettings.bsTune()">
                             </div></div>
                         </div>
-                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_rear_roll">Rear level</div></div>
+                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_rear_roll">后台级别</div></div>
                             <div class="setting-control"><div class="slider-control">
                                 <span class="slider-value" id="bsRearRollVal">0.00</span>
                                 <input type="range" class="slider" id="bsRearRoll" min="-0.4" max="0.4" step="0.005" value="0.0" oninput="RoadSenseSettings.bsTune()">
                             </div></div>
                         </div>
-                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_rear_pitch">Rear tilt</div></div>
+                        <div class="setting-row"><div class="setting-info"><div class="setting-name" data-i18n="road_sense.bs_rear_pitch">后倾斜线</div></div>
                             <div class="setting-control"><div class="slider-control">
                                 <span class="slider-value" id="bsRearPitchVal">0.00</span>
                                 <input type="range" class="slider" id="bsRearPitch" min="-0.4" max="0.4" step="0.005" value="0.0" oninput="RoadSenseSettings.bsTune()">
@@ -924,8 +922,8 @@
                         </div>
 
                         <div style="display:flex;flex-wrap:wrap;padding-top:20px;margin-top:8px;border-top:1px solid var(--border-subtle);">
-                            <button class="btn btn-primary" style="margin:0 10px 0 0;" onclick="RoadSenseSettings.bsSave()" data-i18n="road_sense.bs_save">Apply alignment</button>
-                            <button class="btn btn-secondary" onclick="RoadSenseSettings.bsResetDefaults()" data-i18n="road_sense.bs_reset">Reset to default</button>
+                            <button class="btn btn-primary" style="margin:0 10px 0 0;" onclick="RoadSenseSettings.bsSave()" data-i18n="road_sense.bs_save">应用对齐</button>
+                            <button class="btn btn-secondary" onclick="RoadSenseSettings.bsResetDefaults()" data-i18n="road_sense.bs_reset">重置为默认值</button>
                         </div>
                     </div>
                 </div>

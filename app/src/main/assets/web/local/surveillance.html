@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.surveillance_title">Surveillance - OverDrive</title>
+    <title data-i18n="app.surveillance_title">监控 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="../shared/app-icon-dark.webp">
@@ -75,12 +75,12 @@
                         <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
                     </svg>
                 </button>
-                <span style="font-weight:600;" data-i18n="surveillance.mobile_title">Surveillance</span>
+                <span style="font-weight:600;" data-i18n="surveillance.mobile_title">哨兵安防</span>
                 <div style="width:40px;"></div>
             </div>
 
             <header class="page-header">
-                <h1 class="page-title" data-i18n="surveillance.page_title">Surveillance Settings</h1>
+                <h1 class="page-title" data-i18n="surveillance.page_title">监控设置</h1>
                 <div class="header-actions">
                     <div class="header-badge">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -95,25 +95,25 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                            <span data-i18n="surveillance.mode">Surveillance Mode</span>
+                            <span data-i18n="surveillance.mode">监控模式</span>
                         </div>
-                        <span class="status-badge inactive" id="survStatusBadge" data-i18n="status.off">OFF</span>
+                        <span class="status-badge inactive" id="survStatusBadge" data-i18n="status.off">关</span>
                     </div>
                     <div class="card-body">
                         <!-- Operating mode: ON+OFF (keep working while parked) vs ON only (sleep after car off) -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.operating_mode">Operating Mode</div>
-                                <div class="setting-desc" data-i18n="surveillance.operating_mode_desc">Whether Overdrive keeps running after the car is turned off. On Only fully shuts Overdrive down when you park; while-driving features (dashcam, trips, charging) are unaffected.</div>
+                                <div class="setting-name" data-i18n="surveillance.operating_mode">运行模式</div>
+                                <div class="setting-desc" data-i18n="surveillance.operating_mode_desc">设置车辆熄火后 OverDrive 是否在后台常驻运行。“仅上电运行”将在驻车熄火后完全关闭 OverDrive；行车期间的功能（行车记录仪、行程统计、充电监控）不受任何影响。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="operatingModeBtns">
-                                    <button class="btn-toggle" data-value="onAndOff" onclick="SurvSettings.setOperatingMode('onAndOff')" data-i18n="surveillance.operating_mode_on_off">On &amp; Off</button>
-                                    <button class="btn-toggle" data-value="onOnly" onclick="SurvSettings.setOperatingMode('onOnly')" data-i18n="surveillance.operating_mode_on_only">On Only</button>
+                                    <button class="btn-toggle" data-value="onAndOff" onclick="SurvSettings.setOperatingMode('onAndOff')" data-i18n="surveillance.operating_mode_on_off">全时常驻运行</button>
+                                    <button class="btn-toggle" data-value="onOnly" onclick="SurvSettings.setOperatingMode('onOnly')" data-i18n="surveillance.operating_mode_on_only">仅上电运行</button>
                                 </div>
                             </div>
                         </div>
-                        <div class="setting-hint" id="operatingModeHint" data-i18n="surveillance.operating_mode_hint_on_off">Overdrive keeps watching while parked — surveillance and background monitoring stay active. Uses a little battery overnight.</div>
+                        <div class="setting-hint" id="operatingModeHint" data-i18n="surveillance.operating_mode_hint_on_off">停车时 Overdrive 会持续守护 — 监控和后台监测保持启用。夜间会消耗少量电量。</div>
 
                         <!-- Shown only in "On Only" mode: the settings below govern
                              post-vehicle-OFF surveillance, which is disabled when the head
@@ -121,13 +121,13 @@
                              SurvSettings.applyOperatingModeUI(). -->
                         <div class="info-box-note" id="postOffDisabledNotice" style="display:none;margin-top:12px;">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                            <div class="info-note" data-i18n="surveillance.operating_mode_postoff_disabled_note">These settings control surveillance after the car is off. In On Only mode Overdrive shuts down when parked, so they don't apply. Switch to On &amp; Off to use them.</div>
+                            <div class="info-note" data-i18n="surveillance.operating_mode_postoff_disabled_note">这些设置用于控制车辆熄火后的驻车哨兵。在“仅上电运行”模式下，OverDrive 会在驻车熄火时完全退出，因此这些设置不会生效。若需使用请切换至“全时常驻运行”模式。</div>
                         </div>
 
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.enable">Enable Surveillance</div>
-                                <div class="setting-desc" data-i18n="surveillance.enable_desc">Monitor cameras for motion and object detection</div>
+                                <div class="setting-name" data-i18n="surveillance.enable">启用驻车哨兵</div>
+                                <div class="setting-desc" data-i18n="surveillance.enable_desc">监控摄像头画面，检测移动与目标物体。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -140,32 +140,32 @@
                         <!-- Arm mode: Lock (arm on door-lock) vs Power (arm on power-off) -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.arm_mode">Arm Mode</div>
-                                <div class="setting-desc" data-i18n="surveillance.arm_mode_desc">When surveillance arms after the car powers off. Both modes honor safe locations and schedules.</div>
+                                <div class="setting-name" data-i18n="surveillance.arm_mode">手电模式</div>
+                                <div class="setting-desc" data-i18n="surveillance.arm_mode_desc">车辆熄火下电后的哨兵布防策略。两种模式均遵循已设置的安全地点与定时计划。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="armModeBtns">
-                                    <button class="btn-toggle" data-value="lock" onclick="SurvSettings.setArmMode('lock')" data-i18n="surveillance.arm_lock">On Lock</button>
-                                    <button class="btn-toggle" data-value="power" onclick="SurvSettings.setArmMode('power')" data-i18n="surveillance.arm_power">On Power-Off</button>
+                                    <button class="btn-toggle" data-value="lock" onclick="SurvSettings.setArmMode('lock')" data-i18n="surveillance.arm_lock">锁定时</button>
+                                    <button class="btn-toggle" data-value="power" onclick="SurvSettings.setArmMode('power')" data-i18n="surveillance.arm_power">关闭电源时</button>
                                 </div>
                             </div>
                         </div>
-                        <div class="setting-hint" id="armModeHint" data-i18n="surveillance.arm_hint_lock">Arms when you lock the doors and disarms when you unlock (so it won't record you). If your car can't report lock status, it arms 60s after power-off as a fallback.</div>
+                        <div class="setting-hint" id="armModeHint" data-i18n="surveillance.arm_hint_lock">在你锁车时自动开启哨兵布防，解锁上车时自动撤防（避免录制车主自身）。若车型无法读取车门锁闭状态，则会在车辆熄火下电 60 秒后作为备用策略自动布防。</div>
 
                         <!-- ACC-OFF mode: Smart (motion + AI events) vs Continuous (plain rolling) -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.accoff_mode">ACC-OFF Mode</div>
-                                <div class="setting-desc" data-i18n="surveillance.accoff_mode_desc">Smart records motion-triggered events. Continuous records the whole time the car is parked, with no filters and no AI.</div>
+                                <div class="setting-name" data-i18n="surveillance.accoff_mode">ACC-OFF 模式</div>
+                                <div class="setting-desc" data-i18n="surveillance.accoff_mode_desc">智能模式仅录制运动触发事件；持续模式在驻车期间全程连续录制，不进行过滤且不占用 AI 算力。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="accOffModeBtns">
-                                    <button class="btn-toggle" data-value="smart" onclick="SurvSettings.setAccOffMode('smart')" data-i18n="surveillance.accoff_smart">Smart</button>
-                                    <button class="btn-toggle" data-value="continuous" onclick="SurvSettings.setAccOffMode('continuous')" data-i18n="surveillance.accoff_continuous">Continuous</button>
+                                    <button class="btn-toggle" data-value="smart" onclick="SurvSettings.setAccOffMode('smart')" data-i18n="surveillance.accoff_smart">聪明的</button>
+                                    <button class="btn-toggle" data-value="continuous" onclick="SurvSettings.setAccOffMode('continuous')" data-i18n="surveillance.accoff_continuous">连续</button>
                                 </div>
                             </div>
                         </div>
-                        <div class="setting-hint" id="accOffModeHint" data-i18n="surveillance.accoff_hint_smart">Motion + AI gating. Recordings begin only when something moves and AI confirms a person, vehicle, or other relevant object.</div>
+                        <div class="setting-hint" id="accOffModeHint" data-i18n="surveillance.accoff_hint_smart">运动感知 + AI 目标识别。仅在检测到物体移动且 AI 确认行人、车辆等目标时才开始录制。</div>
 
                         <!-- Keep USB ports powered while parked. Default ON. Off lets the
                              head unit sleep on the next ACC-OFF cycle to save the 12V
@@ -175,8 +175,8 @@
                              to Internal storage. The toggle/confirm flow enforces this. -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" id="survKeepUsbPowerName" data-i18n="surveillance.keep_usb_power">Keep USB powered while parked</div>
-                                <div class="setting-desc" id="survKeepUsbPowerDesc" data-i18n="surveillance.keep_usb_power_desc">Keeps the USB ports powered after the car is switched off (for example to charge a phone or power an accessory). Turn off to let the head unit sleep and save the 12V battery. Note: the SD-card slot shares the USB power rail, so turning this off also powers down the SD card while parked — surveillance will record to Internal storage instead. Takes effect the next time the car is switched off.</div>
+                                <div class="setting-name" id="survKeepUsbPowerName" data-i18n="surveillance.keep_usb_power">停车时保持 USB 供电</div>
+                                <div class="setting-desc" id="survKeepUsbPowerDesc" data-i18n="surveillance.keep_usb_power_desc">车辆熄火下电后保持车机 USB 接口继续供电（例如为手机充电或为外接随身 Wi-Fi 供电）。关闭此项可让 USB 接口随车休眠以节省 12V 小蓄电池电量。此设置不影响车载摄像头 — 驻车驻车哨兵仍会正常执行。将于下次熄火锁车时生效。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -195,8 +195,8 @@
                              at park entry, so it never enables data by itself. -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.mobile_data_keepalive">Keep mobile data awake while parked</div>
-                                <div class="setting-desc" data-i18n="surveillance.mobile_data_keepalive_desc">On some models the mobile data module goes to sleep a while after the car is switched off, so the car drops off the network while parked. Turn this on to keep it awake. It is recommended to leave this off unless you actually lose cellular while parked, because keeping the connection alive uses extra battery and mobile data. Only takes effect if mobile data is already on when you park. Takes effect the next time the car is switched off.</div>
+                                <div class="setting-name" data-i18n="surveillance.mobile_data_keepalive">驻车熄火时保持移动蜂窝网络常开</div>
+                                <div class="setting-desc" data-i18n="surveillance.mobile_data_keepalive_desc">部分比亚迪车型在熄火闭锁一段时间后移动网卡会自动休眠，导致驻车时远程离线。开启此项可在熄火后持续保活蜂窝网卡。建议仅在你确有驻车掉线问题时才开启，因为长驻网络会消耗少许小电瓶电量和卡流量。仅在驻车前已开启数据网络时生效，在下次熄火时起效。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -212,8 +212,8 @@
                              schedule + active HTTP request on ACC ON or shutdown. -->
                         <div class="setting-row" id="survDi5CloudKeepAliveRow" style="display:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.di5_cloud_keepalive">Experimental: Keep DI5 awake using BYD Cloud</div>
-                                <div class="setting-desc" data-i18n="surveillance.di5_cloud_keepalive_desc">While ACC is off, requests vehicle status through BYD Cloud every 15 seconds. Requires a connected BYD account and internet access. It may use vehicle SIM data, prevent deep sleep, and increase parked battery use. It stops on ACC-on or when the daemon stops.</div>
+                                <div class="setting-name" data-i18n="surveillance.di5_cloud_keepalive">实验性: 使用比亚迪云保持 DI5 车机唤醒</div>
+                                <div class="setting-desc" data-i18n="surveillance.di5_cloud_keepalive_desc">在关闭 ACC 期间，每隔 15 秒通过比亚迪云端请求车辆状态。需要登录比亚迪云账户且车机可联网。此功能可能会消耗车机 SIM 流量、阻止车机进入深度休眠并增加驻车电耗。开启 ACC 上电或停止守护进程时会自动结束。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -222,7 +222,7 @@
                                 </label>
                             </div>
                         </div>
-                        <div class="setting-hint" id="survDi5CloudKeepAliveCloudNote" style="display:none;" data-i18n="surveillance.di5_cloud_keepalive_requires_cloud">Connect and verify your BYD Cloud account before enabling this option.</div>
+                        <div class="setting-hint" id="survDi5CloudKeepAliveCloudNote" style="display:none;" data-i18n="surveillance.di5_cloud_keepalive_requires_cloud">开启此功能前请先连接并验证比亚迪云账户。</div>
 
                         <!-- Opt-in DiLink 5 parked keep-alive (Experimental). ONE master
                              switch; the individual levers (MCU/sentry hold, panorama
@@ -236,8 +236,8 @@
                              confirmation (12 V battery cost). -->
                         <div class="setting-row" id="survDi5ParkedKeepAliveRow">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.di5_parked_keepalive">Experimental: DiLink 5 parked keep-alive</div>
-                                <div class="setting-desc" data-i18n="surveillance.di5_parked_keepalive_desc">For DiLink 5 head units, with any camera mode. Keeps the vehicle in sentry mode after the car is switched off so the MCU does not cut the camera and USB rails, and re-wakes the MCU if it drifts to sleep. Uses more 12V battery; it stops by itself below the configured voltage cutoff and stays off until the car is switched on or charging is detected. Takes effect on the next parked tick.</div>
+                                <div class="setting-name" data-i18n="surveillance.di5_parked_keepalive">实验性: DiLink 5 驻车常驻保活</div>
+                                <div class="setting-desc" data-i18n="surveillance.di5_parked_keepalive_desc">适用于 DiLink 5 车机（兼容所有摄像头模式）。在车辆熄火后保持驻车哨兵状态，防止 MCU 切断摄像头和 USB 供电，并在 MCU 尝试休眠时自动重新唤醒。会增加 12V 小电瓶消耗；当电压低于设置的截止阈值时会自动退出，直到车辆重新上电或检测到正在充电。在下次驻车心跳时生效。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -253,7 +253,7 @@
                              Keep-USB toggle above — keep them adjacent. -->
                         <div class="info-box-warning" id="survUsbPowerStorageNotice" style="display:none;margin-top:12px;">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                            <div class="info-note" data-i18n="surveillance.usb_off_storage_notice">USB power is off, so the SD card is unpowered while parked. Surveillance records to Internal storage until USB power is turned back on.</div>
+                            <div class="info-note" data-i18n="surveillance.usb_off_storage_notice">USB 供电已关闭，SD 卡在驻车时将断电。在重新开启 USB 供电前，监控录像将保存到内部存储。</div>
                         </div>
 
                         <!-- Low-power-while-parked toggle. Default OFF (byte-identical
@@ -266,8 +266,8 @@
                              Persisted immediately (no Apply) via toggleLowPowerMode(). -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.low_power_mode">Low-power mode while parked</div>
-                                <div class="setting-desc" data-i18n="surveillance.low_power_mode_desc">Saves battery while parked by running the camera at a low frame rate (about 5 fps) when nothing is happening, then instantly ramping back to full quality the moment motion is detected. Motion and object detection are unaffected — the same events are caught — but the recorded footage during quiet periods is choppier to save power. Takes effect while the car is parked and surveillance is armed.</div>
+                                <div class="setting-name" data-i18n="surveillance.low_power_mode">驻车低功耗模式</div>
+                                <div class="setting-desc" data-i18n="surveillance.low_power_mode_desc">停车时以低帧率（约 5 fps）运行摄像头以节省电量，一旦检测到移动立即恢复全画质。运动与目标检测不受影响——同样能捕捉到事件——只是空闲时段的录像画面会不够流畅，以此节省电量。仅在车辆驻车且监控已布防时生效。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -286,8 +286,8 @@
                              settings sit together, before the Status/Events readout. -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.low_soc_cutoff">Low-battery cutoff</div>
-                                <div class="setting-desc" data-i18n="surveillance.low_soc_cutoff_desc">Stop surveillance and let the car sleep when the main battery drops to this level, protecting it from over-discharge. Set to Off to never stop on battery level.</div>
+                                <div class="setting-name" data-i18n="surveillance.low_soc_cutoff">低电量停止</div>
+                                <div class="setting-desc" data-i18n="surveillance.low_soc_cutoff_desc">当主电池电量降至此水平时停止监控并让车辆休眠，防止其过度放电。设为关闭则不按电量停止。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -297,12 +297,12 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="setting-hint" id="lowSocCutoffHint" data-i18n="surveillance.low_soc_cutoff_hint">Higher values protect the battery more but end surveillance sooner. Off keeps watching until the battery is critically low.</div>
+                        <div class="setting-hint" id="lowSocCutoffHint" data-i18n="surveillance.low_soc_cutoff_hint">数值越高对电池保护越好，但监控结束得越早。关闭后将持续监控，直到电池电量降至极低。</div>
 
                         <div class="info-box">
-                            <div class="info-row"><span class="label" data-i18n="surveillance.status_label">Status</span><span class="value" id="survState" data-i18n="common.idle">Idle</span></div>
+                            <div class="info-row"><span class="label" data-i18n="surveillance.status_label">状态</span><span class="value" id="survState" data-i18n="common.idle">空闲</span></div>
                             <div class="info-row">
-                                <span class="label" data-i18n="surveillance.events_today">Events Today</span>
+                                <span class="label" data-i18n="surveillance.events_today">今天的事件</span>
                                 <a href="events.html?filter=sentry" class="value link-value" id="eventsToday">0 →</a>
                             </div>
                         </div>
@@ -314,15 +314,15 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                            <span data-i18n="surveillance.safe_locations">Safe Locations</span>
-                            <span class="status-badge inactive" id="safeLocBadge" data-i18n="status.off">OFF</span>
+                            <span data-i18n="surveillance.safe_locations">安全的地方</span>
+                            <span class="status-badge inactive" id="safeLocBadge" data-i18n="status.off">关</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.safe_disable">Disable at Safe Locations</div>
-                                <div class="setting-desc" data-i18n="surveillance.safe_desc">Camera won't start when parked here</div>
+                                <div class="setting-name" data-i18n="surveillance.safe_disable">在安全的地方禁用</div>
+                                <div class="setting-desc" data-i18n="surveillance.safe_desc">在此处停车时不会启动摄像头。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -336,11 +336,11 @@
                             <!-- Status -->
                             <div class="info-box" id="safeLocStatusBox" style="margin-top:8px;">
                                 <div class="info-row">
-                                    <span class="label" data-i18n="surveillance.status_label">Status</span>
+                                    <span class="label" data-i18n="surveillance.status_label">状态</span>
                                     <span class="value safe-loc-status is-pending" id="safeLocStatus">--</span>
                                 </div>
                                 <div class="info-row">
-                                    <span class="label" data-i18n="surveillance.gps_label">GPS</span>
+                                    <span class="label" data-i18n="surveillance.gps_label">GPS 定位</span>
                                     <span class="value" id="safeLocGps">--</span>
                                 </div>
                             </div>
@@ -353,7 +353,7 @@
                             <!-- Radius Slider -->
                             <div class="safe-zone-radius-control">
                                 <div class="safe-zone-radius-header">
-                                    <span class="safe-zone-radius-title" data-i18n="surveillance.zone_radius">Zone Radius</span>
+                                    <span class="safe-zone-radius-title" data-i18n="surveillance.zone_radius">区域半径</span>
                                     <span class="safe-zone-radius-value" id="safeLocRadiusValue">150m</span>
                                 </div>
                                 <input type="range" class="slider safe-zone-radius-slider" id="safeLocRadiusSlider" min="15" max="500" step="5" value="150"
@@ -367,11 +367,11 @@
                             <!-- Add Button -->
                             <button class="btn btn-primary" style="width:100%; margin-top:12px;" onclick="SafeLocations.addCurrentZone()">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                                <span data-i18n="surveillance.add_zone">Add this zone</span>
+                                <span data-i18n="surveillance.add_zone">添加此区域</span>
                             </button>
 
                             <!-- Saved Zones List -->
-                            <div class="safe-zone-list-title" data-i18n="safe_loc.saved_zones">Saved zones</div>
+                            <div class="safe-zone-list-title" data-i18n="safe_loc.saved_zones">已保存的安全区域</div>
                             <div class="safe-zone-list" id="safeLocZoneList"></div>
                         </div>
                     </div>
@@ -382,64 +382,64 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                            <span data-i18n="surveillance.detection_settings">Detection Settings</span>
-                            <span class="unsaved-indicator" id="detectionUnsaved" data-i18n="surveillance.unsaved">● unsaved</span>
+                            <span data-i18n="surveillance.detection_settings">检测设置</span>
+                            <span class="unsaved-indicator" id="detectionUnsaved" data-i18n="surveillance.unsaved">● 未保存</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <!-- Environment Preset -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.env_preset">Environment Preset</div>
-                                <div class="setting-desc" data-i18n="surveillance.env_desc">Quick preset for your parking situation</div>
+                                <div class="setting-name" data-i18n="surveillance.env_preset">环境默认</div>
+                                <div class="setting-desc" data-i18n="surveillance.env_desc">快速默认你的停车场情况</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="envPresetBtns">
-                                    <button class="btn-toggle" data-value="outdoor" onclick="SurvSettings.setEnvironmentPreset('outdoor')" data-i18n="surveillance.env_outdoor">Outdoor</button>
-                                    <button class="btn-toggle" data-value="garage" onclick="SurvSettings.setEnvironmentPreset('garage')" data-i18n="surveillance.env_garage">Garage</button>
-                                    <button class="btn-toggle" data-value="street" onclick="SurvSettings.setEnvironmentPreset('street')" data-i18n="surveillance.env_street">Street</button>
-                                    <button class="btn-toggle" data-value="custom" id="envPresetCustom" style="opacity:0.7;cursor:default;" data-i18n="surveillance.env_custom">Custom</button>
+                                    <button class="btn-toggle" data-value="outdoor" onclick="SurvSettings.setEnvironmentPreset('outdoor')" data-i18n="surveillance.env_outdoor">户外</button>
+                                    <button class="btn-toggle" data-value="garage" onclick="SurvSettings.setEnvironmentPreset('garage')" data-i18n="surveillance.env_garage">车库</button>
+                                    <button class="btn-toggle" data-value="street" onclick="SurvSettings.setEnvironmentPreset('street')" data-i18n="surveillance.env_street">街道</button>
+                                    <button class="btn-toggle" data-value="custom" id="envPresetCustom" style="opacity:0.7;cursor:default;" data-i18n="surveillance.env_custom">定制</button>
                                 </div>
                             </div>
                         </div>
-                        <div class="setting-hint" id="envPresetHint" data-i18n="surveillance.env_hint.outdoor">Standard filtering for open parking lots and driveways. Handles sun, clouds, and headlights.</div>
+                        <div class="setting-hint" id="envPresetHint" data-i18n="surveillance.env_hint.outdoor">针对露天停车场与开阔车道调校的标准过滤，可有效处理阳光、云影与车灯照射。</div>
 
                         <!-- Sensitivity -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.sensitivity">Sensitivity</div>
-                                <div class="setting-desc" data-i18n="surveillance.sensitivity_desc">How easily motion is detected</div>
+                                <div class="setting-name" data-i18n="surveillance.sensitivity">敏感性</div>
+                                <div class="setting-desc" data-i18n="surveillance.sensitivity_desc">运动是多么容易被检测到的</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
-                                    <span class="slider-value" id="v2SensitivityValue" data-i18n="surveillance.v2_sens_label.3">3 — Default</span>
+                                    <span class="slider-value" id="v2SensitivityValue" data-i18n="surveillance.v2_sens_label.3">3 — 默认</span>
                                     <input type="range" class="slider" id="v2SensitivitySlider" min="1" max="5" value="3" oninput="SurvSettings.updateV2Sensitivity(this.value)">
                                 </div>
                             </div>
                         </div>
-                        <div class="setting-hint" id="v2SensitivityHint" data-i18n="surveillance.v2_sens_hint.3">Balanced — detects a person approaching within about 3 meters.</div>
+                        <div class="setting-hint" id="v2SensitivityHint" data-i18n="surveillance.v2_sens_hint.3">预估在约 3 米范围内检测靠近车辆的人员。</div>
 
                         <!-- Detection Zone -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.det_zone">Detection Zone</div>
-                                <div class="setting-desc" data-i18n="surveillance.det_zone_desc">How far from the car motion triggers an alert</div>
+                                <div class="setting-name" data-i18n="surveillance.det_zone">检测区</div>
+                                <div class="setting-desc" data-i18n="surveillance.det_zone_desc">距离车辆多远范围内的移动会触发警报</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="detectionZoneBtns">
-                                    <button class="btn-toggle" data-value="close" onclick="SurvSettings.setDetectionZone('close')" data-i18n="surveillance.det_close">Close (~3m)</button>
-                                    <button class="btn-toggle active" data-value="normal" onclick="SurvSettings.setDetectionZone('normal')" data-i18n="surveillance.det_normal">Normal (~6m)</button>
-                                    <button class="btn-toggle" data-value="extended" onclick="SurvSettings.setDetectionZone('extended')" data-i18n="surveillance.det_extended">Extended (full frame)</button>
+                                    <button class="btn-toggle" data-value="close" onclick="SurvSettings.setDetectionZone('close')" data-i18n="surveillance.det_close">近距离 (~3m)</button>
+                                    <button class="btn-toggle active" data-value="normal" onclick="SurvSettings.setDetectionZone('normal')" data-i18n="surveillance.det_normal">标准 (~6m)</button>
+                                    <button class="btn-toggle" data-value="extended" onclick="SurvSettings.setDetectionZone('extended')" data-i18n="surveillance.det_extended">扩展 (整帧)</button>
                                 </div>
                             </div>
                         </div>
-                        <div class="setting-hint" id="detectionZoneHint" data-i18n="surveillance.zone_hint.normal">Standard detection band. Roughly the bottom two-thirds of each camera's view (typically within ~6m on the rear camera). Default for everyday parking.</div>
+                        <div class="setting-hint" id="detectionZoneHint" data-i18n="surveillance.zone_hint.normal">标准检测范围（约各摄像头画面下部三分之二，后视距离约 6 米以内）。适用于日常标准车位停放。</div>
 
                         <!-- Loitering Time -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.loitering_time">Loitering Time</div>
-                                <div class="setting-desc" data-i18n="surveillance.loitering_time_desc">How long someone must stay near the car before recording starts</div>
+                                <div class="setting-name" data-i18n="surveillance.loitering_time">徘徊逗留时长</div>
+                                <div class="setting-desc" data-i18n="surveillance.loitering_time_desc">目标在车辆旁持续逗留达到该时长后才触发录像</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -448,13 +448,13 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="setting-hint" id="loiteringTimeHint" data-i18n="surveillance.loitering_time_hint">Higher values ignore people just walking past. Lower values are more responsive.</div>
+                        <div class="setting-hint" id="loiteringTimeHint" data-i18n="surveillance.loitering_time_hint">数值越高，越能忽略只是从旁经过的行人；数值越低则响应越灵敏。</div>
 
                         <!-- Approach Trigger -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.approach_trigger">Approach Trigger</div>
-                                <div class="setting-desc" data-i18n="surveillance.approach_trigger_desc">Record sooner when the camera AI confirms a real person or vehicle approaching — without waiting out the full loitering time</div>
+                                <div class="setting-name" data-i18n="surveillance.approach_trigger">快速接近触发</div>
+                                <div class="setting-desc" data-i18n="surveillance.approach_trigger_desc">当摄像头 AI 识别并确认真实行人或车辆靠近时立即触发录像，无需等待完整的徘徊逗留时长</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -463,30 +463,30 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="setting-hint" id="approachTriggerHint" data-i18n="surveillance.approach_trigger_hint">Set to Off to require the full loitering time for every event. Lower values record walk-ups faster (only fires when the AI sees a real person/vehicle).</div>
+                        <div class="setting-hint" id="approachTriggerHint" data-i18n="surveillance.approach_trigger_hint">设为“关闭”则所有事件均需等待完整的徘徊逗留时间。数值越低，在检测到有人接近时越快启动录制（仅在 AI 识别到行人/车辆时才触发）。</div>
 
                         <!-- Shadow Filter -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.shadow_filter">Shadow Filter</div>
-                                <div class="setting-desc" data-i18n="surveillance.shadow_filter_desc">Filters out tree shadows, cloud shadows, and other lighting changes that cause false recordings</div>
+                                <div class="setting-name" data-i18n="surveillance.shadow_filter">阴影过滤器</div>
+                                <div class="setting-desc" data-i18n="surveillance.shadow_filter_desc">过滤树影摇晃、云层遮光及其他易引起误报的光线突变</div>
                             </div>
                             <div class="setting-control">
                                 <select class="select-control" id="shadowFilterSelect" onchange="SurvSettings.updateShadowFilter(this.value)">
-                                    <option value="0" data-i18n="surveillance.shadow_off">Off</option>
-                                    <option value="1" data-i18n="surveillance.shadow_light">Light</option>
-                                    <option value="2" selected data-i18n="surveillance.shadow_normal">Normal</option>
-                                    <option value="3" data-i18n="surveillance.shadow_aggressive">Aggressive</option>
+                                    <option value="0" data-i18n="surveillance.shadow_off">关闭</option>
+                                    <option value="1" data-i18n="surveillance.shadow_light">轻度</option>
+                                    <option value="2" selected data-i18n="surveillance.shadow_normal">标准</option>
+                                    <option value="3" data-i18n="surveillance.shadow_aggressive">强力</option>
                                 </select>
                             </div>
                         </div>
-                        <div class="setting-hint" id="shadowFilterHint" data-i18n="surveillance.shadow_hint.2">Normal works well for most outdoor parking. Use Aggressive if parked under trees with heavy shadow movement.</div>
+                        <div class="setting-hint" id="shadowFilterHint" data-i18n="surveillance.shadow_hint.2">平衡过滤 — 过滤绝大多数树影晃动，同时保持对真实移动目标的灵敏捕获。</div>
 
                         <!-- Motion salience: record on strong motion even when AI is unsure -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.motion_salience">Record on strong motion</div>
-                                <div class="setting-desc" data-i18n="surveillance.motion_salience_desc">Trigger on large, close, moving objects even when the AI can't identify them</div>
+                                <div class="setting-name" data-i18n="surveillance.motion_salience">强烈动作记录</div>
+                                <div class="setting-desc" data-i18n="surveillance.motion_salience_desc">对体积大、距离近且正在移动的物体触发，即使 AI 无法识别它们</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -495,13 +495,13 @@
                                 </label>
                             </div>
                         </div>
-                        <div class="setting-hint" id="motionSalienceHint" data-i18n="surveillance.motion_salience_hint">Catches events the AI misses — someone walking right up to the car in poor light, or a large vehicle pulling in close, where object recognition returns nothing. Only fires when the movement is big, close, and travels steadily across the scene for about a second, so wind-blown branches, shadows, rain and headlight sweeps are still ignored. Expect some extra recordings with no identified person or vehicle: these are kept even with "Discard non-actor recordings" on, because a clip the AI couldn't classify is the last one worth deleting automatically.</div>
+                        <div class="setting-hint" id="motionSalienceHint" data-i18n="surveillance.motion_salience_hint">用于捕捉 AI 识别可能遗漏的事件——例如在昏暗光线下有人紧贴车辆行走，或大型车辆在近距离紧贴停靠但物体识别未返回结果的情况。仅当画面运动幅度大、距离近且在场景中持续移动约一秒时才会触发，因此风吹树枝、影子晃动、雨水及远光灯照射依然会被有效忽略。开启后可能会产生少量未识别出具体人或车辆的录像：即使开启了“丢弃无目标录像”，这些片段也会被完整保留，因为 AI 无法分类的片段恰恰是最不应被自动删除的潜在事件。</div>
 
                         <!-- Aggressively discard non-actor recordings -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.discard_empty_motion">Discard non-actor recordings</div>
-                                <div class="setting-desc" data-i18n="surveillance.discard_empty_motion_desc">Aggressively drop recordings where no real person or vehicle was tracked</div>
+                                <div class="setting-name" data-i18n="surveillance.discard_empty_motion">丢弃无目标录像</div>
+                                <div class="setting-desc" data-i18n="surveillance.discard_empty_motion_desc">积极删除未追踪到真实人员或车辆的录像</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -510,13 +510,13 @@
                                 </label>
                             </div>
                         </div>
-                        <div class="setting-hint" id="discardEmptyMotionHint" data-i18n="surveillance.discard_empty_motion_hint">Good if you get false alerts from shadows or tree-branch movement — these clips are deleted automatically when nothing real was tracked. Caution: in low light or unclear conditions it can occasionally discard a real threat the AI failed to identify. Leave off if you'd rather keep every recording.</div>
+                        <div class="setting-hint" id="discardEmptyMotionHint" data-i18n="surveillance.discard_empty_motion_hint">如果你经常收到来自阴影或树枝晃动的误报，开启此项会有帮助——当没有追踪到任何真实目标时，这些片段会被自动删除。注意：在弱光或画面不清的情况下，偶尔可能会丢弃 AI 未能识别出的真实威胁。如果你更希望保留每一段录像，请保持关闭。</div>
 
                         <!-- Also discard at night (sub-toggle of the above) -->
                         <div class="setting-row" id="discardEmptyMotionNightRow" style="padding-left:16px;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.discard_empty_motion_night">Also discard at night</div>
-                                <div class="setting-desc" data-i18n="surveillance.discard_empty_motion_night_desc">Extend the filter to dark scenes using motion shape instead of brightness</div>
+                                <div class="setting-name" data-i18n="surveillance.discard_empty_motion_night">夜间也丢弃了</div>
+                                <div class="setting-desc" data-i18n="surveillance.discard_empty_motion_night_desc">改用运动轮廓而非亮度判断，将此过滤规则扩展到暗光场景。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -525,18 +525,18 @@
                                 </label>
                             </div>
                         </div>
-                        <div class="setting-hint" id="discardEmptyMotionNightHint" data-i18n="surveillance.discard_empty_motion_night_hint">By default the filter only runs in daylight, because in the dark the AI can miss a real person entirely. With this on, night clips are discarded only when the motion looks like wind-blown foliage or a lighting change (headlights, reflections) and never translated across the scene like a person would. Higher chance of dropping a real night-time event than the daytime filter — leave off if in doubt.</div>
+                        <div class="setting-hint" id="discardEmptyMotionNightHint" data-i18n="surveillance.discard_empty_motion_night_hint">默认情况下该过滤仅在白天生效，因为在夜间暗光下 AI 可能会完全漏识别真实人员。开启此项后，夜间录像仅当运动特征明显属于风吹树影或光线变化（车灯照射、反光），且从未出现类似人员走动的位移轨迹时才会被丢弃。开启后过滤掉真实夜间事件的风险会高于白天模式——如有疑虑建议保持关闭。</div>
 
                         <!-- Camera Controls -->
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.camera_controls">Camera Controls</div>
-                                <div class="setting-desc" data-i18n="surveillance.camera_controls_desc">Enable or disable detection per camera</div>
+                                <div class="setting-name" data-i18n="surveillance.camera_controls">各摄像头开关</div>
+                                <div class="setting-desc" data-i18n="surveillance.camera_controls_desc">针对每个摄像头单独开启或禁用移动检测</div>
                             </div>
                         </div>
                         <div class="surv-camera-grid">
                             <div class="setting-row" style="border-bottom:none;padding:8px 0;">
-                                <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="surveillance.camera_front">Front</div></div>
+                                <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="surveillance.camera_front">前视</div></div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
                                         <input type="checkbox" id="v2CameraFront" checked onchange="SurvSettings.updateV2Cameras()">
@@ -545,7 +545,7 @@
                                 </div>
                             </div>
                             <div class="setting-row" style="border-bottom:none;padding:8px 0;">
-                                <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="surveillance.camera_right">Right</div></div>
+                                <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="surveillance.camera_right">右侧</div></div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
                                         <input type="checkbox" id="v2CameraRight" checked onchange="SurvSettings.updateV2Cameras()">
@@ -554,7 +554,7 @@
                                 </div>
                             </div>
                             <div class="setting-row" style="border-bottom:none;padding:8px 0;">
-                                <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="surveillance.camera_left">Left</div></div>
+                                <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="surveillance.camera_left">左侧</div></div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
                                         <input type="checkbox" id="v2CameraLeft" checked onchange="SurvSettings.updateV2Cameras()">
@@ -563,7 +563,7 @@
                                 </div>
                             </div>
                             <div class="setting-row" style="border-bottom:none;padding:8px 0;">
-                                <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="surveillance.camera_rear">Rear</div></div>
+                                <div class="setting-info"><div class="setting-name" style="font-size:13px;" data-i18n="surveillance.camera_rear">后视</div></div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
                                         <input type="checkbox" id="v2CameraRear" checked onchange="SurvSettings.updateV2Cameras()">
@@ -572,13 +572,13 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="setting-hint" id="cameraControlsHint" data-i18n="surveillance.camera_controls_hint">Disable cameras facing a wall or busy road to reduce false alerts.</div>
+                        <div class="setting-hint" id="cameraControlsHint" data-i18n="surveillance.camera_controls_hint">关闭正对墙壁或繁忙马路的摄像头，以显著减少误报。</div>
 
                         <!-- Side-cam Boost -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.sidecam_boost">Side-cam Boost</div>
-                                <div class="setting-desc" data-i18n="surveillance.sidecam_boost_desc">Override sensitivity and detection zone for the left and right cameras only. Useful when neighbours pull into adjacent stalls and the front/rear settings are too conservative to catch them.</div>
+                                <div class="setting-name" data-i18n="surveillance.sidecam_boost">侧方摄像头增强</div>
+                                <div class="setting-desc" data-i18n="surveillance.sidecam_boost_desc">仅覆盖左右摄像头的灵敏度和检测区域。当邻车驶入相邻车位而前后摄像头设置过于保守无法捕捉时很有用。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -590,24 +590,24 @@
                         <div id="sideCamBoostControls" style="display:none;padding-bottom:16px;">
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name" style="font-size:13px;" data-i18n="surveillance.sidecam_sens">Side sensitivity</div>
+                                    <div class="setting-name" style="font-size:13px;" data-i18n="surveillance.sidecam_sens">侧方灵敏度</div>
                                 </div>
                                 <div class="setting-control">
                                     <div class="slider-control">
-                                        <span class="slider-value" id="sideCamSensValue" data-i18n="surveillance.v2_sens_label.4">4</span>
+                                        <span class="slider-value" id="sideCamSensValue" data-i18n="surveillance.v2_sens_label.4">其他类型</span>
                                         <input type="range" class="slider" id="sideCamSensSlider" min="1" max="5" value="4" oninput="SurvSettings.updateSideCamSens(this.value)">
                                     </div>
                                 </div>
                             </div>
                             <div class="setting-row" style="border-bottom:none;">
                                 <div class="setting-info">
-                                    <div class="setting-name" style="font-size:13px;" data-i18n="surveillance.sidecam_zone">Side zone</div>
+                                    <div class="setting-name" style="font-size:13px;" data-i18n="surveillance.sidecam_zone">侧方区域</div>
                                 </div>
                                 <div class="setting-control">
                                     <div class="btn-group" id="sideCamZoneBtns">
-                                        <button class="btn-toggle" data-value="close" onclick="SurvSettings.setSideCamZone('close')" data-i18n="surveillance.det_close">Close</button>
-                                        <button class="btn-toggle" data-value="normal" onclick="SurvSettings.setSideCamZone('normal')" data-i18n="surveillance.det_normal">Normal</button>
-                                        <button class="btn-toggle active" data-value="extended" onclick="SurvSettings.setSideCamZone('extended')" data-i18n="surveillance.det_extended">Extended</button>
+                                        <button class="btn-toggle" data-value="close" onclick="SurvSettings.setSideCamZone('close')" data-i18n="surveillance.det_close">近距离 (~3m)</button>
+                                        <button class="btn-toggle" data-value="normal" onclick="SurvSettings.setSideCamZone('normal')" data-i18n="surveillance.det_normal">标准 (~6m)</button>
+                                        <button class="btn-toggle active" data-value="extended" onclick="SurvSettings.setSideCamZone('extended')" data-i18n="surveillance.det_extended">扩展 (整帧)</button>
                                     </div>
                                 </div>
                             </div>
@@ -616,17 +616,17 @@
                         <!-- Object Detection -->
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.detect_objects">Detect Objects</div>
-                                <div class="setting-desc" data-i18n="surveillance.detect_objects_desc">AI identifies what triggered the motion</div>
+                                <div class="setting-name" data-i18n="surveillance.detect_objects">目标识别类型</div>
+                                <div class="setting-desc" data-i18n="surveillance.detect_objects_desc">由 AI 模型识别触发移动的目标类型</div>
                             </div>
                         </div>
                         <div class="checkbox-row">
-                            <label class="checkbox-item active"><input type="checkbox" id="detectPerson" checked onchange="SurvSettings.updateDetection()"><span data-i18n="surveillance.detect_person">Person</span></label>
-                            <label class="checkbox-item active"><input type="checkbox" id="detectCar" checked onchange="SurvSettings.updateDetection()"><span data-i18n="surveillance.detect_vehicle">Vehicle</span></label>
-                            <label class="checkbox-item"><input type="checkbox" id="detectBike" onchange="SurvSettings.updateDetection()"><span data-i18n="surveillance.detect_bike">Bike</span></label>
-                            <label class="checkbox-item"><input type="checkbox" id="detectAnimal" onchange="SurvSettings.updateDetection()"><span data-i18n="surveillance.detect_animal">Animal</span></label>
+                            <label class="checkbox-item active"><input type="checkbox" id="detectPerson" checked onchange="SurvSettings.updateDetection()"><span data-i18n="surveillance.detect_person">行人</span></label>
+                            <label class="checkbox-item active"><input type="checkbox" id="detectCar" checked onchange="SurvSettings.updateDetection()"><span data-i18n="surveillance.detect_vehicle">车辆</span></label>
+                            <label class="checkbox-item"><input type="checkbox" id="detectBike" onchange="SurvSettings.updateDetection()"><span data-i18n="surveillance.detect_bike">骑行者/自行车</span></label>
+                            <label class="checkbox-item"><input type="checkbox" id="detectAnimal" onchange="SurvSettings.updateDetection()"><span data-i18n="surveillance.detect_animal">动物</span></label>
                         </div>
-                        <div class="setting-hint" data-i18n="surveillance.detect_objects_hint">Select which objects YOLO AI should identify. Motion detection triggers regardless — AI classifies what was detected.</div>
+                        <div class="setting-hint" data-i18n="surveillance.detect_objects_hint">选择需要通过 YOLO AI 模型识别的目标。移动检测触发后，AI 将自动分类标注。</div>
 
                         <!-- Telegram delivery moved to notifications.html (Telegram tab).
                              Same input IDs (v2TelegramSendStartPing, v2TelegramTierGroup,
@@ -643,17 +643,17 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-                            <span data-i18n="surveillance.developer">Developer</span>
+                            <span data-i18n="surveillance.developer">开发人员</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n-attr="title:surveillance.motion_heatmap_title" title="Shows colored blocks on the live stream indicating where motion is detected." data-i18n="surveillance.motion_heatmap">Motion Heatmap</div>
-                                <div class="setting-desc" data-i18n="surveillance.motion_heatmap_desc">Overlay motion detection zones on stream</div>
+                                <div class="setting-name" data-i18n-attr="title:surveillance.motion_heatmap_title" title="在实时画面上以色块标出检测到移动的区域。" data-i18n="surveillance.motion_heatmap">运动热图</div>
+                                <div class="setting-desc" data-i18n="surveillance.motion_heatmap_desc">在流量上覆盖的运动检测区域</div>
                             </div>
                             <div class="setting-control">
-                                <label class="toggle-switch" data-i18n-attr="title:surveillance.motion_heatmap_title" title="Shows colored blocks on the live stream indicating where motion is detected.">
+                                <label class="toggle-switch" data-i18n-attr="title:surveillance.motion_heatmap_title" title="在实时画面上以色块标出检测到移动的区域。">
                                     <input type="checkbox" id="v2MotionHeatmap" onchange="SurvSettings.updateV2Dev()">
                                     <span class="toggle-slider"></span>
                                 </label>
@@ -661,11 +661,11 @@
                         </div>
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n-attr="title:surveillance.filter_debug_log_title" title="Logs detailed filter decisions for each detection." data-i18n="surveillance.filter_debug_log">Filter Debug Log</div>
-                                <div class="setting-desc" data-i18n="surveillance.filter_debug_log_desc">Log detailed filter decisions</div>
+                                <div class="setting-name" data-i18n-attr="title:surveillance.filter_debug_log_title" title="记录每次目标检测的详细过滤决策逻辑。" data-i18n="surveillance.filter_debug_log">过滤调试日志</div>
+                                <div class="setting-desc" data-i18n="surveillance.filter_debug_log_desc">记录详细的过滤决策。</div>
                             </div>
                             <div class="setting-control">
-                                <label class="toggle-switch" data-i18n-attr="title:surveillance.filter_debug_log_title" title="Logs detailed filter decisions for each detection.">
+                                <label class="toggle-switch" data-i18n-attr="title:surveillance.filter_debug_log_title" title="记录每次目标检测的详细过滤决策逻辑。">
                                     <input type="checkbox" id="v2FilterDebugLog" onchange="SurvSettings.updateV2Dev()">
                                     <span class="toggle-slider"></span>
                                 </label>
@@ -679,28 +679,28 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M3 9h18"/></svg>
-                            <span data-i18n="surveillance.detection_zones_title">Detection Zones</span>
+                            <span data-i18n="surveillance.detection_zones_title">移动检测防区</span>
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="setting-hint" style="margin-bottom:12px;" data-i18n="surveillance.detection_zones_hint">Limit motion detection to specific areas of each camera. When off, the full camera frame is used for detection.</div>
+                        <div class="setting-hint" style="margin-bottom:12px;" data-i18n="surveillance.detection_zones_hint">可将移动检测限制在每个摄像头的特定区域。关闭时将对整个摄像头画面进行检测。</div>
 
                         <!-- Camera tabs + unsaved indicator -->
                         <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
                             <div class="btn-group" id="roiCameraTabs" style="flex:1;">
-                                <button class="btn-toggle active" onclick="RoiEditor.selectCamera(0)" data-i18n="surveillance.camera_front">Front</button>
-                                <button class="btn-toggle" onclick="RoiEditor.selectCamera(1)" data-i18n="surveillance.camera_right">Right</button>
-                                <button class="btn-toggle" onclick="RoiEditor.selectCamera(2)" data-i18n="surveillance.camera_rear">Rear</button>
-                                <button class="btn-toggle" onclick="RoiEditor.selectCamera(3)" data-i18n="surveillance.camera_left">Left</button>
+                                <button class="btn-toggle active" onclick="RoiEditor.selectCamera(0)" data-i18n="surveillance.camera_front">前视</button>
+                                <button class="btn-toggle" onclick="RoiEditor.selectCamera(1)" data-i18n="surveillance.camera_right">右侧</button>
+                                <button class="btn-toggle" onclick="RoiEditor.selectCamera(2)" data-i18n="surveillance.camera_rear">后视</button>
+                                <button class="btn-toggle" onclick="RoiEditor.selectCamera(3)" data-i18n="surveillance.camera_left">左侧</button>
                             </div>
-                            <span class="unsaved-indicator" id="roiUnsaved" style="display:none;flex-shrink:0;" data-i18n="surveillance.unsaved">● unsaved</span>
+                            <span class="unsaved-indicator" id="roiUnsaved" style="display:none;flex-shrink:0;" data-i18n="surveillance.unsaved">● 未保存</span>
                         </div>
 
                         <!-- Per-camera ROI toggle -->
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.roi_enable">Enable Zone</div>
-                                <div class="setting-desc" data-i18n="surveillance.roi_enable_desc">Draw a detection zone for this camera</div>
+                                <div class="setting-name" data-i18n="surveillance.roi_enable">启用防区 (ROI)</div>
+                                <div class="setting-desc" data-i18n="surveillance.roi_enable_desc">为此摄像头绘制指定检测区域</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -719,9 +719,9 @@
 
                             <!-- Buttons -->
                             <div style="display:flex; gap:8px; margin-top:8px;">
-                                <button class="btn btn-primary" style="flex:1;" onclick="RoiEditor.save()" data-i18n="surveillance.roi_save">Save Zone</button>
-                                <button class="btn" style="flex:0 0 auto; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--card-border); padding:8px 12px; font-size:12px;" onclick="RoiEditor.selectAll()" data-i18n="surveillance.roi_all">All</button>
-                                <button class="btn" style="flex:0 0 auto; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--card-border); padding:8px 12px; font-size:12px;" onclick="RoiEditor.clear()" data-i18n="surveillance.roi_none">None</button>
+                                <button class="btn btn-primary" style="flex:1;" onclick="RoiEditor.save()" data-i18n="surveillance.roi_save">保存防区</button>
+                                <button class="btn" style="flex:0 0 auto; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--card-border); padding:8px 12px; font-size:12px;" onclick="RoiEditor.selectAll()" data-i18n="surveillance.roi_all">全选</button>
+                                <button class="btn" style="flex:0 0 auto; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--card-border); padding:8px 12px; font-size:12px;" onclick="RoiEditor.clear()" data-i18n="surveillance.roi_none">清空</button>
                             </div>
                         </div>
 
@@ -735,15 +735,15 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                            <span data-i18n="surveillance.schedule_title">Surveillance Schedule</span>
-                            <span class="status-badge inactive" id="scheduleBadge" data-i18n="status.off">OFF</span>
+                            <span data-i18n="surveillance.schedule_title">监控定时计划</span>
+                            <span class="status-badge inactive" id="scheduleBadge" data-i18n="status.off">关</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.schedule_enable">Enable Schedule</div>
-                                <div class="setting-desc" data-i18n="surveillance.schedule_enable_desc">Only activate sentry during specific days and hours</div>
+                                <div class="setting-name" data-i18n="surveillance.schedule_enable">启用定时计划</div>
+                                <div class="setting-desc" data-i18n="surveillance.schedule_enable_desc">仅在指定的日期和时段启用驻车监控。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -754,14 +754,14 @@
                         </div>
 
                         <div id="scheduleContent" style="display:none;">
-                            <div class="setting-hint" style="margin-bottom:12px;" data-i18n="surveillance.schedule_hint">Add time windows when surveillance should be active. Outside these windows, sentry mode won't start even if ACC is off.</div>
+                            <div class="setting-hint" style="margin-bottom:12px;" data-i18n="surveillance.schedule_hint">添加监控生效的时间段。在此之外，即使车辆熄火下电，监控也不会启动。</div>
 
                             <div id="scheduleRulesList"></div>
 
-                            <button class="btn" style="width:100%; margin-top:8px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--card-border);" onclick="ScheduleEditor.addRule()" data-i18n="surveillance.schedule_add_window">+ Add Time Window</button>
+                            <button class="btn" style="width:100%; margin-top:8px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--card-border);" onclick="ScheduleEditor.addRule()" data-i18n="surveillance.schedule_add_window">+ 添加时间窗口</button>
 
                             <div style="margin-top:12px;">
-                                <button class="btn btn-primary" id="scheduleSaveBtn" style="width:100%;" onclick="ScheduleEditor.save()" data-i18n="surveillance.schedule_save">Save Schedule</button>
+                                <button class="btn btn-primary" id="scheduleSaveBtn" style="width:100%;" onclick="ScheduleEditor.save()" data-i18n="surveillance.schedule_save">保存定时计划</button>
                             </div>
                             
                             <div style="margin-top:8px; font-size:12px; color:var(--text-muted);" id="scheduleSummary"></div>
@@ -778,15 +778,15 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/></svg>
-                            <span data-i18n="parking.settings_title">Parking Intelligence</span>
-                            <span class="status-badge inactive" id="parkingBadge" data-i18n="status.off">OFF</span>
+                            <span data-i18n="parking.settings_title">停车智能配置</span>
+                            <span class="status-badge inactive" id="parkingBadge" data-i18n="status.off">关</span>
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="setting-hint" style="margin-bottom:12px;" data-i18n="parking.settings_desc">Opens a session at every switch-off: location and GPS freshness, four-camera stills when you walk away and when you return, the vehicles that arrived or left next to you while sentry watched, and two notifications ("Parked", "Back at car"). Off = no threads, no store, no compute.</div>
+                        <div class="setting-hint" style="margin-bottom:12px;" data-i18n="parking.settings_desc">在车辆熄火停泊期间记录环境、车位信息与安全概况。</div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="parking.settings_enabled">Enable Parking Intelligence</div>
+                                <div class="setting-name" data-i18n="parking.settings_enabled">开启停车智能服务</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -798,8 +798,8 @@
                         <div id="parkingSubSettings">
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="parking.settings_snapshots">Arrived / returned stills</div>
-                                    <div class="setting-desc" data-i18n="parking.settings_snapshots_desc">Four-camera stills ~90 s after switch-off and at the first door open or unlock. Also the image on the notifications.</div>
+                                    <div class="setting-name" data-i18n="parking.settings_snapshots">环视静止快照</div>
+                                    <div class="setting-desc" data-i18n="parking.settings_snapshots_desc">在离车约 90 秒后以及返车时自动采集四路环视静态照片。</div>
                                 </div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
@@ -810,8 +810,8 @@
                             </div>
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="parking.settings_neighbours">Neighbour timeline</div>
-                                    <div class="setting-desc" data-i18n="parking.settings_neighbours_desc">Track vehicles that arrive or leave next to you from the sentry baseline and finalized events, and keep the sharpest frames of each. Needs sentry armed.</div>
+                                    <div class="setting-name" data-i18n="parking.settings_neighbours">相邻车辆监测</div>
+                                    <div class="setting-desc" data-i18n="parking.settings_neighbours_desc">追踪停车期间停泊在车身周围或离开的邻车动向。</div>
                                 </div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
@@ -822,8 +822,8 @@
                             </div>
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="parking.settings_signage">Read garage signage (v2)</div>
-                                    <div class="setting-desc" data-i18n="parking.settings_signage_desc">Read level / zone / bay text from the stills and the last minute of the approach clip with the bundled on-device OCR (PP-OCRv3, ~5.5 MB). Runs once right after the arrival stills so the Parked message carries the level; a read deferred by a recording sentry clip is retried later. Language-specific models can be side-loaded to Overdrive/models/.</div>
+                                    <div class="setting-name" data-i18n="parking.settings_signage">车库标识与车位识别 (OCR)</div>
+                                    <div class="setting-desc" data-i18n="parking.settings_signage_desc">利用端侧轻量 AI 模型自动从环视画面中识别地库楼层、分区与车位编号。</div>
                                 </div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
@@ -835,8 +835,8 @@
                             <div class="setting-hint" id="parkingModelsNote" style="display:none;"></div>
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="parking.settings_geocoding">Address lookup</div>
-                                    <div class="setting-desc" data-i18n="parking.settings_geocoding_desc">Turn the parking GPS fix into a district / street label for the Parked message and the session list. Until you set it here, parking follows your sentry or dashcam place-tagging choice.</div>
+                                    <div class="setting-name" data-i18n="parking.settings_geocoding">逆地理编码 (地点解析)</div>
+                                    <div class="setting-desc" data-i18n="parking.settings_geocoding_desc">将 GPS 经纬度坐标解析为可读的道路或地名。</div>
                                 </div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
@@ -848,8 +848,8 @@
                             <div class="setting-hint" id="parkingGeocodingNote" style="display:none;"></div>
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="parking.settings_geocoding_online">Use online resolver</div>
-                                    <div class="setting-desc" data-i18n="parking.settings_geocoding_online_desc">Falls back to OpenStreetMap Nominatim when on-device geocoding cannot name the place. Sends only the parking coordinates and your device language.</div>
+                                    <div class="setting-name" data-i18n="parking.settings_geocoding_online">允许在线地理编码查询</div>
+                                    <div class="setting-desc" data-i18n="parking.settings_geocoding_online_desc">允许连接公共地图接口解析地址。关闭时仅依赖离线缓存。</div>
                                 </div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
@@ -860,7 +860,7 @@
                             </div>
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="parking.settings_retention">Keep sessions (days)</div>
+                                    <div class="setting-name" data-i18n="parking.settings_retention">停车记录保留天数</div>
                                 </div>
                                 <div class="setting-control">
                                     <input type="number" class="input" id="parkingRetentionDays" min="7" max="730" step="1" style="width:90px;" onchange="ParkingSettings.save('retentionDays', parseInt(this.value, 10))">
@@ -868,7 +868,7 @@
                             </div>
                             <div class="setting-row" style="border-bottom:none;">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="parking.settings_cap">Stills &amp; frames cap (MB)</div>
+                                    <div class="setting-name" data-i18n="parking.settings_cap">最大存储占用 (MB)</div>
                                 </div>
                                 <div class="setting-control">
                                     <input type="number" class="input" id="parkingStorageCapMb" min="50" max="4096" step="50" style="width:90px;" onchange="ParkingSettings.save('storageCapMb', parseInt(this.value, 10))">
@@ -876,7 +876,7 @@
                             </div>
                         </div>
                         <div style="margin-top:12px;">
-                            <a class="btn" href="parking.html" style="width:100%; display:block; text-align:center;" data-i18n="parking.settings_open_page">Open Parking</a>
+                            <a class="btn" href="parking.html" style="width:100%; display:block; text-align:center;" data-i18n="parking.settings_open_page">打开停车页面</a>
                         </div>
                     </div>
                 </div>
@@ -887,15 +887,15 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                            <span data-i18n="surveillance.screen_deterrent_title">Screen Deterrent</span>
+                            <span data-i18n="surveillance.screen_deterrent_title">车机中控屏威慑</span>
                         </div>
-                        <span class="status-badge inactive" id="screenDeterrentBadge" data-i18n="surveillance.screen_deterrent_off_badge">OFF</span>
+                        <span class="status-badge inactive" id="screenDeterrentBadge" data-i18n="surveillance.screen_deterrent_off_badge">关闭</span>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.screen_deterrent_enable">Display warning on motion</div>
-                                <div class="setting-desc" data-i18n="surveillance.screen_deterrent_enable_desc">Wake the head-unit screen and show a fullscreen warning when motion is detected. Works without BYD Cloud.</div>
+                                <div class="setting-name" data-i18n="surveillance.screen_deterrent_enable">检测到移动时显示警告</div>
+                                <div class="setting-desc" data-i18n="surveillance.screen_deterrent_enable_desc">检测到移动时唤醒车机屏幕并显示全屏警示画面，无需依赖比亚迪云端服务。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -906,8 +906,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.screen_deterrent_duration">Tail duration</div>
-                                <div class="setting-desc" data-i18n="surveillance.screen_deterrent_duration_desc">How long the warning stays visible after motion stops. While motion continues, the warning stays up.</div>
+                                <div class="setting-name" data-i18n="surveillance.screen_deterrent_duration">警告驻留时长</div>
+                                <div class="setting-desc" data-i18n="surveillance.screen_deterrent_duration_desc">移动停止后警示画面继续显示的时长。若移动仍在持续，警示画面将一直显示。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -920,22 +920,22 @@
                              Stacked with explicit OR divider + override banner so
                              the mutex is unmissable. -->
                         <div style="margin-top:8px; padding:12px; border:1px solid var(--card-border); border-radius:12px; background:var(--bg-secondary);">
-                            <div style="font-size:13px; font-weight:600; color:var(--text-primary); margin-bottom:8px;" data-i18n="surveillance.screen_deterrent_content_heading">Custom content</div>
-                            <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;" data-i18n="surveillance.screen_deterrent_content_help">Pick ONE: a custom message overlaid on the default red screen, OR your own image, GIF or MP4 clip. The uploaded asset always wins if both are set.</div>
+                            <div style="font-size:13px; font-weight:600; color:var(--text-primary); margin-bottom:8px;" data-i18n="surveillance.screen_deterrent_content_heading">自定义威慑内容</div>
+                            <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;" data-i18n="surveillance.screen_deterrent_content_help">二选一：默认红色警示背景叠加自定义文字，或直接展示自定义静态图片/动态 GIF。若同时设置，自定义图片优先生效。</div>
 
                             <!-- Override banner: shown when image is set -->
                             <div id="screenDeterrentOverrideBanner" style="display:none; padding:10px 12px; border:1px solid var(--warning); background:rgba(245,158,11,0.12); border-radius:8px; margin-bottom:12px;">
                                 <div style="display:flex; align-items:center; gap:8px; color:var(--warning); font-size:13px;">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px; height:16px; flex-shrink:0;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                                    <span data-i18n="surveillance.screen_deterrent_override_banner">An asset is set — the custom message is being ignored. Remove the asset to use a message instead.</span>
+                                    <span data-i18n="surveillance.screen_deterrent_override_banner">当前已设置自定义图片，默认文字提示已被覆盖。若要使用文字提示，请先移除图片。</span>
                                 </div>
                             </div>
 
                             <!-- Message option -->
                             <div class="setting-row" style="border-bottom:none; padding:6px 0;">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="surveillance.screen_deterrent_message">Custom message</div>
-                                    <div class="setting-desc" data-i18n="surveillance.screen_deterrent_message_desc">Replaces "YOU ARE ON CAMERA" on the default red screen.</div>
+                                    <div class="setting-name" data-i18n="surveillance.screen_deterrent_message">自定义提示文字</div>
+                                    <div class="setting-desc" data-i18n="surveillance.screen_deterrent_message_desc">替换默认红屏上的“你已进入监控区域”。</div>
                                 </div>
                                 <div class="setting-control">
                                     <input type="text" id="screenDeterrentMessage" maxlength="120" class="md-input" oninput="SurvSettings.queueScreenDeterrentMessage(this.value)" placeholder="YOU ARE ON CAMERA" style="padding-top:14px; padding-bottom:14px; line-height:1.2;">
@@ -945,30 +945,30 @@
                             <!-- OR divider -->
                             <div style="display:flex; align-items:center; gap:8px; margin:8px 0; color:var(--text-muted); font-size:11px; font-weight:600; letter-spacing:0.08em;">
                                 <div style="flex:1; height:1px; background:var(--card-border);"></div>
-                                <span data-i18n="surveillance.screen_deterrent_or">OR</span>
+                                <span data-i18n="surveillance.screen_deterrent_or">或</span>
                                 <div style="flex:1; height:1px; background:var(--card-border);"></div>
                             </div>
 
                             <!-- Image option -->
                             <div class="setting-row" style="border-bottom:none; padding:6px 0;">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="surveillance.screen_deterrent_image">Custom image, GIF or video</div>
-                                    <div class="setting-desc" data-i18n="surveillance.screen_deterrent_image_desc">PNG / JPG / WebP / GIF up to 8 MB, or an MP4 clip up to 10 s, 1080p and 10 MB. Video loops while the warning is visible; audio is not played.</div>
+                                    <div class="setting-name" data-i18n="surveillance.screen_deterrent_image">自定义图片或 GIF</div>
+                                    <div class="setting-desc" data-i18n="surveillance.screen_deterrent_image_desc">支持 PNG / JPG / WebP / GIF，最大 8 MB；或 10 秒以内、1080p、最大 10 MB 的 MP4 短片。警示画面显示期间视频循环播放，不播放声音。</div>
                                     <div class="setting-desc" style="margin-top: 12px; color: var(--text-primary);">
-                                        <div style="font-weight:600; margin-bottom:8px;" data-i18n="surveillance.themes_title">Themes by Giovanni Mirulla</div>
+                                        <div style="font-weight:600; margin-bottom:8px;" data-i18n="surveillance.themes_title">精选警示主题 (Giovanni Mirulla)</div>
                                         <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                                             <!-- Theme 1 -->
                                             <div style="border:1px solid var(--card-border); border-radius:8px; padding:8px; background:var(--bg-base); width: 140px; text-align: center;">
                                                 <div style="font-size:12px; font-weight:600; margin-bottom:8px;">Sentry 1</div>
                                                 <button type="button" class="btn btn-primary" style="width:100%; font-size:12px; padding:6px 0;" onclick="SurvSettings.downloadAndSetTheme('https://raw.githubusercontent.com/yash-srivastava/Overdrive-release/refs/heads/main/themes/sentry1.gif', 'sentry1.gif', this)">
-                                                    <span data-i18n="surveillance.download_set">Download &amp; Set</span>
+                                                    <span data-i18n="surveillance.download_set">下载并应用</span>
                                                 </button>
                                             </div>
                                             <!-- Theme 2 -->
                                             <div style="border:1px solid var(--card-border); border-radius:8px; padding:8px; background:var(--bg-base); width: 140px; text-align: center;">
                                                 <div style="font-size:12px; font-weight:600; margin-bottom:8px;">Sentry 2</div>
                                                 <button type="button" class="btn btn-primary" style="width:100%; font-size:12px; padding:6px 0;" onclick="SurvSettings.downloadAndSetTheme('https://raw.githubusercontent.com/yash-srivastava/Overdrive-release/refs/heads/main/themes/sentry2.gif', 'sentry2.gif', this)">
-                                                    <span data-i18n="surveillance.download_set">Download &amp; Set</span>
+                                                    <span data-i18n="surveillance.download_set">下载并应用</span>
                                                 </button>
                                             </div>
                                         </div>
@@ -978,11 +978,11 @@
                                     <input type="file" id="screenDeterrentFile" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4" style="display:none;" onchange="SurvSettings.uploadScreenDeterrentImage(this.files[0])">
                                     <button type="button" class="btn btn-secondary" onclick="document.getElementById('screenDeterrentFile').click()" id="screenDeterrentUploadBtn">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;vertical-align:-2px;margin-right:4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                                        <span id="screenDeterrentUploadLabel" data-i18n="surveillance.screen_deterrent_upload">Upload</span>
+                                        <span id="screenDeterrentUploadLabel" data-i18n="surveillance.screen_deterrent_upload">上传图片</span>
                                     </button>
                                     <button type="button" class="btn btn-secondary" id="screenDeterrentClearBtn" onclick="SurvSettings.clearScreenDeterrentImage()" style="display:none; margin-left:8px; color:var(--danger); border-color:var(--danger);">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;vertical-align:-2px;margin-right:4px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                                        <span data-i18n="surveillance.screen_deterrent_remove">Remove asset</span>
+                                        <span data-i18n="surveillance.screen_deterrent_remove">移除图片</span>
                                     </button>
                                 </div>
                             </div>
@@ -990,14 +990,14 @@
                             <div id="screenDeterrentPreview" style="display:none; margin-top:12px; text-align:center;">
                                 <img id="screenDeterrentPreviewImg" alt="" style="max-width:100%; max-height:180px; border-radius:8px; border:1px solid var(--card-border); background:var(--bg-secondary);" />
                                 <video id="screenDeterrentPreviewVideo" muted loop playsinline controls preload="auto" style="display:none; max-width:100%; max-height:180px; border-radius:8px; border:1px solid var(--card-border); background:var(--bg-secondary);"></video>
-                                <div id="screenDeterrentPreviewLabel" style="font-size:12px; color:var(--text-muted); margin-top:4px;" data-i18n="surveillance.screen_deterrent_preview_label">Current asset</div>
+                                <div id="screenDeterrentPreviewLabel" style="font-size:12px; color:var(--text-muted); margin-top:4px;" data-i18n="surveillance.screen_deterrent_preview_label">当前画面</div>
                                 <button type="button" class="btn btn-secondary" style="margin-top:8px; font-size:12px;" onclick="SurvSettings.testScreenDeterrent()">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;vertical-align:-2px;margin-right:4px;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                                    <span data-i18n="surveillance.test_on_screen">Test on Screen</span>
+                                    <span data-i18n="surveillance.test_on_screen">在车机屏幕上预览测试</span>
                                 </button>
                             </div>
                         </div>
-                        <div class="setting-hint" data-i18n="surveillance.screen_deterrent_hint">The screen wakes only while ACC is off. When the car turns on, the deterrent is suppressed.</div>
+                        <div class="setting-hint" data-i18n="surveillance.screen_deterrent_hint">屏幕仅在 ACC 关闭（熄火）状态下唤醒；车辆启动后，中控屏威慑将自动抑制。</div>
                     </div>
                 </div>
 
@@ -1006,29 +1006,29 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                            <span data-i18n="surveillance.deterrent_title">Cloud Deterrent</span>
+                            <span data-i18n="surveillance.deterrent_title">云端威慑</span>
                         </div>
-                        <span class="status-badge inactive" id="deterrentBadge" data-i18n="surveillance.deterrent_silent_badge">SILENT</span>
+                        <span class="status-badge inactive" id="deterrentBadge" data-i18n="surveillance.deterrent_silent_badge">静默</span>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.deterrent_on_motion">On motion detected</div>
-                                <div class="setting-desc" data-i18n="surveillance.deterrent_on_motion_desc">Action to take via BYD Cloud when a threat is confirmed. Requires BYD Cloud account setup.</div>
+                                <div class="setting-name" data-i18n="surveillance.deterrent_on_motion">检测到移动时触发</div>
+                                <div class="setting-desc" data-i18n="surveillance.deterrent_on_motion_desc">确认存在威胁时通过比亚迪云端执行的动作，需先完成比亚迪云账户配置。</div>
                             </div>
                             <div class="setting-control">
                                 <select class="select-control" id="deterrentAction" onchange="SurvSettings.updateDeterrent(this.value)">
-                                    <option value="silent" data-i18n="surveillance.deterrent_silent_option">Silent (record only)</option>
-                                    <option value="flash_lights" data-i18n="surveillance.deterrent_flash_option">Flash lights</option>
-                                    <option value="find_car" data-i18n="surveillance.deterrent_horn_option">Horn + lights</option>
+                                    <option value="silent" data-i18n="surveillance.deterrent_silent_option">静默（仅录像）</option>
+                                    <option value="flash_lights" data-i18n="surveillance.deterrent_flash_option">仅闪灯</option>
+                                    <option value="find_car" data-i18n="surveillance.deterrent_horn_option">鸣笛 + 闪灯</option>
                                 </select>
                             </div>
                         </div>
-                        <div class="setting-hint" data-i18n="surveillance.deterrent_hint_v2">Flash Lights and Horn + Lights use BYD's cloud API. BYD Cloud account setup required — set it up on the BYD Cloud page (sidebar → Integrations → BYD Cloud).</div>
+                        <div class="setting-hint" data-i18n="surveillance.deterrent_hint_v2">闪灯与鸣笛使用比亚迪云端 API，需先配置比亚迪云服务账户（侧边栏 → 扩展集成 → 比亚迪云服务）。</div>
                         <div id="deterrentWarning" class="info-box" style="display:none; border-color:var(--warning); background:rgba(245,158,11,0.08); margin-top:8px;">
                             <div style="display:flex; align-items:center; gap:8px; color:var(--warning);">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                                <span style="font-size:13px;"><span data-i18n="surveillance.deterrent_warning_v2">BYD Cloud account setup required.</span> <a href="byd-cloud.html" style="color:var(--warning); text-decoration:underline;" data-i18n="surveillance.deterrent_warning_link">Open BYD Cloud →</a></span>
+                                <span style="font-size:13px;"><span data-i18n="surveillance.deterrent_warning_v2">需先配置比亚迪云服务账户。</span> <a href="byd-cloud.html" style="color:var(--warning); text-decoration:underline;" data-i18n="surveillance.deterrent_warning_link">打开比亚迪云服务 →</a></span>
                             </div>
                         </div>
                     </div>
@@ -1048,14 +1048,14 @@
                                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
                                 <circle cx="12" cy="10" r="3"/>
                             </svg>
-                            <span data-i18n="surveillance.geocoding_title">Place Tagging</span>
+                            <span data-i18n="surveillance.geocoding_title">地理位置标签</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.geocoding_enabled_name">Tag sentry events with place names</div>
-                                <div class="setting-desc" data-i18n="surveillance.geocoding_enabled_desc">Reverse-geocode the event-start GPS into a district/city label and save it next to each clip's sidecar. Off by default to keep parked-at-home addresses out of shared notifications.</div>
+                                <div class="setting-name" data-i18n="surveillance.geocoding_enabled_name">哨兵事件添加地理位置名称</div>
+                                <div class="setting-desc" data-i18n="surveillance.geocoding_enabled_desc">将事件起始 GPS 坐标逆解析为区县/城市名称，并随每段录像的附属元数据文件一同保存。默认关闭，以免家庭停车地址出现在共享通知中。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -1066,8 +1066,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.geocoding_online_name">Use online resolver</div>
-                                <div class="setting-desc" data-i18n="surveillance.geocoding_online_desc">Falls back to OpenStreetMap Nominatim when on-device geocoding cannot name a location. Sends only the event-start coordinates and your device language.</div>
+                                <div class="setting-name" data-i18n="surveillance.geocoding_online_name">使用在线逆地理编码服务</div>
+                                <div class="setting-desc" data-i18n="surveillance.geocoding_online_desc">当本地离线地名库无法匹配时，回退使用 OpenStreetMap Nominatim 在线解析（仅发送触发坐标和语言）。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -1078,8 +1078,8 @@
                         </div>
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info" style="flex:1 1 auto;">
-                                <div class="setting-name" data-i18n="surveillance.geocoding_custom_url_name">Custom Nominatim URL</div>
-                                <div class="setting-desc" data-i18n="surveillance.geocoding_custom_url_desc">Optional. Point to a self-hosted instance to skip the public OSM endpoint entirely. Shared with dashcam settings.</div>
+                                <div class="setting-name" data-i18n="surveillance.geocoding_custom_url_name">自定义 Nominatim 接口</div>
+                                <div class="setting-desc" data-i18n="surveillance.geocoding_custom_url_desc">可选。指向自托管实例即可完全跳过公共 OSM 接口，此设置与行车记录仪共用。</div>
                             </div>
                             <div class="setting-control">
                                 <input type="url" id="survGeocodingCustomUrl" class="text-input" inputmode="url" placeholder="https://nominatim.example.com" disabled onchange="SurvSettings.saveGeocodingCustomUrl()" />
@@ -1093,15 +1093,15 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4" fill="currentColor"/></svg>
-                            <span data-i18n="surveillance.recording_settings_title">Recording Settings</span>
-                            <span class="unsaved-indicator" id="recordingUnsaved" data-i18n="surveillance.unsaved">● unsaved</span>
+                            <span data-i18n="surveillance.recording_settings_title">记录设置</span>
+                            <span class="unsaved-indicator" id="recordingUnsaved" data-i18n="surveillance.unsaved">● 未保存</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.pre_event_buffer">Pre-event Buffer</div>
-                                <div class="setting-desc" data-i18n="surveillance.pre_event_buffer_desc">Seconds captured before motion event</div>
+                                <div class="setting-name" data-i18n="recording.pre_event_buffer">事件前缓冲时长</div>
+                                <div class="setting-desc" data-i18n="surveillance.pre_event_buffer_desc">检测到移动事件发生前预录制的秒数 (预录缓冲区)</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -1112,8 +1112,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.post_event_buffer">Post-event Buffer</div>
-                                <div class="setting-desc" data-i18n="surveillance.post_event_buffer_desc">Seconds captured after motion stops</div>
+                                <div class="setting-name" data-i18n="recording.post_event_buffer">事件后缓冲时长</div>
+                                <div class="setting-desc" data-i18n="surveillance.post_event_buffer_desc">目标停止移动后延时录制的秒数</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -1125,26 +1125,26 @@
                         <div class="setting-row">
                             <div class="setting-info">
                                 <div class="setting-name">
-                                    <span data-i18n="surveillance.recording_quality">Surveillance Quality</span>
+                                    <span data-i18n="surveillance.recording_quality">监控画质</span>
                                 </div>
-                                <div class="setting-desc" data-i18n="surveillance.recording_quality_desc">Quality for parked (ACC-off) surveillance recording — independent of the driving dashcam quality. Higher tiers preserve more detail at the cost of more storage.</div>
+                                <div class="setting-desc" data-i18n="surveillance.recording_quality_desc">驻车（ACC OFF）监控录像的画质——独立于行车记录仪画质。档位越高细节越多，占用存储也越大。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group btn-group-vertical" id="survQualityBtns">
                                     <button class="btn-toggle" data-value="ECONOMY"  onclick="SurvSettings.setRecordingQuality('ECONOMY')">
-                                        <span class="tier-name" data-i18n="recording.tier_economy">Economy</span>
+                                        <span class="tier-name" data-i18n="recording.tier_economy">经济</span>
                                     </button>
                                     <button class="btn-toggle" data-value="STANDARD" onclick="SurvSettings.setRecordingQuality('STANDARD')">
-                                        <span class="tier-name" data-i18n="recording.tier_standard">Standard</span>
+                                        <span class="tier-name" data-i18n="recording.tier_standard">标准</span>
                                     </button>
                                     <button class="btn-toggle active" data-value="HIGH" onclick="SurvSettings.setRecordingQuality('HIGH')">
-                                        <span class="tier-name" data-i18n="recording.tier_high">High</span>
+                                        <span class="tier-name" data-i18n="recording.tier_high">高清</span>
                                     </button>
                                     <button class="btn-toggle" data-value="PREMIUM" onclick="SurvSettings.setRecordingQuality('PREMIUM')">
-                                        <span class="tier-name" data-i18n="recording.tier_premium">Premium</span>
+                                        <span class="tier-name" data-i18n="recording.tier_premium">超清</span>
                                     </button>
                                     <button class="btn-toggle" data-value="MAX" onclick="SurvSettings.setRecordingQuality('MAX')">
-                                        <span class="tier-name" data-i18n="recording.tier_max">Max</span>
+                                        <span class="tier-name" data-i18n="recording.tier_max">极高</span>
                                     </button>
                                 </div>
                             </div>
@@ -1152,9 +1152,9 @@
                         <div class="setting-row">
                             <div class="setting-info">
                                 <div class="setting-name">
-                                    <span data-i18n="recording.codec">Video Codec</span>
+                                    <span data-i18n="recording.codec">视频编码格式</span>
                                 </div>
-                                <div class="setting-desc" data-i18n="recording.codec_desc">H.265 produces 50% smaller files</div>
+                                <div class="setting-desc" data-i18n="recording.codec_desc">H.265 产生50%较小的文件</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="codecBtns">
@@ -1166,9 +1166,9 @@
                         <div class="setting-row">
                             <div class="setting-info">
                                 <div class="setting-name">
-                                    <span data-i18n="surveillance.camera_fps">Surveillance FPS</span>
+                                    <span data-i18n="surveillance.camera_fps">监控 FPS</span>
                                 </div>
-                                <div class="setting-desc" data-i18n="surveillance.camera_fps_desc_split">Frame rate for parked (ACC-off) surveillance — independent of the driving dashcam. Lower saves power &amp; storage while parked.</div>
+                                <div class="setting-desc" data-i18n="surveillance.camera_fps_desc_split">驻车哨兵（ACC 熄火下电）的录像帧率——独立于行车记录仪。较低帧率可在驻车时节省电量与存储空间。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="survFpsBtns">
@@ -1185,46 +1185,46 @@
                         <div class="setting-row">
                             <div class="setting-info">
                                 <div class="setting-name">
-                                    <span data-i18n="recording.clip_duration">Clip Duration</span>
-                                    <span class="setting-badge" data-i18n="recording.applies_next_rotation">Next clip</span>
+                                    <span data-i18n="recording.clip_duration">分段时长</span>
+                                    <span class="setting-badge" data-i18n="recording.applies_next_rotation">下个素材轮换生效</span>
                                 </div>
-                                <div class="setting-desc" data-i18n="recording.clip_duration_desc">Length of each recorded video segment. Applies to both driving (ACC on) and parked surveillance (ACC off) recordings, on the next segment rotation.</div>
+                                <div class="setting-desc" data-i18n="recording.clip_duration_desc">单个视频分段的时长。适用于行车（ACC 通电）与驻车哨兵（ACC 断电）录像，在下次分段轮换时生效。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="survClipDurationBtns">
-                                    <button class="btn-toggle active" data-value="2" onclick="SurvSettings.setClipDuration(2)" data-i18n="recording.clip_2min">2 min</button>
-                                    <button class="btn-toggle" data-value="5" onclick="SurvSettings.setClipDuration(5)" data-i18n="recording.clip_5min">5 min</button>
-                                    <button class="btn-toggle" data-value="10" onclick="SurvSettings.setClipDuration(10)" data-i18n="recording.clip_10min">10 min</button>
+                                    <button class="btn-toggle active" data-value="2" onclick="SurvSettings.setClipDuration(2)" data-i18n="recording.clip_2min">2 分钟</button>
+                                    <button class="btn-toggle" data-value="5" onclick="SurvSettings.setClipDuration(5)" data-i18n="recording.clip_5min">5 分钟</button>
+                                    <button class="btn-toggle" data-value="10" onclick="SurvSettings.setClipDuration(10)" data-i18n="recording.clip_10min">10 分钟</button>
                                 </div>
                             </div>
                         </div>
                         <div class="info-box-note">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                             <div class="info-note" data-i18n="recording.clip_duration_warning">
-                                Longer clips mean fewer, larger files — but an in-progress clip is only finalized when it rotates. On sudden power loss (e.g. battery cut on impact) the current clip can be lost, so a 10-minute setting risks up to 10 minutes of unsaved footage vs 2. Keep 2 min if your vehicle can lose power abruptly.
+                                分段越长，文件越少但单文件体积越大；且录制中的分段仅在切片轮换时才会写入完成。若遇到突发断电，未落盘的当前分段可能丢失（设为 10 分钟最多可能丢失 10 分钟视频，而设为 2 分钟仅损失最多 2 分钟）。建议保持 2 分钟以防意外断电。
                             </div>
                         </div>
                         <div class="info-box">
                             <div class="info-row">
-                                <span class="label" data-i18n="recording.active_estimate">At your settings</span>
+                                <span class="label" data-i18n="recording.active_estimate">基于当前设置估算</span>
                                 <span class="value" id="survActiveEstimate">— Mbps · — / hr · ~—</span>
                             </div>
                             <div class="info-row" style="font-size: 0.85em; opacity: 0.7;">
-                                <span class="label" data-i18n="recording.native_resolution">Native</span>
+                                <span class="label" data-i18n="recording.native_resolution">原生分辨率</span>
                                 <span class="value">2560×1920 mosaic · 4 × 1280×960 cameras</span>
                             </div>
                             <div class="info-row" id="survFpsClampRow" style="display: none; font-size: 0.85em;">
-                                <span class="label" data-i18n="recording.fps_actual">Measured FPS</span>
+                                <span class="label" data-i18n="recording.fps_actual">实测帧率 (FPS)</span>
                                 <span class="value" id="survFpsActual">—</span>
                             </div>
                         </div>
                         <div class="timeline-visual">
-                            <div class="timeline-segment timeline-pre" id="timelinePre" data-i18n="surveillance.timeline_pre">PRE</div>
-                            <div class="timeline-segment timeline-event" data-i18n="surveillance.timeline_event">EVENT</div>
-                            <div class="timeline-segment timeline-post" id="timelinePost" data-i18n="surveillance.timeline_post">POST</div>
+                            <div class="timeline-segment timeline-pre" id="timelinePre" data-i18n="surveillance.timeline_pre">经济发展</div>
+                            <div class="timeline-segment timeline-event" data-i18n="surveillance.timeline_event">事件</div>
+                            <div class="timeline-segment timeline-post" id="timelinePost" data-i18n="surveillance.timeline_post">邮件</div>
                         </div>
                         <div class="timeline-labels">
-                            <span id="preLabel">5s before</span><span data-i18n="surveillance.timeline_motion_detected">Motion Detected</span><span id="postLabel">10s after</span>
+                            <span id="preLabel">5s before</span><span data-i18n="surveillance.timeline_motion_detected">发现运动</span><span id="postLabel">10s after</span>
                         </div>
                     </div>
                 </div>
@@ -1240,33 +1240,33 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>
                             </svg>
-                            <span data-i18n="recording.layout_title">Recording Layout</span>
+                            <span data-i18n="recording.layout_title">录像版面配置</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
                                 <div class="setting-name">
-                                    <span data-i18n="recording.layout_label">Camera Layout</span>
-                                    <span class="setting-badge" data-i18n="recording.applies_live">Applies live</span>
+                                    <span data-i18n="recording.layout_label">摄像头版面配置</span>
+                                    <span class="setting-badge" data-i18n="recording.applies_live">立即生效</span>
                                 </div>
-                                <div class="setting-desc" data-i18n="recording.layout_desc">Standard records the four 360 cameras as a 2×2 grid. Dashcam puts the forward road view across the top with the 360 left, rear and right cameras along the bottom. Telemetry overlay is preserved either way.</div>
+                                <div class="setting-desc" data-i18n="recording.layout_desc">“标准”模式将 4 路全景摄像头录制为 2×2 网格。“行车记录仪”模式将前方道路画面置于上方，并将左、后、右 3 路画面并排置于下方。无论哪种布局，车况数据叠加层均会保留。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group btn-group-vertical" id="survLayoutBtns">
                                     <button class="btn-toggle active" data-value="standard" onclick="SurvSettings.setSurveillanceLayout('standard')">
-                                        <span class="tier-name" data-i18n="recording.layout_standard">Standard (360 grid)</span>
+                                        <span class="tier-name" data-i18n="recording.layout_standard">标准 (360 网格)</span>
                                     </button>
                                     <button class="btn-toggle" data-value="dashcam" onclick="SurvSettings.setSurveillanceLayout('dashcam')">
-                                        <span class="tier-name" data-i18n="recording.layout_dashcam">Dashcam (forward + sides)</span>
+                                        <span class="tier-name" data-i18n="recording.layout_dashcam">行车记录仪（前视 + 侧视）</span>
                                     </button>
                                 </div>
                             </div>
                         </div>
                         <div class="setting-row" style="border-bottom:none;" id="survWindshieldRow">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.layout_use_windshield_label">Use Windshield Camera in Dashcam Layout</div>
-                                <div class="setting-desc" data-i18n="recording.layout_use_windshield_desc">When available, use the dedicated windshield camera for the top dashcam view. Falls back to the 360 front camera if the stream cannot be opened.</div>
+                                <div class="setting-name" data-i18n="recording.layout_use_windshield_label">在行车记录仪版面中选用挡风玻璃摄像头</div>
+                                <div class="setting-desc" data-i18n="recording.layout_use_windshield_desc">若硬件支持，上方主画面将优先使用前挡风玻璃专用原厂记录仪摄像头。若无法开启该路视频流，则自动回退使用 360 环视前置摄像头。</div>
                                 <div class="setting-desc" id="survWindshieldCameraInfo" style="display:none;"></div>
                             </div>
                             <div class="setting-control">
@@ -1288,7 +1288,7 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
                             </svg>
-                            <span data-i18n="recording.telemetry_overlay_title">Telemetry Overlay</span>
+                            <span data-i18n="recording.telemetry_overlay_title">遥测信息叠加</span>
                         </div>
                     </div>
                     <div class="card-body">
@@ -1296,8 +1296,8 @@
                              toggle, and :last-child now binds to the picker. -->
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.telemetry_show_label">Show on Sentry Recordings</div>
-                                <div class="setting-desc" data-i18n="surveillance.telemetry_show_desc">Burn vehicle data into ACC-off surveillance event clips. Separate from the ACC-on recording overlay.</div>
+                                <div class="setting-name" data-i18n="surveillance.telemetry_show_label">显示在哨兵录像上</div>
+                                <div class="setting-desc" data-i18n="surveillance.telemetry_show_desc">将车辆数据叠加录入 ACC 关闭时的监控片段。与 ACC 开启时的录像叠加相互独立。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -1308,8 +1308,8 @@
                         </div>
                         <div class="setting-row telemetry-fields" id="telemetryFieldsSurveillance" style="display:none;">
                             <div class="setting-info" style="width:100%;">
-                                <div class="setting-name" data-i18n="recording.telemetry_fields_label">Fields to burn in</div>
-                                <div class="setting-desc" data-i18n="surveillance.telemetry_fields_desc">Choose what the overlay draws on surveillance clips.</div>
+                                <div class="setting-name" data-i18n="recording.telemetry_fields_label">画面水印叠加字段 (OSD 烧录)</div>
+                                <div class="setting-desc" data-i18n="surveillance.telemetry_fields_desc">选择要在监控录像上叠加绘制的内容。</div>
                                 <div class="telemetry-fields-grid" id="telemetryFieldsSurveillanceGrid"></div>
                             </div>
                         </div>
@@ -1332,14 +1332,14 @@
                                 <path d="M12 3c2.5 3 2.5 15 0 18"/>
                                 <path d="M12 3c-2.5 3-2.5 15 0 18"/>
                             </svg>
-                            <span data-i18n="recording.rectify_title">Fisheye Correction</span>
+                            <span data-i18n="recording.rectify_title">鱼眼畸变校正</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.rectify_label">Correction Strength</div>
-                                <div class="setting-desc" data-i18n="recording.rectify_desc">Straightens the residual fisheye barrel curve in recordings and surveillance clips. 0 = off (raw HAL output). Higher values pull peripheral pixels inward.</div>
+                                <div class="setting-name" data-i18n="recording.rectify_label">校正强度</div>
+                                <div class="setting-desc" data-i18n="recording.rectify_desc">消除行车与哨兵视频中原厂超广角镜头的桶形畸变。0 为关闭 (原始输出)，数值越大向中心拉伸拉直越明显。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -1351,8 +1351,8 @@
                                      to the full row width). Mirrors the recording-page
                                      card layout. -->
                                 <div class="slider-range-labels" style="width:120px;margin-left:auto;padding:0;">
-                                    <span data-i18n="recording.rectify_min">Off</span>
-                                    <span data-i18n="recording.rectify_max">Max</span>
+                                    <span data-i18n="recording.rectify_min">关闭</span>
+                                    <span data-i18n="recording.rectify_max">最大值</span>
                                 </div>
                             </div>
                         </div>
@@ -1371,26 +1371,26 @@
                                 <path d="M3 17h18l-3-9H6l-3 9z"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/>
                                 <path d="M9 8V5a3 3 0 0 1 6 0v3"/>
                             </svg>
-                            <span data-i18n="oem_dashcam.title">OEM Dashcam</span>
+                            <span data-i18n="oem_dashcam.title">原厂行车记录仪</span>
                         </div>
-                        <span class="status-badge inactive" id="oemPipelineBadge" data-i18n="oem_dashcam.status_idle" role="status" aria-live="polite" aria-atomic="true" style="opacity:0;">Idle</span>
+                        <span class="status-badge inactive" id="oemPipelineBadge" data-i18n="oem_dashcam.status_idle" role="status" aria-live="polite" aria-atomic="true" style="opacity:0;">空闲</span>
                     </div>
                     <div class="card-body">
                         <!-- Camera-ID-unset state. -->
                         <div class="setting-row" id="oemDashcamIdUnsetRow" style="display:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="oem_dashcam.id_unset_title">Camera ID not configured</div>
-                                <div class="setting-desc" data-i18n="oem_dashcam.id_unset_desc">Open the camera-mapping dialog from the Android settings to pick which AVMCamera id is the forward dashcam sensor. Auto = pano XOR 1; on Seal/Han pano is id 1 so OEM dashcam defaults to id 0.</div>
+                                <div class="setting-name" data-i18n="oem_dashcam.id_unset_title">摄像头 ID 未配置</div>
+                                <div class="setting-desc" data-i18n="oem_dashcam.id_unset_desc">请在“诊断 → 摄像头探测”中选择哪个 AVMCamera 编号对应前视行车记录仪摄像头。Auto = pano XOR 1；在 Seal/Han 上 pano 为 id 1，因此 OEM 行车记录仪默认为 id 0。</div>
                             </div>
                         </div>
 
                         <div class="setting-row" id="oemSurvModeRow" style="border-bottom:none;padding-bottom:12px;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="oem_dashcam.surveillance_mode_title">Surveillance behaviour</div>
-                                <div class="setting-desc" data-i18n="oem_dashcam.surveillance_mode_desc">Controls when the forward dashcam sensor writes dvr_*.mp4 in response to surveillance (parked-car motion / sentry).</div>
+                                <div class="setting-name" data-i18n="oem_dashcam.surveillance_mode_title">驻车哨兵模式</div>
+                                <div class="setting-desc" data-i18n="oem_dashcam.surveillance_mode_desc">控制在驻车熄火状态下，前视摄像头何时响应哨兵事件录制 dvr_*.mp4 视频。</div>
                             </div>
                         </div>
-                        <div class="mode-selector" role="radiogroup" aria-busy="true" data-hydrating="true" data-i18n-attr="aria-label:oem_dashcam.mode_picker_aria_surveillance" aria-label="OEM Dashcam surveillance mode" aria-controls="oemPipelineStatusHint">
+                        <div class="mode-selector" role="radiogroup" aria-busy="true" data-hydrating="true" data-i18n-attr="aria-label:oem_dashcam.mode_picker_aria_surveillance" aria-label="原厂记录仪驻车哨兵模式" aria-controls="oemPipelineStatusHint">
                             <label class="mode-option">
                                 <input type="radio" name="oemSurveillanceMode" value="off" checked onchange="SurvSettings.setOemSurveillanceMode('off')" aria-describedby="oemSurvModeDesc_off">
                                 <div class="mode-card mode-card-active">
@@ -1398,8 +1398,8 @@
                                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
                                     </span>
                                     <span class="mode-body">
-                                        <span class="mode-name" data-i18n="oem_dashcam.mode_off">Off</span>
-                                        <span class="mode-desc" id="oemSurvModeDesc_off" data-i18n="oem_dashcam.mode_off_desc_surveillance">Don't record from the OEM forward sensor on surveillance. Pano sentry keeps writing event_*.mp4 normally.</span>
+                                        <span class="mode-name" data-i18n="oem_dashcam.mode_off">关闭</span>
+                                        <span class="mode-desc" id="oemSurvModeDesc_off" data-i18n="oem_dashcam.mode_off_desc_surveillance">在哨兵安防期间不录制原厂前视画面，全景哨兵正常写入 event_*.mp4。</span>
                                     </span>
                                     <span class="mode-radio" aria-hidden="true"></span>
                                 </div>
@@ -1411,8 +1411,8 @@
                                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/><circle cx="9" cy="12" r="1.5" fill="currentColor"/></svg>
                                     </span>
                                     <span class="mode-body">
-                                        <span class="mode-name" data-i18n="oem_dashcam.mode_continuous">Continuous</span>
-                                        <span class="mode-desc" id="oemSurvModeDesc_continuous" data-i18n="oem_dashcam.mode_continuous_desc_surveillance">Always record dvr_*.mp4 the whole time the car is parked, regardless of motion. Will burn through storage fastest.</span>
+                                        <span class="mode-name" data-i18n="oem_dashcam.mode_continuous">连续录制</span>
+                                        <span class="mode-desc" id="oemSurvModeDesc_continuous" data-i18n="oem_dashcam.mode_continuous_desc_surveillance">车辆驻车期间全程录制 dvr_*.mp4 视频，不依赖移动检测。此模式会最快消耗存储空间。</span>
                                     </span>
                                     <span class="mode-radio" aria-hidden="true"></span>
                                 </div>
@@ -1424,8 +1424,8 @@
                                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/><circle cx="12" cy="12" r="3"/></svg>
                                     </span>
                                     <span class="mode-body">
-                                        <span class="mode-name" data-i18n="oem_dashcam.mode_smart">Smart</span>
-                                        <span class="mode-desc" id="oemSurvModeDesc_smart" data-i18n="oem_dashcam.mode_smart_desc_surveillance">Mirror pano motion detection: when surveillance fires (motion + AI confirms a person/vehicle), write dvr_*.mp4 alongside event_*.mp4. Honors the same Safe Locations, Schedule, and per-camera filters as the pano sentry.</span>
+                                        <span class="mode-name" data-i18n="oem_dashcam.mode_smart">智能联动</span>
+                                        <span class="mode-desc" id="oemSurvModeDesc_smart" data-i18n="oem_dashcam.mode_smart_desc_surveillance">与全景哨兵联动：当哨兵触发（移动检测 + AI 识别确认为行人/车辆），同步录制原厂前视 dvr_*.mp4 与全景 event_*.mp4。遵循相同的安全区域、定时计划及各摄像头过滤规则。</span>
                                     </span>
                                     <span class="mode-radio" aria-hidden="true"></span>
                                 </div>
@@ -1434,8 +1434,8 @@
 
                         <div class="setting-row" id="oemPipelineStatusRow" style="border-bottom:none;">
                             <div class="setting-info" style="flex:1 1 auto;">
-                                <div class="setting-name" id="oemPipelineStatus" data-i18n="oem_dashcam.status_idle">Idle</div>
-                                <div class="setting-desc" id="oemPipelineStatusHint" data-i18n="oem_dashcam.status_hint_off">Pick Continuous or Smart above to enable surveillance recording on the OEM forward sensor.</div>
+                                <div class="setting-name" id="oemPipelineStatus" data-i18n="oem_dashcam.status_idle">空闲</div>
+                                <div class="setting-desc" id="oemPipelineStatusHint" data-i18n="oem_dashcam.status_hint_off">在上方选择“连续录制”或“智能联动”，以启用原厂前置摄像头录像。</div>
                             </div>
                         </div>
                     </div>
@@ -1450,17 +1450,17 @@
                                 <circle cx="12" cy="12" r="3"/>
                                 <path d="M7 6V4"/><path d="M17 6V4"/>
                             </svg>
-                            <span data-i18n="oem_dashcam.native_dvr_title">Native DVR app (com.byd.cdr)</span>
+                            <span data-i18n="oem_dashcam.native_dvr_title">比亚迪原厂行车记录仪 (com.byd.cdr)</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info" style="flex:1 1 auto;">
-                                <div class="setting-desc" data-i18n="oem_dashcam.native_dvr_explainer">The factory dashcam app records to /sdcard/DCIM/BYDCam and opens AVMCamera on every ACC ON. Disabling lets OverDrive own the camera without contention.</div>
-                                <div class="setting-name" id="oemNativeDvrStatusLabel" style="margin-top:8px;" data-i18n="oem_dashcam.native_dvr_status_enabled">Status: Enabled</div>
+                                <div class="setting-desc" data-i18n="oem_dashcam.native_dvr_explainer">比亚迪原厂记录仪应用默认录制至 /sdcard/DCIM/BYDCam，且在每次车辆通电 (ACC ON) 时独占打开摄像头。将其停用后，OverDrive 可独占访问摄像头，彻底避免资源抢占冲突。</div>
+                                <div class="setting-name" id="oemNativeDvrStatusLabel" style="margin-top:8px;" data-i18n="oem_dashcam.native_dvr_status_enabled">状态：已启用</div>
                             </div>
                             <div class="setting-control">
-                                <button class="btn btn-primary" id="oemNativeDvrToggleBtn" onclick="SurvSettings.toggleOemNativeDvr()" data-i18n="oem_dashcam.native_dvr_disable">Disable native DVR</button>
+                                <button class="btn btn-primary" id="oemNativeDvrToggleBtn" onclick="SurvSettings.toggleOemNativeDvr()" data-i18n="oem_dashcam.native_dvr_disable">停用原厂记录仪应用</button>
                             </div>
                         </div>
                     </div>
@@ -1475,21 +1475,21 @@
                                 <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
                                 <line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/>
                             </svg>
-                            <span data-i18n="surveillance.storage_title">Surveillance Storage</span>
-                            <span class="unsaved-indicator" id="storageUnsaved" data-i18n="surveillance.unsaved">● unsaved</span>
+                            <span data-i18n="surveillance.storage_title">监控存储</span>
+                            <span class="unsaved-indicator" id="storageUnsaved" data-i18n="surveillance.unsaved">● 未保存</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <!-- Storage Location Selection -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="trip.settings.storage_location">Storage Location</div>
-                                <div class="setting-desc" data-i18n="surveillance.storage_location_desc">Choose where to save surveillance events</div>
+                                <div class="setting-name" data-i18n="trip.settings.storage_location">存储地点</div>
+                                <div class="setting-desc" data-i18n="surveillance.storage_location_desc">选择保存监控事件的地方</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="survStorageTypeBtns">
-                                    <button class="btn-toggle active" data-value="INTERNAL" onclick="SurvSettings.setStorageType('INTERNAL')" data-i18n="trip.settings.storage_internal">Internal</button>
-                                    <button class="btn-toggle" data-value="SD_CARD" onclick="SurvSettings.setStorageType('SD_CARD')" id="btnSurvSdCard" data-i18n="trip.settings.storage_sd">SD card</button>
+                                    <button class="btn-toggle active" data-value="INTERNAL" onclick="SurvSettings.setStorageType('INTERNAL')" data-i18n="trip.settings.storage_internal">内部</button>
+                                    <button class="btn-toggle" data-value="SD_CARD" onclick="SurvSettings.setStorageType('SD_CARD')" id="btnSurvSdCard" data-i18n="trip.settings.storage_sd">SD卡</button>
                                     <button class="btn-toggle" data-value="USB" onclick="SurvSettings.setStorageType('USB')" id="btnSurvUsb" data-i18n="trip.settings.storage_usb">USB</button>
                                 </div>
                             </div>
@@ -1498,7 +1498,7 @@
                         <div class="sd-card-status" id="survSdCardStatus" style="display:none;">
                             <div class="sd-status-row">
                                 <span class="sd-status-dot" id="survSdStatusDot"></span>
-                                <span class="sd-status-text" id="survSdStatusText" data-i18n="recording.sd_checking">SD Card: Checking...</span>
+                                <span class="sd-status-text" id="survSdStatusText" data-i18n="recording.sd_checking">检查中...</span>
                             </div>
                             <div class="sd-space-info" id="survSdSpaceInfo" style="display:none;">
                                 <span id="survSdFree">-- free</span> / <span id="survSdTotal">-- total</span>
@@ -1508,7 +1508,7 @@
                         <div class="sd-card-status" id="survUsbStatus" style="display:none;">
                             <div class="sd-status-row">
                                 <span class="sd-status-dot" id="survUsbStatusDot"></span>
-                                <span class="sd-status-text" id="survUsbStatusText" data-i18n="recording.usb_checking">USB: Checking...</span>
+                                <span class="sd-status-text" id="survUsbStatusText" data-i18n="recording.usb_checking">检查中...</span>
                             </div>
                             <div class="sd-space-info" id="survUsbSpaceInfo" style="display:none;">
                                 <span id="survUsbFree">-- free</span> / <span id="survUsbTotal">-- total</span>
@@ -1516,8 +1516,8 @@
                         </div>
                         <div class="setting-row" style="border-bottom:none;padding-bottom:8px;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.storage_usage">Storage Usage</div>
-                                <div class="setting-desc" id="survStoragePath" data-i18n="surveillance.events_saved_to_default">Events saved to Overdrive/surveillance</div>
+                                <div class="setting-name" data-i18n="surveillance.storage_usage">存储使用</div>
+                                <div class="setting-desc" id="survStoragePath" data-i18n="surveillance.events_saved_to_default">事件保存到 Overdrive/surveillance</div>
                                 <!-- Fallback warning: configured external volume (SD/USB) isn't
                                      mounted (often because USB power is off and the SD rides that
                                      rail) or is full, so clips silently land on internal storage.
@@ -1529,13 +1529,13 @@
                             <div class="storage-fill" id="survStorageFill" style="width: 0%"></div>
                         </div>
                         <div class="storage-info">
-                            <span id="survStorageUsed" data-i18n="surveillance.size_used_dash">-- used</span>
-                            <span id="survStorageLimit" data-i18n="surveillance.size_limit_dash">-- limit</span>
+                            <span id="survStorageUsed" data-i18n="surveillance.size_used_dash">--使用</span>
+                            <span id="survStorageLimit" data-i18n="surveillance.size_limit_dash">-- 限制</span>
                         </div>
                         <div class="setting-row" style="margin-top:16px;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.storage_limit">Storage Limit</div>
-                                <div class="setting-desc" data-i18n="recording.storage_limit_desc">Auto-delete oldest when limit reached</div>
+                                <div class="setting-name" data-i18n="recording.storage_limit">存储容量上限</div>
+                                <div class="setting-desc" data-i18n="recording.storage_limit_desc">达到存储容量上限时自动覆盖删除最旧录像</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -1545,8 +1545,8 @@
                             </div>
                         </div>
                         <div class="slider-range-labels">
-                            <span id="survLimitMin" data-i18n="surveillance.limit_min_default">100 MB</span>
-                            <span id="survLimitMax" data-i18n="surveillance.limit_max_default">100 GB</span>
+                            <span id="survLimitMin" data-i18n="surveillance.limit_min_default">100 MB 的数量</span>
+                            <span id="survLimitMax" data-i18n="surveillance.limit_max_default">100 GB 的数量</span>
                         </div>
                         <!-- Combined-limit advisory — see recording.html for the
                              rationale; same shared renderer, same server payload. -->
@@ -1565,15 +1565,15 @@
                                 <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
                                 <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
                             </svg>
-                            <span data-i18n="recording.cdr_title">BYD Dashcam Auto-Cleanup</span>
-                            <span class="status-badge" id="cdrCleanupBadge" data-i18n="status.off">OFF</span>
+                            <span data-i18n="recording.cdr_title">比亚迪行车记录仪自动清理</span>
+                            <span class="status-badge" id="cdrCleanupBadge" data-i18n="status.off">关</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.cdr_auto_delete">Auto-Delete Old Dashcam Files</div>
-                                <div class="setting-desc" data-i18n="recording.cdr_auto_delete_desc">Free up SD card space by removing oldest BYD dashcam recordings</div>
+                                <div class="setting-name" data-i18n="recording.cdr_auto_delete">自动清理原厂记录仪旧文件</div>
+                                <div class="setting-desc" data-i18n="recording.cdr_auto_delete_desc">通过自动删除最旧的原厂行车记录仪录像，释放 SD 卡空间</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -1586,24 +1586,24 @@
                         <div class="info-box-warning" id="cdrRecommendBanner" style="display:none;">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                             <div class="info-row" style="color:var(--warning);">
-                                <span class="label" data-i18n="recording.cdr_recommend_label_v2">Recommended</span>
-                                <span class="value" data-i18n="recording.cdr_recommend_text">Overdrive uses SD — enable cleanup to keep space free</span>
+                                <span class="label" data-i18n="recording.cdr_recommend_label_v2">建议</span>
+                                <span class="value" data-i18n="recording.cdr_recommend_text">OverDrive 正在使用 SD 卡——建议开启自动清理以确保存储空间充足</span>
                             </div>
                         </div>
                         <!-- CDR Status -->
                         <div class="info-box" id="cdrInfoBox">
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_path">Dashcam Path</span><span class="value" id="cdrPath">--</span></div>
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_usage">Dashcam Usage</span><span class="value" id="cdrUsage">--</span></div>
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_files">Files</span><span class="value" id="cdrFileCount">--</span></div>
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_protected">Protected</span><span class="value" id="cdrProtected">--</span></div>
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_deletable">Deletable</span><span class="value" id="cdrDeletable">--</span></div>
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_bg_monitor">Background monitor</span><span class="value" id="cdrMonitoring">--</span></div>
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_last_cleanup">Last cleanup</span><span class="value" id="cdrLastCleanup">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_path">原厂记录仪路径</span><span class="value" id="cdrPath">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_usage">已占存储空间</span><span class="value" id="cdrUsage">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_files">文件</span><span class="value" id="cdrFileCount">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_protected">受保护</span><span class="value" id="cdrProtected">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_deletable">可清理</span><span class="value" id="cdrDeletable">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_bg_monitor">后台监控</span><span class="value" id="cdrMonitoring">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_last_cleanup">最后一次清理</span><span class="value" id="cdrLastCleanup">--</span></div>
                         </div>
                         <div class="setting-row" style="margin-top:12px;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.cdr_reserved">Reserved Space for Overdrive</div>
-                                <div class="setting-desc" data-i18n="recording.cdr_reserved_desc">Keep this much free on SD card</div>
+                                <div class="setting-name" data-i18n="recording.cdr_reserved">为 OverDrive 预留空间</div>
+                                <div class="setting-desc" data-i18n="recording.cdr_reserved_desc">在 SD 卡上为 OverDrive 保持预留的空闲容量</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -1614,8 +1614,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.cdr_protect_recent">Protect Recent Files</div>
-                                <div class="setting-desc" data-i18n="recording.cdr_protect_recent_desc">Don't delete dashcam files newer than this</div>
+                                <div class="setting-name" data-i18n="recording.cdr_protect_recent">保护近期文件</div>
+                                <div class="setting-desc" data-i18n="recording.cdr_protect_recent_desc">保留指定天数内的原厂记录仪文件不被清理</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -1626,8 +1626,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.cdr_min_keep">Keep Minimum Files</div>
-                                <div class="setting-desc" data-i18n="recording.cdr_min_keep_desc">Always keep at least this many newest files</div>
+                                <div class="setting-name" data-i18n="recording.cdr_min_keep">最少保留文件数</div>
+                                <div class="setting-desc" data-i18n="recording.cdr_min_keep_desc">始终保留至少这么多份最新录像文件</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -1639,12 +1639,12 @@
                         <!-- Manual Cleanup Button -->
                         <button class="btn btn-danger" id="cdrCleanupNow" disabled style="width:100%;margin-top:12px;" onclick="SurvSettings.triggerCdrCleanup()">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                            <span data-i18n="recording.cdr_cleanup_now_v2">Clean up now</span>
+                            <span data-i18n="recording.cdr_cleanup_now_v2">清理起来.</span>
                         </button>
                         <!-- Stats -->
                         <div class="info-box" style="margin-top:12px;">
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_total_freed">Total Freed</span><span class="value" id="cdrTotalFreed">--</span></div>
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_files_deleted">Files Deleted</span><span class="value" id="cdrTotalDeleted">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_total_freed">累计释放空间</span><span class="value" id="cdrTotalFreed">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_files_deleted">已删除文件数</span><span class="value" id="cdrTotalDeleted">--</span></div>
                         </div>
                     </div>
                 </div>
@@ -1655,7 +1655,7 @@
         <div class="footer-bar" id="footerBar">
             <button class="btn btn-primary" id="btnApply" disabled onclick="SurvSettings.applySettings()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><polyline points="20 6 9 17 4 12"/></svg>
-                <span data-i18n="common.apply_changes">Apply Changes</span>
+                <span data-i18n="common.apply_changes">应用更改</span>
             </button>
         </div>
     </div>

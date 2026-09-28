@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.byd_cloud_title">BYD Cloud - OverDrive</title>
+    <title data-i18n="app.byd_cloud_title">BYD 云 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="../shared/app-icon-dark.webp">
@@ -38,14 +38,14 @@
                         <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
                     </svg>
                 </button>
-                <span style="font-weight:600;" data-i18n="nav.byd_cloud">BYD Cloud</span>
+                <span style="font-weight:600;" data-i18n="nav.byd_cloud">BYD云</span>
                 <div style="width:40px;"></div>
             </div>
 
             <header class="page-header">
-                <h1 class="page-title" data-i18n="byd_cloud.page_title">BYD Cloud</h1>
+                <h1 class="page-title" data-i18n="byd_cloud.page_title">BYD 云</h1>
                 <div class="header-actions">
-                    <span class="status-badge inactive" id="bydCloudBadge" data-i18n="surveillance.byd_badge_not_set">NOT SET</span>
+                    <span class="status-badge inactive" id="bydCloudBadge" data-i18n="surveillance.byd_badge_not_set">未设置</span>
                 </div>
             </header>
 
@@ -55,11 +55,11 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
-                            <span data-i18n="byd_cloud.account_title">BYD Cloud Account</span>
+                            <span data-i18n="byd_cloud.account_title">BYD 云账户</span>
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="setting-hint" style="margin-bottom:14px;" data-i18n="surveillance.byd_cloud_hint">Connect your BYD app account to enable remote commands (door lock, flash lights, horn). Only derived key hashes are stored — your raw password is never saved.</div>
+                        <div class="setting-hint" style="margin-bottom:14px;" data-i18n="surveillance.byd_cloud_hint">关联比亚迪 App 账户以启用远程车控指令（车门锁、闪灯、鸣笛）。系统仅保存派生出的密钥哈希，绝不会保存你的原始密码。</div>
 
                         <!-- SOTA recommendation callout — guides users to set up an
                              Alternate Vehicle Authorization profile in the BYD app
@@ -73,22 +73,22 @@
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.8.7 1.3 1.6 1.5 2.6.1.4.4.7.8.7h3.4c.4 0 .7-.3.8-.7.2-1 .7-1.9 1.5-2.6A7 7 0 0 0 12 2z"/></svg>
                                 </span>
                                 <span class="recommend-callout-text">
-                                    <span class="recommend-callout-title" data-i18n="byd_cloud.recommend_title">Use an alternate vehicle authorization profile</span>
-                                    <span class="recommend-callout-sub" data-i18n="byd_cloud.recommend_sub">Recommended — keeps your main BYD account isolated. Tap to view setup steps.</span>
+                                    <span class="recommend-callout-title" data-i18n="byd_cloud.recommend_title">使用替代车辆授权配置文件</span>
+                                    <span class="recommend-callout-sub" data-i18n="byd_cloud.recommend_sub">推荐方式 —— 可让你的 BYD 主账号保持隔离。点击查看设置步骤。</span>
                                 </span>
                                 <span class="recommend-callout-chevron" aria-hidden="true">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                                 </span>
                             </summary>
                             <ol class="recommend-steps">
-                                <li data-i18n="byd_cloud.recommend_step_1">Open the official BYD app on your phone.</li>
-                                <li data-i18n="byd_cloud.recommend_step_2">Go to Vehicle Authorization.</li>
-                                <li data-i18n="byd_cloud.recommend_step_3">Tap New Authorization.</li>
-                                <li data-i18n="byd_cloud.recommend_step_4">Enter a secondary email — it must be different from your main account email.</li>
-                                <li data-i18n="byd_cloud.recommend_step_5">Choose an authorization period that fits how long you want this profile to stay active.</li>
-                                <li data-i18n="byd_cloud.recommend_step_6">Log out of the BYD app, then sign up with the secondary email using the verification code and create a password.</li>
-                                <li data-i18n="byd_cloud.recommend_step_7">Tap Lock or Unlock in the BYD app — it will prompt you to set a Control Pin.</li>
-                                <li data-i18n="byd_cloud.recommend_step_8">Enter the secondary email, password, and Control Pin here in OverDrive.</li>
+                                <li data-i18n="byd_cloud.recommend_step_1">在手机上打开比亚迪官方 App。</li>
+                                <li data-i18n="byd_cloud.recommend_step_2">进入车辆授权。</li>
+                                <li data-i18n="byd_cloud.recommend_step_3">按新授权.</li>
+                                <li data-i18n="byd_cloud.recommend_step_4">输入备用邮箱——必须与主账户邮箱不同。</li>
+                                <li data-i18n="byd_cloud.recommend_step_5">选择与你希望该授权文件保持有效时长相匹配的授权期限。</li>
+                                <li data-i18n="byd_cloud.recommend_step_6">退出 BYD App 登录，然后使用备用邮箱并通过验证码注册，设置好密码。</li>
+                                <li data-i18n="byd_cloud.recommend_step_7">在 BYD App 中点击“锁定”或“解锁”，系统会提示你设置控制 PIN。</li>
+                                <li data-i18n="byd_cloud.recommend_step_8">在 OverDrive 中输入备用邮箱、密码和控制 PIN。</li>
                             </ol>
                         </details>
 
@@ -99,9 +99,9 @@
                             <div class="md-field-box">
                                 <select class="md-input" id="bydCountryCode" onchange="BydCloud.onCountryChange(this.value)">
                                 </select>
-                                <label class="md-label" for="bydCountryCode" data-i18n="byd_cloud.country">Country</label>
+                                <label class="md-label" for="bydCountryCode" data-i18n="byd_cloud.country">国家</label>
                             </div>
-                            <span class="md-supporting" data-i18n="byd_cloud.country_supporting">Use the country your BYD app account was registered under.</span>
+                            <span class="md-supporting" data-i18n="byd_cloud.country_supporting">选择注册 BYD App 账户时使用的国家/地区。</span>
                         </div>
 
                         <!-- Derived server region. Kept visible so users can
@@ -110,34 +110,34 @@
                         <div class="md-field">
                             <div class="md-field-box">
                                 <select class="md-input" id="bydRegion" disabled>
-                                    <option value="eu" data-i18n="surveillance.byd_region_eu">🇪🇺 Europe (default)</option>
-                                    <option value="in" data-i18n="surveillance.byd_region_in">🇮🇳 India</option>
-                                    <option value="au" data-i18n="surveillance.byd_region_au">🇦🇺 Australia</option>
-                                    <option value="sg" data-i18n="surveillance.byd_region_sg">🇸🇬 Singapore</option>
-                                    <option value="br" data-i18n="surveillance.byd_region_br">🇧🇷 Brazil</option>
-                                    <option value="jp" data-i18n="surveillance.byd_region_jp">🇯🇵 Japan</option>
-                                    <option value="kr" data-i18n="surveillance.byd_region_kr">🇰🇷 Korea</option>
-                                    <option value="sa" data-i18n="surveillance.byd_region_sa">🇸🇦 Saudi Arabia</option>
-                                    <option value="om" data-i18n="surveillance.byd_region_om">🇴🇲 Oman</option>
-                                    <option value="kz" data-i18n="surveillance.byd_region_kz">🇰🇿 Kazakhstan</option>
-                                    <option value="tr" data-i18n="surveillance.byd_region_tr">🇹🇷 Turkey</option>
-                                    <option value="mx" data-i18n="surveillance.byd_region_mx">🇲🇽 Mexico</option>
-                                    <option value="id" data-i18n="surveillance.byd_region_id">🇮🇩 Indonesia</option>
-                                    <option value="vn" data-i18n="surveillance.byd_region_vn">🇻🇳 Vietnam</option>
+                                    <option value="eu" data-i18n="surveillance.byd_region_eu">🇪🇺 欧洲（默认）</option>
+                                    <option value="in" data-i18n="surveillance.byd_region_in">印度</option>
+                                    <option value="au" data-i18n="surveillance.byd_region_au">澳大利亚</option>
+                                    <option value="sg" data-i18n="surveillance.byd_region_sg">新加坡</option>
+                                    <option value="br" data-i18n="surveillance.byd_region_br"> 巴西</option>
+                                    <option value="jp" data-i18n="surveillance.byd_region_jp">日本</option>
+                                    <option value="kr" data-i18n="surveillance.byd_region_kr">韩国</option>
+                                    <option value="sa" data-i18n="surveillance.byd_region_sa">沙特阿拉伯</option>
+                                    <option value="om" data-i18n="surveillance.byd_region_om">🇴🇲 奥曼</option>
+                                    <option value="kz" data-i18n="surveillance.byd_region_kz">🇰🇿 哈萨克斯坦</option>
+                                    <option value="tr" data-i18n="surveillance.byd_region_tr">🇹🇷 土耳其</option>
+                                    <option value="mx" data-i18n="surveillance.byd_region_mx">墨西哥</option>
+                                    <option value="id" data-i18n="surveillance.byd_region_id"> 印度尼西亚</option>
+                                    <option value="vn" data-i18n="surveillance.byd_region_vn"> 越南</option>
                                     <!-- BYD's server uses the "no" key for MENA (legacy from when
                                          the region originally launched in North-Africa-Oman). The
                                          hostname is dilinkappoversea-no.byd.auto. Don't read "no"
                                          as Norway here — Norway maps to the "eu" node. -->
-                                    <option value="no" data-i18n="surveillance.byd_region_mena">🇦🇪 Middle East / Africa</option>
-                                    <option value="uz" data-i18n="surveillance.byd_region_uz">🇺🇿 Uzbekistan</option>
+                                    <option value="no" data-i18n="surveillance.byd_region_mena">🇦🇪 中东/非洲</option>
+                                    <option value="uz" data-i18n="surveillance.byd_region_uz">乌兹别克斯坦</option>
                                     <!-- China uses BYD's separate mainland DiLink stack
                                          (WBSK transport + /app/auth/* endpoints,
                                          dilinksuperappserver-cn.byd.auto). -->
-                                    <option value="cn" data-i18n="surveillance.byd_region_cn">🇨🇳 China (mainland)</option>
+                                    <option value="cn" data-i18n="surveillance.byd_region_cn">中国：中国（大陆）</option>
                                 </select>
-                                <label class="md-label" for="bydRegion" data-i18n="surveillance.byd_region">Server Region</label>
+                                <label class="md-label" for="bydRegion" data-i18n="surveillance.byd_region">服务器区域</label>
                             </div>
-                            <span class="md-supporting" id="bydRegionDerived" data-i18n="byd_cloud.region_derived_default">Selected automatically from country code.</span>
+                            <span class="md-supporting" id="bydRegionDerived" data-i18n="byd_cloud.region_derived_default">根据国家代码自动选择。</span>
                         </div>
 
                         <!-- Login identifier: an email on every region, a bare
@@ -147,7 +147,7 @@
                         <div class="md-field">
                             <div class="md-field-box">
                                 <input type="text" inputmode="email" class="md-input" id="bydEmail" placeholder=" " autocomplete="username">
-                                <label class="md-label" for="bydEmail" data-i18n="surveillance.byd_email">Email</label>
+                                <label class="md-label" for="bydEmail" data-i18n="surveillance.byd_email">邮箱 / 手机号</label>
                             </div>
                         </div>
 
@@ -155,31 +155,31 @@
                         <div class="md-field md-field-trailing">
                             <div class="md-field-box">
                                 <input type="password" class="md-input" id="bydPassword" placeholder=" " autocomplete="current-password">
-                                <label class="md-label" for="bydPassword" data-i18n="surveillance.byd_password">Password</label>
-                                <button type="button" class="md-trailing-btn" onclick="BydCloud.togglePasswordVisibility('bydPassword', this)" data-i18n-attr="title:surveillance.byd_password_toggle_title" title="Show / hide password" aria-label="Show password">
+                                <label class="md-label" for="bydPassword" data-i18n="surveillance.byd_password">密码</label>
+                                <button type="button" class="md-trailing-btn" onclick="BydCloud.togglePasswordVisibility('bydPassword', this)" data-i18n-attr="title:surveillance.byd_password_toggle_title" title="显示/隐藏密码" aria-label="Show password">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                                 </button>
                             </div>
-                            <span class="md-supporting" id="bydPasswordHint" data-i18n="surveillance.byd_pwd_hint">Your BYD app login password</span>
+                            <span class="md-supporting" id="bydPasswordHint" data-i18n="surveillance.byd_pwd_hint">比亚迪王朝/海洋 App 登录密码</span>
                         </div>
 
                         <!-- PIN — monospace centered, 6 chars max -->
                         <div class="md-field">
                             <div class="md-field-box">
                                 <input type="password" class="md-input md-input-pin" id="bydPin" placeholder=" " maxlength="6" inputmode="numeric" autocomplete="off">
-                                <label class="md-label" for="bydPin" data-i18n="surveillance.byd_pin">Control Pin</label>
+                                <label class="md-label" for="bydPin" data-i18n="surveillance.byd_pin">车控 PIN 码</label>
                             </div>
-                            <span class="md-supporting" id="bydPinHint" data-i18n="surveillance.byd_pin_hint">The 4–6 digit Pin you set in the official BYD app</span>
+                            <span class="md-supporting" id="bydPinHint" data-i18n="surveillance.byd_pin_hint">在官方比亚迪 App 中设置的 4–6 位车控 PIN 码</span>
                         </div>
 
                         <div class="byd-action-row">
                             <button class="btn btn-primary" onclick="BydCloud.saveCredentials()" id="bydSaveBtn">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                                <span data-i18n="surveillance.save_credentials">Save Credentials</span>
+                                <span data-i18n="surveillance.save_credentials">保存凭证</span>
                             </button>
                             <button class="btn btn-secondary" onclick="BydCloud.testConnection()" id="bydTestBtn" disabled>
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                                <span data-i18n="surveillance.test_connection">Test Connection</span>
+                                <span data-i18n="surveillance.test_connection">测试连接</span>
                             </button>
                         </div>
                         <div id="bydCloudStatus" style="display:none; margin-top:12px; padding:10px 14px; border-radius:10px; font-size:13px;"></div>
@@ -191,17 +191,17 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                            <span data-i18n="byd_cloud.account_info_title">Connection</span>
+                            <span data-i18n="byd_cloud.account_info_title">连接</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div id="bydCloudInfo" style="display:none;">
                             <div class="info-box">
                                 <div class="info-row"><span class="label" data-i18n="surveillance.byd_vin">VIN</span><span class="value" id="bydVinDisplay">—</span></div>
-                                <div class="info-row"><span class="label" data-i18n="surveillance.byd_account">Account</span><span class="value" id="bydAccountDisplay">—</span></div>
+                                <div class="info-row"><span class="label" data-i18n="surveillance.byd_account">账户</span><span class="value" id="bydAccountDisplay">—</span></div>
                             </div>
                         </div>
-                        <div id="bydCloudInfoEmpty" class="empty-state" style="text-align:center; padding:24px 16px; color:var(--text-muted); font-size:13px;" data-i18n="byd_cloud.empty_status">Connect on the Account tab to see your VIN and last cloud push here.</div>
+                        <div id="bydCloudInfoEmpty" class="empty-state" style="text-align:center; padding:24px 16px; color:var(--text-muted); font-size:13px;" data-i18n="byd_cloud.empty_status">在“账号”标签页完成连接后，即可在此查看你的 VIN 和最近一次云端推送。</div>
                     </div>
                 </div>
 
@@ -210,7 +210,7 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                            <span data-i18n="surveillance.byd_cloud_push">Cloud Push</span>
+                            <span data-i18n="surveillance.byd_cloud_push">云推送</span>
                             <span id="bydPushBadge" class="status-badge inactive" style="font-size:11px; padding:2px 8px;">—</span>
                         </div>
                         <span id="bydPushAge" style="font-size:12px; color:var(--text-muted);">—</span>
@@ -231,15 +231,15 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h7l3-9 3 18 3-9h2"/></svg>
-                            <span data-i18n="surveillance.byd_cloud_merge_card">Vehicle Data Source</span>
+                            <span data-i18n="surveillance.byd_cloud_merge_card">车辆数据来源</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div id="bydCloudMergeSection">
                             <div class="setting-row" style="border-bottom:none;">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="surveillance.byd_cloud_merge">Use cloud for vehicle data</div>
-                                    <div class="setting-desc" data-i18n="surveillance.byd_cloud_merge_desc">SOC, charging, and temperature from BYD cloud — may be more accurate when parked</div>
+                                    <div class="setting-name" data-i18n="surveillance.byd_cloud_merge">使用云为车辆数据</div>
+                                    <div class="setting-desc" data-i18n="surveillance.byd_cloud_merge_desc">SOC,充电和气温从 BYD 云可能更准确地停车时</div>
                                 </div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
@@ -257,15 +257,15 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                            <span data-i18n="byd_cloud.danger_zone">Danger zone</span>
+                            <span data-i18n="byd_cloud.danger_zone">危险区</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div id="bydClearSection">
-                            <div class="setting-hint" style="margin-bottom:14px;" data-i18n="byd_cloud.clear_hint">Removes the saved credentials from this device. You'll need to re-enter your BYD app login + PIN to use cloud commands again.</div>
+                            <div class="setting-hint" style="margin-bottom:14px;" data-i18n="byd_cloud.clear_hint">从本机清除已保存的凭据。之后需重新输入比亚迪 App 账号密码及车控 PIN 码方可再次使用云端车控指令。</div>
                             <button class="btn btn-danger" onclick="BydCloud.clearCredentials()" style="width:100%;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                                <span data-i18n="surveillance.byd_clear">Clear Credentials</span>
+                                <span data-i18n="surveillance.byd_clear">清晰的证书</span>
                             </button>
                         </div>
                     </div>
@@ -274,7 +274,7 @@
                 <!-- Empty-state for Advanced tab when nothing's configured -->
                 <div class="card" data-tab="advanced" id="bydAdvancedEmpty">
                     <div class="card-body">
-                        <div class="empty-state" style="text-align:center; padding:24px 16px; color:var(--text-muted); font-size:13px;" data-i18n="byd_cloud.empty_advanced">No advanced actions available until credentials are saved on the Account tab.</div>
+                        <div class="empty-state" style="text-align:center; padding:24px 16px; color:var(--text-muted); font-size:13px;" data-i18n="byd_cloud.empty_advanced">在“账号”标签页保存凭证之前，暂无可用的高级操作。</div>
                     </div>
                 </div>
             </div>

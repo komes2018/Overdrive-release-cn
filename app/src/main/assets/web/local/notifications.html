@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -7,7 +7,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="../shared/app-icon-dark.webp">
-    <title data-i18n="app.notifications_title">Notifications - OverDrive</title>
+    <title data-i18n="app.notifications_title">通知 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <script src="../shared/theme.js?v=8"></script>
     <script src="../shared/app-shell.js?v=7"></script>
@@ -672,12 +672,12 @@
                 <button class="menu-toggle" onclick="toggleSidebar()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
                 </button>
-                <span style="font-weight:600;" data-i18n="notif.page_title">Notifications</span>
+                <span style="font-weight:600;" data-i18n="notif.page_title">通知</span>
                 <div style="width:40px;"></div>
             </div>
 
             <header class="page-header">
-                <h1 class="page-title" data-i18n="notif.page_title">Notifications</h1>
+                <h1 class="page-title" data-i18n="notif.page_title">通知</h1>
                 <div class="header-actions">
                     <div class="header-badge">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -704,7 +704,7 @@
                         <div class="nl-wrap">
                             <!-- Header: count (left) + icon actions (right) -->
                             <div class="nl-header">
-                                <span class="nl-count" id="nlCount" data-i18n="notiflog.empty">No notifications yet</span>
+                                <span class="nl-count" id="nlCount" data-i18n="notiflog.empty">暂无通知</span>
                                 <div class="nl-actions">
                                     <button class="nl-icon-btn" id="nlSelectToggle" onclick="NOTIFLOG.toggleSelectMode()" title="Select" aria-label="Select">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
@@ -718,11 +718,11 @@
                             <!-- Bulk action bar (shown only in select mode) -->
                             <div class="nl-bulk-bar" id="nlBulkBar">
                                 <div class="nl-bulk-left">
-                                    <span class="nl-bulk-count" id="nlBulkCount" data-i18n="notiflog.none_selected">0 selected</span>
-                                    <button class="nl-bulk-link" onclick="NOTIFLOG.selectAllOnPage()" data-i18n="notiflog.select_all">Select all</button>
-                                    <button class="nl-bulk-link" onclick="NOTIFLOG.clearSelection()" data-i18n="notiflog.clear_selection">Clear</button>
+                                    <span class="nl-bulk-count" id="nlBulkCount" data-i18n="notiflog.none_selected">已选 0 项</span>
+                                    <button class="nl-bulk-link" onclick="NOTIFLOG.selectAllOnPage()" data-i18n="notiflog.select_all">全选</button>
+                                    <button class="nl-bulk-link" onclick="NOTIFLOG.clearSelection()" data-i18n="notiflog.clear_selection">清除</button>
                                 </div>
-                                <button class="btn btn-danger" id="nlBulkDeleteBtn" onclick="NOTIFLOG.deleteSelected()" disabled data-i18n="notiflog.delete">Delete</button>
+                                <button class="btn btn-danger" id="nlBulkDeleteBtn" onclick="NOTIFLOG.deleteSelected()" disabled data-i18n="notiflog.delete">删除</button>
                             </div>
 
                             <!-- SOTA filter bar: one row of dropdown chips. Each opens
@@ -732,17 +732,17 @@
                             <div class="nl-filterbar" id="nlFilterBar">
                                 <button class="nl-fchip" id="nlDateChip" onclick="NOTIFLOG.openFilterMenu('date')">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                                    <span class="nl-fchip-label" id="nlDateChipLabel" data-i18n="notiflog.filter_all">All time</span>
+                                    <span class="nl-fchip-label" id="nlDateChipLabel" data-i18n="notiflog.filter_all">全部时间</span>
                                     <svg class="nl-fchip-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
                                 </button>
                                 <button class="nl-fchip" id="nlCatChip" onclick="NOTIFLOG.openFilterMenu('cat')">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
-                                    <span class="nl-fchip-label" id="nlCatChipLabel" data-i18n="notiflog.filter_category">Category</span>
+                                    <span class="nl-fchip-label" id="nlCatChipLabel" data-i18n="notiflog.filter_category">类别</span>
                                     <svg class="nl-fchip-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
                                 </button>
                                 <button class="nl-fchip" id="nlSevChip" onclick="NOTIFLOG.openFilterMenu('sev')">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                                    <span class="nl-fchip-label" id="nlSevChipLabel" data-i18n="notiflog.filter_severity">Severity</span>
+                                    <span class="nl-fchip-label" id="nlSevChipLabel" data-i18n="notiflog.filter_severity">严重程度</span>
                                     <svg class="nl-fchip-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
                                 </button>
                                 <button class="nl-fchip nl-fchip-reset" id="nlResetChip" onclick="NOTIFLOG.resetFilters()" style="display:none;" title="Reset filters" aria-label="Reset filters">
@@ -763,19 +763,19 @@
                             <!-- Empty state -->
                             <div class="nl-empty" id="nlEmpty" style="display:none;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                                <div data-i18n="notiflog.empty">No notifications yet</div>
-                                <div style="font-size:13px;margin-top:6px;" data-i18n="notiflog.empty_hint">Alerts you receive appear here so you can review them any time.</div>
+                                <div data-i18n="notiflog.empty">暂无通知</div>
+                                <div style="font-size:13px;margin-top:6px;" data-i18n="notiflog.empty_hint">你收到的提醒会显示在这里，可随时查看。</div>
                             </div>
 
                             <!-- Pagination -->
                             <div class="nl-pagination" id="nlPagination">
                                 <button class="pagination-btn prev" id="nlPrevBtn" onclick="NOTIFLOG.prevPage()" disabled>
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
-                                    <span data-i18n="notiflog.prev">Prev</span>
+                                    <span data-i18n="notiflog.prev">上一页</span>
                                 </button>
                                 <span class="pagination-info" id="nlPageInfo">Page 1 of 1</span>
                                 <button class="pagination-btn next" id="nlNextBtn" onclick="NOTIFLOG.nextPage()" disabled>
-                                    <span data-i18n="notiflog.next">Next</span>
+                                    <span data-i18n="notiflog.next">下一页</span>
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
                                 </button>
                             </div>
@@ -791,8 +791,8 @@
                          edge so a flip here applies to the very next event
                          without restart. -->
                     <div class="notif-section" id="driveSideSection">
-                        <h2 id="driveSideHeading" data-i18n="notif.vehicle_layout">Vehicle layout</h2>
-                        <p class="notif-section-sub" data-i18n="notif.vehicle_layout_sub">Pick which side of the car the driver sits on. This decides whether door notifications label the front-axis doors as Front-left or Front-right. Saves immediately and applies to the next door event without restarting the daemon.</p>
+                        <h2 id="driveSideHeading" data-i18n="notif.vehicle_layout">车辆布局</h2>
+                        <p class="notif-section-sub" data-i18n="notif.vehicle_layout_sub">选择驾驶员所在的座位方位。该设置决定车门通知将前排车门标记为“左前”还是“右前”。设置即时保存，无需重启守护进程，从下一次车门事件起生效。</p>
                         <!-- role=radiogroup wraps the two radio rows so screen
                              readers announce the picker as one unit instead of
                              two unrelated radios. aria-labelledby points at the
@@ -805,8 +805,8 @@
                              role="radiogroup" aria-labelledby="driveSideHeading">
                             <div class="notif-row" data-side="lhd">
                                 <div class="notif-row-text">
-                                    <div class="notif-row-label" data-i18n="notif.drive_lhd">Left-hand drive</div>
-                                    <div class="notif-row-note" data-i18n="notif.drive_lhd_sub">Driver sits on the left (most of Europe, North America, China).</div>
+                                    <div class="notif-row-label" data-i18n="notif.drive_lhd">左舵驾驶</div>
+                                    <div class="notif-row-note" data-i18n="notif.drive_lhd_sub">驾驶员位于左侧（欧洲大部分地区、北美、中国）。</div>
                                 </div>
                                 <!-- WAI-ARIA roving tabindex: exactly ONE radio
                                      in the group is reachable via Tab. paint()
@@ -818,8 +818,8 @@
                             </div>
                             <div class="notif-row" data-side="rhd">
                                 <div class="notif-row-text">
-                                    <div class="notif-row-label" data-i18n="notif.drive_rhd">Right-hand drive</div>
-                                    <div class="notif-row-note" data-i18n="notif.drive_rhd_sub">Driver sits on the right (UK, Australia, India, Japan).</div>
+                                    <div class="notif-row-label" data-i18n="notif.drive_rhd">右舵驾驶</div>
+                                    <div class="notif-row-note" data-i18n="notif.drive_rhd_sub">驾驶员位于右侧（英国、澳大利亚、印度、日本）。</div>
                                 </div>
                                 <div class="notif-radio" data-side="rhd" role="radio" aria-checked="false" tabindex="-1"></div>
                             </div>
@@ -836,8 +836,8 @@
                          Values are kPa — the unit the BYD TPMS reports — so
                          the comparison path never rounds. -->
                     <div class="notif-section" id="tyreLimitsSection">
-                        <h2 id="tyreLimitsHeading" data-i18n="notif.tyre_limits">Tyre pressure limits</h2>
-                        <p class="notif-section-sub" data-i18n="notif.tyre_limits_sub">Set the normal pressure range for each axle. A tyre below the minimum or above the maximum raises a warning; below the critical value it raises a deflated-tyre alert. Used for push and Telegram notifications and for the corner colours in Vehicle Control. Defaults suit stock tyres — change them if your placard pressures differ.</p>
+                        <h2 id="tyreLimitsHeading" data-i18n="notif.tyre_limits">轮胎压力限制</h2>
+                        <p class="notif-section-sub" data-i18n="notif.tyre_limits_sub">设置前后轴的标准胎压范围。低于下限或高于上限将触发胎压预警；低于严重阈值将触发亏气报警。用于推送、Telegram 报警以及车辆控制界面的四轮状态色标。默认值为原厂标准胎压，若更换非标轮胎请据实调整。</p>
                         <div class="notif-card" id="tyreLimitsCard">
                             <!-- Display-unit picker. Presentation only: the
                                  limit inputs below stay kPa (the canonical,
@@ -848,8 +848,8 @@
                                  needed), same as the min-severity segments. -->
                             <div class="notif-row">
                                 <div class="notif-row-text">
-                                    <div class="notif-row-label" data-i18n="notif.tyre_unit">Display unit</div>
-                                    <div class="notif-row-note" data-i18n="notif.tyre_unit_note">How pressure readings are shown across the dashboard and in alerts. Limits below are always set in kPa.</div>
+                                    <div class="notif-row-label" data-i18n="notif.tyre_unit">胎压显示单位</div>
+                                    <div class="notif-row-note" data-i18n="notif.tyre_unit_note">仪表板和预警通知中胎压的呈现单位。下方限额均以 kPa 为基准。</div>
                                 </div>
                                 <div class="notif-seg notif-seg-compact" id="tyreUnitSeg" role="radiogroup" aria-label="Pressure display unit">
                                     <button type="button" class="notif-seg-btn" data-unit="kpa" role="radio" aria-checked="false">kPa</button>
@@ -859,8 +859,8 @@
                             </div>
                             <div class="notif-row">
                                 <div class="notif-row-text">
-                                    <div class="notif-row-label" data-i18n="notif.tyre_front">Front axle</div>
-                                    <div class="notif-row-note" data-i18n="notif.tyre_axle_note">Normal range — minimum and maximum.</div>
+                                    <div class="notif-row-label" data-i18n="notif.tyre_front">前轴</div>
+                                    <div class="notif-row-note" data-i18n="notif.tyre_axle_note">正常范围——最小值和最大值。</div>
                                     <div class="notif-row-conv" id="tyreFrontConv">&nbsp;</div>
                                 </div>
                                 <div class="notif-range">
@@ -874,8 +874,8 @@
                             </div>
                             <div class="notif-row">
                                 <div class="notif-row-text">
-                                    <div class="notif-row-label" data-i18n="notif.tyre_rear">Rear axle</div>
-                                    <div class="notif-row-note" data-i18n="notif.tyre_axle_note">Normal range — minimum and maximum.</div>
+                                    <div class="notif-row-label" data-i18n="notif.tyre_rear">后方轴</div>
+                                    <div class="notif-row-note" data-i18n="notif.tyre_axle_note">正常范围——最小值和最大值。</div>
                                     <div class="notif-row-conv" id="tyreRearConv">&nbsp;</div>
                                 </div>
                                 <div class="notif-range">
@@ -889,8 +889,8 @@
                             </div>
                             <div class="notif-row">
                                 <div class="notif-row-text">
-                                    <div class="notif-row-label" data-i18n="notif.tyre_critical">Critical (deflated)</div>
-                                    <div class="notif-row-note" data-i18n="notif.tyre_critical_note">At or below this, the alert is escalated to critical. Applies to all four tyres and cannot exceed either axle minimum.</div>
+                                    <div class="notif-row-label" data-i18n="notif.tyre_critical">严重（亏气）</div>
+                                    <div class="notif-row-note" data-i18n="notif.tyre_critical_note">达到或低于该值时，提醒将升级为严重级别。此规则适用于全部四个轮胎，且该值不得高于任一车轴的最小值。</div>
                                     <div class="notif-row-conv" id="tyreCriticalConv">&nbsp;</div>
                                 </div>
                                 <div class="notif-range">
@@ -901,17 +901,17 @@
                             </div>
                             <div class="notif-card-actions">
                                 <span class="notif-hint" id="tyreLimitsHint"></span>
-                                <button class="notif-btn" id="tyreLimitsReset" data-i18n="notif.tyre_reset">Reset to defaults</button>
-                                <button class="notif-btn" id="tyreLimitsSave" data-i18n="common.save">Save</button>
+                                <button class="notif-btn" id="tyreLimitsReset" data-i18n="notif.tyre_reset">重置为默认值</button>
+                                <button class="notif-btn" id="tyreLimitsSave" data-i18n="common.save">保存</button>
                             </div>
                         </div>
                     </div>
 
 
                     <div class="notif-section" id="permissionSection" data-tab="push">
-                        <h2 data-i18n="notif.push_delivery">Push delivery</h2>
+                        <h2 data-i18n="notif.push_delivery">推送</h2>
                         <p class="notif-section-sub" data-i18n="notif.push_delivery_sub">
-                            Enables alerts on the device you are currently using. Each phone you install the dashboard onto needs to be enabled here once.
+                            在当前使用的设备上启用提醒推送。每台安装了仪表板的手机都需要在此单独启用一次。
                         </p>
                         <!-- Origin + backend warnings are PUSH-ONLY: they
                              explain why the per-device push subscribe button
@@ -919,38 +919,38 @@
                              Telegram or Devices tabs (those have nothing to
                              do with the Web Push origin requirement). -->
                         <div id="originBanner" class="notif-status warn" style="display:none;margin-bottom:14px;" data-i18n="notif.origin_banner">
-                            Push notifications require Zrok or a reverse proxy. Cloudflare quick tunnels change every restart and would invalidate every subscription. Tailscale serves over plain HTTP and can't be used for Web Push unless using a reverse proxy. Open the dashboard from your reserved Zrok or reverse proxy URL on your phone, Add to Home Screen, then return here to enable.
+                            推送通知需要 Zrok 或反向代理支持。Cloudflare 快速隧道每次重启都会变更地址，会导致所有推送订阅失效；Tailscale 以纯 HTTP 方式提供服务，除非配合反向代理，否则无法用于 Web Push。请先在手机上通过已预留的 Zrok 或反向代理地址打开仪表板，将其添加到主屏幕，然后返回此处启用。
                         </div>
                         <div id="backendBanner" class="notif-status warn" style="display:none;margin-bottom:14px;" data-i18n="notif.backend_banner">
-                            Notifications backend not initialized. Reserve a Zrok URL via the daemons screen and restart the daemon to enable push delivery.
+                            推送通知后端尚未初始化。请在守护进程界面预留一个 Zrok 地址，然后重启守护进程以启用推送投递。
                         </div>
                         <div class="notif-card" style="padding: 16px 18px;">
                             <div id="permissionRow" class="notif-permission-row">
                                 <div id="permissionState" class="notif-permission-state"></div>
                                 <div class="notif-action-row">
-                                    <button class="notif-btn" id="enableBtn" data-i18n="notif.enable_btn">Enable on this device</button>
-                                    <button class="notif-btn" id="testBtn" data-i18n="notif.test_btn">Send test</button>
-                                    <button class="notif-btn danger" id="disableBtn" style="display:none;" data-i18n="notif.disable_btn">Disable on this device</button>
+                                    <button class="notif-btn" id="enableBtn" data-i18n="notif.enable_btn">在此设备上启用</button>
+                                    <button class="notif-btn" id="testBtn" data-i18n="notif.test_btn">发送测试</button>
+                                    <button class="notif-btn danger" id="disableBtn" style="display:none;" data-i18n="notif.disable_btn">在此设备上禁用</button>
                                 </div>
                             </div>
                         </div>
                     </div>
 
                     <div class="notif-section" data-tab="push">
-                        <h2 data-i18n="notif.categories">Categories</h2>
+                        <h2 data-i18n="notif.categories">类别</h2>
                         <p class="notif-section-sub" data-i18n="notif.categories_sub">
-                            Toggle which kinds of alerts are pushed to this device. Each category fires when the head unit detects the matching event; what triggers it depends on the related daemon's settings. Hover any row to see what its severity level means.
+                            选择推送到本设备的提醒类型。车机检测到匹配事件时即触发相应类别；具体触发条件取决于相关守护进程的设置。
                         </p>
 
                         <div id="categoriesContainer">
-                            <div class="notif-card"><div class="empty-state" data-i18n="common.loading">Loading…</div></div>
+                            <div class="notif-card"><div class="empty-state" data-i18n="common.loading">加载中…</div></div>
                         </div>
                     </div>
 
                     <div class="notif-section" data-tab="push">
-                        <h2 data-i18n="notif.min_importance">Minimum importance</h2>
+                        <h2 data-i18n="notif.min_importance">最小重要性</h2>
                         <p class="notif-section-sub" data-i18n="notif.min_importance_sub">
-                            A device-wide floor applied on top of the categories above. Raise it to silence lower-importance pushes in one place — e.g. "Warn and up" drops every Notice/Info push (routine surveillance, charging started/stopped) while keeping Alerts and Criticals. Off tiers are still recorded in the log.
+                            应用于上述所有类别的全局过滤底线。提高该级别可静音低级推送 — 例如：“警告及以上”会过滤所有常规提示 (例行监控、充电进度、启动/停止)，仅保留重要警报与严重故障。被过滤的事件仍会记录在本地日志中。
                         </p>
                         <div class="notif-card" id="minSeverityCard">
                             <!-- Starts disabled + hint shown to match renderMinSeverity's
@@ -959,27 +959,27 @@
                                  look active + clickable during the load window and a tap
                                  would show a false "enable first" warning. -->
                             <div class="notif-seg disabled" id="minSeveritySeg" role="radiogroup" aria-label="Minimum importance">
-                                <button type="button" class="notif-seg-btn" data-sev="info" role="radio" aria-checked="true" data-i18n="notif.min_info">Everything</button>
-                                <button type="button" class="notif-seg-btn" data-sev="warn" role="radio" aria-checked="false" data-i18n="notif.min_warn">Warn &amp; up</button>
-                                <button type="button" class="notif-seg-btn" data-sev="critical" role="radio" aria-checked="false" data-i18n="notif.min_critical">Critical only</button>
+                                <button type="button" class="notif-seg-btn" data-sev="info" role="radio" aria-checked="true" data-i18n="notif.min_info">全部内容</button>
+                                <button type="button" class="notif-seg-btn" data-sev="warn" role="radio" aria-checked="false" data-i18n="notif.min_warn">警告及以上</button>
+                                <button type="button" class="notif-seg-btn" data-sev="critical" role="radio" aria-checked="false" data-i18n="notif.min_critical">仅严重故障</button>
                             </div>
-                            <div class="notif-seg-hint" id="minSeverityHint" data-i18n="notif.enable_first">Enable notifications on this device first.</div>
+                            <div class="notif-seg-hint" id="minSeverityHint" data-i18n="notif.enable_first">首先启用该设备上的通知.</div>
                         </div>
                     </div>
 
                     <!-- ===== WeCom / Webhook tab ===== -->
                     <div class="notif-section" data-tab="wecom" id="wecomSection">
-                        <h2 data-i18n="notif.wecom_title">WeCom / Webhook Delivery</h2>
+                        <h2 data-i18n="notif.wecom_title">企业微信 / Webhook 机器人推送</h2>
                         <p class="notif-section-sub" data-i18n="notif.wecom_sub">
-                            Deliver alarms, surveillance captures, and vehicle updates directly to Enterprise WeChat, DingTalk, Feishu, or generic Webhooks. Fast and direct without VPN.
+                            将车辆告警、哨兵抓拍图文及状态通知直连推送到企业微信、钉钉、飞书群机器人或自定义 Webhook，国内网络直达无需代理。
                         </p>
 
                         <!-- Main Switch Card -->
                         <div class="notif-card" style="padding: 6px 0;">
                             <div class="notif-row">
                                 <div class="notif-row-text">
-                                    <div class="notif-row-label" data-i18n="notif.wecom_enable_label">Enable Webhook Delivery</div>
-                                    <div class="notif-row-note" data-i18n="notif.wecom_enable_desc">Allow OverDrive to push event notifications to the configured Webhook endpoint.</div>
+                                    <div class="notif-row-label" data-i18n="notif.wecom_enable_label">启用 Webhook 推送</div>
+                                    <div class="notif-row-note" data-i18n="notif.wecom_enable_desc">允许 OverDrive 将事件通知实时推送到配置的 Webhook 端点。</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="wecomEnabled" onchange="WeComPrefs.save()">
@@ -990,27 +990,27 @@
 
                         <!-- Webhook URL Configuration Card -->
                         <div class="notif-card" style="margin-top:14px; padding: 14px 16px;">
-                            <div class="notif-row-label" style="margin-bottom: 8px;" data-i18n="notif.wecom_url_label">Webhook Endpoint URL</div>
+                            <div class="notif-row-label" style="margin-bottom: 8px;" data-i18n="notif.wecom_url_label">Webhook 端点地址</div>
                             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                 <input type="url" id="wecomUrlInput" class="form-input" style="flex: 1 1 260px; min-width: 220px; font-family: monospace; font-size: 13px;" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." autocomplete="off">
-                                <button type="button" class="notif-btn" id="wecomSaveBtn" onclick="WeComPrefs.saveUrl()" data-i18n="common.save">Save</button>
-                                <button type="button" class="notif-btn" id="wecomTestBtn" onclick="WeComPrefs.test()" data-i18n="notif.wecom_test_btn">Send Test</button>
+                                <button type="button" class="notif-btn" id="wecomSaveBtn" onclick="WeComPrefs.saveUrl()" data-i18n="common.save">保存</button>
+                                <button type="button" class="notif-btn" id="wecomTestBtn" onclick="WeComPrefs.test()" data-i18n="notif.wecom_test_btn">发送测试通知</button>
                             </div>
-                            <div class="notif-row-note" style="margin-top: 8px;" data-i18n="notif.wecom_url_hint">Supports Enterprise WeChat, DingTalk, Feishu group bot webhooks, or generic JSON receivers.</div>
+                            <div class="notif-row-note" style="margin-top: 8px;" data-i18n="notif.wecom_url_hint">支持企业微信群机器人、钉钉机器人、飞书自定义机器人 Webhook 或通用 JSON 接收端。</div>
                             <div id="wecomTestFeedback" style="display: none; margin-top: 10px; font-size: 13px; padding: 10px 14px; border-radius: 8px;"></div>
                         </div>
 
                         <!-- Severity Tiers Card -->
                         <div style="margin-top:18px;">
-                            <p class="notif-section-sub" data-i18n="notif.wecom_tiers_desc">Pick which event severities trigger Webhook notifications.</p>
+                            <p class="notif-section-sub" data-i18n="notif.wecom_tiers_desc">选择触发 Webhook 推送的事件级别。</p>
                             <div class="notif-card" style="padding: 6px 0;">
                                 <div class="notif-row">
                                     <div class="notif-row-text">
                                         <div class="notif-row-label">
                                             <span class="status-dot" style="background:var(--text-muted);"></span>
-                                            <span data-i18n="surveillance.tier_notice">Notice</span>
+                                            <span data-i18n="surveillance.tier_notice">提示</span>
                                         </div>
-                                        <div class="notif-row-note" data-i18n="surveillance.tier_notice_desc">Routine activity (parked cars, distant movement)</div>
+                                        <div class="notif-row-note" data-i18n="surveillance.tier_notice_desc">日常活动(停放车辆、远处移动)</div>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" id="wecomTierNotices" onchange="WeComPrefs.save()">
@@ -1021,9 +1021,9 @@
                                     <div class="notif-row-text">
                                         <div class="notif-row-label">
                                             <span class="status-dot" style="background:#FFB75A;"></span>
-                                            <span data-i18n="surveillance.tier_alert">Alert</span>
+                                            <span data-i18n="surveillance.tier_alert">警告</span>
                                         </div>
-                                        <div class="notif-row-note" data-i18n="surveillance.tier_alert_desc">Approaching person, vehicle close enough to warrant attention</div>
+                                        <div class="notif-row-note" data-i18n="surveillance.tier_alert_desc">接近的人或距离值得注意的车辆</div>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" id="wecomTierAlerts" onchange="WeComPrefs.save()">
@@ -1034,9 +1034,9 @@
                                     <div class="notif-row-text">
                                         <div class="notif-row-label">
                                             <span class="status-dot" style="background:#FF6B6B;"></span>
-                                            <span data-i18n="surveillance.tier_critical">Critical</span>
+                                            <span data-i18n="surveillance.tier_critical">紧急</span>
                                         </div>
-                                        <div class="notif-row-note" data-i18n="surveillance.tier_critical_desc">Person at very close range — likely tampering / loitering</div>
+                                        <div class="notif-row-note" data-i18n="surveillance.tier_critical_desc">极近距离的人 — 可能的篡改 / 徘徊</div>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" id="wecomTierCritical" onchange="WeComPrefs.save()">
@@ -1048,12 +1048,12 @@
 
                         <!-- Delivery Categories Card -->
                         <div style="margin-top:18px;">
-                            <p class="notif-section-sub" data-i18n="notif.wecom_categories_desc">Fine-tune specific notification categories pushed via Webhook.</p>
+                            <p class="notif-section-sub" data-i18n="notif.wecom_categories_desc">细化配置通过 Webhook 推送的具体事件分类。</p>
                             <div class="notif-card" style="padding: 6px 0;">
                                 <div class="notif-row">
                                     <div class="notif-row-text">
-                                        <div class="notif-row-label" data-i18n="notif.wecom_motion_images">Surveillance Snapshot Images</div>
-                                        <div class="notif-row-note" data-i18n="notif.wecom_motion_images_desc">Include detection snapshot photo (Base64 JPEG) directly in the bot message.</div>
+                                        <div class="notif-row-label" data-i18n="notif.wecom_motion_images">哨兵现场抓拍图文</div>
+                                        <div class="notif-row-note" data-i18n="notif.wecom_motion_images_desc">在机器人推送消息中直接附带哨兵动检抓拍照片（Base64 图片）。</div>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" id="wecomMotionImages" onchange="WeComPrefs.save()">
@@ -1062,8 +1062,8 @@
                                 </div>
                                 <div class="notif-row">
                                     <div class="notif-row-text">
-                                        <div class="notif-row-label" data-i18n="notif.wecom_charging">Charging & Power Alerts</div>
-                                        <div class="notif-row-note" data-i18n="notif.wecom_charging_desc">Notifications for charge completed, charge interrupted, or critical low battery.</div>
+                                        <div class="notif-row-label" data-i18n="notif.wecom_charging">充电与电量告警</div>
+                                        <div class="notif-row-note" data-i18n="notif.wecom_charging_desc">推送充电完成、充电中断或低电量保护事件。</div>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" id="wecomCharging" onchange="WeComPrefs.save()">
@@ -1072,8 +1072,8 @@
                                 </div>
                                 <div class="notif-row">
                                     <div class="notif-row-text">
-                                        <div class="notif-row-label" data-i18n="notif.wecom_tyre">Tyre Pressure Alerts</div>
-                                        <div class="notif-row-note" data-i18n="notif.wecom_tyre_desc">Alert when tyre pressure falls below or exceeds safe thresholds.</div>
+                                        <div class="notif-row-label" data-i18n="notif.wecom_tyre">胎压告警</div>
+                                        <div class="notif-row-note" data-i18n="notif.wecom_tyre_desc">当轮胎胎压过低、过高或异常漏气时发送告警通知。</div>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" id="wecomTyre" onchange="WeComPrefs.save()">
@@ -1086,15 +1086,15 @@
 
                     <!-- ===== Telegram tab ===== -->
                     <div class="notif-section" data-tab="telegram" id="telegramSection">
-                        <h2 data-i18n="notif.telegram">Telegram delivery</h2>
+                        <h2 data-i18n="notif.telegram">Telegram 消息推送</h2>
                         <p class="notif-section-sub" data-i18n="notif.telegram_sub">
-                            Send surveillance events to a paired Telegram chat. Pair the bot in the Telegram daemon settings; toggles below decide which severities reach the chat. Off tiers are still recorded — only the message is suppressed.
+                            将驻车哨兵事件发送到已配对的 Telegram 聊天。请在 Telegram 守护进程设置中配对机器人；下方的开关决定哪些严重级别的事件会发送到该聊天。被关闭的级别仍会记录 — 只是不再发送消息。
                         </p>
                         <div class="notif-card" style="padding: 6px 0;">
                             <div class="notif-row">
                                 <div class="notif-row-text">
-                                    <div class="notif-row-label" data-i18n="surveillance.telegram_two_stage">Two-stage Telegram alerts</div>
-                                    <div class="notif-row-note" data-i18n="surveillance.telegram_two_stage_desc">Send a quick "recording started" message, then the photo when it ends. Off by default — the photo alone is usually enough.</div>
+                                    <div class="notif-row-label" data-i18n="surveillance.telegram_two_stage">Telegram 两阶段告警</div>
+                                    <div class="notif-row-note" data-i18n="surveillance.telegram_two_stage_desc">录像刚开始时先发送一条快速提示消息，录制结束后再发送事件截图。默认关闭，单发截图通常已足够。</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="v2TelegramSendStartPing" disabled onchange="SurvSettings.updateTelegramStartPing()">
@@ -1104,19 +1104,19 @@
                         </div>
 
                         <div id="v2TelegramTierGroup" style="margin-top:18px;">
-                            <p class="notif-section-sub" data-i18n="surveillance.telegram_tiers_desc">Pick which severity tiers reach your Telegram chat. Off tiers are still recorded; only the message is suppressed.</p>
+                            <p class="notif-section-sub" data-i18n="surveillance.telegram_tiers_desc">选择哪些严重级别会推送到 Telegram 聊天。关闭的级别仍会录像，只是不再发送消息。</p>
                             <div id="v2TelegramTierWarning" class="info-box-warning" style="display:none;margin-bottom:12px;">
                                 <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                                <span style="font-size:12px;color:var(--warning);" data-i18n="surveillance.telegram_not_paired">Telegram bot isn't paired yet — tier toggles have no effect until you link a bot.</span>
+                                <span style="font-size:12px;color:var(--warning);" data-i18n="surveillance.telegram_not_paired">尚未配对 Telegram 机器人 —— 在关联机器人之前，分级开关不会生效。</span>
                             </div>
                             <div class="notif-card" style="padding: 6px 0;">
                                 <div class="notif-row">
                                     <div class="notif-row-text">
                                         <div class="notif-row-label">
                                             <span class="status-dot" style="background:var(--text-muted);"></span>
-                                            <span data-i18n="surveillance.tier_notice">Notice</span>
+                                            <span data-i18n="surveillance.tier_notice">提示</span>
                                         </div>
-                                        <div class="notif-row-note" data-i18n="surveillance.tier_notice_desc">Routine activity (parked cars, distant movement)</div>
+                                        <div class="notif-row-note" data-i18n="surveillance.tier_notice_desc">日常活动(停放车辆、远处移动)</div>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" id="v2TelegramNotices" disabled onchange="SurvSettings.updateTelegramTiers()">
@@ -1127,9 +1127,9 @@
                                     <div class="notif-row-text">
                                         <div class="notif-row-label">
                                             <span class="status-dot" style="background:#FFB75A;"></span>
-                                            <span data-i18n="surveillance.tier_alert">Alert</span>
+                                            <span data-i18n="surveillance.tier_alert">警告</span>
                                         </div>
-                                        <div class="notif-row-note" data-i18n="surveillance.tier_alert_desc">Approaching person, vehicle close enough to warrant attention</div>
+                                        <div class="notif-row-note" data-i18n="surveillance.tier_alert_desc">接近的人或距离值得注意的车辆</div>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" id="v2TelegramAlerts" disabled onchange="SurvSettings.updateTelegramTiers()">
@@ -1140,9 +1140,9 @@
                                     <div class="notif-row-text">
                                         <div class="notif-row-label">
                                             <span class="status-dot" style="background:#FF6B6B;"></span>
-                                            <span data-i18n="surveillance.tier_critical">Critical</span>
+                                            <span data-i18n="surveillance.tier_critical">紧急</span>
                                         </div>
-                                        <div class="notif-row-note" data-i18n="surveillance.tier_critical_desc">Person at very close range — likely tampering / loitering</div>
+                                        <div class="notif-row-note" data-i18n="surveillance.tier_critical_desc">极近距离的人 — 可能的篡改 / 徘徊</div>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" id="v2TelegramCritical" disabled onchange="SurvSettings.updateTelegramTiers()">
@@ -1159,12 +1159,12 @@
                              via /api/telegram/preferences (partial-merge), the
                              same endpoint the Telegram daemon-behavior page
                              uses. -->
-                        <p class="notif-section-sub" style="margin-top:22px;" data-i18n="notif.telegram_delivery_sub">What kind of events Telegram receives. Independent from the per-tier filter above — these toggle entire categories on or off.</p>
+                        <p class="notif-section-sub" style="margin-top:22px;" data-i18n="notif.telegram_delivery_sub">Telegram 接收哪类事件。独立于上面的每层过滤器——这些开关会整体打开或关闭整个类别。</p>
                         <div class="notif-card" style="padding: 6px 0;">
                             <div class="notif-row">
                                 <div class="notif-row-text">
-                                    <div class="notif-row-label" data-i18n="telegram.critical_alerts">Critical alerts</div>
-                                    <div class="notif-row-note" data-i18n="telegram.critical_alerts_desc">Drop-everything events — vehicle health faults, tampering, charging faults. Keep this on.</div>
+                                    <div class="notif-row-label" data-i18n="telegram.critical_alerts">关键警报</div>
+                                    <div class="notif-row-note" data-i18n="telegram.critical_alerts_desc">最高优先级事件——车辆健康故障、被人为破坏或触碰、充电故障。建议保持开启。</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="tgPrefCriticalAlerts" onchange="TelegramPrefs.save()">
@@ -1173,8 +1173,8 @@
                             </div>
                             <div class="notif-row">
                                 <div class="notif-row-text">
-                                    <div class="notif-row-label" data-i18n="telegram.connectivity_updates">Connectivity updates</div>
-                                    <div class="notif-row-note" data-i18n="telegram.connectivity_updates_desc">Notify when the daemon starts, stops, or restarts. Useful for diagnostics; chatty in normal use.</div>
+                                    <div class="notif-row-label" data-i18n="telegram.connectivity_updates">连接更新</div>
+                                    <div class="notif-row-note" data-i18n="telegram.connectivity_updates_desc">守护进程启动、停止或重启时发送通知。便于排查问题，但日常使用中消息会比较频繁。</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="tgPrefConnectivity" onchange="TelegramPrefs.save()">
@@ -1183,8 +1183,8 @@
                             </div>
                             <div class="notif-row">
                                 <div class="notif-row-text">
-                                    <div class="notif-row-label" data-i18n="telegram.motion_text">Motion text alerts</div>
-                                    <div class="notif-row-note" data-i18n="telegram.motion_text_desc">Send a motion alert (text, plus the snapshot photo when one is available) when surveillance detects motion. Video clips have their own toggle below.</div>
+                                    <div class="notif-row-label" data-i18n="telegram.motion_text">动作文本警报</div>
+                                    <div class="notif-row-note" data-i18n="telegram.motion_text_desc">监控检测到移动时发送移动警报（文字消息，有快照时附带抓拍照片）。视频片段在下方单独设置。</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="tgPrefMotionText" onchange="TelegramPrefs.save()">
@@ -1193,8 +1193,8 @@
                             </div>
                             <div class="notif-row">
                                 <div class="notif-row-text">
-                                    <div class="notif-row-label" data-i18n="telegram.video_uploads">Send videos</div>
-                                    <div class="notif-row-note" data-i18n="telegram.video_uploads_desc">Upload short clips on Critical events. Costs more bandwidth — disable if you're on a slow tunnel.</div>
+                                    <div class="notif-row-label" data-i18n="telegram.video_uploads">发送视频</div>
+                                    <div class="notif-row-note" data-i18n="telegram.video_uploads_desc">发生严重事件时上传短视频片段。会消耗更多带宽——如果隧道网络较慢，建议关闭。</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="tgPrefVideoUploads" onchange="TelegramPrefs.save()">
@@ -1209,8 +1209,8 @@
                                  and battery-health messages. -->
                             <div class="notif-row">
                                 <div class="notif-row-text">
-                                    <div class="notif-row-label" data-i18n="telegram.tyre_alerts">Tyre pressure alerts</div>
-                                    <div class="notif-row-note" data-i18n="telegram.tyre_alerts_desc">Send a Telegram message when a tyre goes outside your configured pressure range, or when the TPMS reports a leak. Uses the limits set under Tyre pressure limits.</div>
+                                    <div class="notif-row-label" data-i18n="telegram.tyre_alerts">轮胎压力警报</div>
+                                    <div class="notif-row-note" data-i18n="telegram.tyre_alerts_desc">当轮胎胎压超出设置范围或 TPMS 报告漏气时发送 Telegram 告警消息。基于胎压限制中的阈值判定。</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="tgPrefTyreAlerts" onchange="TelegramPrefs.save()">
@@ -1224,8 +1224,8 @@
                                  feature itself is enabled under Surveillance. -->
                             <div class="notif-row">
                                 <div class="notif-row-text">
-                                    <div class="notif-row-label" data-i18n="telegram.parking_messages">Parking messages</div>
-                                    <div class="notif-row-note" data-i18n="telegram.parking_messages_desc">Send "Parked" (place, GPS freshness, sentry state, four-camera still) and "Back at car" (time away, events, neighbours that came or went). Requires Parking Intelligence under Surveillance settings.</div>
+                                    <div class="notif-row-label" data-i18n="telegram.parking_messages">停车与返车通知</div>
+                                    <div class="notif-row-note" data-i18n="telegram.parking_messages_desc">在车辆停车熄火以及回到车旁时，通过 Telegram 发送包含位置、车位及照片的通知。</div>
                                 </div>
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="tgPrefParkingMessages" onchange="TelegramPrefs.save()">
@@ -1236,12 +1236,12 @@
                     </div>
 
                     <div class="notif-section" data-tab="devices">
-                        <h2 data-i18n="notif.registered_devices">Registered devices</h2>
+                        <h2 data-i18n="notif.registered_devices">已注册的设备</h2>
                         <p class="notif-section-sub" data-i18n="notif.devices_sub">
-                            Every phone that enabled push notifications appears here. Use Remove to deregister a device. Disable on this device above also unsubscribes the current browser locally, while Remove is server-side only.
+                            每台启用过推送通知的手机都会显示在此处。点击“移除”即可注销该设备。上方针对本设备的停用开关只会在本地取消当前浏览器的订阅，而“移除”仅作用于服务端。
                         </p>
                         <div class="notif-card" id="devicesCard">
-                            <div class="empty-state" id="devicesEmpty" data-i18n="notif.no_devices">No devices registered yet.</div>
+                            <div class="empty-state" id="devicesEmpty" data-i18n="notif.no_devices">目前还没有任何设备登记.</div>
                         </div>
                     </div>
                 </div>
@@ -1270,18 +1270,18 @@
     <div class="calendar-popup nl-date-popup" id="nlDatePopup">
         <div class="calendar-panel nl-date-panel">
             <div class="nl-menu-header">
-                <span class="nl-menu-title" data-i18n="notiflog.filter_date">Date</span>
+                <span class="nl-menu-title" data-i18n="notiflog.filter_date">日期</span>
                 <button class="nl-menu-close" onclick="NOTIFLOG.closeDateMenu()" aria-label="Close">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
             </div>
             <div class="nl-date-presets" id="nlDatePresets">
-                <button class="nl-date-preset" data-days="0" onclick="NOTIFLOG.pickDatePreset(0)" data-i18n="notiflog.filter_all">All time</button>
-                <button class="nl-date-preset" data-days="7" onclick="NOTIFLOG.pickDatePreset(7)" data-i18n="notiflog.filter_7d">7 days</button>
-                <button class="nl-date-preset" data-days="30" onclick="NOTIFLOG.pickDatePreset(30)" data-i18n="notiflog.filter_30d">30 days</button>
+                <button class="nl-date-preset" data-days="0" onclick="NOTIFLOG.pickDatePreset(0)" data-i18n="notiflog.filter_all">全部时间</button>
+                <button class="nl-date-preset" data-days="7" onclick="NOTIFLOG.pickDatePreset(7)" data-i18n="notiflog.filter_7d">7 天</button>
+                <button class="nl-date-preset" data-days="30" onclick="NOTIFLOG.pickDatePreset(30)" data-i18n="notiflog.filter_30d">30 天</button>
             </div>
-            <div class="nl-date-divider"><span data-i18n="notiflog.filter_custom">Custom range</span></div>
-            <div class="nl-date-summary" id="nlDateSummary" data-i18n="notiflog.range_pick">Pick a start or end date</div>
+            <div class="nl-date-divider"><span data-i18n="notiflog.filter_custom">自定义范围</span></div>
+            <div class="nl-date-summary" id="nlDateSummary" data-i18n="notiflog.range_pick">请选择开始或结束日期</div>
             <div class="calendar-header">
                 <span class="calendar-title" id="nlCalendarTitle">Calendar</span>
                 <div class="calendar-nav">
@@ -1290,7 +1290,7 @@
                 </div>
             </div>
             <div class="calendar-grid" id="nlCalendarGrid"></div>
-            <button class="btn btn-primary nl-date-apply" id="nlDateApply" onclick="NOTIFLOG.applyCustomRange()" disabled data-i18n="notiflog.range_apply">Apply</button>
+            <button class="btn btn-primary nl-date-apply" id="nlDateApply" onclick="NOTIFLOG.applyCustomRange()" disabled data-i18n="notiflog.range_apply">应用</button>
         </div>
     </div>
 
@@ -2689,7 +2689,7 @@
                 // signal removeDevice() uses to do a FULL local+server
                 // unsubscribe instead of the previous server-only path.
                 var thisDeviceTag = isThis
-                    ? ' <span class="device-row-self" data-i18n="notif.device_this_device">(this device)</span>'
+                    ? ' <span class="device-row-self" data-i18n="notif.device_this_device">此设备</span>'
                     : '';
                 var btnLabel = isThis
                     ? BYD.i18n.t('notif.device_remove_this')

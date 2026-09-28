@@ -1,9 +1,9 @@
 ﻿<!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.seat_positions_title">Seat Positions - OverDrive</title>
+    <title data-i18n="app.seat_positions_title">座椅记忆 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="../shared/app-icon-dark.webp">
@@ -26,14 +26,14 @@
                         <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
                     </svg>
                 </button>
-                <span style="font-weight:600;" data-i18n="nav.seat_positions">Seat Positions</span>
+                <span style="font-weight:600;" data-i18n="nav.seat_positions">座椅记忆</span>
                 <div style="width:40px;"></div>
             </div>
 
             <!-- Hidden in the Android shell (the toolbar already names the page).
                  Kept for the standalone / tunnel session. -->
             <header class="page-header">
-                <h1 class="page-title" data-i18n="seatpos.page_title">Seat Positions</h1>
+                <h1 class="page-title" data-i18n="seatpos.page_title">座椅位置记忆</h1>
             </header>
 
             <div class="page-body">
@@ -43,7 +43,7 @@
                         <div class="sp-now-art" id="spCurrentGlyph" data-sk-real="seatCurrent"></div>
                         <div class="sk sp-sk-art" data-sk-group="seatCurrent"></div>
                         <div class="sp-now-main">
-                            <div class="sp-now-eyebrow" data-i18n="seatpos.current">Current position</div>
+                            <div class="sp-now-eyebrow" data-i18n="seatpos.current">当前座椅位置</div>
                             <div class="sp-match" id="spCurrentMatch" data-sk-real="seatCurrent"></div>
                             <div id="spCurrentAxes" data-sk-real="seatCurrent"></div>
                             <div class="sp-sk-main" data-sk-group="seatCurrent">
@@ -53,7 +53,7 @@
                         </div>
                         <div class="sp-now-actions">
                             <button class="btn btn-primary" id="spSaveNew">
-                                <span data-i18n="seatpos.save_as_new">Save as new</span>
+                                <span data-i18n="seatpos.save_as_new">另存为新默认</span>
                             </button>
                         </div>
                     </div>
@@ -62,7 +62,7 @@
                          then an unconfirmed axis map. -->
                     <div class="sp-status" id="spStatus" data-state="off">
                         <span class="sp-status-dot" aria-hidden="true"></span>
-                        <span class="sp-status-text" id="spStatusText" data-i18n="seatpos.gate_acc_off">The car is off, so the seat motors have no power. Apply and save will do nothing until you turn it on.</span>
+                        <span class="sp-status-text" id="spStatusText" data-i18n="seatpos.gate_acc_off">车辆处于熄火下电状态，座椅电机未通电。请上电启动车辆后再执行调节或保存。</span>
                     </div>
                     <div class="sp-batches" id="spBatches" style="display:none;">
                         <span class="sp-batch" id="spBatch1"><span class="led"></span>batch 1 � mirrors</span>
@@ -93,7 +93,7 @@
             <div id="spDialogHtml"></div>
             <input type="text" id="spDialogInput" class="input" maxlength="60">
             <div class="sp-dialog-actions">
-                <button class="btn sp-dialog-cancel" id="spDialogCancel" data-i18n="common.cancel">Cancel</button>
+                <button class="btn sp-dialog-cancel" id="spDialogCancel" data-i18n="common.cancel">取消</button>
                 <button class="btn btn-primary" id="spDialogConfirm"></button>
             </div>
         </div>

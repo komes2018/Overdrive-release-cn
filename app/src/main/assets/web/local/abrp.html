@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -77,7 +77,7 @@
             </div>
 
             <header class="page-header">
-                <h1 class="page-title" data-i18n="abrp.page_title">ABRP Telemetry</h1>
+                <h1 class="page-title" data-i18n="abrp.page_title">ABRP 电测仪</h1>
                 <div class="header-actions">
                     <div class="header-badge">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -92,7 +92,7 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17m-2 0a2 2 0 1 0 4 0 2 2 0 1 0-4 0"/><path d="M17 17m-2 0a2 2 0 1 0 4 0 2 2 0 1 0-4 0"/><path d="M5 17H3v-6l2-5h9l4 5h1a2 2 0 0 1 2 2v4h-2"/><path d="M9 17h6"/><path d="M14 7l4 5"/></svg>
-                            <span data-i18n="abrp.vehicle">Vehicle</span>
+                            <span data-i18n="abrp.vehicle">车辆</span>
                         </div>
                         <span class="card-badge" id="vehicleStatus">--</span>
                     </div>
@@ -100,7 +100,7 @@
                         <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;">
                             <div style="flex:1;">
                                 <div style="font-size:36px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--text-primary);line-height:1;" id="vehicleSoc">--%</div>
-                                <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;" data-i18n="abrp.state_of_charge">State of Charge</div>
+                                <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;" data-i18n="abrp.state_of_charge">责任的状态</div>
                             </div>
                             <div style="display:flex;flex-direction:column;gap:6px;text-align:right;">
                                 <div style="font-size:13px;color:var(--text-secondary);">
@@ -125,7 +125,7 @@
                             <span id="vehicleOdometer">-- km</span>
                             <span id="vehicleCharging" style="display:none;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;vertical-align:middle;color:var(--brand-primary);" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                                <span data-i18n="abrp.charging">Charging</span>
+                                <span data-i18n="abrp.charging">充电</span>
                             </span>
                             <span id="vehicleSoh">SOH: --%</span>
                         </div>
@@ -144,14 +144,14 @@
                         <div id="tokenDisplay" style="display:none;">
                             <span id="maskedToken" class="token-masked">••••xxxx</span>
                             <div class="token-actions">
-                                <button class="btn btn-danger" onclick="ABRP.deleteToken()" data-i18n="common.delete">Delete</button>
-                                <button class="btn" onclick="ABRP.showTokenInput()" data-i18n="common.edit">Change</button>
+                                <button class="btn btn-danger" onclick="ABRP.deleteToken()" data-i18n="common.delete">删除</button>
+                                <button class="btn" onclick="ABRP.showTokenInput()" data-i18n="common.edit">编辑</button>
                             </div>
                         </div>
                         <div id="tokenInput">
                             <div class="token-input-row">
-                                <input type="password" id="abrpTokenField" placeholder="Enter ABRP user token" data-i18n-attr="placeholder:abrp.token_placeholder">
-                                <button class="btn btn-primary" onclick="ABRP.saveToken()" data-i18n="abrp.save_test">Save &amp; Test</button>
+                                <input type="password" id="abrpTokenField" placeholder="输入ABRP用户代码" data-i18n-attr="placeholder:abrp.token_placeholder">
+                                <button class="btn btn-primary" onclick="ABRP.saveToken()" data-i18n="abrp.save_test">保存和测试</button>
                             </div>
                         </div>
                         <div id="tokenStatus" class="status-text"></div>
@@ -163,14 +163,14 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                            <span data-i18n="abrp.service_control">Service Control</span>
+                            <span data-i18n="abrp.service_control">服务控制</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="abrp.enable_label">Enable ABRP Telemetry</div>
-                                <div class="setting-desc" data-i18n="abrp.enable_desc">Send live vehicle data to A Better Route Planner</div>
+                                <div class="setting-name" data-i18n="abrp.enable_label">启用ABRP电测</div>
+                                <div class="setting-desc" data-i18n="abrp.enable_desc">将车辆实时数据发送至 A Better Route Planner (ABRP)。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -180,9 +180,9 @@
                             </div>
                         </div>
                         <div class="info-box">
-                            <div class="info-row"><span class="label" data-i18n="abrp.status_label">Status</span><span class="value" id="connectionStatus"><span class="status-dot off"></span> <span data-i18n="abrp.status_disconnected">Disconnected</span></span></div>
-                            <div class="info-row"><span class="label" data-i18n="abrp.last_upload">Last Upload</span><span class="value" id="lastUpload">Never</span></div>
-                            <div class="info-row"><span class="label" data-i18n="abrp.uploads">Uploads</span><span class="value" id="uploadCount">0 / 0 failed</span></div>
+                            <div class="info-row"><span class="label" data-i18n="abrp.status_label">状态</span><span class="value" id="connectionStatus"><span class="status-dot off"></span> <span data-i18n="abrp.status_disconnected">已断开</span></span></div>
+                            <div class="info-row"><span class="label" data-i18n="abrp.last_upload">最后上传</span><span class="value" id="lastUpload">Never</span></div>
+                            <div class="info-row"><span class="label" data-i18n="abrp.uploads">输入</span><span class="value" id="uploadCount">0 / 0 failed</span></div>
                         </div>
                     </div>
                 </div>
@@ -192,14 +192,14 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                            <span data-i18n="abrp.data_saving">Data Saving</span>
+                            <span data-i18n="abrp.data_saving">数据节省</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="abrp.change_only">Only send on change</div>
-                                <div class="setting-desc" data-i18n="abrp.change_only_desc">Skip uploads when no values changed. A heartbeat still fires at the max interval.</div>
+                                <div class="setting-name" data-i18n="abrp.change_only">仅在变更时发送</div>
+                                <div class="setting-desc" data-i18n="abrp.change_only_desc">当无数值变更时跳过上传。心跳仍会在最大间隔时发出。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -209,11 +209,11 @@
                             </div>
                         </div>
                         <div style="margin-top:14px;">
-                            <label style="font-size:12px;color:var(--text-secondary);"><span data-i18n="abrp.min_interval">Min interval — fastest</span>: <span id="abrpMinLabel" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">5s</span></label>
+                            <label style="font-size:12px;color:var(--text-secondary);"><span data-i18n="abrp.min_interval">最小间隔 — 最快</span>: <span id="abrpMinLabel" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">5s</span></label>
                             <input type="range" class="slider" id="abrpMinInterval" min="1" max="30" step="1" value="5" style="width:100%;" oninput="ABRP.onSlider()" onchange="ABRP.saveDataSaving()">
                         </div>
                         <div style="margin-top:14px;">
-                            <label style="font-size:12px;color:var(--text-secondary);"><span data-i18n="abrp.max_interval">Max interval — heartbeat</span>: <span id="abrpMaxLabel" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">2m</span></label>
+                            <label style="font-size:12px;color:var(--text-secondary);"><span data-i18n="abrp.max_interval">最大间隔 — 心跳</span>: <span id="abrpMaxLabel" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">2m</span></label>
                             <input type="range" class="slider" id="abrpMaxInterval" min="30" max="1800" step="30" value="120" style="width:100%;" oninput="ABRP.onSlider()" onchange="ABRP.saveDataSaving()">
                         </div>
                     </div>
@@ -224,14 +224,14 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                            <span data-i18n="abrp.app_gate">ABRP App Gate</span>
+                            <span data-i18n="abrp.app_gate">ABRP 应用限制</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="abrp.gate_on_app">Only while ABRP is in use</div>
-                                <div class="setting-desc" data-i18n="abrp.gate_on_app_desc">Stream telemetry only while the ABRP app is open on this head unit — zero uploads otherwise.</div>
+                                <div class="setting-name" data-i18n="abrp.gate_on_app">仅在使用 ABRP 时</div>
+                                <div class="setting-desc" data-i18n="abrp.gate_on_app_desc">仅当 ABRP 应用在此车机上开启时才推流遥测数据——否则不上传任何内容。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -242,18 +242,18 @@
                         </div>
                         <div id="abrpGateOptions" style="display:none;">
                             <div style="margin-top:14px;display:flex;flex-direction:column;gap:4px;">
-                                <label style="font-size:12px;color:var(--text-secondary);" data-i18n="abrp.app_mode">Active when</label>
+                                <label style="font-size:12px;color:var(--text-secondary);" data-i18n="abrp.app_mode">启用时机</label>
                                 <select id="abrpAppMode" onchange="ABRP.saveDataSaving()" style="padding:10px 12px;background:var(--bg-elevated);border:1px solid var(--border-color);border-radius:8px;color:var(--text-primary);font-size:14px;">
-                                    <option value="foreground" data-i18n="abrp.app_mode_foreground">ABRP is on screen (recommended)</option>
-                                    <option value="running" data-i18n="abrp.app_mode_running">ABRP is running (incl. background)</option>
+                                    <option value="foreground" data-i18n="abrp.app_mode_foreground">ABRP 在中控前台显示（推荐）</option>
+                                    <option value="running" data-i18n="abrp.app_mode_running">ABRP 正在执行（包含背景）</option>
                                 </select>
                             </div>
                             <div style="margin-top:14px;">
-                                <label style="font-size:12px;color:var(--text-secondary);"><span data-i18n="abrp.app_grace">Grace period</span>: <span id="abrpGraceLabel" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">90s</span></label>
+                                <label style="font-size:12px;color:var(--text-secondary);"><span data-i18n="abrp.app_grace">宽限期</span>: <span id="abrpGraceLabel" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">90s</span></label>
                                 <input type="range" class="slider" id="abrpAppGrace" min="0" max="600" step="10" value="90" style="width:100%;" oninput="ABRP.onSlider()" onchange="ABRP.saveDataSaving()">
                             </div>
                             <div class="info-box" style="margin-top:12px;">
-                                <div class="info-row"><span class="label" data-i18n="abrp.app_status">ABRP app</span><span class="value" id="abrpAppPresence">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="abrp.app_status">ABRP 应用</span><span class="value" id="abrpAppPresence">--</span></div>
                             </div>
                         </div>
                     </div>
@@ -264,7 +264,7 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                            <span data-i18n="abrp.live_telemetry">Live Telemetry</span>
+                            <span data-i18n="abrp.live_telemetry">现场电测</span>
                         </div>
                     </div>
                     <div class="card-body" style="padding:0;">

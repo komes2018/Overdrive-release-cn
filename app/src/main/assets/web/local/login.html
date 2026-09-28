@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.login_title">Login - OverDrive</title>
+    <title data-i18n="app.login_title">登录 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <script src="../shared/theme.js?v=8"></script>
     <link rel="stylesheet" href="../shared/design-tokens.css">
@@ -290,22 +290,22 @@
                 <img src="../shared/app-icon-glyph-dark.webp" alt="OverDrive">
             </div>
             <h1 class="login-title" data-i18n="app.name">OverDrive</h1>
-            <p class="login-subtitle" data-i18n="login.subtitle">Enter your device token to access</p>
+            <p class="login-subtitle" data-i18n="login.subtitle">输入你的设备访问码</p>
 
             <div id="deviceInfo" class="device-info">
-                <div class="device-info-label" data-i18n="login.device_id">Device ID</div>
+                <div class="device-info-label" data-i18n="login.device_id">设备 ID</div>
                 <!-- No data-i18n here: the device ID is written by JS. A
                      data-i18n binding would let the i18n hydrate() pass
                      overwrite the device ID with the localized "Loading..."
                      on every locale change. setInitialLoadingText() seeds
                      the localized placeholder once instead. -->
-                <div class="device-info-value" id="deviceIdDisplay">Loading...</div>
+                <div class="device-info-value" id="deviceIdDisplay">正在加载...</div>
             </div>
 
             <div id="statusMessage" class="status-message"></div>
 
             <div class="form-group">
-                <label class="form-label" data-i18n="common.access_code">Access Code</label>
+                <label class="form-label" data-i18n="common.access_code">访问码</label>
                 <input type="text"
                        id="tokenInput"
                        class="form-input"
@@ -314,17 +314,17 @@
                        spellcheck="false"
                        maxlength="8"
                        style="text-align: center; font-size: 20px; letter-spacing: 0.2em;">
-                <p class="form-hint" data-i18n="login.find_hint">Find this in your OverDrive app → Dashboard → Access Code</p>
+                <p class="form-hint" data-i18n="login.find_hint">在 OverDrive 应用中查找：仪表盘 → 访问代码</p>
                 <p class="form-error" id="tokenError"></p>
             </div>
 
             <button class="btn btn-primary" id="loginBtn" onclick="login()">
-                <span id="loginBtnText" data-i18n="login.login_btn">Login</span>
+                <span id="loginBtnText" data-i18n="login.login_btn">登录</span>
                 <div class="spinner" id="loginSpinner" style="display:none;"></div>
             </button>
 
             <div class="login-footer">
-                <p data-i18n="login.privacy">Your data stays on your device.</p>
+                <p data-i18n="login.privacy">你的数据只保存在你的设备上。</p>
             </div>
         </div>
     </div>
@@ -354,7 +354,7 @@
             if (deviceId) return; // Don't overwrite a real ID
             const loadingText = (window.BYD && BYD.i18n && BYD.i18n.t)
                 ? (BYD.i18n.t('common.loading') || 'Loading...')
-                : 'Loading...';
+                : '正在加载...';
             el.textContent = loadingText;
         }
 
@@ -372,12 +372,12 @@
                     deviceId = data.deviceId;
                     updateDeviceIdDisplay();
                 } else {
-                    displayEl.textContent = t('login.unknown_device', 'Unknown device');
+                    displayEl.textContent = t('login.unknown_device', '未知设备');
                 }
             } catch (e) {
                 console.error('Failed to check device:', e);
                 const displayEl = document.getElementById('deviceIdDisplay');
-                displayEl.textContent = t('login.connection_error', 'Connection error');
+                displayEl.textContent = t('login.connection_error', '连接错误');
             }
         }
 

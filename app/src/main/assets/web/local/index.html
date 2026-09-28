@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.dashboard_title">Dashboard - OverDrive</title>
+    <title data-i18n="app.dashboard_title">仪表盘 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="../shared/app-icon-dark.webp">
@@ -35,8 +35,8 @@
                 <section class="dash-hero">
                     <div class="dash-hero-main">
                         <div class="dash-hero-copy">
-                            <h1 data-i18n="dashboard.heading">Dashboard</h1>
-                            <p id="dashHeroSubtitle" data-i18n="dashboard.subtitle">Vehicle status, position and main controls.</p>
+                            <h1 data-i18n="dashboard.heading">仪表盘</h1>
+                            <p id="dashHeroSubtitle" data-i18n="dashboard.subtitle">整车状态、实时位置与快捷车控</p>
                         </div>
                         <div class="dash-drive-state is-pending" id="dashDriveState"
                              role="status" aria-live="polite" aria-atomic="true">
@@ -49,18 +49,18 @@
                             </div>
                             <div class="dash-drive-copy">
                                 <span id="dashDrivePower"
-                                      data-i18n="dashboard.drive_power_pending">Vehicle --</span>
+                                      data-i18n="dashboard.drive_power_pending">整车 --</span>
                                 <strong id="dashDriveMode"
-                                        data-i18n="dashboard.drive_state_waiting">Waiting for status</strong>
+                                        data-i18n="dashboard.drive_state_waiting">等待状态同步</strong>
                                 <small id="dashDriveDetail">--</small>
                             </div>
                             <div class="dash-drive-readouts">
                                 <div class="dash-drive-readout dash-drive-gear">
-                                    <span data-i18n="dashboard.drive_metric_gear">Gear</span>
+                                    <span data-i18n="dashboard.drive_metric_gear">当前挡位</span>
                                     <strong id="dashDriveGear">--</strong>
                                 </div>
                                 <div class="dash-drive-readout dash-drive-speed">
-                                    <span data-i18n="dashboard.drive_metric_speed">Speed</span>
+                                    <span data-i18n="dashboard.drive_metric_speed">当前车速</span>
                                     <div>
                                         <strong id="dashDriveSpeed">--</strong>
                                         <small id="dashDriveSpeedUnit">km/h</small>
@@ -69,9 +69,9 @@
                             </div>
                         </div>
                         <div class="dash-hero-status">
-                            <span class="dash-chip" id="dashConnChip" data-i18n="dashboard.chip_device_pending">Device --</span>
-                            <span class="dash-chip" id="dashSurvChip" data-i18n="dashboard.chip_surveillance_pending">Surveillance --</span>
-                            <span class="dash-chip" id="dashGpsChip" data-i18n="dashboard.chip_gps_pending">GPS --</span>
+                            <span class="dash-chip" id="dashConnChip" data-i18n="dashboard.chip_device_pending">车机 --</span>
+                            <span class="dash-chip" id="dashSurvChip" data-i18n="dashboard.chip_surveillance_pending">哨兵 --</span>
+                            <span class="dash-chip" id="dashGpsChip" data-i18n="dashboard.chip_gps_pending">GPS 定位中…</span>
                         </div>
                     </div>
                     <!--
@@ -137,27 +137,27 @@
                             <div class="dash-glance-rows">
                                 <div class="dash-glance-row">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-                                    <span data-i18n="dashboard.metric_lock">Lock</span>
+                                    <span data-i18n="dashboard.metric_lock">门锁状态</span>
                                     <strong id="glLockText">--</strong>
                                 </div>
                                 <div class="dash-glance-row">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M4.2 6l15.6 12M4.2 18 19.8 6"/></svg>
-                                    <span data-i18n="dashboard.glance_climate">Climate</span>
+                                    <span data-i18n="dashboard.glance_climate">座舱空调</span>
                                     <strong id="glClimateText">--</strong>
                                 </div>
                                 <div class="dash-glance-row">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 12h18"/></svg>
-                                    <span data-i18n="dashboard.glance_windows">Windows</span>
+                                    <span data-i18n="dashboard.glance_windows">车窗状态</span>
                                     <strong id="glWindowsText">--</strong>
                                 </div>
                                 <div class="dash-glance-row">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg>
-                                    <span data-i18n="dashboard.glance_tyres">Tyres</span>
+                                    <span data-i18n="dashboard.glance_tyres">胎压监测</span>
                                     <strong id="glTyresText">--</strong>
                                 </div>
                                 <div class="dash-glance-row">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3z"/></svg>
-                                    <span data-i18n="dashboard.glance_sentry">Sentry</span>
+                                    <span data-i18n="dashboard.glance_sentry">驻车哨兵</span>
                                     <strong id="glSentryText">--</strong>
                                 </div>
                             </div>
@@ -165,11 +165,11 @@
                         <div class="dash-range-intel" id="dashRangeIntel" hidden aria-live="polite">
                             <div class="dash-range-values">
                                 <div class="dash-range-value dash-range-value--personalized">
-                                    <span data-i18n="trip.card.personalized_range">Personalized Range</span>
+                                    <span data-i18n="trip.card.personalized_range">动态续航预估</span>
                                     <strong id="dashPersonalizedRange">--</strong>
                                 </div>
                                 <div class="dash-range-value dash-range-value--vehicle">
-                                    <span data-i18n="dashboard.range_vehicle_label">Vehicle</span>
+                                    <span data-i18n="dashboard.range_vehicle_label">原车表显</span>
                                     <strong id="dashVehicleRange">--</strong>
                                 </div>
                             </div>
@@ -202,9 +202,9 @@
                     </span>
                     <span class="dash-ai-insight-copy">
                         <span class="dash-ai-insight-kicker"
-                              data-i18n="dashboard.ai_insight_kicker">AI insight</span>
+                              data-i18n="dashboard.ai_insight_kicker">AI 车况洞察</span>
                         <strong id="dashAiInsightTitle"
-                                data-i18n="dashboard.ai_insight_default_title">Vehicle brief</strong>
+                                data-i18n="dashboard.ai_insight_default_title">车况概览简报</strong>
                         <span id="dashAiInsightText" class="dash-ai-insight-text"></span>
                         <small id="dashAiInsightMeta"></small>
                     </span>
@@ -222,8 +222,8 @@
                     <article class="dash-card dash-location-card" data-card-id="location">
                         <div class="dash-card-head">
                             <div>
-                                <span class="dash-card-kicker" data-i18n="dashboard.kicker_position">Position</span>
-                                <h2 data-i18n="dashboard.card_location">Vehicle location</h2>
+                                <span class="dash-card-kicker" data-i18n="dashboard.kicker_position">车辆定位</span>
+                                <h2 data-i18n="dashboard.card_location">车辆位置</h2>
                             </div>
                             <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
@@ -235,7 +235,7 @@
                         <div class="dash-action-row">
                             <button class="dash-primary-btn" type="button" onclick="BYD.dashboard.openDirections()">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11 22 2l-9 19-2-8-8-2Z"/><path d="m11 13 4-4"/></svg>
-                                <span data-i18n="dashboard.directions">Navigate to car</span>
+                                <span data-i18n="dashboard.directions">寻车导航</span>
                             </button>
                         </div>
                     </article>
@@ -243,8 +243,8 @@
                     <article class="dash-card dash-actions-card" data-card-id="commands">
                         <div class="dash-card-head">
                             <div>
-                                <span class="dash-card-kicker" data-i18n="dashboard.kicker_commands">Commands</span>
-                                <h2 data-i18n="dashboard.card_commands">Quick controls</h2>
+                                <span class="dash-card-kicker" data-i18n="dashboard.kicker_commands">快捷车控</span>
+                                <h2 data-i18n="dashboard.card_commands">快捷控制</h2>
                             </div>
                             <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
@@ -253,27 +253,27 @@
                         <div class="dash-command-grid">
                             <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/lock')">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-                                <span data-i18n="dashboard.cmd_lock">Lock</span>
+                                <span data-i18n="dashboard.cmd_lock">一键落锁</span>
                             </button>
                             <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/unlock')">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>
-                                <span data-i18n="dashboard.cmd_unlock">Unlock</span>
+                                <span data-i18n="dashboard.cmd_unlock">一键解锁</span>
                             </button>
                             <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/flash')">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h8l-1 8 11-13h-8l1-7z"/></svg>
-                                <span data-i18n="dashboard.cmd_flash">Flash</span>
+                                <span data-i18n="dashboard.cmd_flash">闪灯寻车</span>
                             </button>
                             <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/find-car')">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M11 8v3l2 2"/></svg>
-                                <span data-i18n="dashboard.cmd_find">Find</span>
+                                <span data-i18n="dashboard.cmd_find">鸣笛寻车</span>
                             </button>
                             <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/trunk', {action:'open'})">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"/><polyline points="12 11 12 6"/><polyline points="9 8 12 5 15 8"/></svg>
-                                <span data-i18n="dashboard.cmd_trunk_open">Open trunk</span>
+                                <span data-i18n="dashboard.cmd_trunk_open">开启后备箱</span>
                             </button>
                             <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/trunk', {action:'close'})">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"/><polyline points="12 9 12 14"/><polyline points="9 12 12 15 15 12"/></svg>
-                                <span data-i18n="dashboard.cmd_trunk_close">Close trunk</span>
+                                <span data-i18n="dashboard.cmd_trunk_close">关闭后备箱</span>
                             </button>
                         </div>
                         <!-- User-defined buttons (GET /api/quick-controls). Rendered into its
@@ -283,19 +283,19 @@
                         <div class="dash-command-grid dash-command-grid-media">
                             <a class="dash-command" href="live-view.html">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><path d="M2 12a9 9 0 0 0 8 8"/><circle cx="2" cy="12" r="2"/></svg>
-                                <span data-i18n="dashboard.cmd_live">Live</span>
+                                <span data-i18n="dashboard.cmd_live">实时监控</span>
                             </a>
                             <a class="dash-command" href="events.html">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>
-                                <span data-i18n="dashboard.cmd_recordings">Recordings</span>
+                                <span data-i18n="dashboard.cmd_recordings">事件录像</span>
                             </a>
                             <a class="dash-command" href="trips.html">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17h2v-7l4 4 4-4 4 4 4-4v7h2"/><path d="M4 5h16"/></svg>
-                                <span data-i18n="dashboard.cmd_trips">Trips</span>
+                                <span data-i18n="dashboard.cmd_trips">行程分析</span>
                             </a>
                             <a class="dash-command" href="parking.html">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/></svg>
-                                <span data-i18n="dashboard.cmd_parking">Parking</span>
+                                <span data-i18n="dashboard.cmd_parking">停车记录</span>
                             </a>
                         </div>
                     </article>
@@ -303,26 +303,26 @@
                     <article class="dash-card dash-info-card" data-card-id="info">
                         <div class="dash-card-head">
                             <div>
-                                <span class="dash-card-kicker" data-i18n="dashboard.kicker_vehicle">Vehicle</span>
-                                <h2 data-i18n="dashboard.card_info">Main info</h2>
+                                <span class="dash-card-kicker" data-i18n="dashboard.kicker_vehicle">车辆状态</span>
+                                <h2 data-i18n="dashboard.card_info">核心车况信息</h2>
                             </div>
                             <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
                             </button>
                         </div>
                         <div class="dash-metric-grid" id="dashInfoGrid">
-                            <div class="dash-metric"><span data-i18n="dashboard.metric_battery">Battery</span><strong id="dashSoc">--</strong></div>
+                            <div class="dash-metric"><span data-i18n="dashboard.metric_battery">动力电量</span><strong id="dashSoc">--</strong></div>
                             <!-- On PHEVs the strong shows TOTAL range and the small
                                  carries the EV + fuel breakdown; on BEVs the small
                                  stays hidden and strong = electric range. -->
-                            <div class="dash-metric"><span id="dashRangeLabel" data-i18n="dashboard.metric_range">Range</span><strong id="dashRange">--</strong><small id="dashRangeBreakdown" style="display:none"></small></div>
+                            <div class="dash-metric"><span id="dashRangeLabel" data-i18n="dashboard.metric_range">续航里程</span><strong id="dashRange">--</strong><small id="dashRangeBreakdown" style="display:none"></small></div>
                             <!-- PHEV-only; unhidden when /api/status carries range.fuelPercent -->
-                            <div class="dash-metric" id="dashFuelMetric" style="display:none"><span data-i18n="vehicle.fuel">Fuel</span><strong id="dashFuel">--</strong></div>
+                            <div class="dash-metric" id="dashFuelMetric" style="display:none"><span data-i18n="vehicle.fuel">燃油</span><strong id="dashFuel">--</strong></div>
                             <div class="dash-metric"><span>12V</span><strong id="dash12v">--</strong></div>
-                            <div class="dash-metric"><span data-i18n="dashboard.metric_power">Power</span><strong id="dashAcc">--</strong></div>
+                            <div class="dash-metric"><span data-i18n="dashboard.metric_power">整车电源</span><strong id="dashAcc">--</strong></div>
                             <!-- Value = SSID / Mobile Data / Ethernet; small = IPv4 when known -->
-                            <div class="dash-metric"><span data-i18n="dashboard.metric_network">Network</span><strong id="dashNetwork">--</strong><small id="dashNetworkIp" style="display:none"></small></div>
-                            <div class="dash-metric"><span data-i18n="dashboard.metric_lock">Lock</span><strong id="dashLock">--</strong></div>
+                            <div class="dash-metric"><span data-i18n="dashboard.metric_network">网络连接</span><strong id="dashNetwork">--</strong><small id="dashNetworkIp" style="display:none"></small></div>
+                            <div class="dash-metric"><span data-i18n="dashboard.metric_lock">门锁状态</span><strong id="dashLock">--</strong></div>
                         </div>
                     </article>
 
@@ -331,8 +331,8 @@
                     <article class="dash-card dash-info-card" data-card-id="charging">
                         <div class="dash-card-head">
                             <div>
-                                <span class="dash-card-kicker" data-i18n="charge.kicker">Energy</span>
-                                <h2 data-i18n="charge.card_title">Charging</h2>
+                                <span class="dash-card-kicker" data-i18n="charge.kicker">充放电</span>
+                                <h2 data-i18n="charge.card_title">充电状态</h2>
                             </div>
                             <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
@@ -340,18 +340,18 @@
                         </div>
                         <div class="dash-charge-chip" id="dashChargeChip">
                             <span class="ic_status_dot dot-idle" id="dashChargeDot"></span>
-                            <span id="dashChargeState" data-i18n="charge.state_idle">Idle</span>
+                            <span id="dashChargeState" data-i18n="charge.state_idle">空闲</span>
                         </div>
                         <div class="dash-metric-grid dash-metric-grid--4">
-                            <div class="dash-metric"><span data-i18n="charge.metric_soc">SoC</span><strong id="dashChargeSoc">--</strong></div>
-                            <div class="dash-metric"><span data-i18n="charge.metric_power">Power</span><strong id="dashChargePower">--</strong></div>
-                            <div class="dash-metric"><span data-i18n="charge.metric_session">Session</span><strong id="dashChargeKwh">--</strong></div>
-                            <div class="dash-metric"><span data-i18n="charge.metric_ttf">Time to full</span><strong id="dashChargeTtf">--</strong></div>
+                            <div class="dash-metric"><span data-i18n="charge.metric_soc">当前电量 (SoC)</span><strong id="dashChargeSoc">--</strong></div>
+                            <div class="dash-metric"><span data-i18n="charge.metric_power">充电功率</span><strong id="dashChargePower">--</strong></div>
+                            <div class="dash-metric"><span data-i18n="charge.metric_session">本次充入电量</span><strong id="dashChargeKwh">--</strong></div>
+                            <div class="dash-metric"><span data-i18n="charge.metric_ttf">充满剩余时间</span><strong id="dashChargeTtf">--</strong></div>
                         </div>
                         <div class="dash-action-row">
                             <button class="dash-primary-btn" type="button" onclick="location.href='charging.html'">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 L4 14 h7 l-1 8 9-12 h-7 z"/></svg>
-                                <span data-i18n="charge.open">Charging details</span>
+                                <span data-i18n="charge.open">充电详情</span>
                             </button>
                         </div>
                     </article>

@@ -48,52 +48,52 @@
      */
     var NAV_ITEMS = [
         // ===== Overview ===== — the "what's happening now" cluster.
-        { divider: true, label: 'Overview', i18n: 'nav.overview_group' },
-        { href: 'index.html',           i18n: 'nav.dashboard',       label: 'Dashboard',       svg: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>' },
-        { href: 'assistant.html',       i18n: 'nav.assistant',       label: 'Assistant',       svg: '<rect x="4" y="6" width="16" height="13" rx="3"/><path d="M9 3v3M8 12h.01M16 12h.01M9 16h6"/>' },
-        { href: 'live-view.html',       i18n: 'nav.live_view',       label: 'Live View',       svg: '<path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><path d="M2 12a9 9 0 0 0 8 8"/><circle cx="2" cy="12" r="2"/>' },
-        { href: 'communicate.html',     i18n: 'nav.communicate',     label: 'Communicate',     svg: '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/>' },
-        { href: 'events.html',          i18n: 'nav.recordings',      label: 'Recordings',      svg: '<path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/>' },
+        { divider: true, label: '概述', i18n: 'nav.overview_group' },
+        { href: 'index.html',           i18n: 'nav.dashboard',       label: '仪表盘',       svg: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>' },
+        { href: 'assistant.html',       i18n: 'nav.assistant',       label: 'AI 助手',       svg: '<rect x="4" y="6" width="16" height="13" rx="3"/><path d="M9 3v3M8 12h.01M16 12h.01M9 16h6"/>' },
+        { href: 'live-view.html',       i18n: 'nav.live_view',       label: '实时画面',       svg: '<path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><path d="M2 12a9 9 0 0 0 8 8"/><circle cx="2" cy="12" r="2"/>' },
+        { href: 'communicate.html',     i18n: 'nav.communicate',     label: '远程通信',     svg: '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/>' },
+        { href: 'events.html',          i18n: 'nav.recordings',      label: '录像',      svg: '<path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/>' },
         // Parking Intelligence: sessions ("where did I park, what happened").
-        { href: 'parking.html',         i18n: 'nav.parking',         label: 'Parking',         svg: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
+        { href: 'parking.html',         i18n: 'nav.parking',         label: '停车',         svg: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
 
         // ===== Vehicle ===== — control + trip history.
-        { divider: true, label: 'Vehicle', i18n: 'nav.vehicle_group' },
-        { href: 'vehicle-control.html', i18n: 'nav.vehicle_control', label: 'Vehicle Control', svg: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>' },
-        { href: 'trips.html',           i18n: 'nav.trips',           label: 'Trips',           svg: '<path d="M3 17h2v-7l4 4 4-4 4 4 4-4v7h2"/><path d="M4 5h16"/>' },
-        { href: 'charging.html',        i18n: 'nav.charging',        label: 'Charging',        svg: '<path d="M13 2 L4 14 h7 l-1 8 9-12 h-7 z"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
-        { href: 'seat-positions.html',  i18n: 'nav.seat_positions',  label: 'Seat Positions',  svg: '<g transform="translate(0 24) scale(.025)"><path fill="currentColor" stroke="none" d="M560-160H320q-33 0-56.5-23.5T240-240v-400q0-17 11.5-28.5T280-680q17 0 28.5 11.5T320-640v400h240q17 0 28.5 11.5T600-200q0 17-11.5 28.5T560-160ZM460-720q-33 0-56.5-23.5T380-800q0-33 23.5-56.5T460-880q33 0 56.5 23.5T540-800q0 33-23.5 56.5T460-720Zm180 600v-160H440q-33 0-56.5-23.5T360-360v-220q0-42 29-71t71-29q42 0 71 29t29 71v180h80q33 0 56.5 23.5T720-320v200q0 17-11.5 28.5T680-80q-17 0-28.5-11.5T640-120Z"/></g>' },
-        { href: 'automations.html',     i18n: 'nav.automations',     label: 'Automations',     svg: '<rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/>' },
-        { href: 'key-mapping.html',     i18n: 'nav.key_mapping',     label: 'Key Mapping',     svg: '<rect width="20" height="14" x="2" y="5" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M7 13h.01M17 13h.01M11 13h2"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
+        { divider: true, label: '车辆', i18n: 'nav.vehicle_group' },
+        { href: 'vehicle-control.html', i18n: 'nav.vehicle_control', label: '车辆控制', svg: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>' },
+        { href: 'trips.html',           i18n: 'nav.trips',           label: '行程',           svg: '<path d="M3 17h2v-7l4 4 4-4 4 4 4-4v7h2"/><path d="M4 5h16"/>' },
+        { href: 'charging.html',        i18n: 'nav.charging',        label: '充电',        svg: '<path d="M13 2 L4 14 h7 l-1 8 9-12 h-7 z"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
+        { href: 'seat-positions.html',  i18n: 'nav.seat_positions',  label: '座椅记忆',  svg: '<g transform="translate(0 24) scale(.025)"><path fill="currentColor" stroke="none" d="M560-160H320q-33 0-56.5-23.5T240-240v-400q0-17 11.5-28.5T280-680q17 0 28.5 11.5T320-640v400h240q17 0 28.5 11.5T600-200q0 17-11.5 28.5T560-160ZM460-720q-33 0-56.5-23.5T380-800q0-33 23.5-56.5T460-880q33 0 56.5 23.5T540-800q0 33-23.5 56.5T460-720Zm180 600v-160H440q-33 0-56.5-23.5T360-360v-220q0-42 29-71t71-29q42 0 71 29t29 71v180h80q33 0 56.5 23.5T720-320v200q0 17-11.5 28.5T680-80q-17 0-28.5-11.5T640-120Z"/></g>' },
+        { href: 'automations.html',     i18n: 'nav.automations',     label: '自动化',     svg: '<rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/>' },
+        { href: 'key-mapping.html',     i18n: 'nav.key_mapping',     label: '按键映射',     svg: '<rect width="20" height="14" x="2" y="5" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M7 13h.01M17 13h.01M11 13h2"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
 
         // ===== Integrations group ===== — mirrors the native Integrations
         // sub-page (Telegram, ABRP, MQTT, BYD Cloud).
-        { divider: true, label: 'Integrations', i18n: 'nav.integrations_group' },
+        { divider: true, label: '集成', i18n: 'nav.integrations_group' },
         { href: 'telegram.html',                          i18n: 'nav.telegram',       label: 'Telegram',       svg: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
         { href: 'abrp.html',                              i18n: 'nav.abrp',           label: 'ABRP',           svg: '<path d="M9 18l6-6-6-6"/><circle cx="18" cy="12" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>' },
         { href: 'mqtt.html',                              i18n: 'nav.mqtt',           label: 'MQTT',           svg: '<circle cx="12" cy="12" r="2"/><path d="M8.46 15.54A5 5 0 0 1 7 12a5 5 0 0 1 1.46-3.54"/><path d="M15.54 8.46A5 5 0 0 1 17 12a5 5 0 0 1-1.46 3.54"/><path d="M5.64 18.36A9 9 0 0 1 3 12a9 9 0 0 1 2.64-6.36"/><path d="M18.36 5.64A9 9 0 0 1 21 12a9 9 0 0 1-2.64 6.36"/>', svgExtra: 'stroke-linecap="round"' },
-        { href: 'byd-cloud.html',                         i18n: 'nav.byd_cloud',      label: 'BYD Cloud',      svg: '<path d="M17.5 19a4.5 4.5 0 1 0-2.83-7.97A6 6 0 0 0 4 12.45a3 3 0 0 0 .5 5.95"/><path d="M17.5 19h-12"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
+        { href: 'byd-cloud.html',                         i18n: 'nav.byd_cloud',      label: 'BYD云',      svg: '<path d="M17.5 19a4.5 4.5 0 1 0-2.83-7.97A6 6 0 0 0 4 12.45a3 3 0 0 0 .5 5.95"/><path d="M17.5 19h-12"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
 
         // ===== Diagnostics ===== — Performance is the only diagnostics-ish
         // page that exists on web; the native diagnostics fragment is native.
-        { divider: true, label: 'Diagnostics', i18n: 'nav.diagnostics_group' },
-        { href: 'performance.html',                       i18n: 'nav.performance',    label: 'Performance',    svg: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>' },
-        { href: 'network.html',                           i18n: 'nav.network',        label: 'Network',        svg: '<path d="M12 20h.01"/><path d="M8.5 16.4a5 5 0 0 1 7 0"/><path d="M5 13a9 9 0 0 1 14 0"/><path d="M1.8 9.6a14 14 0 0 1 20.4 0"/>', svgExtra: 'stroke-linecap="round"' },
-        { href: 'remote-dev-view.html',                   label: 'Remote Dev View',  svg: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="m9 8 2 2-2 2M13 12h2"/>' },
+        { divider: true, label: '诊断', i18n: 'nav.diagnostics_group' },
+        { href: 'performance.html',                       i18n: 'nav.performance',    label: '性能',    svg: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>' },
+        { href: 'network.html',                           i18n: 'nav.network',        label: '网络与热点',        svg: '<path d="M12 20h.01"/><path d="M8.5 16.4a5 5 0 0 1 7 0"/><path d="M5 13a9 9 0 0 1 14 0"/><path d="M1.8 9.6a14 14 0 0 1 20.4 0"/>', svgExtra: 'stroke-linecap="round"' },
+        { href: 'remote-dev-view.html',                   label: '远程调试',  svg: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="m9 8 2 2-2 2M13 12h2"/>' },
 
         // ===== Settings ===== — surveillance + recording + notifications
         // are settings sub-destinations under SettingsFragment on native.
-        { divider: true, label: 'Settings', i18n: 'nav.settings_group' },
-        { href: 'surveillance.html',                      i18n: 'nav.surveillance',   label: 'Surveillance',   svg: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>' },
-        { href: 'recording.html',                         i18n: 'nav.recording_settings', label: 'Recording Settings', svg: '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>' },
-        { href: 'road-sense.html',                        i18n: 'nav.road_sense',     label: 'RoadSense',      svg: '<path d="M3.2 20.2 L8.6 11 L15.4 11 L20.8 20.2 Z"/><path d="M12 12.4v1.3M12 15.7v1.6M12 18.7v1.1"/><path d="M12 3.2v2.4"/><path d="M12 7.6h.01"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
-        { href: 'notifications.html',                     i18n: 'nav.notifications',  label: 'Notifications',  svg: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>' },
+        { divider: true, label: '设置', i18n: 'nav.settings_group' },
+        { href: 'surveillance.html',                      i18n: 'nav.surveillance',   label: '监控',   svg: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>' },
+        { href: 'recording.html',                         i18n: 'nav.recording_settings', label: '录制设置', svg: '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>' },
+        { href: 'road-sense.html',                        i18n: 'nav.road_sense',     label: 'RoadSense 路况',     svg: '<path d="M3.2 20.2 L8.6 11 L15.4 11 L20.8 20.2 Z"/><path d="M12 12.4v1.3M12 15.7v1.6M12 18.7v1.1"/><path d="M12 3.2v2.4"/><path d="M12 7.6h.01"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
+        { href: 'notifications.html',                     i18n: 'nav.notifications',  label: '通知',  svg: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>' },
 
         // ===== About ===== — version, license, source, support links,
         // Check for Updates. Sits in its own group so the link isn't
         // dangling under "Settings".
-        { divider: true, label: 'About', i18n: 'nav.about_group' },
-        { href: 'about.html',                             i18n: 'nav.about',          label: 'About',          svg: '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' }
+        { divider: true, label: '关于', i18n: 'nav.about_group' },
+        { href: 'about.html',                             i18n: 'nav.about',          label: '关于',          svg: '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' }
     ];
 
     function activeBasename() {
@@ -147,18 +147,18 @@
         // dashboard, the canonical "home"). The close-X stays for mobile.
         var header = ''
             + '<div class="sidebar-header">'
-            +   '<a href="index.html" class="brand brand-link" aria-label="OverDrive — open Dashboard" data-i18n-attr="aria-label:nav.brand_home">'
+            +   '<a href="index.html" class="brand brand-link" aria-label="OverDrive — 打开仪表盘" data-i18n-attr="aria-label:nav.brand_home">'
             +     '<div class="brand-logo">'
             +       '<img src="../shared/app-icon-glyph-dark.webp" alt="OverDrive">'
             +       '<span class="brand-online-pulse" aria-hidden="true"></span>'
             +     '</div>'
             +     '<div class="brand-text">'
             +       '<span class="brand-name" data-i18n="app.name">OverDrive</span>'
-            +       '<span class="brand-tagline" data-i18n="app.tagline">Surveillance System</span>'
+            +       '<span class="brand-tagline" data-i18n="app.tagline">监控系统</span>'
             +       '<span class="brand-version" id="appVersion"></span>'
             +     '</div>'
             +   '</a>'
-            +   '<button class="sidebar-close" type="button" aria-label="Close menu">'
+            +   '<button class="sidebar-close" type="button" aria-label="关闭菜单">'
             +     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
             +       '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'
             +     '</svg>'
@@ -179,26 +179,26 @@
             + '<div class="sidebar-footer">'
             +   '<div class="status-card">'
             +     '<div class="status-row">'
-            +       '<span class="status-label" data-i18n="status.device"><span class="status-dot" id="connDot"></span>Device</span>'
+            +       '<span class="status-label" data-i18n="status.device"><span class="status-dot" id="connDot"></span>设备</span>'
             +       '<span class="status-value" id="deviceId">--</span>'
             +     '</div>'
             +     '<div class="status-row">'
-            +       '<span class="status-label" data-i18n="status.acc">ACC</span>'
+            +       '<span class="status-label" data-i18n="status.acc">ACC 上电</span>'
             +       '<span class="status-value" id="accValue">--</span>'
             +     '</div>'
             +     '<div class="status-row">'
             +       '<span class="status-label" data-i18n="status.battery_12v">'
-            +         '<svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/></svg>12V'
+            +         '<svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 1 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/></svg>12V'
             +       '</span>'
             +       '<span class="status-value" id="batteryValue">--</span>'
             +     '</div>'
             +     '<div class="status-row">'
-            +       '<span class="status-label" data-i18n="status.sentry">Surveillance</span>'
-            +       '<span class="status-value" id="survStatus" data-i18n="status.off">OFF</span>'
+            +       '<span class="status-label" data-i18n="status.sentry">监控</span>'
+            +       '<span class="status-value" id="survStatus" data-i18n="status.off">关</span>'
             +     '</div>'
             +     '<div class="status-row">'
             +       '<span class="status-label" data-i18n="status.network">'
-            +         '<span id="networkIcon"><svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg></span>Net'
+            +         '<span id="networkIcon"><svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg></span>网络'
             +       '</span>'
             +       '<span class="status-value" id="networkValue">--</span>'
             +     '</div>'
@@ -229,7 +229,7 @@
         //   evBatteryFill, fuelCard, fuelPercentValue, fuelBarFill.
         var s = '<div class="status-card ev-card" id="evCard">'
             +   '<div class="ev-header-row">'
-            +     '<span class="ev-title" data-i18n="status.vehicle_status">Vehicle Status</span>'
+            +     '<span class="ev-title" data-i18n="status.vehicle_status">车辆状态</span>'
             +     '<span class="ev-percent-text" id="evPercentValue">--%</span>'
             +   '</div>'
             +   '<div class="ev-svg-container">'
@@ -289,11 +289,11 @@
             +     '<span class="ev-soh-val" id="evSohValue">--%</span>'
             +   '</div>'
             +   '<div class="ev-personalized-range" id="evPersonalizedRow" style="display:none;">'
-            +     '<span class="ev-personalized-label" data-i18n="vehicle.personalized_label">Personalized</span>'
+            +     '<span class="ev-personalized-label" data-i18n="vehicle.personalized_label">⚡ 动态续航</span>'
             +     '<span class="ev-personalized-val" id="evPersonalizedRange">-- km</span>'
             +   '</div>'
             +   '<div class="ev-personalized-range ev-personalized-combined" id="evCombinedRow" style="display:none;">'
-            +     '<span class="ev-personalized-label" data-i18n="vehicle.combined_label">Combined</span>'
+            +     '<span class="ev-personalized-label" data-i18n="vehicle.combined_label">🔋⛽ 综合续航</span>'
             +     '<span class="ev-personalized-val" id="evCombinedRange">-- km</span>'
             +   '</div>'
             + '</div>';
@@ -309,14 +309,14 @@
             +       '<path d="M13 10h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V9.83a2 2 0 0 0-.59-1.42L18 6"/>'
             +       '<path d="M6 14v-3"/>'
             +     '</svg>'
-            +     '<span class="fuel-title" data-i18n="vehicle.fuel">Fuel</span>'
+            +     '<span class="fuel-title" data-i18n="vehicle.fuel">燃油</span>'
             +     '<span class="fuel-percent" id="fuelPercentValue">--%</span>'
             +   '</div>'
             +   '<div class="fuel-bar-track">'
             +     '<div class="fuel-bar-fill" id="fuelBarFill" style="width:0%"></div>'
             +   '</div>'
             +   '<div class="ev-personalized-range fuel-personalized-row" id="fuelPersonalizedRow" style="display:none;">'
-            +     '<span class="ev-personalized-label" data-i18n="vehicle.personalized_label">Personalized</span>'
+            +     '<span class="ev-personalized-label" data-i18n="vehicle.personalized_label">⚡ 动态续航</span>'
             +     '<span class="ev-personalized-val" id="fuelPersonalizedRange">-- km</span>'
             +   '</div>'
             + '</div>';
@@ -386,7 +386,7 @@
         header.className = 'mobile-header';
         header.setAttribute('data-auto-mobile-header', '1');
         header.innerHTML =
-            '<button class="menu-toggle" type="button" aria-label="Open menu" aria-expanded="false">' +
+            '<button class="menu-toggle" type="button" aria-label="打开菜单" aria-expanded="false">' +
               '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">' +
                 '<line x1="4" x2="20" y1="12" y2="12"/>' +
                 '<line x1="4" x2="20" y1="6" y2="6"/>' +

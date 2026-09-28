@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -7,7 +7,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="../shared/app-icon-dark.webp">
-    <title data-i18n="about.page_title">About — OverDrive</title>
+    <title data-i18n="about.page_title">关于 — OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <script src="../shared/theme.js?v=8"></script>
     <script src="../shared/app-shell.js?v=7"></script>
@@ -365,47 +365,47 @@
                 <button class="menu-toggle" onclick="toggleSidebar()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
                 </button>
-                <span style="font-weight:600;" data-i18n="about.page_title_short">About</span>
+                <span style="font-weight:600;" data-i18n="about.page_title_short">关于</span>
                 <div style="width:40px;"></div>
             </div>
 
             <header class="page-header">
-                <h1 class="page-title" data-i18n="about.page_title_short">About</h1>
+                <h1 class="page-title" data-i18n="about.page_title_short">关于</h1>
             </header>
 
             <div class="page-body">
                 <div class="about-page-body">
                     <section class="about-section" id="vehicleInfoSection">
-                        <h3 class="about-subhead" data-i18n="about.vehicle_title">Vehicle &amp; head unit</h3>
-                        <p class="about-section-sub" data-i18n="about.vehicle_sub">Version information reported by this car.</p>
+                        <h3 class="about-subhead" data-i18n="about.vehicle_title">车辆与车机系统信息</h3>
+                        <p class="about-section-sub" data-i18n="about.vehicle_sub">当前比亚迪车机上报的详细固件与版本信息。</p>
                         <div class="vehicle-info-card" aria-live="polite">
                             <div class="vehicle-info-row">
-                                <span class="vehicle-info-label" data-i18n="about.vehicle_firmware">Firmware</span>
+                                <span class="vehicle-info-label" data-i18n="about.vehicle_firmware">车机固件版本</span>
                                 <span class="vehicle-info-value" data-vehicle-info="firmware">—</span>
                             </div>
                             <div class="vehicle-info-row">
-                                <span class="vehicle-info-label" data-i18n="about.vehicle_dsp">DSP</span>
+                                <span class="vehicle-info-label" data-i18n="about.vehicle_dsp">DSP 版本</span>
                                 <span class="vehicle-info-value" data-vehicle-info="dsp">—</span>
                             </div>
                             <div class="vehicle-info-row">
-                                <span class="vehicle-info-label" data-i18n="about.vehicle_mcu">MCU</span>
+                                <span class="vehicle-info-label" data-i18n="about.vehicle_mcu">MCU 固件版本</span>
                                 <span class="vehicle-info-value" data-vehicle-info="mcu">—</span>
                             </div>
                             <div class="vehicle-info-row">
-                                <span class="vehicle-info-label" data-i18n="about.vehicle_android">Android</span>
+                                <span class="vehicle-info-label" data-i18n="about.vehicle_android">Android 系统版本</span>
                                 <span class="vehicle-info-value" data-vehicle-info="android">—</span>
                             </div>
                             <div class="vehicle-info-row">
-                                <span class="vehicle-info-label" data-i18n="about.vehicle_security_patch">Security patch</span>
+                                <span class="vehicle-info-label" data-i18n="about.vehicle_security_patch">安全补丁日期</span>
                                 <span class="vehicle-info-value" data-vehicle-info="securityPatch">—</span>
                             </div>
                             <div class="vehicle-info-row">
-                                <span class="vehicle-info-label" data-i18n="about.vehicle_head_unit">Head unit</span>
+                                <span class="vehicle-info-label" data-i18n="about.vehicle_head_unit">车机硬件型号</span>
                                 <span class="vehicle-info-value" data-vehicle-info="headUnit">—</span>
                             </div>
                         </div>
-                        <p class="vehicle-info-status" id="vehicleInfoStatus" role="status" data-i18n="about.vehicle_loading">Loading vehicle information…</p>
-                        <p class="vehicle-info-privacy" data-i18n="about.vehicle_vin_private">For privacy, VIN is available only in the in-car About screen and is never sent to the browser.</p>
+                        <p class="vehicle-info-status" id="vehicleInfoStatus" role="status" data-i18n="about.vehicle_loading">正在读取车辆信息…</p>
+                        <p class="vehicle-info-privacy" data-i18n="about.vehicle_vin_private">出于隐私保护，车架号 (VIN) 仅在车端“关于”页面显示，绝不会发送至浏览器。</p>
                     </section>
 
                     <!-- Sequence mirrors the native About fragment: section
@@ -413,19 +413,19 @@
                          the Thanks card (recognition leads), then the three
                          tier asks (free → social → monetary). -->
                     <section class="about-section">
-                        <h2 data-i18n="about.support.section">Powered by people like you</h2>
-                        <p class="about-section-sub" data-i18n="about.thanks_subtitle">Built with the help of contributors and supporters.</p>
+                        <h2 data-i18n="about.support.section">由像你一样的人推动</h2>
+                        <p class="about-section-sub" data-i18n="about.thanks_subtitle">在贡献者和支持者的帮助下打造。</p>
                     </section>
 
                     <section class="about-section">
-                        <h3 class="about-subhead" data-i18n="about.contributors_title">Contributors</h3>
-                        <p class="about-section-sub" data-i18n="about.contributors_sub">People who've shipped code to OverDrive.</p>
+                        <h3 class="about-subhead" data-i18n="about.contributors_title">贡献者</h3>
+                        <p class="about-section-sub" data-i18n="about.contributors_sub">为 OverDrive 提交代码的人。</p>
                         <div class="credits-card" id="contributorsList"></div>
                     </section>
 
                     <section class="about-section">
-                        <h3 class="about-subhead" data-i18n="about.supporters_title">Supporters</h3>
-                        <p class="about-section-sub" data-i18n="about.supporters_sub">Folks who've kept the late-night commits caffeinated.</p>
+                        <h3 class="about-subhead" data-i18n="about.supporters_title">支持者</h3>
+                        <p class="about-section-sub" data-i18n="about.supporters_sub">在深夜代码提交时为咖啡因续命的人。</p>
                         <div class="credits-card" id="supportersList"></div>
                         <!-- Explains the ring/size + ×N encoding. Built by
                              renderLegend() from the data that's actually present. -->
@@ -440,8 +440,8 @@
                          backend reports log upload is available (braveheart
                          build). Populated by send-logs.js. -->
                     <section class="about-section" id="diagSection" style="display:none">
-                        <h3 class="about-subhead" data-i18n="logs.section_title">Diagnostics</h3>
-                        <p class="about-section-sub" data-i18n="logs.section_sub">Send a daemon log to the maintainer — you'll get a short code to share.</p>
+                        <h3 class="about-subhead" data-i18n="logs.section_title">诊断</h3>
+                        <p class="about-section-sub" data-i18n="logs.section_sub">遇到问题？在此上传守护进程的日志 — 你将获得一个简短的提取码，然后在 Discord、GitHub Issues 或 WhatsApp 上把它分享给我们，并说明出现了什么问题。</p>
                         <div class="credits-card" id="diagDaemonList"></div>
                     </section>
 
@@ -452,8 +452,8 @@
                                     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
                                 </svg>
                                 <div class="tier-text">
-                                    <p class="tier-title" data-i18n="about.support.star_title">Drop a ⭐ on GitHub</p>
-                                    <p class="tier-value" data-i18n="about.support.star_value">Takes a second. Means a lot.</p>
+                                    <p class="tier-title" data-i18n="about.support.star_title">在 GitHub 上点 ⭐</p>
+                                    <p class="tier-value" data-i18n="about.support.star_value">只需一秒，却意义重大。</p>
                                 </div>
                                 <svg class="tier-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <polyline points="9 18 15 12 9 6"/>
@@ -469,8 +469,8 @@
                                     <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
                                 </svg>
                                 <div class="tier-text">
-                                    <p class="tier-title" data-i18n="about.support.share_title">Tell a fellow owner</p>
-                                    <p class="tier-value" data-i18n="about.support.share_value">Every shared link helps another BYD owner discover Overdrive.</p>
+                                    <p class="tier-title" data-i18n="about.support.share_title">告诉另一位车主</p>
+                                    <p class="tier-value" data-i18n="about.support.share_value">每一次分享都帮助另一位 BYD 车主发现 Overdrive。</p>
                                 </div>
                                 <svg class="tier-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <polyline points="9 18 15 12 9 6"/>
@@ -486,8 +486,8 @@
                                     <line x1="14" y1="1" x2="14" y2="4"/>
                                 </svg>
                                 <div class="tier-text">
-                                    <p class="tier-title" data-i18n="about.support.kofi_title">Fuel the next release ☕</p>
-                                    <p class="tier-value" data-i18n="about.support.kofi_value">A coffee on Ko-fi keeps the late-night commits coming.</p>
+                                    <p class="tier-title" data-i18n="about.support.kofi_title">支持下一个版本 ☕</p>
+                                    <p class="tier-value" data-i18n="about.support.kofi_value">Ko-fi 上的一杯咖啡，让深夜的提交持续不断。</p>
                                 </div>
                                 <svg class="tier-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <polyline points="9 18 15 12 9 6"/>

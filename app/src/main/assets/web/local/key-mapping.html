@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.key_mapping_title">Key Mapping - OverDrive</title>
+    <title data-i18n="app.key_mapping_title">按键映射 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#00876C">
@@ -164,14 +164,14 @@
                 <button class="menu-toggle" onclick="toggleSidebar()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
                 </button>
-                <span style="font-weight:600;" data-i18n="nav.key_mapping">Key Mapping</span>
+                <span style="font-weight:600;" data-i18n="nav.key_mapping">按键映射</span>
                 <div style="width:40px;"></div>
             </div>
 
             <header class="page-header">
-                <h1 class="page-title" data-i18n="keymap.page_title">Key Mapping</h1>
+                <h1 class="page-title" data-i18n="keymap.page_title">按键映射</h1>
                 <div class="header-actions">
-                    <span class="status-badge inactive" id="kmStatusBadge" data-i18n="keymap.badge_off">OFF</span>
+                    <span class="status-badge inactive" id="kmStatusBadge" data-i18n="keymap.badge_off">关</span>
                 </div>
             </header>
 
@@ -188,18 +188,18 @@
                              (there is nothing to go and change). Both need ids for that. -->
                         <div class="info-box-note info-box-framed" id="kmA11yNeeded" style="background:rgba(255,179,0,0.10);border:1px solid rgba(255,179,0,0.35);">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="#ffb300" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                            <div data-i18n="keymap.a11y_needed">Key mapping needs the OverDrive accessibility service turned on to intercept hardware buttons. Bindings are saved but won't fire until you enable it.</div>
+                            <div data-i18n="keymap.a11y_needed">按键映射需要开启 OverDrive 无障碍服务才能拦截硬件按键。映射已保存，但在你启用前不会触发。</div>
                         </div>
                         <!-- Shown INSTEAD of the amber note when the service is enabled but the
                              system hasn't finished starting it — the normal window right after a
                              car power-on, which clears on its own. -->
                         <div class="info-box-note info-box-framed" id="kmA11yPending" style="display:none;background:rgba(3,169,244,0.10);border:1px solid rgba(3,169,244,0.35);">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="#03a9f4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                            <div data-i18n="keymap.a11y_pending">The service is enabled and starting up — hardware buttons become active in a few seconds. No action needed.</div>
+                            <div data-i18n="keymap.a11y_pending">无障碍服务已启用并正在启动中 — 物理按键将在数秒内就绪，无需额外操作。</div>
                         </div>
                         <button class="btn btn-primary" id="kmA11yOpenBtn" onclick="KM.openA11ySettings()" style="width:100%;margin-top:12px;">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                            <span data-i18n="keymap.open_a11y">Open accessibility settings</span>
+                            <span data-i18n="keymap.open_a11y">打开无障碍设置</span>
                         </button>
                     </div>
                 </div>
@@ -208,7 +208,7 @@
                     <div class="card-body">
                         <div class="info-box-note info-box-framed" style="background:rgba(255,179,0,0.10);border:1px solid rgba(255,179,0,0.35);">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="#ffb300" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                            <div data-i18n="keymap.clip_restart_required">Instant replay is saved. The full window becomes available after a cold restart of Camera daemon from Daemons. The current dashcam recording was not interrupted.</div>
+                            <div data-i18n="keymap.clip_restart_required">即时回放片段已保存。在后台守护进程中冷重启摄像头服务后即可查看完整时间窗口。当前行车记录仪录像未受中断。</div>
                         </div>
                     </div>
                 </div>
@@ -217,8 +217,8 @@
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="keymap.enable">Enable key mapping</div>
-                                <div class="setting-desc" data-i18n="keymap.enable_desc">Master switch. When off, all hardware buttons behave exactly as stock — no key is intercepted.</div>
+                                <div class="setting-name" data-i18n="keymap.enable">启用按键映射</div>
+                                <div class="setting-desc" data-i18n="keymap.enable_desc">总开关。关闭后，所有硬件按键完全按原车方式工作 —— 不拦截任何按键。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -229,8 +229,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="keymap.allow_advanced">Advanced actions</div>
-                                <div class="setting-desc" data-i18n="keymap.allow_advanced_desc">Allow bindings that run a raw shell command. Leave off unless you know exactly what you're sending.</div>
+                                <div class="setting-name" data-i18n="keymap.allow_advanced">高级操作</div>
+                                <div class="setting-desc" data-i18n="keymap.allow_advanced_desc">允许运行原始 Shell 命令的映射。除非你清楚自己发送的内容，否则请保持关闭。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -241,8 +241,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="keymap.double_tap_window">Double-tap speed</div>
-                                <div class="setting-desc" data-i18n="keymap.double_tap_window_desc">How long to wait for a second tap before a double-tap binding gives up and the single-tap fires. Raise it if your double-taps often trigger the single action; lower it if a single tap feels laggy.</div>
+                                <div class="setting-name" data-i18n="keymap.double_tap_window">双击速度</div>
+                                <div class="setting-desc" data-i18n="keymap.double_tap_window_desc">等待第二次点击的超时时间。超时后双击绑定放弃等待并执行单击动作。如果双击经常误触发单击，请调高；如果单击感觉迟钝，请调低。</div>
                             </div>
                             <div class="setting-control" style="display:flex;align-items:center;">
                                 <input type="range" class="slider" id="kmDoubleTapWindow" min="250" max="1500" step="50"
@@ -263,16 +263,16 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="5" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M7 13h10"/></svg>
-                            <span data-i18n="keymap.list_title">Your bindings</span>
+                            <span data-i18n="keymap.list_title">你的映射</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div id="kmList"></div>
                         <div id="kmEmpty" class="empty-state" style="display:none;">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="5" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M7 13h10"/></svg>
-                            <p data-i18n="keymap.empty_p">No key bindings yet.</p>
-                            <p class="empty-state-hint" data-i18n="keymap.empty_hint">Switch to the Add tab, press a hardware button to capture it, then choose what it should do.</p>
-                            <button class="btn btn-primary" onclick="KM.goAdd()" data-i18n="keymap.add_binding">Add binding</button>
+                            <p data-i18n="keymap.empty_p">暂无按键映射。</p>
+                            <p class="empty-state-hint" data-i18n="keymap.empty_hint">按下一个硬件按键进行捕获，然后选择它要执行的操作。</p>
+                            <button class="btn btn-primary" onclick="KM.goAdd()" data-i18n="keymap.add_binding">添加映射</button>
                         </div>
                     </div>
                 </div>
@@ -282,7 +282,7 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                            <span id="kmAddTitle" data-i18n="keymap.add_title">Add a binding</span>
+                            <span id="kmAddTitle" data-i18n="keymap.add_title">添加映射</span>
                         </div>
                     </div>
                     <div class="card-body">
@@ -294,7 +294,7 @@
                              button not in the list. -->
                         <div class="setting-row" style="margin-top:4px;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="keymap.known_button">Button</div>
+                                <div class="setting-name" data-i18n="keymap.known_button">按键</div>
                             </div>
                             <div class="setting-control">
                                 <select id="kmKnownButton" class="select-control" onchange="KM.onKnownButtonChange()"></select>
@@ -305,35 +305,35 @@
                              chosen in the Button dropdown. Capture a key that isn't
                              in the known list, or type its keycode. -->
                         <div id="kmCustomKeyWrap" style="display:none;">
-                            <div class="setting-hint" style="margin:12px 0 4px;" data-i18n="keymap.capture_hint">Tap “Capture”, then press the steering-wheel or dash button. Some buttons are handled by the car's firmware and never reach here — if nothing appears, enter its keycode below.</div>
+                            <div class="setting-hint" style="margin:12px 0 4px;" data-i18n="keymap.capture_hint">点按“捕获”，然后按下你想重新映射的方向盘或中控按键。部分按键由车辆固件处理，不会传到这里 —— 如果没有任何反应，说明该按键无法重新映射。</div>
 
                             <div class="km-capture" id="kmCaptureBox">
                                 <div class="km-keycode" id="kmCapKeycode">—</div>
-                                <div class="km-caphint" id="kmCapHint" data-i18n="keymap.capture_idle">No key captured</div>
+                                <div class="km-caphint" id="kmCapHint" data-i18n="keymap.capture_idle">未捕获按键</div>
                             </div>
                             <button class="btn btn-secondary" id="kmCaptureBtn" onclick="KM.toggleCapture()" style="width:100%;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                                <span id="kmCaptureBtnLabel" data-i18n="keymap.capture">Capture a key</span>
+                                <span id="kmCaptureBtnLabel" data-i18n="keymap.capture">捕获按键</span>
                             </button>
 
                             <div class="md-field" style="margin-top:16px;">
                                 <div class="md-field-box">
                                     <input type="number" class="md-input" id="kmManualKeycode" placeholder=" " inputmode="numeric">
-                                    <label class="md-label" for="kmManualKeycode" data-i18n="keymap.manual_keycode">Or enter a keycode</label>
+                                    <label class="md-label" for="kmManualKeycode" data-i18n="keymap.manual_keycode">或输入键码</label>
                                 </div>
-                                <span class="md-supporting" data-i18n="keymap.manual_keycode_help">Android KeyEvent code, e.g. 87 = next track, 88 = previous.</span>
+                                <span class="md-supporting" data-i18n="keymap.manual_keycode_help">Android KeyEvent 键码，例如 87 = 下一曲，88 = 上一曲。</span>
                             </div>
                         </div>
 
                         <div class="setting-row" style="margin-top:8px;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="keymap.press_type">Press type</div>
+                                <div class="setting-name" data-i18n="keymap.press_type">按键方式</div>
                             </div>
                             <div class="setting-control">
                                 <select id="kmPressType" class="select-control" onchange="KM.onPressTypeChange()">
-                                    <option value="single" data-i18n="keymap.press_single">Single press</option>
-                                    <option value="double" data-i18n="keymap.press_double">Double press</option>
-                                    <option value="long" data-i18n="keymap.press_long">Long press</option>
+                                    <option value="single" data-i18n="keymap.press_single">短按</option>
+                                    <option value="double" data-i18n="keymap.press_double">双击</option>
+                                    <option value="long" data-i18n="keymap.press_long">长按</option>
                                 </select>
                             </div>
                         </div>
@@ -346,8 +346,8 @@
                              only when Press type = double (toggled in onPressTypeChange). -->
                         <div class="setting-row" id="kmBlockNativeRow" style="display:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="keymap.block_native_single">Block single-click action</div>
-                                <div class="setting-desc" data-i18n="keymap.block_native_single_desc">Stop the button's normal single-click from firing before your double-click action. A single tap still works, just after a short delay.</div>
+                                <div class="setting-name" data-i18n="keymap.block_native_single">阻止单击动作</div>
+                                <div class="setting-desc" data-i18n="keymap.block_native_single_desc">阻止按键默认的单击动作在你的双击动作之前触发。单击仍然有效，只是会延迟片刻才生效。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -359,13 +359,13 @@
 
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="keymap.action">Action</div>
+                                <div class="setting-name" data-i18n="keymap.action">操作</div>
                             </div>
                             <div class="setting-control">
                                 <select id="kmActionKind" class="select-control" onchange="KM.onKindChange()">
-                                    <option value="curated" data-i18n="keymap.kind_curated">Vehicle action</option>
-                                    <option value="openApp" data-i18n="keymap.kind_open_app">Open app</option>
-                                    <option value="shell" id="kmShellOption" data-i18n="keymap.kind_shell">Advanced: shell</option>
+                                    <option value="curated" data-i18n="keymap.kind_curated">车辆操作</option>
+                                    <option value="openApp" data-i18n="keymap.kind_open_app">打开应用</option>
+                                    <option value="shell" id="kmShellOption" data-i18n="keymap.kind_shell">高级：Shell</option>
                                 </select>
                             </div>
                         </div>
@@ -375,13 +375,13 @@
                              daemon's catalog stays the single source of truth. -->
                         <div id="kmCuratedWrap">
                             <div class="setting-row">
-                                <div class="setting-info"><div class="setting-name" data-i18n="keymap.curated_action">Vehicle action</div></div>
+                                <div class="setting-info"><div class="setting-name" data-i18n="keymap.curated_action">车辆操作</div></div>
                                 <div class="setting-control">
                                     <select id="kmCuratedAction" class="select-control" onchange="KM.onCuratedChange()"></select>
                                 </div>
                             </div>
                             <div class="setting-row" id="kmPayloadRow" style="border-bottom:none;">
-                                <div class="setting-info"><div class="setting-name" data-i18n="keymap.value">Value</div></div>
+                                <div class="setting-info"><div class="setting-name" data-i18n="keymap.value">值</div></div>
                                 <div class="setting-control">
                                     <select id="kmPayload" class="select-control"></select>
                                 </div>
@@ -393,21 +393,21 @@
                                  sliders. Only beforeSeconds/afterSeconds are saved. -->
                             <div id="kmClipWindowWrap" style="display:none;">
                                 <div class="setting-row">
-                                    <div class="setting-info"><div class="setting-name" data-i18n="keymap.clip_window">Clip window</div></div>
+                                    <div class="setting-info"><div class="setting-name" data-i18n="keymap.clip_window">片段窗口</div></div>
                                     <div class="setting-control">
                                         <select id="kmClipPreset" class="select-control" onchange="KM.onClipPresetChange()">
-                                            <option value="15:0" data-i18n="keymap.clip_previous_15">Previous 15 seconds</option>
-                                            <option value="30:0" data-i18n="keymap.clip_previous_30" selected>Previous 30 seconds</option>
-                                            <option value="60:0" data-i18n="keymap.clip_previous_60">Previous 60 seconds</option>
-                                            <option value="15:15" data-i18n="keymap.clip_before_after_15">15 seconds before + 15 after</option>
-                                            <option value="30:30" data-i18n="keymap.clip_before_after_30">30 seconds before + 30 after</option>
-                                            <option value="custom" data-i18n="keymap.clip_custom">Custom</option>
+                                            <option value="15:0" data-i18n="keymap.clip_previous_15">前 15 秒</option>
+                                            <option value="30:0" data-i18n="keymap.clip_previous_30" selected>前 30 秒</option>
+                                            <option value="60:0" data-i18n="keymap.clip_previous_60">前 60 秒</option>
+                                            <option value="15:15" data-i18n="keymap.clip_before_after_15">事件前 15 秒 + 事件后 15 秒</option>
+                                            <option value="30:30" data-i18n="keymap.clip_before_after_30">30 秒前 + 30 秒</option>
+                                            <option value="custom" data-i18n="keymap.clip_custom">自定义</option>
                                         </select>
                                     </div>
                                 </div>
                                 <div id="kmClipCustomWrap" style="display:none;">
                                     <div class="setting-row">
-                                        <div class="setting-info"><div class="setting-name" data-i18n="keymap.clip_before">Seconds before</div></div>
+                                        <div class="setting-info"><div class="setting-name" data-i18n="keymap.clip_before">秒前</div></div>
                                         <div class="setting-control">
                                             <div class="slider-control">
                                                 <span class="slider-value" id="kmClipBeforeValue">30s</span>
@@ -416,7 +416,7 @@
                                         </div>
                                     </div>
                                     <div class="setting-row" style="border-bottom:none;">
-                                        <div class="setting-info"><div class="setting-name" data-i18n="keymap.clip_after">Seconds after</div></div>
+                                        <div class="setting-info"><div class="setting-name" data-i18n="keymap.clip_after">秒后</div></div>
                                         <div class="setting-control">
                                             <div class="slider-control">
                                                 <span class="slider-value" id="kmClipAfterValue">0s</span>
@@ -424,7 +424,7 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="setting-hint" style="margin-top:8px;" data-i18n="keymap.clip_window_hint">The complete clip can be up to 60 seconds.</div>
+                                    <div class="setting-hint" style="margin-top:8px;" data-i18n="keymap.clip_window_hint">单个视频片段最长可达 60 秒。</div>
                                 </div>
                             </div>
                         </div>
@@ -433,15 +433,15 @@
                              fetched live from /api/apps/list (daemon PackageManager). -->
                         <div id="kmOpenAppWrap" style="display:none;">
                             <div class="setting-row" style="border-bottom:none;">
-                                <div class="setting-info"><div class="setting-name" data-i18n="keymap.app">App</div></div>
+                                <div class="setting-info"><div class="setting-name" data-i18n="keymap.app">应用</div></div>
                                 <div class="setting-control">
                                     <select id="kmOpenApp" class="select-control"></select>
                                 </div>
                             </div>
                             <div class="setting-row" style="border-bottom:none;">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="keymap.split_screen">Split screen</div>
-                                    <div class="setting-desc" data-i18n="keymap.split_screen_desc">Open the app docked to one half of the screen instead of full-screen.</div>
+                                    <div class="setting-name" data-i18n="keymap.split_screen">分割屏幕</div>
+                                    <div class="setting-desc" data-i18n="keymap.split_screen_desc">打开停靠到屏幕一半的应用程序，而不是全屏。</div>
                                 </div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
@@ -457,12 +457,12 @@
                             <div class="md-field" style="margin-top:8px;">
                                 <div class="md-field-box">
                                     <input type="text" class="md-input" id="kmShellCmd" placeholder=" " autocomplete="off">
-                                    <label class="md-label" for="kmShellCmd" data-i18n="keymap.shell_cmd">Shell command</label>
+                                    <label class="md-label" for="kmShellCmd" data-i18n="keymap.shell_cmd">Shell 命令</label>
                                 </div>
                             </div>
                             <div class="km-adv-warn">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                                <span data-i18n="keymap.shell_warn">Runs as the daemon on every press. A bad command can disrupt the head unit. Requires “Advanced actions” enabled.</span>
+                                <span data-i18n="keymap.shell_warn">每次按键都会以守护进程身份运行。错误的命令可能扰乱车机。需先启用“高级操作”。</span>
                             </div>
                         </div>
 
@@ -476,38 +476,38 @@
                         <div class="byd-action-row" style="margin-top:16px;">
                             <button class="btn btn-secondary" id="kmAddStepBtn" onclick="KM.addStep()" style="flex:1;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                <span data-i18n="keymap.add_step">Add step</span>
+                                <span data-i18n="keymap.add_step">添加步骤</span>
                             </button>
                             <button class="btn btn-primary" id="kmAddBtn" onclick="KM.addBinding()" style="flex:1;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><polyline points="20 6 9 17 4 12"/></svg>
-                                <span id="kmAddBtnLabel" data-i18n="keymap.add_binding">Add binding</span>
+                                <span id="kmAddBtnLabel" data-i18n="keymap.add_binding">添加映射</span>
                             </button>
                         </div>
-                        <div class="setting-hint" style="margin-top:8px;" data-i18n="keymap.sequence_hint">Add one action, or chain several with “Add step” to fire them all from one button.</div>
+                        <div class="setting-hint" style="margin-top:8px;" data-i18n="keymap.sequence_hint">添加一个操作，或用“添加步骤”串联多个操作，一个按键即可全部触发。</div>
                         <!-- Quick-control buttons reuse the action builder above: compose the
                              action exactly as for a key, then save it as a dashboard button
                              instead of binding it to a keycode. The daemon fires both through
                              one executor, so a button can never do more than a key can. -->
                         <div class="setting-row" style="margin-top:20px;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="keymap.qc_title">Or add it as a dashboard button</div>
-                                <div class="setting-desc" data-i18n="keymap.qc_desc">Saves the action above as a button under Quick controls on the dashboard, with no physical key needed.</div>
+                                <div class="setting-name" data-i18n="keymap.qc_title">或添加为仪表盘快捷按钮</div>
+                                <div class="setting-desc" data-i18n="keymap.qc_desc">将上述动作作为快捷按键保存到仪表盘的“快捷控制”卡片中，无需依赖方向盘物理按键。</div>
                             </div>
                         </div>
                         <div class="md-field">
                             <div class="md-field-box">
                                 <input type="text" class="md-input" id="kmQcLabel" placeholder=" " autocomplete="off" maxlength="40">
-                                <label class="md-label" for="kmQcLabel" data-i18n="keymap.qc_label">Button label</label>
+                                <label class="md-label" for="kmQcLabel" data-i18n="keymap.qc_label">按钮名称</label>
                             </div>
                         </div>
                         <div class="byd-action-row" style="margin-top:12px;">
                             <button class="btn btn-secondary" id="kmQcSaveBtn" onclick="KM.saveQuickControl()" style="flex:1;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-                                <span data-i18n="keymap.qc_save">Add dashboard button</span>
+                                <span data-i18n="keymap.qc_save">添加快捷按钮</span>
                             </button>
                         </div>
                         <div id="kmQcList" class="km-steps" style="margin-top:12px;"></div>
-                        <div id="kmQcEmpty" class="setting-hint" style="margin-top:8px;display:none;" data-i18n="keymap.qc_empty">No dashboard buttons yet.</div>
+                        <div id="kmQcEmpty" class="setting-hint" style="margin-top:8px;display:none;" data-i18n="keymap.qc_empty">暂无仪表盘快捷按钮。</div>
                     </div>
                 </div>
             </div>

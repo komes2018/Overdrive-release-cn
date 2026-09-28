@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.live_view_title">Live View - OverDrive</title>
+    <title data-i18n="app.live_view_title">现场视频 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="../shared/app-icon-dark.webp">
@@ -59,7 +59,7 @@
                             <div class="camera-top-bar">
                                 <div class="top-bar-left">
                                     <div class="connection-status" id="connectionStatus" role="status"
-                                         aria-label="Select Camera"
+                                         aria-label="选择摄像头"
                                          data-i18n-attr="aria-label:pip.select_camera">
                                         <span class="conn-dot"></span>
                                     </div>
@@ -71,18 +71,18 @@
                                          option popup can't be themed. -->
                                     <div class="quality-menu" id="qualityMenu">
                                         <select id="qualitySelector" class="quality-menu__native" onchange="BYD.stream.setQuality(this.value)">
-                                            <option value="ULTRA_LOW"  data-i18n="stream.quality_ultra_low">Ultra Low (400k)</option>
-                                            <option value="LOW"        data-i18n="stream.quality_low">Low (600k)</option>
-                                            <option value="MEDIUM"     selected data-i18n="stream.quality_medium">Medium (1M)</option>
-                                            <option value="HIGH"       data-i18n="stream.quality_high">High (1.5M)</option>
-                                            <option value="ULTRA_HIGH" data-i18n="stream.quality_ultra_high">Ultra High (2.5M)</option>
-                                            <option value="SMOOTH"     data-i18n="stream.quality_smooth">Smooth (3.5M, 25 fps)</option>
-                                            <option value="MAX"        data-i18n="stream.quality_max">Max (5M, 30 fps)</option>
+                                            <option value="ULTRA_LOW"  data-i18n="stream.quality_ultra_low">超低 (400k)</option>
+                                            <option value="LOW"        data-i18n="stream.quality_low">低 (600k)</option>
+                                            <option value="MEDIUM"     selected data-i18n="stream.quality_medium">平均值 (1M)</option>
+                                            <option value="HIGH"       data-i18n="stream.quality_high">高1.5米</option>
+                                            <option value="ULTRA_HIGH" data-i18n="stream.quality_ultra_high">超高 (2.5M)</option>
+                                            <option value="SMOOTH"     data-i18n="stream.quality_smooth">流 (3.5M,25fps)</option>
+                                            <option value="MAX"        data-i18n="stream.quality_max">极限 (5M,30fps)</option>
                                         </select>
                                         <button type="button" class="quality-menu__trigger" id="qualityMenuTrigger"
                                                 aria-haspopup="listbox" aria-expanded="false"
                                                 data-i18n-attr="aria-label:recording.video_quality_title"
-                                                aria-label="Video Quality">
+                                                aria-label="视频质量">
                                             <span class="quality-menu__value" id="qualityMenuValue">Medium (1M)</span>
                                             <svg class="quality-menu__chevron" viewBox="0 0 24 24" fill="none"
                                                  stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -97,8 +97,8 @@
                                             onclick="BYD.cabinListener.toggle()"
                                             aria-pressed="false"
                                             data-i18n-attr="title:liveview.listen_cabin;aria-label:liveview.listen_cabin"
-                                            title="Listen to cabin"
-                                            aria-label="Listen to cabin">
+                                            title="车内收音监听"
+                                            aria-label="车内收音监听">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                             <path d="M11 5 6 9H2v6h4l5 4V5Z"/>
                                             <path d="M15.5 8.5a5 5 0 0 1 0 7"/>
@@ -131,11 +131,11 @@
                                         </svg>
                                         <span class="idle-spinner" aria-hidden="true"></span>
                                     </div>
-                                    <span class="idle-text" data-i18n="stream.idle_hint">Tap a camera on the car below</span>
+                                    <span class="idle-text" data-i18n="stream.idle_hint">点击下方车辆示意图上的摄像头</span>
                                     <span class="idle-subtext" id="videoIdleSubtext"></span>
                                 </div>
                                 <div class="camera-label-overlay" id="cameraLabelOverlay" style="display:none;">
-                                    <span id="currentCameraLabel" data-i18n="stream.front_camera">Front Camera</span>
+                                    <span id="currentCameraLabel" data-i18n="stream.front_camera">前视摄像头</span>
                                 </div>
 
                                 <!-- Deterrent controls — manual horn + light triggers so the
@@ -148,26 +148,26 @@
                                      to prevent accidental activation. -->
                                 <div class="deterrent-controls" id="deterrentControls" style="display:none;"
                                      role="group" data-i18n-attr="aria-label:liveview.deterrent_group_label"
-                                     aria-label="Vehicle deterrent controls">
+                                     aria-label="主动威慑控制">
                                     <button type="button" class="deterrent-btn deterrent-horn" id="deterrentHornBtn"
                                             onclick="BYD.stream.fireDeterrent('horn')"
                                             data-i18n-attr="title:liveview.deterrent_horn;aria-label:liveview.deterrent_horn"
-                                            title="Horn" aria-label="Horn">
+                                            title="鸣笛" aria-label="鸣笛">
                                         <!-- Lucide megaphone -->
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>
                                         </svg>
-                                        <span class="deterrent-label" data-i18n="liveview.deterrent_horn">Horn</span>
+                                        <span class="deterrent-label" data-i18n="liveview.deterrent_horn">鸣笛</span>
                                     </button>
                                     <button type="button" class="deterrent-btn deterrent-flash" id="deterrentFlashBtn"
                                             onclick="BYD.stream.fireDeterrent('flash')"
                                             data-i18n-attr="title:liveview.deterrent_flash;aria-label:liveview.deterrent_flash"
-                                            title="Flash" aria-label="Flash">
+                                            title="闪灯" aria-label="闪灯">
                                         <!-- Lucide lightbulb -->
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>
                                         </svg>
-                                        <span class="deterrent-label" data-i18n="liveview.deterrent_flash">Flash</span>
+                                        <span class="deterrent-label" data-i18n="liveview.deterrent_flash">闪灯</span>
                                     </button>
                                 </div>
                             </div>
@@ -177,7 +177,7 @@
                             <section class="camera-selector-card" aria-label="Camera selector">
                             <!-- Camera selector — first card in the landscape utility rail. -->
                             <div class="selector-card-header">
-                                <h2 data-i18n="liveview.cameras">Cameras</h2>
+                                <h2 data-i18n="liveview.cameras">摄像头</h2>
                             </div>
                             <div class="car-selector-bottom">
                                 <div class="car-image-container">
@@ -191,7 +191,7 @@
                                     <div class="cam-hotspot" data-cam="1" onclick="BYD.stream.selectCamera(1)">
                                         <div class="hotspot-pulse"></div>
                                         <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label" data-i18n="stream.hotspot_front">FRONT</span>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_front">前</span>
                                     </div>
                                     <!-- OEM Dashcam (data-cam=6). Hidden by default; the
                                          init script unhides it iff /api/settings/quality
@@ -203,27 +203,27 @@
                                     <div class="cam-hotspot cam-dvr" data-cam="6" style="display:none;" onclick="BYD.stream.selectCamera(6)">
                                         <div class="hotspot-pulse"></div>
                                         <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label" data-i18n="stream.hotspot_oem_dashcam">DVR</span>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_oem_dashcam">虚拟机</span>
                                     </div>
                                     <div class="cam-hotspot" data-cam="3" onclick="BYD.stream.selectCamera(3)">
                                         <div class="hotspot-pulse"></div>
                                         <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label" data-i18n="stream.hotspot_rear">REAR</span>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_rear">后</span>
                                     </div>
                                     <div class="cam-hotspot" data-cam="4" onclick="BYD.stream.selectCamera(4)">
                                         <div class="hotspot-pulse"></div>
                                         <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label" data-i18n="stream.hotspot_left">LEFT</span>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_left">左</span>
                                     </div>
                                     <div class="cam-hotspot" data-cam="2" onclick="BYD.stream.selectCamera(2)">
                                         <div class="hotspot-pulse"></div>
                                         <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label" data-i18n="stream.hotspot_right">RIGHT</span>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_right">右</span>
                                     </div>
                                     <div class="cam-hotspot cam-all" data-cam="0" onclick="BYD.stream.selectCamera(0)">
                                         <div class="hotspot-pulse"></div>
                                         <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label" data-i18n="stream.hotspot_all">ALL</span>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_all">全部</span>
                                     </div>
                                 </div>
                             </div>
@@ -232,7 +232,7 @@
                             <section class="live-location-card" id="locationCard">
                                 <div class="location-card-header">
                                     <div>
-                                        <h2 data-i18n="dashboard.card_location">Vehicle location</h2>
+                                        <h2 data-i18n="dashboard.card_location">车辆位置</h2>
                                         <div class="location-freshness is-sk">
                                             <span class="location-freshness-dot"></span>
                                             <span class="location-freshness-label">
@@ -244,7 +244,7 @@
                                     <button type="button" class="location-close-button"
                                             onclick="BYD.liveLayout.setMapExpanded(false)"
                                             data-i18n-attr="aria-label:liveview.back_to_cameras"
-                                            aria-label="Back to cameras">
+                                            aria-label="返回摄像头列表">
                                         <svg viewBox="0 0 24 24" aria-hidden="true">
                                             <path fill="currentColor" d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l8.92-7.92L13.5 5.5 8 11h12z"/>
                                         </svg>
@@ -257,7 +257,7 @@
                                         <button class="btn-map-float btn-my-location"
                                                 onclick="BYD.map.showMyLocation()"
                                                 data-i18n-attr="aria-label:liveview.my_location"
-                                                aria-label="Show my location">
+                                                aria-label="定位我的位置">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                                 <circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>
                                             </svg>
@@ -265,7 +265,7 @@
                                         <button class="btn-map-float btn-directions"
                                                 onclick="BYD.map.openDirections()"
                                                 data-i18n-attr="aria-label:liveview.directions"
-                                                aria-label="Directions to vehicle">
+                                                aria-label="寻车路线导航">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>
                                         </button>
                                     </div>
@@ -288,7 +288,7 @@
                                         <path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/>
                                         <path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>
                                     </svg>
-                                    <span id="locationExpandLabel" data-i18n="liveview.expand_map">Expand map</span>
+                                    <span id="locationExpandLabel" data-i18n="liveview.expand_map">展开地图</span>
                                 </button>
                             </section>
                             </aside>

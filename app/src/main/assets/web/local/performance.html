@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.performance_title">Performance - OverDrive</title>
+    <title data-i18n="app.performance_title">性能 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <script src="../shared/theme.js?v=8"></script>
     <script src="../shared/app-shell.js?v=7"></script>
@@ -801,16 +801,16 @@
                         <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
                     </svg>
                 </button>
-                <span style="font-weight:600;" data-i18n="performance.page_header_short">Performance</span>
+                <span style="font-weight:600;" data-i18n="performance.page_header_short">性能</span>
                 <div style="width:40px;"></div>
             </div>
 
             <header class="page-header">
-                <h1 class="page-title" data-i18n="performance.page_title">Performance Monitor</h1>
+                <h1 class="page-title" data-i18n="performance.page_title">性能监测器</h1>
                 <div class="header-actions">
                     <div class="monitoring-status compact-status-pill">
                         <span class="monitoring-dot compact-status-pill__dot" id="monitoringDot"></span>
-                        <span id="monitoringText" data-i18n="performance.monitoring">Monitoring</span>
+                        <span id="monitoringText" data-i18n="performance.monitoring">监测</span>
                     </div>
                     <div class="header-badge">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -827,28 +827,28 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;margin-right:8px;stroke:var(--success);">
                                 <rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/>
                             </svg>
-                            <span data-i18n="performance.soc_history">Battery SOC History</span>
+                            <span data-i18n="performance.soc_history">动力电池 SOC 历史</span>
                         </div>
                         <div class="soc-time-selector" id="socTimeSelector">
-                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setSocTimeRange(24)" data-i18n="performance.range_24h">24h</button>
-                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setSocTimeRange(72)" data-i18n="performance.range_3d">3 Days</button>
-                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setSocTimeRange(168)" data-i18n="performance.range_7d">7 Days</button>
+                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setSocTimeRange(24)" data-i18n="performance.range_24h">24小时</button>
+                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setSocTimeRange(72)" data-i18n="performance.range_3d">3天</button>
+                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setSocTimeRange(168)" data-i18n="performance.range_7d">7天</button>
                         </div>
                     </div>
                     <div class="soc-stats-row">
-                        <div class="soc-stat"><span class="soc-stat-value" id="socCurrent">--%</span><span class="soc-stat-label" data-i18n="performance.label_current">Current</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="socKwh">-- kWh</span><span class="soc-stat-label" data-i18n="performance.label_energy">Energy</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="socMin">--%</span><span class="soc-stat-label" data-i18n="performance.label_min">Min</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="socMax">--%</span><span class="soc-stat-label" data-i18n="performance.label_max">Max</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="socAvg">--%</span><span class="soc-stat-label" data-i18n="performance.label_avg">Avg</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="chargingSessions">--</span><span class="soc-stat-label" data-i18n="performance.label_charges">Charges</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="socCurrent">--%</span><span class="soc-stat-label" data-i18n="performance.label_current">当前百分比</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="socKwh">-- kWh</span><span class="soc-stat-label" data-i18n="performance.label_energy">剩余电量</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="socMin">--%</span><span class="soc-stat-label" data-i18n="performance.label_min">最低</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="socMax">--%</span><span class="soc-stat-label" data-i18n="performance.label_max">最高</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="socAvg">--%</span><span class="soc-stat-label" data-i18n="performance.label_avg">平均</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="chargingSessions">--</span><span class="soc-stat-label" data-i18n="performance.label_charges">充电次数</span></div>
                     </div>
                     <div class="chart-container" style="height: 250px;">
                         <canvas id="socChart" class="chart-canvas"></canvas>
                     </div>
                     <div class="chart-legend" style="margin-top:12px;justify-content:center;">
                         <div class="legend-item"><span class="legend-dot" style="background:var(--success);"></span><span data-i18n="performance.legend_soc">SOC %</span></div>
-                        <div class="legend-item"><span class="legend-dot" style="background:var(--brand-secondary);"></span><span data-i18n="abrp.charging">Charging</span></div>
+                        <div class="legend-item"><span class="legend-dot" style="background:var(--brand-secondary);"></span><span data-i18n="abrp.charging">充电</span></div>
                     </div>
                 </div>
 
@@ -859,28 +859,28 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;margin-right:8px;stroke:var(--chart-warning);">
                                 <rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/>
                             </svg>
-                            <span data-i18n="performance.batt12v_history">12V Battery History</span>
+                            <span data-i18n="performance.batt12v_history">12V 小电瓶历史</span>
                         </div>
                         <div class="soc-time-selector" id="voltageTimeSelector">
-                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setBatteryTimeRange(24)" data-i18n="performance.range_24h">24h</button>
-                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setBatteryTimeRange(72)" data-i18n="performance.range_3d">3 Days</button>
-                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setBatteryTimeRange(168)" data-i18n="performance.range_7d">7 Days</button>
+                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setBatteryTimeRange(24)" data-i18n="performance.range_24h">24小时</button>
+                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setBatteryTimeRange(72)" data-i18n="performance.range_3d">3天</button>
+                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setBatteryTimeRange(168)" data-i18n="performance.range_7d">7天</button>
                         </div>
                     </div>
                     <div class="soc-stats-row">
-                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vCurrent">--V</span><span class="soc-stat-label" data-i18n="performance.label_current">Current</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vMin">--V</span><span class="soc-stat-label" data-i18n="performance.label_min">Min</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vMax">--V</span><span class="soc-stat-label" data-i18n="performance.label_max">Max</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vAvg">--V</span><span class="soc-stat-label" data-i18n="performance.label_avg">Avg</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vCurrent">--V</span><span class="soc-stat-label" data-i18n="performance.label_current">当前百分比</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vMin">--V</span><span class="soc-stat-label" data-i18n="performance.label_min">最低</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vMax">--V</span><span class="soc-stat-label" data-i18n="performance.label_max">最高</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vAvg">--V</span><span class="soc-stat-label" data-i18n="performance.label_avg">平均</span></div>
                     </div>
                     <div class="chart-container" style="height: 200px;">
                         <canvas id="voltageChart" class="chart-canvas"></canvas>
                     </div>
-                    <div class="chart-hint" data-i18n="performance.chart_hint">Touch or hover to see values</div>
+                    <div class="chart-hint" data-i18n="performance.chart_hint">触摸或悬停查看数值</div>
                     <div class="chart-legend" style="margin-top:8px;justify-content:center;">
-                        <div class="legend-item"><span class="legend-dot" style="background:var(--chart-warning);"></span><span data-i18n="performance.legend_12v">12V Voltage</span></div>
-                        <div class="legend-item"><span class="legend-dot" style="background:rgba(239,68,68,0.5);"></span><span data-i18n="performance.legend_warn_115">Warning (11.5V)</span></div>
-                        <div class="legend-item"><span class="legend-dot" style="background:rgba(14,165,233,0.3);"></span><span data-i18n="abrp.charging">Charging</span></div>
+                        <div class="legend-item"><span class="legend-dot" style="background:var(--chart-warning);"></span><span data-i18n="performance.legend_12v">12V 电压</span></div>
+                        <div class="legend-item"><span class="legend-dot" style="background:rgba(239,68,68,0.5);"></span><span data-i18n="performance.legend_warn_115">低电警告 (11.5V)</span></div>
+                        <div class="legend-item"><span class="legend-dot" style="background:rgba(14,165,233,0.3);"></span><span data-i18n="abrp.charging">充电</span></div>
                     </div>
                 </div>
 
@@ -891,31 +891,31 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;margin-right:8px;stroke:var(--chart-soh);">
                                 <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
                             </svg>
-                            <span data-i18n="performance.battery_health">Battery Health</span>
+                            <span data-i18n="performance.battery_health">电池健康度 (SOH)</span>
                         </div>
                         <div class="soc-time-selector" id="healthTimeSelector">
-                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setHealthTimeRange(24)" data-i18n="performance.range_24h">24h</button>
-                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setHealthTimeRange(72)" data-i18n="performance.range_3d">3 Days</button>
-                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setHealthTimeRange(168)" data-i18n="performance.range_7d">7 Days</button>
+                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setHealthTimeRange(24)" data-i18n="performance.range_24h">24小时</button>
+                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setHealthTimeRange(72)" data-i18n="performance.range_3d">3天</button>
+                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setHealthTimeRange(168)" data-i18n="performance.range_7d">7天</button>
                         </div>
                     </div>
                     <div class="soc-stats-row">
-                        <div class="soc-stat"><span class="soc-stat-value" id="sohValue" style="color:var(--chart-soh);">--%</span><span class="soc-stat-label" data-i18n="performance.label_soh">SOH</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="estCapacity">-- kWh</span><span class="soc-stat-label" data-i18n="performance.label_est_cap">Est. Cap</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="tempHighVal">--°C</span><span class="soc-stat-label" data-i18n="performance.label_temp_hi">Temp Hi</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="tempLowVal">--°C</span><span class="soc-stat-label" data-i18n="performance.label_temp_lo">Temp Lo</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="tempDeltaVal">--°C</span><span class="soc-stat-label" data-i18n="performance.label_temp_delta">Δ Temp</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="thermalStatus">--</span><span class="soc-stat-label" data-i18n="performance.label_status">Status</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="sohValue" style="color:var(--chart-soh);">--%</span><span class="soc-stat-label" data-i18n="performance.label_soh">电池健康度 (SOH)</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="estCapacity">-- kWh</span><span class="soc-stat-label" data-i18n="performance.label_est_cap">预估电池容量</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="tempHighVal">--°C</span><span class="soc-stat-label" data-i18n="performance.label_temp_hi">最高温度</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="tempLowVal">--°C</span><span class="soc-stat-label" data-i18n="performance.label_temp_lo">最低温度</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="tempDeltaVal">--°C</span><span class="soc-stat-label" data-i18n="performance.label_temp_delta">电芯温差</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="thermalStatus">--</span><span class="soc-stat-label" data-i18n="performance.label_status">状态</span></div>
                     </div>
                     <div class="chart-container" style="height: 220px;">
                         <canvas id="thermalChart" class="chart-canvas"></canvas>
                     </div>
-                    <div class="chart-hint" data-i18n="performance.chart_hint">Touch or hover to see values</div>
+                    <div class="chart-hint" data-i18n="performance.chart_hint">触摸或悬停查看数值</div>
                     <div class="chart-legend" style="margin-top:8px;justify-content:center;">
-                        <div class="legend-item"><span class="legend-dot" style="background:var(--danger);"></span><span data-i18n="performance.legend_high">High</span></div>
-                        <div class="legend-item"><span class="legend-dot" style="background:var(--success);"></span><span data-i18n="performance.legend_low">Low</span></div>
-                        <div class="legend-item"><span class="legend-dot" style="background:var(--chart-batt-3);"></span><span data-i18n="performance.legend_avg">Average</span></div>
-                        <div class="legend-item"><span class="legend-dot" style="background:rgba(14,165,233,0.3);"></span><span data-i18n="abrp.charging">Charging</span></div>
+                        <div class="legend-item"><span class="legend-dot" style="background:var(--danger);"></span><span data-i18n="performance.legend_high">最高</span></div>
+                        <div class="legend-item"><span class="legend-dot" style="background:var(--success);"></span><span data-i18n="performance.legend_low">最低</span></div>
+                        <div class="legend-item"><span class="legend-dot" style="background:var(--chart-batt-3);"></span><span data-i18n="performance.legend_avg">平均</span></div>
+                        <div class="legend-item"><span class="legend-dot" style="background:rgba(14,165,233,0.3);"></span><span data-i18n="abrp.charging">充电</span></div>
                     </div>
                 </div>
 
@@ -927,16 +927,16 @@
                                 <rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/>
                                 <path d="M9 12.5L11 10.5 12 12 13 10.5 15 12.5"/>
                             </svg>
-                            <span data-i18n="performance.soh_card_title">State of Health (SOH)</span>
+                            <span data-i18n="performance.soh_card_title">电池健康度 (SOH)</span>
                         </div>
-                        <button class="btn btn-danger" id="btnResetSoh" onclick="BYD.performance.resetSoh()" style="font-size:11px;padding:4px 10px;border-radius:6px;" data-i18n="performance.btn_reset">Reset</button>
+                        <button class="btn btn-danger" id="btnResetSoh" onclick="BYD.performance.resetSoh()" style="font-size:11px;padding:4px 10px;border-radius:6px;" data-i18n="performance.btn_reset">重置</button>
                     </div>
 
                     <!-- Live SOH headline -->
                     <div style="display:flex;align-items:center;gap:16px;margin:16px 0;">
                         <div style="text-align:center;min-width:120px;">
                             <div id="sohDetailPercent" style="font-family:'JetBrains Mono',monospace;font-size:42px;font-weight:700;color:var(--chart-soh);line-height:1;">--%</div>
-                            <div style="font-size:12px;color:var(--text-muted);margin-top:4px;" data-i18n="performance.active_soh">Active SOH</div>
+                            <div style="font-size:12px;color:var(--text-muted);margin-top:4px;" data-i18n="performance.active_soh">当前生效 SOH</div>
                             <div id="sohCalibrationAnchor" style="font-size:11px;color:var(--text-muted);margin-top:2px;display:none;"></div>
                             <div id="sohFallbackCaption" class="soh-caption" hidden></div>
                         </div>
@@ -944,8 +944,8 @@
                             <!-- Battery capacity row — tappable, opens modal -->
                             <div id="sohCapacityRow" onclick="BYD.performance.openSohCapacityModal()"
                                  style="background:var(--bg-elevated);padding:14px 16px;border-radius:12px;cursor:pointer;border:1px solid var(--border-subtle);">
-                                <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;" data-i18n="soh.battery_capacity_label">Battery capacity</div>
-                                <div id="sohCapacitySummary" style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:600;color:var(--text-primary);margin-top:4px;" data-i18n="soh.tap_to_set">Tap to set</div>
+                                <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;" data-i18n="soh.battery_capacity_label">电池容量</div>
+                                <div id="sohCapacitySummary" style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:600;color:var(--text-primary);margin-top:4px;" data-i18n="soh.tap_to_set">按下设置</div>
                                 <div id="sohCapacitySource" style="font-size:11px;color:var(--text-muted);margin-top:2px;"></div>
                             </div>
                         </div>
@@ -954,11 +954,11 @@
                     <!-- Metadata row -->
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
                         <div style="background:var(--bg-elevated);padding:8px 10px;border-radius:6px;">
-                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;" data-i18n="performance.meta_nominal">Nominal</div>
+                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;" data-i18n="performance.meta_nominal">标称容量</div>
                             <div id="sohDetailNominal" style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:var(--text-primary);margin-top:2px;">-- kWh</div>
                         </div>
                         <div style="background:var(--bg-elevated);padding:8px 10px;border-radius:6px;">
-                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;" data-i18n="performance.meta_updated">Updated</div>
+                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;" data-i18n="performance.meta_updated">最后更新</div>
                             <div id="sohDetailUpdated" style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:var(--text-primary);margin-top:2px;">--</div>
                         </div>
                     </div>
@@ -970,9 +970,9 @@
                          notification's defaultClickUrl points here. JS wires
                          the button to /api/performance/soh/nominal directly. -->
                     <div id="sohFrameMismatchBanner" style="display:none;margin-top:10px;padding:12px 14px;background:rgba(255,176,0,0.08);border:1px solid rgba(255,176,0,0.4);border-radius:8px;">
-                        <div style="font-size:11px;font-weight:700;color:var(--chart-soh);text-transform:uppercase;letter-spacing:0.5px;" data-i18n="soh.frame_mismatch_title">Pack-capacity frame mismatch</div>
+                        <div style="font-size:11px;font-weight:700;color:var(--chart-soh);text-transform:uppercase;letter-spacing:0.5px;" data-i18n="soh.frame_mismatch_title">电池包容量与帧数据不匹配</div>
                         <div id="sohFrameMismatchBody" style="font-size:12px;color:var(--text-primary);margin-top:6px;line-height:1.5;"></div>
-                        <button id="sohFrameMismatchAction" class="btn" style="margin-top:10px;font-size:12px;padding:6px 14px;border-radius:6px;background:var(--chart-soh);color:#000;border:none;cursor:pointer;font-weight:600;" data-i18n="soh.use_observed_value">Use observed value</button>
+                        <button id="sohFrameMismatchAction" class="btn" style="margin-top:10px;font-size:12px;padding:6px 14px;border-radius:6px;background:var(--chart-soh);color:#000;border:none;cursor:pointer;font-weight:600;" data-i18n="soh.use_observed_value">使用观测值</button>
                     </div>
                 </div>
 
@@ -982,18 +982,18 @@
                      data-theme=light. Inline color overrides removed. -->
                 <div id="sohCapacityModalBackdrop" class="modal-backdrop" style="display:none;">
                     <div class="modal-card soh-modal-card" role="dialog" aria-modal="true" aria-labelledby="sohCapacityModalTitle">
-                        <h3 id="sohCapacityModalTitle" class="soh-modal-title" data-i18n="soh.modal_title">Set battery capacity</h3>
+                        <h3 id="sohCapacityModalTitle" class="soh-modal-title" data-i18n="soh.modal_title">设置电池容量</h3>
 
-                        <label class="soh-modal-label" for="sohCapacityModalInput" data-i18n="soh.modal_capacity_label">Capacity (kWh)</label>
+                        <label class="soh-modal-label" for="sohCapacityModalInput" data-i18n="soh.modal_capacity_label">产能 (kWh)</label>
                         <input id="sohCapacityModalInput" class="soh-modal-input soh-modal-input-num" type="number" min="5" max="120" step="0.1" />
 
-                        <label class="soh-modal-label" for="sohCapacityModalModel" data-i18n="soh.modal_model_label">Model</label>
+                        <label class="soh-modal-label" for="sohCapacityModalModel" data-i18n="soh.modal_model_label">模型</label>
                         <select id="sohCapacityModalModel" class="soh-modal-input soh-modal-select"></select>
 
                         <div class="soh-modal-actions">
-                            <button class="btn btn-secondary" onclick="BYD.performance.resetSohCapacityToAuto()" data-i18n="soh.modal_reset">Reset to auto-detect</button>
-                            <button class="btn btn-secondary" onclick="BYD.performance.closeSohCapacityModal()" data-i18n="common.cancel">Cancel</button>
-                            <button id="sohCapacityModalSave" class="btn btn-primary" onclick="BYD.performance.saveSohCapacity()" data-i18n="soh.modal_save">Save</button>
+                            <button class="btn btn-secondary" onclick="BYD.performance.resetSohCapacityToAuto()" data-i18n="soh.modal_reset">重新设置为自动检测</button>
+                            <button class="btn btn-secondary" onclick="BYD.performance.closeSohCapacityModal()" data-i18n="common.cancel">取消</button>
+                            <button id="sohCapacityModalSave" class="btn btn-primary" onclick="BYD.performance.saveSohCapacity()" data-i18n="soh.modal_save">保存</button>
                         </div>
                     </div>
                 </div>
@@ -1008,11 +1008,11 @@
                                     <rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/>
                                     <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/>
                                 </svg>
-                                <span data-i18n="performance.card_cpu">CPU</span>
+                                <span data-i18n="performance.card_cpu">CPU 处理器</span>
                             </div>
                         </div>
                         <div class="metric-value"><span id="cpuValue">--</span><span class="unit">%</span></div>
-                        <div class="metric-subtitle"><span data-i18n="performance.card_app_label">App</span>: <span id="cpuAppValue">--</span>% <span style="opacity:0.6">device</span></div>
+                        <div class="metric-subtitle"><span data-i18n="performance.card_app_label">应用程序</span>: <span id="cpuAppValue">--</span>% <span style="opacity:0.6">device</span></div>
                         <div class="metric-bar"><div class="metric-bar-fill" id="cpuBar" style="width: 0%"></div></div>
                         <!-- top-style (per-core) readout for cross-checking with a live `top`.
                              100% = one fully-busy core; ceiling = cores × 100 (e.g. 800% on 8 cores). -->
@@ -1021,11 +1021,11 @@
                         </div>
                         <div class="stats-row">
                             <div class="stat-item">
-                                <span class="stat-label" data-i18n="performance.card_frequency">Frequency</span>
+                                <span class="stat-label" data-i18n="performance.card_frequency">频率</span>
                                 <span class="stat-value" id="cpuFreq">-- MHz</span>
                             </div>
                             <div class="stat-item">
-                                <span class="stat-label" data-i18n="performance.card_temperature">Temperature</span>
+                                <span class="stat-label" data-i18n="performance.card_temperature">温度</span>
                                 <span class="stat-value" id="cpuTemp">--°C</span>
                             </div>
                         </div>
@@ -1039,7 +1039,7 @@
                                     <path d="M6 19v-3M10 19v-3M14 19v-3M18 19v-3M6 8v-3M10 8v-3M14 8v-3M18 8v-3"/>
                                     <rect x="2" y="8" width="20" height="8" rx="1"/>
                                 </svg>
-                                <span data-i18n="performance.card_memory">Memory</span>
+                                <span data-i18n="performance.card_memory">内存</span>
                             </div>
                         </div>
                         <div class="metric-value"><span id="memValue">--</span><span class="unit">%</span></div>
@@ -1048,15 +1048,15 @@
                         <div class="memory-breakdown">
                             <div class="breakdown-item">
                                 <div class="breakdown-value" id="appMemTotal">--</div>
-                                <div class="breakdown-label" data-i18n="performance.card_app_total">App Total</div>
+                                <div class="breakdown-label" data-i18n="performance.card_app_total">应用总计</div>
                             </div>
                             <div class="breakdown-item">
                                 <div class="breakdown-value" id="appMemNative">--</div>
-                                <div class="breakdown-label" data-i18n="performance.card_native">Native</div>
+                                <div class="breakdown-label" data-i18n="performance.card_native">Native 内存</div>
                             </div>
                             <div class="breakdown-item">
                                 <div class="breakdown-value" id="appMemJava">--</div>
-                                <div class="breakdown-label" data-i18n="performance.card_java_heap">Java Heap</div>
+                                <div class="breakdown-label" data-i18n="performance.card_java_heap">Java 堆内存</div>
                             </div>
                         </div>
                     </div>
@@ -1069,20 +1069,20 @@
                                     <rect x="2" y="6" width="20" height="12" rx="2"/>
                                     <path d="M6 10h4v4H6zM14 10h4v4h-4z"/>
                                 </svg>
-                                <span data-i18n="performance.card_gpu">GPU</span>
+                                <span data-i18n="performance.card_gpu">GPU 负载</span>
                             </div>
                             <span class="gpu-status-badge" id="gpuStatusBadge" style="display:none;"></span>
                         </div>
                         <div class="metric-value"><span id="gpuValue">--</span><span class="unit">%</span></div>
-                        <div class="metric-subtitle" id="gpuSubtitle" data-i18n="performance.card_gpu_default_subtitle">Graphics Processing</div>
+                        <div class="metric-subtitle" id="gpuSubtitle" data-i18n="performance.card_gpu_default_subtitle">图形处理</div>
                         <div class="metric-bar"><div class="metric-bar-fill" id="gpuBar" style="width: 0%"></div></div>
                         <div class="stats-row">
                             <div class="stat-item">
-                                <span class="stat-label" data-i18n="performance.card_frequency">Frequency</span>
+                                <span class="stat-label" data-i18n="performance.card_frequency">频率</span>
                                 <span class="stat-value" id="gpuFreq">-- MHz</span>
                             </div>
                             <div class="stat-item">
-                                <span class="stat-label" data-i18n="performance.card_temperature">Temperature</span>
+                                <span class="stat-label" data-i18n="performance.card_temperature">温度</span>
                                 <span class="stat-value" id="gpuTemp">--°C</span>
                             </div>
                         </div>
@@ -1100,18 +1100,18 @@
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
                                 </svg>
-                                <span data-i18n="performance.card_app_stats">App Stats</span>
+                                <span data-i18n="performance.card_app_stats">应用运行状态</span>
                             </div>
                         </div>
                         <div class="metric-value"><span id="threadCount">--</span><span class="unit">threads</span></div>
-                        <div class="metric-subtitle" data-i18n="performance.card_active_threads">Active Threads</div>
+                        <div class="metric-subtitle" data-i18n="performance.card_active_threads">活跃线程数</div>
                         <div class="stats-row">
                             <div class="stat-item">
-                                <span class="stat-label" data-i18n="performance.card_open_fds">Open FDs</span>
+                                <span class="stat-label" data-i18n="performance.card_open_fds">文件句柄 (FD)</span>
                                 <span class="stat-value" id="openFds">--</span>
                             </div>
                             <div class="stat-item">
-                                <span class="stat-label" data-i18n="performance.card_gc_count">GC Count</span>
+                                <span class="stat-label" data-i18n="performance.card_gc_count">GC 回收次数</span>
                                 <span class="stat-value" id="gcCount">--</span>
                             </div>
                         </div>
@@ -1128,24 +1128,24 @@
                                     <line x1="10" y1="10" x2="10" y2="14"/>
                                     <line x1="14" y1="10" x2="14" y2="14"/>
                                 </svg>
-                                <span data-i18n="performance.card_ev_battery">EV Battery</span>
+                                <span data-i18n="performance.card_ev_battery">动力电池</span>
                             </div>
                             <span class="gpu-status-badge" id="sohBadge" style="display:none;"></span>
                         </div>
                         <div class="metric-value"><span id="evSocValue">--</span><span class="unit">%</span></div>
-                        <div class="metric-subtitle"><span id="evKwhValue">--</span> <span data-i18n="performance.card_kwh_remaining_suffix">kWh remaining</span></div>
+                        <div class="metric-subtitle"><span id="evKwhValue">--</span> <span data-i18n="performance.card_kwh_remaining_suffix">剩余电量 (kWh)</span></div>
                         <div class="metric-bar"><div class="metric-bar-fill ev-battery" id="evSocBar" style="width: 0%"></div></div>
                         <div class="stats-row">
                             <div class="stat-item">
-                                <span class="stat-label" data-i18n="performance.card_range">Range</span>
+                                <span class="stat-label" data-i18n="performance.card_range">预估续航</span>
                                 <span class="stat-value" id="evRangeValue">-- km</span>
                             </div>
                             <div class="stat-item">
-                                <span class="stat-label" data-i18n="performance.label_soh">SOH</span>
+                                <span class="stat-label" data-i18n="performance.label_soh">电池健康度 (SOH)</span>
                                 <span class="stat-value" id="evSohValue">--%</span>
                             </div>
                             <div class="stat-item">
-                                <span class="stat-label" data-i18n="performance.card_status">Status</span>
+                                <span class="stat-label" data-i18n="performance.card_status">状态</span>
                                 <span class="stat-value" id="evChargingStatus">--</span>
                             </div>
                         </div>
@@ -1156,18 +1156,18 @@
                     <div class="process-monitor-header">
                         <div>
                             <div class="process-monitor-title">
-                                <h2 data-i18n="performance.live_processes">Live Processes</h2>
-                                <span class="process-live-badge" id="topLiveBadge" data-i18n="performance.paused">Paused</span>
+                                <h2 data-i18n="performance.live_processes">实时进程</h2>
+                                <span class="process-live-badge" id="topLiveBadge" data-i18n="performance.paused">已暂停</span>
                             </div>
                             <div class="process-monitor-meta">
                                 <span id="topSource">top -b -n 1</span>
                                 <span aria-hidden="true"> · </span>
-                                <span id="topUpdated" data-i18n="performance.waiting">Waiting</span>
+                                <span id="topUpdated" data-i18n="performance.waiting">等待中</span>
                             </div>
                         </div>
                         <button class="process-refresh" id="topRefreshButton"
-                                type="button" title="Refresh process snapshot"
-                                aria-label="Refresh process snapshot"
+                                type="button" title="刷新进程快照"
+                                aria-label="刷新进程快照"
                                 data-i18n-attr="title:performance.refresh_snapshot;aria-label:performance.refresh_snapshot"
                                 onclick="BYD.performance.refreshTopNow()">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -1180,38 +1180,38 @@
 
                     <div class="process-summary">
                         <div class="process-summary-item">
-                            <div class="process-summary-label" data-i18n="performance.cpu_activity">CPU activity</div>
+                            <div class="process-summary-label" data-i18n="performance.cpu_activity">CPU 使用率</div>
                             <div class="process-summary-value" id="topCpuBusy">--%</div>
                             <div class="process-summary-detail" id="topCpuDetail">--</div>
                         </div>
                         <div class="process-summary-item">
-                            <div class="process-summary-label" data-i18n="performance.tasks">Tasks</div>
+                            <div class="process-summary-label" data-i18n="performance.tasks">任务数</div>
                             <div class="process-summary-value" id="topTasks">--</div>
                             <div class="process-summary-detail" id="topTasksDetail">--</div>
                         </div>
                         <div class="process-summary-item">
-                            <div class="process-summary-label" data-i18n="performance.ram">RAM</div>
+                            <div class="process-summary-label" data-i18n="performance.ram">内存 (RAM)</div>
                             <div class="process-summary-value" id="topMemory">--</div>
                             <div class="process-summary-detail" id="topMemoryDetail">--</div>
                         </div>
                         <div class="process-summary-item">
-                            <div class="process-summary-label" data-i18n="performance.swap">Swap</div>
+                            <div class="process-summary-label" data-i18n="performance.swap">交换分区 (Swap)</div>
                             <div class="process-summary-value" id="topSwap">--</div>
                             <div class="process-summary-detail" id="topSwapDetail">--</div>
                         </div>
                     </div>
 
-                    <div class="process-table" role="table" aria-label="Android processes" data-i18n-attr="aria-label:performance.live_processes">
+                    <div class="process-table" role="table" aria-label="实时进程" data-i18n-attr="aria-label:performance.live_processes">
                         <div class="process-table-header" role="row">
-                            <span role="columnheader" data-i18n="performance.col_process">Process</span>
+                            <span role="columnheader" data-i18n="performance.col_process">进程</span>
                             <span role="columnheader" style="text-align:right;" data-i18n="performance.col_cpu">CPU</span>
-                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_memory">Memory</span>
-                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_resident">Resident</span>
-                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_user">User</span>
+                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_memory">内存</span>
+                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_resident">常驻内存</span>
+                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_user">用户</span>
                             <span role="columnheader" style="text-align:right;" data-i18n="performance.col_pid">PID</span>
                         </div>
                         <div id="topProcessRows" role="rowgroup">
-                            <div class="process-empty" data-i18n="performance.waiting_snapshot">Waiting for a process snapshot</div>
+                            <div class="process-empty" data-i18n="performance.waiting_snapshot">正在等待进程快照</div>
                         </div>
                     </div>
                 </section>
@@ -1223,39 +1223,39 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;margin-right:8px;stroke:var(--brand-secondary);">
                                 <path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/>
                             </svg>
-                            <span data-i18n="performance.data_usage_title">Data Usage</span>
+                            <span data-i18n="performance.data_usage_title">流量与数据消耗</span>
                         </div>
                         <label class="du-toggle" id="dataUsageToggle" title="">
                             <input type="checkbox" id="dataUsageEnabled" onchange="BYD.performance.toggleDataUsage(this.checked)">
                             <span class="du-toggle-track"><span class="du-toggle-thumb"></span></span>
-                            <span class="du-toggle-label" data-i18n="performance.data_usage_enabled">Enabled</span>
+                            <span class="du-toggle-label" data-i18n="performance.data_usage_enabled">已启用</span>
                         </label>
                     </div>
 
                     <!-- Disabled / empty hint (shown when feature is off) -->
                     <div class="du-hint" id="dataUsageHint" style="display:none;">
-                        <p data-i18n="performance.data_usage_hint">Track the data Overdrive uses (WiFi vs mobile, app vs background) over the last 30 days. Collection is off by default and uses negligible resources.</p>
+                        <p data-i18n="performance.data_usage_hint">统计 OverDrive 在过去 30 天内消耗的流量（Wi-Fi 与移动网络，应用前台与后台）。默认关闭，开启后占用极低系统资源。</p>
                     </div>
 
                     <!-- Live content (shown when enabled) -->
                     <div id="dataUsageContent" style="display:none;">
                         <div class="soc-time-selector" id="dataUsageTimeSelector" style="margin-bottom:12px;">
-                            <button class="time-btn" data-days="7" onclick="BYD.performance.setDataUsageRange(7)" data-i18n="performance.range_7d">7 Days</button>
-                            <button class="time-btn active" data-days="30" onclick="BYD.performance.setDataUsageRange(30)" data-i18n="performance.range_30d">30 Days</button>
+                            <button class="time-btn" data-days="7" onclick="BYD.performance.setDataUsageRange(7)" data-i18n="performance.range_7d">7天</button>
+                            <button class="time-btn active" data-days="30" onclick="BYD.performance.setDataUsageRange(30)" data-i18n="performance.range_30d">30 天</button>
                         </div>
                         <div class="soc-stats-row">
-                            <div class="soc-stat"><span class="soc-stat-value" id="duTotal">--</span><span class="soc-stat-label" data-i18n="performance.data_usage_total">Total</span></div>
-                            <div class="soc-stat"><span class="soc-stat-value" id="duWifi">--</span><span class="soc-stat-label" data-i18n="performance.data_usage_wifi">WiFi</span></div>
-                            <div class="soc-stat"><span class="soc-stat-value" id="duMobile">--</span><span class="soc-stat-label" data-i18n="performance.data_usage_mobile">Mobile</span></div>
-                            <div class="soc-stat"><span class="soc-stat-value" id="duApp">--</span><span class="soc-stat-label" data-i18n="performance.data_usage_app">App</span></div>
-                            <div class="soc-stat"><span class="soc-stat-value" id="duSystem">--</span><span class="soc-stat-label" data-i18n="performance.data_usage_background">Background</span></div>
+                            <div class="soc-stat"><span class="soc-stat-value" id="duTotal">--</span><span class="soc-stat-label" data-i18n="performance.data_usage_total">总计</span></div>
+                            <div class="soc-stat"><span class="soc-stat-value" id="duWifi">--</span><span class="soc-stat-label" data-i18n="performance.data_usage_wifi">Wi-Fi</span></div>
+                            <div class="soc-stat"><span class="soc-stat-value" id="duMobile">--</span><span class="soc-stat-label" data-i18n="performance.data_usage_mobile">蜂窝移动网络</span></div>
+                            <div class="soc-stat"><span class="soc-stat-value" id="duApp">--</span><span class="soc-stat-label" data-i18n="performance.data_usage_app">应用</span></div>
+                            <div class="soc-stat"><span class="soc-stat-value" id="duSystem">--</span><span class="soc-stat-label" data-i18n="performance.data_usage_background">后台</span></div>
                         </div>
                         <div class="chart-container" style="height: 250px;">
                             <canvas id="dataUsageChart" class="chart-canvas"></canvas>
                         </div>
                         <div class="chart-legend" style="margin-top:12px;justify-content:center;">
-                            <div class="legend-item"><span class="legend-dot" style="background:var(--brand-secondary);"></span><span data-i18n="performance.data_usage_wifi">WiFi</span></div>
-                            <div class="legend-item"><span class="legend-dot" style="background:var(--chart-warning);"></span><span data-i18n="performance.data_usage_mobile">Mobile</span></div>
+                            <div class="legend-item"><span class="legend-dot" style="background:var(--brand-secondary);"></span><span data-i18n="performance.data_usage_wifi">Wi-Fi</span></div>
+                            <div class="legend-item"><span class="legend-dot" style="background:var(--chart-warning);"></span><span data-i18n="performance.data_usage_mobile">蜂窝移动网络</span></div>
                         </div>
                         <p class="du-note" id="dataUsageNote" style="display:none;"></p>
                     </div>
@@ -1264,25 +1264,25 @@
                 <!-- CPU Usage Chart -->
                 <div class="chart-card" data-tab="live">
                     <div class="chart-header">
-                        <div class="chart-title" data-i18n="performance.chart_cpu_history">CPU Usage History (60s)</div>
+                        <div class="chart-title" data-i18n="performance.chart_cpu_history">CPU 占用走势 (近 60 秒)</div>
                         <div class="chart-legend">
-                            <div class="legend-item"><span class="legend-dot system"></span><span data-i18n="performance.legend_system">System</span></div>
-                            <div class="legend-item"><span class="legend-dot app"></span><span data-i18n="performance.legend_app">App</span></div>
+                            <div class="legend-item"><span class="legend-dot system"></span><span data-i18n="performance.legend_system">系统</span></div>
+                            <div class="legend-item"><span class="legend-dot app"></span><span data-i18n="performance.legend_app">应用程序</span></div>
                         </div>
                     </div>
                     <div class="chart-container">
                         <canvas id="cpuChart" class="chart-canvas"></canvas>
                     </div>
-                    <div class="chart-hint" data-i18n="performance.chart_hint">Touch or hover to see values</div>
+                    <div class="chart-hint" data-i18n="performance.chart_hint">触摸或悬停查看数值</div>
                 </div>
 
                 <!-- Memory Usage Chart -->
                 <div class="chart-card" data-tab="live">
                     <div class="chart-header">
-                        <div class="chart-title" data-i18n="performance.chart_mem_history">Memory Usage History (60s)</div>
+                        <div class="chart-title" data-i18n="performance.chart_mem_history">内存占用走势 (近 60 秒)</div>
                         <div class="chart-legend">
-                            <div class="legend-item"><span class="legend-dot system"></span><span data-i18n="performance.legend_system">System</span></div>
-                            <div class="legend-item"><span class="legend-dot app"></span><span data-i18n="performance.legend_app">App</span></div>
+                            <div class="legend-item"><span class="legend-dot system"></span><span data-i18n="performance.legend_system">系统</span></div>
+                            <div class="legend-item"><span class="legend-dot app"></span><span data-i18n="performance.legend_app">应用程序</span></div>
                         </div>
                     </div>
                     <div class="chart-container">
@@ -1293,9 +1293,9 @@
                 <!-- GPU Usage Chart -->
                 <div class="chart-card" data-tab="live">
                     <div class="chart-header">
-                        <div class="chart-title" data-i18n="performance.chart_gpu_history">GPU Usage History (60s)</div>
+                        <div class="chart-title" data-i18n="performance.chart_gpu_history">GPU 负载走势 (近 60 秒)</div>
                         <div class="chart-legend">
-                            <div class="legend-item"><span class="legend-dot gpu"></span><span data-i18n="performance.legend_gpu_load">GPU Load</span></div>
+                            <div class="legend-item"><span class="legend-dot gpu"></span><span data-i18n="performance.legend_gpu_load">GPU 负载</span></div>
                         </div>
                     </div>
                     <div class="chart-container">
@@ -1313,14 +1313,14 @@
                                 <line x1="10" y1="11" x2="10" y2="17"/>
                                 <line x1="14" y1="11" x2="14" y2="17"/>
                             </svg>
-                            <span data-i18n="performance.reset_data_title">Reset Data</span>
+                            <span data-i18n="performance.reset_data_title">清除历史数据</span>
                         </div>
                     </div>
                     <div id="resetCategoriesList">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="performance.cat_trips">Trips</div>
-                                <div class="setting-desc" data-i18n="performance.cat_trips_desc">Trip history, routes, weekly/monthly rollups, consumption buckets</div>
+                                <div class="setting-name" data-i18n="performance.cat_trips">行程</div>
+                                <div class="setting-desc" data-i18n="performance.cat_trips_desc">行程历史、行车轨迹、每周/每月汇总及能耗区间分析</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="trips"><span class="toggle-slider"></span></label>
@@ -1328,8 +1328,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="performance.cat_soc_history_label">SoC &amp; 12V history</div>
-                                <div class="setting-desc" data-i18n="performance.cat_soc_history_desc">All SOC samples, charging sessions and battery voltage logs</div>
+                                <div class="setting-name" data-i18n="performance.cat_soc_history_label">SoC &amp; 12V 历史</div>
+                                <div class="setting-desc" data-i18n="performance.cat_soc_history_desc">电池 SoC 采样点、充电记录与电压日志</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="socHistory"><span class="toggle-slider"></span></label>
@@ -1337,8 +1337,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="performance.cat_soh_label">SoH calibration</div>
-                                <div class="setting-desc" data-i18n="performance.cat_soh_desc">Re-detects nominal capacity and re-seeds estimate from BMS</div>
+                                <div class="setting-name" data-i18n="performance.cat_soh_label">SOH标定</div>
+                                <div class="setting-desc" data-i18n="performance.cat_soh_desc">重新检测 BMS 标称容量，并重置 SOH 预估模型</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="soh"><span class="toggle-slider"></span></label>
@@ -1346,8 +1346,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="performance.cat_abrp_token">ABRP token</div>
-                                <div class="setting-desc" data-i18n="performance.cat_abrp_token_desc">Disables ABRP telemetry until re-paired</div>
+                                <div class="setting-name" data-i18n="performance.cat_abrp_token">ABRP 访问令牌</div>
+                                <div class="setting-desc" data-i18n="performance.cat_abrp_token_desc">将停用 ABRP 遥测上报，直至重新配对后恢复</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="abrpToken"><span class="toggle-slider"></span></label>
@@ -1355,8 +1355,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="performance.cat_byd_cloud">BYD Cloud credentials</div>
-                                <div class="setting-desc" data-i18n="performance.cat_byd_cloud_desc">Username, login key, VIN, region — re-login required</div>
+                                <div class="setting-name" data-i18n="performance.cat_byd_cloud">BYD 云凭证</div>
+                                <div class="setting-desc" data-i18n="performance.cat_byd_cloud_desc">用户名、登录密钥、VIN、地区 —— 需要重新登录</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="bydCloud"><span class="toggle-slider"></span></label>
@@ -1364,8 +1364,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="performance.cat_recordings_label">Recordings (videos)</div>
-                                <div class="setting-desc" data-i18n="performance.cat_recordings_desc">Deletes every MP4 in the recordings folder</div>
+                                <div class="setting-name" data-i18n="performance.cat_recordings_label">行车录像 (视频)</div>
+                                <div class="setting-desc" data-i18n="performance.cat_recordings_desc">清空录像存储目录中的所有 MP4 视频文件</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="mediaRecordings"><span class="toggle-slider"></span></label>
@@ -1373,8 +1373,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="performance.cat_sentry_events">Sentry events</div>
-                                <div class="setting-desc" data-i18n="performance.cat_sentry_events_desc">Surveillance event clips and JSON sidecars</div>
+                                <div class="setting-name" data-i18n="performance.cat_sentry_events">监控活动</div>
+                                <div class="setting-desc" data-i18n="performance.cat_sentry_events_desc">哨兵事件视频及伴随 JSON 元数据</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="mediaSurveillance"><span class="toggle-slider"></span></label>
@@ -1382,8 +1382,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="performance.cat_proximity">Proximity recordings</div>
-                                <div class="setting-desc" data-i18n="performance.cat_proximity_desc">Radar-triggered event MP4s</div>
+                                <div class="setting-name" data-i18n="performance.cat_proximity">近距离记录</div>
+                                <div class="setting-desc" data-i18n="performance.cat_proximity_desc">雷达近距防护录制的 MP4 视频</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="mediaProximity"><span class="toggle-slider"></span></label>
@@ -1391,8 +1391,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="performance.cat_trip_telemetry">Trip telemetry files</div>
-                                <div class="setting-desc" data-i18n="performance.cat_trip_telemetry_desc">Per-trip JSON telemetry on disk (DB rows handled by Trips above)</div>
+                                <div class="setting-name" data-i18n="performance.cat_trip_telemetry">行程遥测数据文件</div>
+                                <div class="setting-desc" data-i18n="performance.cat_trip_telemetry_desc">磁盘上缓存的单次行程遥测 JSON 数据</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="mediaTrips"><span class="toggle-slider"></span></label>
@@ -1400,9 +1400,9 @@
                         </div>
                     </div>
                     <div style="display:flex;gap:8px;padding:12px 0 4px;">
-                        <button class="btn" onclick="BYD.performance.toggleAllResetCategories(true)" style="flex:1;background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--card-border);" data-i18n="performance.btn_select_all">Select all</button>
-                        <button class="btn" onclick="BYD.performance.toggleAllResetCategories(false)" style="flex:1;background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--card-border);" data-i18n="performance.btn_clear">Clear</button>
-                        <button class="btn btn-danger" onclick="BYD.performance.runReset()" style="flex:2;" data-i18n="performance.btn_reset_selected">Reset Selected</button>
+                        <button class="btn" onclick="BYD.performance.toggleAllResetCategories(true)" style="flex:1;background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--card-border);" data-i18n="performance.btn_select_all">全选</button>
+                        <button class="btn" onclick="BYD.performance.toggleAllResetCategories(false)" style="flex:1;background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--card-border);" data-i18n="performance.btn_clear">清除</button>
+                        <button class="btn btn-danger" onclick="BYD.performance.runReset()" style="flex:2;" data-i18n="performance.btn_reset_selected">重置选中项</button>
                     </div>
                 </div>
 

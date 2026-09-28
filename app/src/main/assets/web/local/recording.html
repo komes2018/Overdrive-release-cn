@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.recordings_title">Recordings - OverDrive</title>
+    <title data-i18n="app.recordings_title">记录 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <script src="../shared/theme.js?v=8"></script>
     <script src="../shared/app-shell.js?v=7"></script>
@@ -50,12 +50,12 @@
                         <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
                     </svg>
                 </button>
-                <span style="font-weight:600;" data-i18n="nav.recordings">Recordings</span>
+                <span style="font-weight:600;" data-i18n="nav.recordings">录像</span>
                 <div style="width:40px;"></div>
             </div>
 
             <header class="page-header">
-                <h1 class="page-title" data-i18n="recording.page_title">Recording Settings</h1>
+                <h1 class="page-title" data-i18n="recording.page_title">录像设置</h1>
             </header>
 
             <div class="page-body">
@@ -64,15 +64,15 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4" fill="currentColor"/></svg>
-                            <span data-i18n="recording.status_title">Recording Status</span>
+                            <span data-i18n="recording.status_title">录制状态</span>
                         </div>
-                        <span class="status-badge inactive" id="recStatusBadge" data-i18n="recording.status_idle">IDLE</span>
+                        <span class="status-badge inactive" id="recStatusBadge" data-i18n="recording.status_idle">空闲</span>
                     </div>
                     <div class="card-body">
                         <div class="info-box" style="margin-top:0;">
-                            <div class="info-row"><span class="label" data-i18n="recording.current_state">Current State</span><span class="value" id="recState" data-i18n="common.idle">Idle</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.current_state">现状</span><span class="value" id="recState" data-i18n="common.idle">空闲</span></div>
                             <div class="info-row">
-                                <span class="label" data-i18n="recording.recordings_today">Recordings Today</span>
+                                <span class="label" data-i18n="recording.recordings_today">今日录像</span>
                                 <a href="events.html" class="value link-value" id="recToday">0 →</a>
                             </div>
                         </div>
@@ -86,17 +86,17 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/>
                             </svg>
-                            <span data-i18n="recording.mode_title">Recording Mode (ACC ON)</span>
+                            <span data-i18n="recording.mode_title">录像模式 (ACC ON 通电)</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;padding-bottom:12px;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.select_mode">Select Mode</div>
-                                <div class="setting-desc" data-i18n="recording.select_mode_desc">Choose when to record while driving</div>
+                                <div class="setting-name" data-i18n="recording.select_mode">选择录像模式</div>
+                                <div class="setting-desc" data-i18n="recording.select_mode_desc">选择车辆行驶或通电时的录制策略</div>
                             </div>
                         </div>
-                        <div class="mode-selector" role="radiogroup" data-i18n-attr="aria-label:recording.mode_picker_aria" aria-label="Recording mode">
+                        <div class="mode-selector" role="radiogroup" data-i18n-attr="aria-label:recording.mode_picker_aria" aria-label="录制模式">
                             <label class="mode-option">
                                 <input type="radio" name="recordingMode" value="NONE" checked onchange="RecSettings.onModeChange('NONE')">
                                 <div class="mode-card mode-card-default">
@@ -109,8 +109,8 @@
                                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
                                     </span>
                                     <span class="mode-body">
-                                        <span class="mode-name" data-i18n="recording.mode_none_name">None (Default)</span>
-                                        <span class="mode-desc" data-i18n="recording.mode_none_desc">No recording - saves battery and resources</span>
+                                        <span class="mode-name" data-i18n="recording.mode_none_name">无（默认）</span>
+                                        <span class="mode-desc" data-i18n="recording.mode_none_desc">关闭录像 — 最大程度节省电量与系统资源</span>
                                     </span>
                                     <span class="mode-radio" aria-hidden="true"></span>
                                 </div>
@@ -123,8 +123,8 @@
                                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/><circle cx="9" cy="12" r="1.5" fill="currentColor"/></svg>
                                     </span>
                                     <span class="mode-body">
-                                        <span class="mode-name" data-i18n="recording.mode_continuous_name">Continuous</span>
-                                        <span class="mode-desc" data-i18n="recording.mode_continuous_desc">Record all the time when cameras are active</span>
+                                        <span class="mode-name" data-i18n="recording.mode_continuous_name">连续</span>
+                                        <span class="mode-desc" data-i18n="recording.mode_continuous_desc">只要摄像头处于工作状态就持续录像</span>
                                     </span>
                                     <span class="mode-radio" aria-hidden="true"></span>
                                 </div>
@@ -137,8 +137,8 @@
                                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="2"/><path d="M12 2v8"/><path d="M4.93 10.93 10 14"/><path d="M19.07 10.93 14 14"/></svg>
                                     </span>
                                     <span class="mode-body">
-                                        <span class="mode-name" data-i18n="recording.mode_drive_name">Drive Mode</span>
-                                        <span class="mode-desc" data-i18n="recording.mode_drive_desc">Record only when driving (D/R/S/M gear)</span>
+                                        <span class="mode-name" data-i18n="recording.mode_drive_name">驱动模式</span>
+                                        <span class="mode-desc" data-i18n="recording.mode_drive_desc">仅在行驶时录像（D/R/S/M 挡）</span>
                                     </span>
                                     <span class="mode-radio" aria-hidden="true"></span>
                                 </div>
@@ -151,8 +151,8 @@
                                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12a3 3 0 0 1 3-3"/><path d="M12 15a3 3 0 0 0 3-3"/></svg>
                                     </span>
                                     <span class="mode-body">
-                                        <span class="mode-name" data-i18n="recording.mode_proximity_name">Proximity Guard</span>
-                                        <span class="mode-desc" data-i18n="recording.mode_proximity_desc">Record when objects approach the vehicle</span>
+                                        <span class="mode-name" data-i18n="recording.mode_proximity_name">雷达近距防护</span>
+                                        <span class="mode-desc" data-i18n="recording.mode_proximity_desc">当有物体靠近车辆时开始录像</span>
                                     </span>
                                     <span class="mode-radio" aria-hidden="true"></span>
                                 </div>
@@ -168,33 +168,33 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>
                             </svg>
-                            <span data-i18n="recording.layout_title">Recording Layout</span>
+                            <span data-i18n="recording.layout_title">录像版面配置</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
                                 <div class="setting-name">
-                                    <span data-i18n="recording.layout_label">Camera Layout</span>
-                                    <span class="setting-badge" data-i18n="recording.applies_live">Applies live</span>
+                                    <span data-i18n="recording.layout_label">摄像头版面配置</span>
+                                    <span class="setting-badge" data-i18n="recording.applies_live">立即生效</span>
                                 </div>
-                                <div class="setting-desc" data-i18n="recording.layout_desc">Standard records the four 360 cameras as a 2×2 grid. Dashcam puts the forward road view across the top with the 360 left, rear and right cameras along the bottom. Telemetry overlay is preserved either way.</div>
+                                <div class="setting-desc" data-i18n="recording.layout_desc">“标准”模式将 4 路全景摄像头录制为 2×2 网格。“行车记录仪”模式将前方道路画面置于上方，并将左、后、右 3 路画面并排置于下方。无论哪种布局，车况数据叠加层均会保留。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group btn-group-vertical" id="recLayoutBtns">
                                     <button class="btn-toggle active" data-value="standard" onclick="RecSettings.setRecordingLayout('standard')">
-                                        <span class="tier-name" data-i18n="recording.layout_standard">Standard (360 grid)</span>
+                                        <span class="tier-name" data-i18n="recording.layout_standard">标准 (360 网格)</span>
                                     </button>
                                     <button class="btn-toggle" data-value="dashcam" onclick="RecSettings.setRecordingLayout('dashcam')">
-                                        <span class="tier-name" data-i18n="recording.layout_dashcam">Dashcam (forward + sides)</span>
+                                        <span class="tier-name" data-i18n="recording.layout_dashcam">行车记录仪（前视 + 侧视）</span>
                                     </button>
                                 </div>
                             </div>
                         </div>
                         <div class="setting-row" style="border-bottom:none;" id="dashcamWindshieldRow">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.layout_use_windshield_label">Use Windshield Camera in Dashcam Layout</div>
-                                <div class="setting-desc" id="dashcamWindshieldDesc" data-i18n="recording.layout_use_windshield_desc">When available, use the dedicated windshield camera for the top dashcam view. Falls back to the 360 front camera if the stream cannot be opened.</div>
+                                <div class="setting-name" data-i18n="recording.layout_use_windshield_label">在行车记录仪版面中选用挡风玻璃摄像头</div>
+                                <div class="setting-desc" id="dashcamWindshieldDesc" data-i18n="recording.layout_use_windshield_desc">若硬件支持，上方主画面将优先使用前挡风玻璃专用原厂记录仪摄像头。若无法开启该路视频流，则自动回退使用 360 环视前置摄像头。</div>
                                 <div class="setting-desc" id="windshieldCameraInfo" style="display:none;"></div>
                             </div>
                             <div class="setting-control">
@@ -214,26 +214,26 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                             </svg>
-                            <span data-i18n="recording.proximity_settings_title">Proximity Guard Settings</span>
+                            <span data-i18n="recording.proximity_settings_title">雷达近距监控设置</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.trigger_sensitivity">Trigger Sensitivity</div>
-                                <div class="setting-desc" data-i18n="recording.trigger_sensitivity_desc">When to start recording</div>
+                                <div class="setting-name" data-i18n="recording.trigger_sensitivity">触发器敏感性</div>
+                                <div class="setting-desc" data-i18n="recording.trigger_sensitivity_desc">何时开始录制视频</div>
                             </div>
                             <div class="setting-control">
                                 <select class="select-input" id="triggerLevel" onchange="RecSettings.markDirty()">
-                                    <option value="RED" data-i18n="recording.trigger_red">Close only (0–0.5 m)</option>
-                                    <option value="YELLOW_RED" data-i18n="recording.trigger_yellow_red">Medium + close (0–0.8 m)</option>
+                                    <option value="RED" data-i18n="recording.trigger_red">🔴 仅靠近 (0-0.5m)</option>
+                                    <option value="YELLOW_RED" data-i18n="recording.trigger_yellow_red"> 平均+接近 (0-0.8m)</option>
                                 </select>
                             </div>
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.pre_event_buffer">Pre-event Buffer</div>
-                                <div class="setting-desc" data-i18n="recording.pre_event_buffer_desc">Seconds captured before event</div>
+                                <div class="setting-name" data-i18n="recording.pre_event_buffer">事件前缓冲时长</div>
+                                <div class="setting-desc" data-i18n="recording.pre_event_buffer_desc">触发事件发生前的预录秒数</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -244,8 +244,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.post_event_buffer">Post-event Buffer</div>
-                                <div class="setting-desc" data-i18n="recording.post_event_buffer_desc">Seconds captured after radar clears</div>
+                                <div class="setting-name" data-i18n="recording.post_event_buffer">事件后缓冲时长</div>
+                                <div class="setting-desc" data-i18n="recording.post_event_buffer_desc">雷达目标离开后的延时录制秒数</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -256,10 +256,10 @@
                         </div>
                         <div class="timeline-visual">
                             <div class="timeline-segment pre">
-                                <span class="timeline-label"><span data-i18n="recording.timeline_pre">PRE</span> <span id="timelinePre">5s</span></span>
+                                <span class="timeline-label"><span data-i18n="recording.timeline_pre">经济发展</span> <span id="timelinePre">5s</span></span>
                             </div>
                             <div class="timeline-segment event">
-                                <span class="timeline-label" data-i18n="recording.timeline_event">EVENT</span>
+                                <span class="timeline-label" data-i18n="recording.timeline_event">️事件</span>
                             </div>
                             <div class="timeline-segment post">
                                 <span class="timeline-label"><span data-i18n="recording.timeline_post">POST</span> <span id="timelinePost">10s</span></span>
@@ -268,7 +268,7 @@
                         <div class="info-box-note">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                             <div class="info-note" data-i18n="recording.timeline_note">
-                                Recording continues if radar triggers again within post-buffer time
+                                若雷达在后置缓冲时间内再次触发，将继续录像。
                             </div>
                         </div>
                     </div>
@@ -287,14 +287,14 @@
                                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
                                 <circle cx="12" cy="10" r="3"/>
                             </svg>
-                            <span data-i18n="recording.geocoding_title">Place Tagging</span>
+                            <span data-i18n="recording.geocoding_title">地理位置标签</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.geocoding_enabled_name">Tag dashcam recordings with place names</div>
-                                <div class="setting-desc" data-i18n="recording.geocoding_enabled_desc">Reverse-geocode the recording-start GPS into a district/city label and save it next to each clip's sidecar. Off by default.</div>
+                                <div class="setting-name" data-i18n="recording.geocoding_enabled_name">为行车记录仪录像添加位置名称</div>
+                                <div class="setting-desc" data-i18n="recording.geocoding_enabled_desc">将录像开始时的 GPS 坐标逆地理编码为区县／城市名称，并随每个片段的旁挂元数据文件一并保存。默认关闭。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -305,8 +305,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.geocoding_online_name">Use online resolver</div>
-                                <div class="setting-desc" data-i18n="recording.geocoding_online_desc">Falls back to OpenStreetMap Nominatim when the on-device geocoder cannot name a location. Sends only the recording-start coordinates and your device language.</div>
+                                <div class="setting-name" data-i18n="recording.geocoding_online_name">使用在线逆地理编码服务</div>
+                                <div class="setting-desc" data-i18n="recording.geocoding_online_desc">当本地离线地名库无法匹配时，回退使用 OpenStreetMap Nominatim 在线解析（仅发送触发坐标和语言）。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -317,8 +317,8 @@
                         </div>
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info" style="flex:1 1 auto;">
-                                <div class="setting-name" data-i18n="recording.geocoding_custom_url_name">Custom Nominatim URL</div>
-                                <div class="setting-desc" data-i18n="recording.geocoding_custom_url_desc">Optional. Point to a self-hosted instance to skip the public OSM endpoint entirely. Shared with surveillance.</div>
+                                <div class="setting-name" data-i18n="recording.geocoding_custom_url_name">自定义 Nominatim 接口</div>
+                                <div class="setting-desc" data-i18n="recording.geocoding_custom_url_desc">可选。指向私有部署的 Nominatim 实例即可完全跳过公共 OSM 接口。该设置与驻车哨兵共用。</div>
                             </div>
                             <div class="setting-control">
                                 <input type="url" id="geocodingCustomUrl" class="text-input" inputmode="url" placeholder="https://nominatim.example.com" disabled onchange="RecSettings.saveGeocodingCustomUrl()" />
@@ -340,26 +340,26 @@
                                 <path d="M3 17h18l-3-9H6l-3 9z"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/>
                                 <path d="M9 8V5a3 3 0 0 1 6 0v3"/>
                             </svg>
-                            <span data-i18n="oem_dashcam.title">OEM Dashcam</span>
+                            <span data-i18n="oem_dashcam.title">原厂行车记录仪</span>
                         </div>
-                        <span class="status-badge inactive" id="oemPipelineBadge" data-i18n="oem_dashcam.status_idle" role="status" aria-live="polite" aria-atomic="true" style="opacity:0;">Idle</span>
+                        <span class="status-badge inactive" id="oemPipelineBadge" data-i18n="oem_dashcam.status_idle" role="status" aria-live="polite" aria-atomic="true" style="opacity:0;">空闲</span>
                     </div>
                     <div class="card-body">
                         <!-- Camera-ID-unset state. -->
                         <div class="setting-row" id="oemDashcamIdUnsetRow" style="display:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="oem_dashcam.id_unset_title">Camera ID not configured</div>
-                                <div class="setting-desc" data-i18n="oem_dashcam.id_unset_desc">Open the camera-mapping dialog from the Android settings to pick which AVMCamera id is the forward dashcam sensor. Auto = pano XOR 1; on Seal/Han pano is id 1 so OEM dashcam defaults to id 0.</div>
+                                <div class="setting-name" data-i18n="oem_dashcam.id_unset_title">摄像头 ID 未配置</div>
+                                <div class="setting-desc" data-i18n="oem_dashcam.id_unset_desc">请在“诊断 → 摄像头探测”中选择哪个 AVMCamera 编号对应前视行车记录仪摄像头。Auto = pano XOR 1；在 Seal/Han 上 pano 为 id 1，因此 OEM 行车记录仪默认为 id 0。</div>
                             </div>
                         </div>
 
                         <div class="setting-row" id="oemRecordingModeRow" style="border-bottom:none;padding-bottom:12px;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="oem_dashcam.recording_mode_title">Recording behaviour</div>
-                                <div class="setting-desc" data-i18n="oem_dashcam.recording_mode_desc">Controls when the forward dashcam sensor writes dvr_*.mp4 alongside the pano cam_*.mp4 dashcam clips.</div>
+                                <div class="setting-name" data-i18n="oem_dashcam.recording_mode_title">行车录制模式</div>
+                                <div class="setting-desc" data-i18n="oem_dashcam.recording_mode_desc">控制前视行车记录仪在何时写入 dvr_*.mp4，与全景摄像头生成的 cam_*.mp4 片段同时录制。</div>
                             </div>
                         </div>
-                        <div class="mode-selector" role="radiogroup" aria-busy="true" data-hydrating="true" data-i18n-attr="aria-label:oem_dashcam.mode_picker_aria_recording" aria-label="OEM Dashcam recording mode" aria-controls="oemPipelineStatusHint">
+                        <div class="mode-selector" role="radiogroup" aria-busy="true" data-hydrating="true" data-i18n-attr="aria-label:oem_dashcam.mode_picker_aria_recording" aria-label="原厂记录仪行车录制模式" aria-controls="oemPipelineStatusHint">
                             <label class="mode-option">
                                 <input type="radio" name="oemRecordingMode" value="off" checked onchange="RecSettings.setOemRecordingMode('off')" aria-describedby="oemModeDesc_off">
                                 <div class="mode-card mode-card-active">
@@ -367,8 +367,8 @@
                                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
                                     </span>
                                     <span class="mode-body">
-                                        <span class="mode-name" data-i18n="oem_dashcam.mode_off">Off</span>
-                                        <span class="mode-desc" id="oemModeDesc_off" data-i18n="oem_dashcam.mode_off_desc_recording">Don't record from the OEM forward sensor. Pano dashcam keeps writing cam_*.mp4 normally.</span>
+                                        <span class="mode-name" data-i18n="oem_dashcam.mode_off">关闭</span>
+                                        <span class="mode-desc" id="oemModeDesc_off" data-i18n="oem_dashcam.mode_off_desc_recording">不录制原厂前视视频，360 全景记录仪仍正常写入 cam_*.mp4。</span>
                                     </span>
                                     <span class="mode-radio" aria-hidden="true"></span>
                                 </div>
@@ -380,8 +380,8 @@
                                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/><circle cx="9" cy="12" r="1.5" fill="currentColor"/></svg>
                                     </span>
                                     <span class="mode-body">
-                                        <span class="mode-name" data-i18n="oem_dashcam.mode_continuous">Continuous</span>
-                                        <span class="mode-desc" id="oemModeDesc_continuous" data-i18n="oem_dashcam.mode_continuous_desc_recording">Always record dvr_*.mp4 while OverDrive is running, regardless of what the pano dashcam is doing.</span>
+                                        <span class="mode-name" data-i18n="oem_dashcam.mode_continuous">连续录制</span>
+                                        <span class="mode-desc" id="oemModeDesc_continuous" data-i18n="oem_dashcam.mode_continuous_desc_recording">只要 OverDrive 运行中就始终录制原厂前视 dvr_*.mp4，无论全景记录仪处于何种状态。</span>
                                     </span>
                                     <span class="mode-radio" aria-hidden="true"></span>
                                 </div>
@@ -393,8 +393,8 @@
                                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/><circle cx="12" cy="12" r="3"/></svg>
                                     </span>
                                     <span class="mode-body">
-                                        <span class="mode-name" data-i18n="oem_dashcam.mode_smart">Smart</span>
-                                        <span class="mode-desc" id="oemModeDesc_smart" data-i18n="oem_dashcam.mode_smart_desc_recording">Mirror the pano dashcam: when pano is recording (Drive Mode / Continuous / Proximity Guard fires), record dvr_*.mp4 too. Pano stops, OEM stops.</span>
+                                        <span class="mode-name" data-i18n="oem_dashcam.mode_smart">智能联动</span>
+                                        <span class="mode-desc" id="oemModeDesc_smart" data-i18n="oem_dashcam.mode_smart_desc_recording">与 360 全景记录仪联动：全景录像时（行车模式 / 连续录制 / 雷达近距防护触发），同步录制原厂前视 dvr_*.mp4；全景停止时原厂亦同步停止。</span>
                                     </span>
                                     <span class="mode-radio" aria-hidden="true"></span>
                                 </div>
@@ -406,8 +406,8 @@
                              clips. -->
                         <div class="setting-row" id="oemTelemetryOverlayRow">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="oem_dashcam.telemetry_overlay">Burn-in telemetry on OEM clips</div>
-                                <div class="setting-desc" data-i18n="oem_dashcam.telemetry_overlay_desc">Stamps speed, GPS, and timestamp into dvr_*.mp4. Independent of the pano overlay setting.</div>
+                                <div class="setting-name" data-i18n="oem_dashcam.telemetry_overlay">在原厂录像中叠加遥测数据</div>
+                                <div class="setting-desc" data-i18n="oem_dashcam.telemetry_overlay_desc">在原厂前视录像 (dvr_*.mp4) 画面中叠加车速、GPS 坐标与时间戳水印，独立于 360 全景录像的水印设置。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -420,16 +420,16 @@
                         <!-- OEM-clip field picker; separate selection from the pano flow. -->
                         <div class="setting-row telemetry-fields" id="telemetryFieldsOemDashcam" style="display:none;">
                             <div class="setting-info" style="width:100%;">
-                                <div class="setting-name" data-i18n="recording.telemetry_fields_label">Fields to burn in</div>
-                                <div class="setting-desc" data-i18n="oem_dashcam.telemetry_fields_desc">Choose what the overlay draws on OEM dashcam clips.</div>
+                                <div class="setting-name" data-i18n="recording.telemetry_fields_label">画面水印叠加字段 (OSD 烧录)</div>
+                                <div class="setting-desc" data-i18n="oem_dashcam.telemetry_fields_desc">选择在原厂前视录像片段中叠加的水印信息。</div>
                                 <div class="telemetry-fields-grid" id="telemetryFieldsOemDashcamGrid"></div>
                             </div>
                         </div>
 
                         <div class="setting-row" id="oemPipelineStatusRow" style="border-bottom:none;">
                             <div class="setting-info" style="flex:1 1 auto;">
-                                <div class="setting-name" id="oemPipelineStatus" data-i18n="oem_dashcam.status_idle">Idle</div>
-                                <div class="setting-desc" id="oemPipelineStatusHint" data-i18n="oem_dashcam.status_hint_off">Pick Continuous or Smart above to enable the OEM forward-sensor recording.</div>
+                                <div class="setting-name" id="oemPipelineStatus" data-i18n="oem_dashcam.status_idle">空闲</div>
+                                <div class="setting-desc" id="oemPipelineStatusHint" data-i18n="oem_dashcam.status_hint_off">在上方选择“连续录制”或“智能联动”，以启用原厂前置摄像头录像。</div>
                             </div>
                         </div>
                     </div>
@@ -449,17 +449,17 @@
                                 <circle cx="12" cy="12" r="3"/>
                                 <path d="M7 6V4"/><path d="M17 6V4"/>
                             </svg>
-                            <span data-i18n="oem_dashcam.native_dvr_title">Native DVR app (com.byd.cdr)</span>
+                            <span data-i18n="oem_dashcam.native_dvr_title">比亚迪原厂行车记录仪 (com.byd.cdr)</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info" style="flex:1 1 auto;">
-                                <div class="setting-desc" data-i18n="oem_dashcam.native_dvr_explainer">The factory dashcam app records to /sdcard/DCIM/BYDCam and opens AVMCamera on every ACC ON. Disabling lets OverDrive own the camera without contention.</div>
-                                <div class="setting-name" id="nativeDvrStatusLabel" style="margin-top:8px;" data-i18n="oem_dashcam.native_dvr_status_enabled">Status: Enabled</div>
+                                <div class="setting-desc" data-i18n="oem_dashcam.native_dvr_explainer">比亚迪原厂记录仪应用默认录制至 /sdcard/DCIM/BYDCam，且在每次车辆通电 (ACC ON) 时独占打开摄像头。将其停用后，OverDrive 可独占访问摄像头，彻底避免资源抢占冲突。</div>
+                                <div class="setting-name" id="nativeDvrStatusLabel" style="margin-top:8px;" data-i18n="oem_dashcam.native_dvr_status_enabled">状态：已启用</div>
                             </div>
                             <div class="setting-control">
-                                <button class="btn btn-primary" id="nativeDvrToggleBtn" onclick="RecSettings.toggleNativeDvr()" data-i18n="oem_dashcam.native_dvr_disable">Disable native DVR</button>
+                                <button class="btn btn-primary" id="nativeDvrToggleBtn" onclick="RecSettings.toggleNativeDvr()" data-i18n="oem_dashcam.native_dvr_disable">停用原厂记录仪应用</button>
                             </div>
                         </div>
                     </div>
@@ -470,33 +470,33 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>
-                            <span data-i18n="recording.video_quality_title">Video Quality</span>
+                            <span data-i18n="recording.video_quality_title">视频质量</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
                                 <div class="setting-name">
-                                    <span data-i18n="recording.recording_quality">Recording Quality</span>
+                                    <span data-i18n="recording.recording_quality">录像画质</span>
                                 </div>
-                                <div class="setting-desc" data-i18n="recording.recording_quality_desc">Higher tiers preserve more detail at the cost of more storage. Output is a 2560×1920 mosaic of four 1280×960 cameras.</div>
+                                <div class="setting-desc" data-i18n="recording.recording_quality_desc">画质等级越高，保留细节越多，但会消耗更多存储。四路 1280×960 摄像头拼接为 2560×1920 输出。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group btn-group-vertical" id="recQualityBtns">
                                     <button class="btn-toggle" data-value="ECONOMY"  onclick="RecSettings.setRecordingQuality('ECONOMY')">
-                                        <span class="tier-name"  data-i18n="recording.tier_economy">Economy</span>
+                                        <span class="tier-name"  data-i18n="recording.tier_economy">经济</span>
                                     </button>
                                     <button class="btn-toggle" data-value="STANDARD" onclick="RecSettings.setRecordingQuality('STANDARD')">
-                                        <span class="tier-name"  data-i18n="recording.tier_standard">Standard</span>
+                                        <span class="tier-name"  data-i18n="recording.tier_standard">标准</span>
                                     </button>
                                     <button class="btn-toggle active" data-value="HIGH" onclick="RecSettings.setRecordingQuality('HIGH')">
-                                        <span class="tier-name"  data-i18n="recording.tier_high">High</span>
+                                        <span class="tier-name"  data-i18n="recording.tier_high">高清</span>
                                     </button>
                                     <button class="btn-toggle" data-value="PREMIUM" onclick="RecSettings.setRecordingQuality('PREMIUM')">
-                                        <span class="tier-name"  data-i18n="recording.tier_premium">Premium</span>
+                                        <span class="tier-name"  data-i18n="recording.tier_premium">超清</span>
                                     </button>
                                     <button class="btn-toggle" data-value="MAX" onclick="RecSettings.setRecordingQuality('MAX')">
-                                        <span class="tier-name"  data-i18n="recording.tier_max">Max</span>
+                                        <span class="tier-name"  data-i18n="recording.tier_max">极高</span>
                                     </button>
                                 </div>
                             </div>
@@ -504,9 +504,9 @@
                         <div class="setting-row">
                             <div class="setting-info">
                                 <div class="setting-name">
-                                    <span data-i18n="recording.codec">Video Codec</span>
+                                    <span data-i18n="recording.codec">视频编码格式</span>
                                 </div>
-                                <div class="setting-desc" data-i18n="recording.codec_desc">H.265 produces 50% smaller files</div>
+                                <div class="setting-desc" data-i18n="recording.codec_desc">H.265 产生50%较小的文件</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="codecBtns">
@@ -518,9 +518,9 @@
                         <div class="setting-row">
                             <div class="setting-info">
                                 <div class="setting-name">
-                                    <span data-i18n="recording.camera_fps">Camera FPS</span>
+                                    <span data-i18n="recording.camera_fps">摄像头 FPS</span>
                                 </div>
-                                <div class="setting-desc" data-i18n="recording.camera_fps_desc">Frame rate for recording &amp; surveillance.</div>
+                                <div class="setting-desc" data-i18n="recording.camera_fps_desc">录像与监控录制的视频帧率。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="fpsBtns">
@@ -538,36 +538,36 @@
                         <div class="setting-row">
                             <div class="setting-info">
                                 <div class="setting-name">
-                                    <span data-i18n="recording.clip_duration">Clip Duration</span>
-                                    <span class="setting-badge" data-i18n="recording.applies_next_rotation">Next clip</span>
+                                    <span data-i18n="recording.clip_duration">分段时长</span>
+                                    <span class="setting-badge" data-i18n="recording.applies_next_rotation">下个素材轮换生效</span>
                                 </div>
-                                <div class="setting-desc" data-i18n="recording.clip_duration_desc">Length of each recorded video segment. Applies to both driving (ACC on) and parked surveillance (ACC off) recordings, on the next segment rotation.</div>
+                                <div class="setting-desc" data-i18n="recording.clip_duration_desc">单个视频分段的时长。适用于行车（ACC 通电）与驻车哨兵（ACC 断电）录像，在下次分段轮换时生效。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="clipDurationBtns">
-                                    <button class="btn-toggle active" data-value="2" onclick="RecSettings.setClipDuration(2)" data-i18n="recording.clip_2min">2 min</button>
-                                    <button class="btn-toggle" data-value="5" onclick="RecSettings.setClipDuration(5)" data-i18n="recording.clip_5min">5 min</button>
-                                    <button class="btn-toggle" data-value="10" onclick="RecSettings.setClipDuration(10)" data-i18n="recording.clip_10min">10 min</button>
+                                    <button class="btn-toggle active" data-value="2" onclick="RecSettings.setClipDuration(2)" data-i18n="recording.clip_2min">2 分钟</button>
+                                    <button class="btn-toggle" data-value="5" onclick="RecSettings.setClipDuration(5)" data-i18n="recording.clip_5min">5 分钟</button>
+                                    <button class="btn-toggle" data-value="10" onclick="RecSettings.setClipDuration(10)" data-i18n="recording.clip_10min">10 分钟</button>
                                 </div>
                             </div>
                         </div>
                         <div class="info-box-note">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                             <div class="info-note" data-i18n="recording.clip_duration_warning">
-                                Longer clips mean fewer, larger files — but an in-progress clip is only finalized when it rotates. On sudden power loss (e.g. battery cut on impact) the current clip can be lost, so a 10-minute setting risks up to 10 minutes of unsaved footage vs 2. Keep 2 min if your vehicle can lose power abruptly.
+                                分段越长，文件越少但单文件体积越大；且录制中的分段仅在切片轮换时才会写入完成。若遇到突发断电，未落盘的当前分段可能丢失（设为 10 分钟最多可能丢失 10 分钟视频，而设为 2 分钟仅损失最多 2 分钟）。建议保持 2 分钟以防意外断电。
                             </div>
                         </div>
                         <div class="info-box">
                             <div class="info-row">
-                                <span class="label" data-i18n="recording.active_estimate">At your settings</span>
+                                <span class="label" data-i18n="recording.active_estimate">基于当前设置估算</span>
                                 <span class="value" id="activeEstimate">— Mbps · — / hr · ~—</span>
                             </div>
                             <div class="info-row" style="font-size: 0.85em; opacity: 0.7;">
-                                <span class="label" data-i18n="recording.native_resolution">Native</span>
+                                <span class="label" data-i18n="recording.native_resolution">原生分辨率</span>
                                 <span class="value" id="nativeResolution">2560×1920 mosaic · 4 × 1280×960 cameras</span>
                             </div>
                             <div class="info-row" id="fpsClampRow" style="display: none; font-size: 0.85em;">
-                                <span class="label" data-i18n="recording.fps_actual">Measured FPS</span>
+                                <span class="label" data-i18n="recording.fps_actual">实测帧率 (FPS)</span>
                                 <span class="value" id="fpsActual">—</span>
                             </div>
                         </div>
@@ -590,14 +590,14 @@
                                 <path d="M12 3c2.5 3 2.5 15 0 18"/>
                                 <path d="M12 3c-2.5 3-2.5 15 0 18"/>
                             </svg>
-                            <span data-i18n="recording.rectify_title">Fisheye Correction</span>
+                            <span data-i18n="recording.rectify_title">鱼眼畸变校正</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.rectify_label">Correction Strength</div>
-                                <div class="setting-desc" data-i18n="recording.rectify_desc">Straightens the residual fisheye barrel curve in recordings and surveillance clips. 0 = off (raw HAL output). Higher values pull peripheral pixels inward.</div>
+                                <div class="setting-name" data-i18n="recording.rectify_label">校正强度</div>
+                                <div class="setting-desc" data-i18n="recording.rectify_desc">消除行车与哨兵视频中原厂超广角镜头的桶形畸变。0 为关闭 (原始输出)，数值越大向中心拉伸拉直越明显。</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -610,8 +610,8 @@
                                      gap) so "Off"/"Max" sit directly under the track
                                      ends instead of flushing to the row edges. -->
                                 <div class="slider-range-labels" style="width:120px;margin-left:auto;padding:0;">
-                                    <span data-i18n="recording.rectify_min">Off</span>
-                                    <span data-i18n="recording.rectify_max">Max</span>
+                                    <span data-i18n="recording.rectify_min">关闭</span>
+                                    <span data-i18n="recording.rectify_max">最大值</span>
                                 </div>
                             </div>
                         </div>
@@ -625,7 +625,7 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
                             </svg>
-                            <span data-i18n="recording.telemetry_overlay_title">Telemetry Overlay</span>
+                            <span data-i18n="recording.telemetry_overlay_title">遥测信息叠加</span>
                         </div>
                     </div>
                     <div class="card-body">
@@ -633,8 +633,8 @@
                              this toggle, and :last-child now binds to the picker. -->
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.telemetry_show_label">Show on Recorded Video</div>
-                                <div class="setting-desc" data-i18n="recording.telemetry_show_desc">Overlay speed, gear, pedals and timestamp on recorded video</div>
+                                <div class="setting-name" data-i18n="recording.telemetry_show_label">在录制视频中叠显仪表数据</div>
+                                <div class="setting-desc" data-i18n="recording.telemetry_show_desc">在 ACC 通电的行车录像与手动录像上叠加车辆数据</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -648,8 +648,8 @@
                              RecSettings.renderTelemetryFields('accOn', ...). -->
                         <div class="setting-row telemetry-fields" id="telemetryFieldsAccOn" style="display:none;">
                             <div class="setting-info" style="width:100%;">
-                                <div class="setting-name" data-i18n="recording.telemetry_fields_label">Fields to burn in</div>
-                                <div class="setting-desc" data-i18n="recording.telemetry_fields_desc">Choose what the overlay draws on trip and manual recordings.</div>
+                                <div class="setting-name" data-i18n="recording.telemetry_fields_label">画面水印叠加字段 (OSD 烧录)</div>
+                                <div class="setting-desc" data-i18n="recording.telemetry_fields_desc">选择在行程记录与手动录像中叠加显示的车况遥测数据字段。</div>
                                 <div class="telemetry-fields-grid" id="telemetryFieldsAccOnGrid"></div>
                             </div>
                         </div>
@@ -666,14 +666,14 @@
                                 <line x1="12" y1="19" x2="12" y2="23"/>
                                 <line x1="8" y1="23" x2="16" y2="23"/>
                             </svg>
-                            <span data-i18n="recording.audio_title">Cabin Audio</span>
+                            <span data-i18n="recording.audio_title">座舱音频录制</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.audio_label">Record Cabin Audio</div>
-                                <div class="setting-desc" data-i18n="recording.audio_desc">Captures the cabin microphone alongside video. Active only during ACC-on recording (Continuous, Drive, Proximity Guard); never during Surveillance.</div>
+                                <div class="setting-name" data-i18n="recording.audio_label">录制车内声音</div>
+                                <div class="setting-desc" data-i18n="recording.audio_desc">随视频同步录制座舱麦克风声音。仅在 ACC 上电录制（行车录像、近距离防御）时生效；驻车哨兵期间永不录音。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -694,20 +694,20 @@
                                 <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
                                 <line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/>
                             </svg>
-                            <span data-i18n="recording.storage_title">Recording Storage</span>
+                            <span data-i18n="recording.storage_title">录制存储</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <!-- Storage Location Selection -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="trip.settings.storage_location">Storage Location</div>
-                                <div class="setting-desc" data-i18n="recording.storage_location_desc">Choose where to save recordings</div>
+                                <div class="setting-name" data-i18n="trip.settings.storage_location">存储地点</div>
+                                <div class="setting-desc" data-i18n="recording.storage_location_desc">选择录像文件的存储位置</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="recStorageTypeBtns">
-                                    <button class="btn-toggle active" data-value="INTERNAL" onclick="RecSettings.setStorageType('INTERNAL')" data-i18n="trip.settings.storage_internal">Internal</button>
-                                    <button class="btn-toggle" data-value="SD_CARD" onclick="RecSettings.setStorageType('SD_CARD')" id="btnRecSdCard" data-i18n="trip.settings.storage_sd">SD card</button>
+                                    <button class="btn-toggle active" data-value="INTERNAL" onclick="RecSettings.setStorageType('INTERNAL')" data-i18n="trip.settings.storage_internal">内部</button>
+                                    <button class="btn-toggle" data-value="SD_CARD" onclick="RecSettings.setStorageType('SD_CARD')" id="btnRecSdCard" data-i18n="trip.settings.storage_sd">SD卡</button>
                                     <button class="btn-toggle" data-value="USB" onclick="RecSettings.setStorageType('USB')" id="btnRecUsb" data-i18n="trip.settings.storage_usb">USB</button>
                                 </div>
                             </div>
@@ -719,13 +719,13 @@
                              clips are on the SD/USB they chose. -->
                         <div class="storage-fallback-banner" id="recStorageFallbackBanner" style="display:none;" role="status" aria-live="polite">
                             <span class="sd-status-dot" style="background:#f0a020;"></span>
-                            <span id="recStorageFallbackText" data-i18n="recording.storage_fallback_internal">SD/USB unavailable — saving to internal storage</span>
+                            <span id="recStorageFallbackText" data-i18n="recording.storage_fallback_internal">SD/USB 无法使用 — 正在存储至内部存储空间</span>
                         </div>
                         <!-- SD Card Status -->
                         <div class="sd-card-status" id="recSdCardStatus" style="display:none;">
                             <div class="sd-status-row">
                                 <span class="sd-status-dot" id="recSdStatusDot"></span>
-                                <span class="sd-status-text" id="recSdStatusText" data-i18n="recording.sd_checking">SD Card: Checking...</span>
+                                <span class="sd-status-text" id="recSdStatusText" data-i18n="recording.sd_checking">检查中...</span>
                             </div>
                             <div class="sd-space-info" id="recSdSpaceInfo" style="display:none;">
                                 <span id="recSdFree">-- free</span> / <span id="recSdTotal">-- total</span>
@@ -735,7 +735,7 @@
                         <div class="sd-card-status" id="recUsbStatus" style="display:none;">
                             <div class="sd-status-row">
                                 <span class="sd-status-dot" id="recUsbStatusDot"></span>
-                                <span class="sd-status-text" id="recUsbStatusText" data-i18n="recording.usb_checking">USB: Checking...</span>
+                                <span class="sd-status-text" id="recUsbStatusText" data-i18n="recording.usb_checking">检查中...</span>
                             </div>
                             <div class="sd-space-info" id="recUsbSpaceInfo" style="display:none;">
                                 <span id="recUsbFree">-- free</span> / <span id="recUsbTotal">-- total</span>
@@ -743,8 +743,8 @@
                         </div>
                         <div class="setting-row" style="border-bottom:none;padding-bottom:8px;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="trip.settings.storage_usage">Storage Usage</div>
-                                <div class="setting-desc" id="recStoragePath" data-i18n="recording.storage_path_default">Recordings saved to Overdrive/recordings</div>
+                                <div class="setting-name" data-i18n="trip.settings.storage_usage">存储使用</div>
+                                <div class="setting-desc" id="recStoragePath" data-i18n="recording.storage_path_default">录像保存到 Overdrive/recordings</div>
                             </div>
                         </div>
                         <div class="storage-bar">
@@ -756,8 +756,8 @@
                         </div>
                         <div class="setting-row" style="margin-top:16px;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.storage_limit">Storage Limit</div>
-                                <div class="setting-desc" data-i18n="recording.storage_limit_desc">Auto-delete oldest when limit reached</div>
+                                <div class="setting-name" data-i18n="recording.storage_limit">存储容量上限</div>
+                                <div class="setting-desc" data-i18n="recording.storage_limit_desc">达到存储容量上限时自动覆盖删除最旧录像</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -789,15 +789,15 @@
                                 <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
                                 <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
                             </svg>
-                            <span data-i18n="recording.cdr_title">BYD Dashcam Auto-Cleanup</span>
-                            <span class="status-badge" id="cdrCleanupBadge" data-i18n="status.off">OFF</span>
+                            <span data-i18n="recording.cdr_title">比亚迪行车记录仪自动清理</span>
+                            <span class="status-badge" id="cdrCleanupBadge" data-i18n="status.off">关</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.cdr_auto_delete">Auto-Delete Old Dashcam Files</div>
-                                <div class="setting-desc" data-i18n="recording.cdr_auto_delete_desc">Free up SD card space by removing oldest BYD dashcam recordings</div>
+                                <div class="setting-name" data-i18n="recording.cdr_auto_delete">自动清理原厂记录仪旧文件</div>
+                                <div class="setting-desc" data-i18n="recording.cdr_auto_delete_desc">通过自动删除最旧的原厂行车记录仪录像，释放 SD 卡空间</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -810,24 +810,24 @@
                         <div class="info-box-warning" id="cdrRecommendBanner" style="display:none;">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                             <div class="info-row" style="color:var(--warning);">
-                                <span class="label" data-i18n="recording.cdr_recommend_label_v2">Recommended</span>
-                                <span class="value" data-i18n="recording.cdr_recommend_text">Overdrive uses SD — enable cleanup to keep space free</span>
+                                <span class="label" data-i18n="recording.cdr_recommend_label_v2">建议</span>
+                                <span class="value" data-i18n="recording.cdr_recommend_text">OverDrive 正在使用 SD 卡——建议开启自动清理以确保存储空间充足</span>
                             </div>
                         </div>
                         <!-- CDR Status -->
                         <div class="info-box" id="cdrInfoBox">
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_path">Dashcam Path</span><span class="value" id="cdrPath">--</span></div>
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_usage">Dashcam Usage</span><span class="value" id="cdrUsage">--</span></div>
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_files">Files</span><span class="value" id="cdrFileCount">--</span></div>
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_protected">Protected</span><span class="value" id="cdrProtected">--</span></div>
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_deletable">Deletable</span><span class="value" id="cdrDeletable">--</span></div>
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_bg_monitor">Background monitor</span><span class="value" id="cdrMonitoring">--</span></div>
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_last_cleanup">Last cleanup</span><span class="value" id="cdrLastCleanup">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_path">原厂记录仪路径</span><span class="value" id="cdrPath">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_usage">已占存储空间</span><span class="value" id="cdrUsage">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_files">文件</span><span class="value" id="cdrFileCount">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_protected">受保护</span><span class="value" id="cdrProtected">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_deletable">可清理</span><span class="value" id="cdrDeletable">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_bg_monitor">后台监控</span><span class="value" id="cdrMonitoring">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_last_cleanup">最后一次清理</span><span class="value" id="cdrLastCleanup">--</span></div>
                         </div>
                         <div class="setting-row" style="margin-top:12px;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.cdr_reserved">Reserved Space for Overdrive</div>
-                                <div class="setting-desc" data-i18n="recording.cdr_reserved_desc">Keep this much free on SD card</div>
+                                <div class="setting-name" data-i18n="recording.cdr_reserved">为 OverDrive 预留空间</div>
+                                <div class="setting-desc" data-i18n="recording.cdr_reserved_desc">在 SD 卡上为 OverDrive 保持预留的空闲容量</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -838,8 +838,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.cdr_protect_recent">Protect Recent Files</div>
-                                <div class="setting-desc" data-i18n="recording.cdr_protect_recent_desc">Don't delete dashcam files newer than this</div>
+                                <div class="setting-name" data-i18n="recording.cdr_protect_recent">保护近期文件</div>
+                                <div class="setting-desc" data-i18n="recording.cdr_protect_recent_desc">保留指定天数内的原厂记录仪文件不被清理</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -850,8 +850,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.cdr_min_keep">Keep Minimum Files</div>
-                                <div class="setting-desc" data-i18n="recording.cdr_min_keep_desc">Always keep at least this many newest files</div>
+                                <div class="setting-name" data-i18n="recording.cdr_min_keep">最少保留文件数</div>
+                                <div class="setting-desc" data-i18n="recording.cdr_min_keep_desc">始终保留至少这么多份最新录像文件</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -863,12 +863,12 @@
                         <!-- Manual Cleanup Button -->
                         <button class="btn btn-danger" id="cdrCleanupNow" disabled style="width:100%;margin-top:12px;" onclick="RecSettings.triggerCdrCleanup()">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                            <span data-i18n="recording.cdr_cleanup_now_v2">Clean up now</span>
+                            <span data-i18n="recording.cdr_cleanup_now_v2">清理起来.</span>
                         </button>
                         <!-- Stats -->
                         <div class="info-box" style="margin-top:12px;">
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_total_freed">Total Freed</span><span class="value" id="cdrTotalFreed">--</span></div>
-                            <div class="info-row"><span class="label" data-i18n="recording.cdr_files_deleted">Files Deleted</span><span class="value" id="cdrTotalDeleted">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_total_freed">累计释放空间</span><span class="value" id="cdrTotalFreed">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_files_deleted">已删除文件数</span><span class="value" id="cdrTotalDeleted">--</span></div>
                         </div>
                     </div>
                 </div>
@@ -883,8 +883,7 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;">
                     <polyline points="20 6 9 17 4 12"/>
                 </svg>
-                Apply Changes
-            </button>
+                应用更改</button>
         </div>
     </div>
 

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.network_title">Network &amp; Hotspot - OverDrive</title>
+    <title data-i18n="app.network_title">网络与热点 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <script src="../shared/theme.js?v=8"></script>
     <script src="../shared/app-shell.js?v=7"></script>
@@ -82,12 +82,12 @@
                         <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
                     </svg>
                 </button>
-                <span style="font-weight:600;" data-i18n="network.nav">Network</span>
+                <span style="font-weight:600;" data-i18n="network.nav">网络与热点</span>
                 <div style="width:40px;"></div>
             </div>
 
             <header class="page-header">
-                <h1 class="page-title" data-i18n="network.page_title">Network &amp; Hotspot</h1>
+                <h1 class="page-title" data-i18n="network.page_title">网络共享与车载热点</h1>
                 <div class="header-actions">
                     <div class="header-badge">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -102,7 +102,7 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h.01"/><path d="M8.5 16.4a5 5 0 0 1 7 0"/><path d="M5 13a9 9 0 0 1 14 0"/><path d="M1.8 9.6a14 14 0 0 1 20.4 0"/></svg>
-                            <span data-i18n="network.hotspot">WiFi Hotspot</span>
+                            <span data-i18n="network.hotspot">车载 Wi‑Fi 热点</span>
                         </div>
                         <span class="card-badge" id="hsStateBadge">--</span>
                     </div>
@@ -110,18 +110,18 @@
                         <!-- Single-radio confirm step: the web equivalent of the
                              native AlertDialog. Hidden once acknowledged. -->
                         <div class="hs-warn" id="hsWarn" style="display:none;">
-                            <strong data-i18n="network.warn_title">The car will leave WiFi</strong>
-                            <div style="margin-top:6px;" data-i18n="network.warn_body">This head unit has one WiFi radio, so it cannot host a hotspot and stay on a WiFi network at the same time. While the hotspot is on, the car disconnects from WiFi and uses the built-in SIM's mobile data for itself and for every connected device. WiFi comes back when you turn the hotspot off.</div>
+                            <strong data-i18n="network.warn_title">开启热点将断开车机的 Wi‑Fi 连接</strong>
+                            <div style="margin-top:6px;" data-i18n="network.warn_body">当前车机仅配备了一块 Wi‑Fi 无线网卡，无法同时连接外部 Wi‑Fi 并开启热点。开启热点后，车机将自动断开外部 Wi‑Fi，自身及连入设备均将使用车机内置 SIM 卡的移动蜂窝数据。关闭热点后会自动重新连回 Wi‑Fi。</div>
                             <div class="hs-actions">
-                                <button class="btn" onclick="NetworkPage.cancelWarn()" data-i18n="common.cancel">Cancel</button>
-                                <button class="btn btn-primary" onclick="NetworkPage.acceptWarn()" data-i18n="network.warn_continue">Turn on hotspot</button>
+                                <button class="btn" onclick="NetworkPage.cancelWarn()" data-i18n="common.cancel">取消</button>
+                                <button class="btn btn-primary" onclick="NetworkPage.acceptWarn()" data-i18n="network.warn_continue">确认开启热点</button>
                             </div>
                         </div>
 
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="network.enable_label">Share mobile data over WiFi</div>
-                                <div class="setting-desc" id="hsStateDesc" data-i18n="network.enable_desc">Turns the head unit into a WiFi access point that shares the built-in SIM's internet.</div>
+                                <div class="setting-name" data-i18n="network.enable_label">通过 Wi‑Fi 共享车机蜂窝移动流量</div>
+                                <div class="setting-desc" id="hsStateDesc" data-i18n="network.enable_desc">将车机中控屏转换为 Wi‑Fi 热点，共享车机内置流量卡网络。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -134,17 +134,17 @@
                         <!-- Read-only: this firmware owns the AP name and key, so show
                              them to connect with instead of offering dead inputs. -->
                         <div class="hs-field">
-                            <label data-i18n="network.ssid">Network name</label>
+                            <label data-i18n="network.ssid">热点网络名称 (SSID)</label>
                             <div id="hsSsidValue" class="hs-readonly" onclick="NetworkPage.copyCred('ssid')">—</div>
                         </div>
                         <div class="hs-field">
-                            <label data-i18n="network.password">Password</label>
+                            <label data-i18n="network.password">连接密码</label>
                             <div class="hs-readonly-row">
                                 <div id="hsPasswordValue" class="hs-readonly" onclick="NetworkPage.copyCred('password')">—</div>
-                                <button class="btn btn-ghost" id="hsRevealBtn" onclick="NetworkPage.toggleReveal()" data-i18n="network.reveal">Show</button>
+                                <button class="btn btn-ghost" id="hsRevealBtn" onclick="NetworkPage.toggleReveal()" data-i18n="network.reveal">显示密码</button>
                             </div>
                         </div>
-                        <div class="hs-note" data-i18n="network.credentials_note">The vehicle sets the hotspot name and password, so they can't be changed here. Tap either one to copy it.</div>
+                        <div class="hs-note" data-i18n="network.credentials_note">热点名称和密码由原车系统统一管理，无法在此修改。点击任意一项即可一键复制。</div>
                     </div>
                 </div>
 
@@ -153,21 +153,21 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                            <span data-i18n="network.session">This session</span>
+                            <span data-i18n="network.session">本次开启统计</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="hs-stats">
                             <div class="hs-stat">
-                                <div class="label" data-i18n="network.uptime">Uptime</div>
+                                <div class="label" data-i18n="network.uptime">运行时长</div>
                                 <div class="value" id="hsUptime">--</div>
                             </div>
                             <div class="hs-stat">
-                                <div class="label" data-i18n="network.rx">Received</div>
+                                <div class="label" data-i18n="network.rx">下行接收</div>
                                 <div class="value" id="hsRx">--</div>
                             </div>
                             <div class="hs-stat">
-                                <div class="label" data-i18n="network.tx">Sent</div>
+                                <div class="label" data-i18n="network.tx">上行发送</div>
                                 <div class="value" id="hsTx">--</div>
                             </div>
                         </div>
@@ -179,7 +179,7 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="12" rx="2"/><path d="M7 20h10"/><path d="M12 16v4"/></svg>
-                            <span data-i18n="network.clients">Connected devices</span>
+                            <span data-i18n="network.clients">已连接设备</span>
                         </div>
                         <span class="card-badge" id="hsClientCount">0</span>
                     </div>
@@ -193,21 +193,21 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                            <span data-i18n="network.limit">Data limit</span>
+                            <span data-i18n="network.limit">热点流量限额</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="hs-field">
-                            <label for="hsCap" data-i18n="network.limit_label">Data limit (MB)</label>
+                            <label for="hsCap" data-i18n="network.limit_label">流量上限 (MB)</label>
                             <input type="number" id="hsCap" min="0" step="1" placeholder="0">
                         </div>
-                        <div class="hs-note" data-i18n="network.limit_desc">When the hotspot has passed this much data it turns itself off and you get a notification. Leave empty for no limit. This is a total limit, not a speed limit.</div>
+                        <div class="hs-note" data-i18n="network.limit_desc">当车载热点消耗流量达到此数值时将自动关闭热点并推送通知。留空表示不限制流量（注意：此为累计流量上限，非限速）。</div>
                         <div class="info-box" style="margin-top:12px;">
-                            <div class="info-row"><span class="label" data-i18n="network.usage">Used</span><span class="value" id="hsUsage">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="network.usage">已使用流量</span><span class="value" id="hsUsage">--</span></div>
                         </div>
                         <div class="hs-actions">
-                            <button class="btn" onclick="NetworkPage.resetUsage()" data-i18n="network.reset_usage">Reset counter</button>
-                            <button class="btn btn-primary" onclick="NetworkPage.saveLimit()" data-i18n="common.save">Save</button>
+                            <button class="btn" onclick="NetworkPage.resetUsage()" data-i18n="network.reset_usage">重置流量统计</button>
+                            <button class="btn btn-primary" onclick="NetworkPage.saveLimit()" data-i18n="common.save">保存</button>
                         </div>
                     </div>
                 </div>
@@ -217,14 +217,14 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15H4.6a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 6.2 9.6l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 11 4.6V4.6a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1.82.33"/></svg>
-                            <span data-i18n="network.behaviour">Behaviour</span>
+                            <span data-i18n="network.behaviour">运行策略</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="network.keepalive">Keep the hotspot up</div>
-                                <div class="setting-desc" data-i18n="network.keepalive_desc">If the access point drops on its own, start it again.</div>
+                                <div class="setting-name" data-i18n="network.keepalive">保持热点常开 (自动拉起)</div>
+                                <div class="setting-desc" data-i18n="network.keepalive_desc">如果车载热点意外被系统关闭，自动将其重新拉起开启。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -235,8 +235,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="network.autostart">Start when the car powers on</div>
-                                <div class="setting-desc" data-i18n="network.autostart_desc">Turn the hotspot on once at each power-up.</div>
+                                <div class="setting-name" data-i18n="network.autostart">车辆上电时自动开启</div>
+                                <div class="setting-desc" data-i18n="network.autostart_desc">每次车辆启动上电时，自动开启车载热点。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -253,14 +253,14 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-                            <span data-i18n="network.proxy">Proxy</span>
+                            <span data-i18n="network.proxy">本地代理</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="network.proxy_system">Route this car's traffic through the proxy</div>
-                                <div class="setting-desc" data-i18n="network.proxy_system_desc">Sets the system-wide HTTP proxy so apps on the head unit use the encrypted tunnel. Needs the proxy service running.</div>
+                                <div class="setting-name" data-i18n="network.proxy_system">将本车网络流量经由本地代理路由</div>
+                                <div class="setting-desc" data-i18n="network.proxy_system_desc">配置车机系统全局 HTTP 代理，使车机应用能够经由加密隧道访问网络。需要代理服务处于运行状态。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -271,7 +271,7 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="network.proxy_clients">Give connected devices internet (proxy)</div>
+                                <div class="setting-name" data-i18n="network.proxy_clients">为热点连接设备提供互联网代理</div>
                                 <!-- Replaced at runtime with the live gateway/port; this
                                      inline copy is what shows before the first poll. -->
                                 <div class="setting-desc" id="hsProxyClientsDesc">Connecting to the hotspot is not enough — this vehicle can't route devices to the internet on its own, so each device must be pointed at the car's proxy. On the device, after joining this hotspot: 1) open its Wi-Fi settings and edit this network, 2) set Proxy to Manual, 3) enter the hostname and port shown here, 4) save, then browse. The device keeps showing "no internet" and its own mobile-data icon even when this is working — that check ignores proxies.</div>
@@ -285,7 +285,7 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="network.client_tunnel_title">Also encrypt connected devices' traffic</div>
+                                <div class="setting-name" data-i18n="network.client_tunnel_title">同时加密已连接设备的上网流量</div>
                                 <div class="setting-desc" id="hsClientTunnelDesc">Sends connected devices' traffic through the encrypted tunnel before it leaves the car's SIM. Point devices at port 8122 instead of 8121. Slower, since it adds a hop. Turning this off stops that port listening immediately.</div>
                             </div>
                             <div class="setting-control">

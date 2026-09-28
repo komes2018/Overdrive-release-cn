@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.automations_title">Automations - OverDrive</title>
+    <title data-i18n="app.automations_title">自动化 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <script src="../shared/theme.js?v=8"></script>
     <script src="../shared/app-shell.js?v=7"></script>
@@ -52,12 +52,12 @@
                 <button class="menu-toggle" onclick="toggleSidebar()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
                 </button>
-                <span style="font-weight:600;" data-i18n="automation.page_title">Automations</span>
+                <span style="font-weight:600;" data-i18n="automation.page_title">自动化</span>
                 <div style="width:40px;"></div>
             </div>
 
             <header class="page-header">
-                <h1 class="page-title" data-i18n="automation.page_title">Automations</h1>
+                <h1 class="page-title" data-i18n="automation.page_title">自动化</h1>
                 <!-- The form lives on the Add tab (see window.OT_TABS above);
                      the empty-state below has a CTA that switches to it. -->
                 <!-- Clock badge — matches the other local pages. Hidden inside the
@@ -77,10 +77,10 @@
                 <!-- Section header for the list (Automations tab). Mirrors the
                      uppercase section-title used across the other local pages. -->
                 <div class="automations-section-head" data-tab="automations" id="listHead" style="display:none;">
-                    <h2 class="automations-section-title" data-i18n="automation.list_title">Your automations</h2>
+                    <h2 class="automations-section-title" data-i18n="automation.list_title">你的自动化</h2>
                     <button class="btn btn-secondary" onclick="AutomationSettings.showForm(null, {})">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                        <span data-i18n="automation.add_automation">Add Automation</span>
+                        <span data-i18n="automation.add_automation">添加自动化</span>
                     </button>
                 </div>
 
@@ -89,15 +89,15 @@
                      Shown only when there are 2+ automations (see automations.js
                      render()) — a single card has nothing to sort. -->
                 <div class="automations-sort-row" id="automationSortRow" data-tab="automations" style="display:none;">
-                    <label class="automations-sort-label" for="automationSortSelect" data-i18n="automation.sort_by">Sort by</label>
+                    <label class="automations-sort-label" for="automationSortSelect" data-i18n="automation.sort_by">排序方式</label>
                     <select id="automationSortSelect" class="automations-sort-select" onchange="AutomationSettings.setSort(this.value)">
-                        <option value="default" data-i18n="automation.sort_default">Default order</option>
-                        <option value="name_az" data-i18n="automation.sort_name_az">Name A&#8594;Z</option>
-                        <option value="name_za" data-i18n="automation.sort_name_za">Name Z&#8594;A</option>
-                        <option value="recent" data-i18n="automation.sort_recent">Recently run</option>
-                        <option value="runs" data-i18n="automation.sort_runs">Most runs</option>
-                        <option value="enabled" data-i18n="automation.sort_enabled_first">Enabled first</option>
-                        <option value="disabled" data-i18n="automation.sort_disabled_first">Disabled first</option>
+                        <option value="default" data-i18n="automation.sort_default">默认顺序</option>
+                        <option value="name_az" data-i18n="automation.sort_name_az">按名称 A→Z</option>
+                        <option value="name_za" data-i18n="automation.sort_name_za">按名称 Z→A</option>
+                        <option value="recent" data-i18n="automation.sort_recent">最近运行优先</option>
+                        <option value="runs" data-i18n="automation.sort_runs">运行次数最多</option>
+                        <option value="enabled" data-i18n="automation.sort_enabled_first">已启用优先</option>
+                        <option value="disabled" data-i18n="automation.sort_disabled_first">未启用优先</option>
                     </select>
                 </div>
 
@@ -108,9 +108,9 @@
                 <div id="emptyState" class="card" data-tab="automations" style="display:none;">
                     <div class="empty-state">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/></svg>
-                        <p data-i18n="automation.empty_p">No Automations configured. Add an automation.</p>
-                        <p class="empty-state-hint" data-i18n="automation.empty_hint">Create one to trigger an action when a vehicle event matches your conditions.</p>
-                        <button class="btn btn-primary" onclick="AutomationSettings.showForm(null, {})" data-i18n="automation.add_automation">Add Automation</button>
+                        <p data-i18n="automation.empty_p">尚未配置自动化。请添加一个自动化。</p>
+                        <p class="empty-state-hint" data-i18n="automation.empty_hint">创建一个自动化，在车辆事件符合你的条件时触发操作。</p>
+                        <button class="btn btn-primary" onclick="AutomationSettings.showForm(null, {})" data-i18n="automation.add_automation">添加自动化</button>
                     </div>
                 </div>
 
@@ -122,14 +122,14 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                            <span data-i18n="automation.settings_title">Settings</span>
+                            <span data-i18n="automation.settings_title">设置</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="automation.allow_shell">Allow shell actions</div>
-                                <div class="setting-desc" data-i18n="automation.allow_shell_desc">Let automations run a raw shell command automatically when their conditions match. This runs unattended in the background — leave off unless you are certain what your automations do.</div>
+                                <div class="setting-name" data-i18n="automation.allow_shell">允许 Shell 操作</div>
+                                <div class="setting-desc" data-i18n="automation.allow_shell_desc">允许自动化在条件符合时自动运行原始 Shell 命令。此操作会在后台无人值守运行 —— 除非你确定自己的自动化会执行什么操作，否则请保持关闭。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -154,22 +154,22 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                            <span data-i18n="automation.backup_title">Backup &amp; Restore</span>
+                            <span data-i18n="automation.backup_title">备份和恢复</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none; align-items:flex-start;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="automation.backup_name">Export / Import</div>
-                                <div class="setting-desc" data-i18n="automation.backup_desc">Save all your automations to a file, or restore them from a backup. Importing merges into your current automations (existing ones with the same id are replaced).</div>
+                                <div class="setting-name" data-i18n="automation.backup_name">导出/导入</div>
+                                <div class="setting-desc" data-i18n="automation.backup_desc">将你所有的自动化保存到一个文件，或从备份中恢复。导入时会合并到你当前的自动化中（相同 ID 的现有自动化将被替换）。</div>
                             </div>
                             <div class="setting-control" style="display:flex; gap:8px;">
                                 <button class="btn btn-secondary" onclick="AutomationSettings.exportAll()">
-                                    <span data-i18n="automation.backup_export">Export</span>
+                                    <span data-i18n="automation.backup_export">导出</span>
                                 </button>
                                 <input type="file" id="automationImportFile" accept="application/json,.json" style="display:none;" onchange="AutomationSettings.importFile(this.files[0])">
                                 <button class="btn btn-secondary" onclick="document.getElementById('automationImportFile').click()">
-                                    <span data-i18n="automation.backup_import">Import</span>
+                                    <span data-i18n="automation.backup_import">导入</span>
                                 </button>
                             </div>
                         </div>
@@ -182,19 +182,19 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-                            <span data-i18n="automation.audio_library_title">Audio Library</span>
+                            <span data-i18n="automation.audio_library_title">音频库</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none; align-items:flex-start;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="automation.audio_library">Uploaded sounds</div>
-                                <div class="setting-desc" data-i18n="automation.audio_library_desc">Upload MP3, WAV or MP4 sounds (max 48 MB). The Play Audio action and key mapping can play any sound here.</div>
+                                <div class="setting-name" data-i18n="automation.audio_library">上传声音</div>
+                                <div class="setting-desc" data-i18n="automation.audio_library_desc">上传 MP3、WAV 或 MP4 音频文件（最大 16 MB）。“播放音频”动作和按键映射可以播放这里的任意音效。</div>
                             </div>
                             <div class="setting-control">
                                 <input type="file" id="audioLibFile" accept="audio/*,video/mp4,.mp3,.wav,.m4a,.aac,.ogg" style="display:none;" onchange="AudioLibrary.upload(this.files[0])">
                                 <button class="btn btn-secondary" onclick="document.getElementById('audioLibFile').click()">
-                                    <span id="audioLibUploadLabel" data-i18n="automation.audio_upload">Upload</span>
+                                    <span id="audioLibUploadLabel" data-i18n="automation.audio_upload">上传</span>
                                 </button>
                             </div>
                         </div>
@@ -208,24 +208,24 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
-                            <span data-i18n="automation.safety_title">Driving safety guards</span>
+                            <span data-i18n="automation.safety_title">行车主动安全防护规则</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="info-box-warning" role="alert" style="margin:0 0 8px;">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                            <div class="info-note" data-i18n="automation.safety_warning">These guards apply to matching vehicle actions started through OverDrive's Automations, Action Groups, Key Mapping, Quick Controls, MQTT, Vehicle Controls, and saved seat positions. Turning one off lets OverDrive attempt that action while the car is moving or its state is unknown. Advanced raw shell, CAN, and diagnostic actions are outside these guards.</div>
+                            <div class="info-note" data-i18n="automation.safety_warning">这些安全防护适用于通过 OverDrive 自动化、操作组、按键映射、快捷控制、MQTT、车控面板及座椅记忆触发的车辆动作。关闭某项防护后，OverDrive 将允许在行车过程中或状态未知时尝试该操作。高级原始 Shell、CAN 和底层诊断操作不受此防护限制。</div>
                         </div>
 
                         <div id="safetySettingsStatus" class="info-box-note" role="status" style="margin:0;">
                             <svg id="safetySettingsStatusIcon" class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                            <div id="safetySettingsStatusText" class="info-note" data-i18n="automation.safety_loading">Loading safety settings…</div>
+                            <div id="safetySettingsStatusText" class="info-note" data-i18n="automation.safety_loading">正在加载安全防护配置…</div>
                         </div>
                         <div id="safetySettingsControls" hidden>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" id="safetyDoorLocksName" data-i18n="automation.safety_door_locks">Door lock and unlock</div>
-                                <div class="setting-desc" id="safetyDoorLocksDesc" data-i18n="automation.safety_door_locks_desc">Block locking or unlocking the doors unless the car is safely parked.</div>
+                                <div class="setting-name" id="safetyDoorLocksName" data-i18n="automation.safety_door_locks">车门加锁与解锁</div>
+                                <div class="setting-desc" id="safetyDoorLocksDesc" data-i18n="automation.safety_door_locks_desc">除非车辆处于安全驻车状态，否则阻止锁定或解锁车门。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -237,8 +237,8 @@
 
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" id="safetyTrunkName" data-i18n="automation.safety_trunk">Trunk movement</div>
-                                <div class="setting-desc" id="safetyTrunkDesc" data-i18n="automation.safety_trunk_desc">Block opening or closing the tailgate. Stop remains available.</div>
+                                <div class="setting-name" id="safetyTrunkName" data-i18n="automation.safety_trunk">后备箱/尾门动作</div>
+                                <div class="setting-desc" id="safetyTrunkDesc" data-i18n="automation.safety_trunk_desc">阻止行车中开启或关闭后备箱。停止动作不受限制。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -250,8 +250,8 @@
 
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" id="safetyMirrorFoldName" data-i18n="automation.safety_mirror_fold">Fold mirrors</div>
-                                <div class="setting-desc" id="safetyMirrorFoldDesc" data-i18n="automation.safety_mirror_fold_desc">Block folding the exterior mirrors. Unfolding remains available.</div>
+                                <div class="setting-name" id="safetyMirrorFoldName" data-i18n="automation.safety_mirror_fold">外后视镜折叠</div>
+                                <div class="setting-desc" id="safetyMirrorFoldDesc" data-i18n="automation.safety_mirror_fold_desc">阻止行车中折叠外后视镜。展开动作不受限制。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -263,8 +263,8 @@
 
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" id="safetyPositioningName" data-i18n="automation.safety_positioning">Seat, steering and mirror positioning</div>
-                                <div class="setting-desc" id="safetyPositioningDesc" data-i18n="automation.safety_positioning_desc">Block seat-memory recall and saved-position movement. The vehicle may still require Park itself.</div>
+                                <div class="setting-name" id="safetyPositioningName" data-i18n="automation.safety_positioning">座椅、方向盘与后视镜位置调节</div>
+                                <div class="setting-desc" id="safetyPositioningDesc" data-i18n="automation.safety_positioning_desc">阻止行车中调用座椅记忆和位置调节。原车可能仍需驻车挡才能响应。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -276,8 +276,8 @@
 
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" id="safetyHeadlightOffName" data-i18n="automation.safety_headlight_off">Turn headlights off</div>
-                                <div class="setting-desc" id="safetyHeadlightOffDesc" data-i18n="automation.safety_headlight_off_desc">Block selecting headlight Off. Auto, parking lights and low beam remain available.</div>
+                                <div class="setting-name" id="safetyHeadlightOffName" data-i18n="automation.safety_headlight_off">关闭大灯</div>
+                                <div class="setting-desc" id="safetyHeadlightOffDesc" data-i18n="automation.safety_headlight_off_desc">阻止将车灯挡位切换至关闭。自动 (AUTO)、示宽灯和近光灯不受限制。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -289,8 +289,8 @@
 
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" id="safetyDisplayBrightnessName" data-i18n="automation.safety_display_brightness">Display brightness</div>
-                                <div class="setting-desc" id="safetyDisplayBrightnessDesc" data-i18n="automation.safety_display_brightness_desc">Block changes to infotainment, driver-cluster and HUD brightness.</div>
+                                <div class="setting-name" id="safetyDisplayBrightnessName" data-i18n="automation.safety_display_brightness">屏幕亮度调节</div>
+                                <div class="setting-desc" id="safetyDisplayBrightnessDesc" data-i18n="automation.safety_display_brightness_desc">阻止行车中自动调节中控屏、仪表盘和 HUD 亮度。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -302,8 +302,8 @@
 
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" id="safetyDisplayPowerName" data-i18n="automation.safety_display_power">Display power</div>
-                                <div class="setting-desc" id="safetyDisplayPowerDesc" data-i18n="automation.safety_display_power_desc">Block screen power changes and turning the HUD off. Turning the HUD on remains available.</div>
+                                <div class="setting-name" id="safetyDisplayPowerName" data-i18n="automation.safety_display_power">屏幕电源控制</div>
+                                <div class="setting-desc" id="safetyDisplayPowerDesc" data-i18n="automation.safety_display_power_desc">阻止中控息屏和关闭 HUD。开启 HUD 不受限制。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -315,8 +315,8 @@
 
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" id="safetyScreenMediaName" data-i18n="automation.safety_screen_media">Full-screen media</div>
-                                <div class="setting-desc" id="safetyScreenMediaDesc" data-i18n="automation.safety_screen_media_desc">Block full-screen playback. Speaker-only audio remains available.</div>
+                                <div class="setting-name" id="safetyScreenMediaName" data-i18n="automation.safety_screen_media">全屏多媒体播放</div>
+                                <div class="setting-desc" id="safetyScreenMediaDesc" data-i18n="automation.safety_screen_media_desc">阻止行车中弹出全屏视频播放。纯扬声器音频播报不受限制。</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -333,15 +333,15 @@
                      elements tagged data-tab="community" so app-tabs shows them
                      only on the Community tab. Populated by community-automations.js. -->
                 <div class="automations-section-head" data-tab="community">
-                    <h2 class="automations-section-title" data-i18n="community.browse_title">Community automations</h2>
+                    <h2 class="automations-section-title" data-i18n="community.browse_title">社区自动化</h2>
                 </div>
                 <div id="communityControls" data-tab="community"></div>
                 <div id="communityList" data-tab="community"></div>
                 <div id="communityEmpty" class="card" data-tab="community" style="display:none;">
                     <div class="empty-state">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 21a8 8 0 0 0-16 0"/><circle cx="10" cy="8" r="5"/><path d="M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3"/></svg>
-                        <p id="communityEmptyMsg" data-i18n="community.empty">No community automations yet. Be the first to publish one.</p>
-                        <p class="empty-state-hint" data-i18n="community.empty_hint">Publish one of your automations from the Automations tab to share it.</p>
+                        <p id="communityEmptyMsg" data-i18n="community.empty">尚无社区自动化。成为第一个发布者。</p>
+                        <p class="empty-state-hint" data-i18n="community.empty_hint">从“自动化”标签页发布你的一个自动化，即可分享给其他人。</p>
                     </div>
                 </div>
                 <div id="communityPagination" data-tab="community" style="display:none;"></div>
@@ -352,7 +352,7 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                            <span id="formTitle" data-i18n="automation.add_automation">Add Automation</span>
+                            <span id="formTitle" data-i18n="automation.add_automation">添加自动化</span>
                         </div>
                     </div>
                     <div class="card-body">
@@ -361,8 +361,8 @@
                         </div>
 
                         <div class="form-actions">
-                            <button class="btn btn-secondary" onclick="AutomationSettings.hideForm()" data-i18n="common.cancel">Cancel</button>
-                            <button id="saveBtn" class="btn btn-primary" onclick="AutomationSettings.saveForm()" data-i18n="automation.save_automation">Save Automation</button>
+                            <button class="btn btn-secondary" onclick="AutomationSettings.hideForm()" data-i18n="common.cancel">取消</button>
+                            <button id="saveBtn" class="btn btn-primary" onclick="AutomationSettings.saveForm()" data-i18n="automation.save_automation">保存自动化</button>
                         </div>
                     </div>
                 </div>
@@ -373,23 +373,23 @@
                      (#groupEditor). -->
                 <div id="groupListSection" data-tab="groups">
                     <div class="automations-section-head">
-                        <h2 class="automations-section-title" data-i18n="automation.groups_title">Action groups</h2>
+                        <h2 class="automations-section-title" data-i18n="automation.groups_title">行动小组</h2>
                         <div class="automations-section-actions">
                             <!-- Export / import the group set. Backend: GET /api/action-groups/export
                                  + POST /api/action-groups/import (validates every group before
                                  storing), mirroring the automation backup on the Settings tab. -->
                             <button class="btn btn-secondary" onclick="AutomationSettings.exportGroups()" data-i18n-attr="title:automation.groups_backup_export_hint">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                                <span data-i18n="automation.backup_export">Export</span>
+                                <span data-i18n="automation.backup_export">导出</span>
                             </button>
                             <input type="file" id="groupImportFile" accept="application/json,.json" style="display:none;" onchange="AutomationSettings.importGroupsFile(this.files[0])">
                             <button class="btn btn-secondary" onclick="document.getElementById('groupImportFile').click()" data-i18n-attr="title:automation.groups_backup_import_hint">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                                <span data-i18n="automation.backup_import">Import</span>
+                                <span data-i18n="automation.backup_import">导入</span>
                             </button>
                             <button class="btn btn-secondary" onclick="AutomationSettings.showGroupForm(null)">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                <span data-i18n="automation.new_group">New group</span>
+                                <span data-i18n="automation.new_group">新建组</span>
                             </button>
                         </div>
                     </div>
@@ -397,9 +397,9 @@
                     <div id="groupEmpty" class="card" style="display:none;">
                         <div class="empty-state">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
-                            <p data-i18n="automation.groups_empty">No action groups yet.</p>
-                            <p class="empty-state-hint" data-i18n="automation.groups_empty_hint">Create a group of actions once, then run it from any automation or key binding with "Run action group".</p>
-                            <button class="btn btn-primary" onclick="AutomationSettings.showGroupForm(null)" data-i18n="automation.new_group">New group</button>
+                            <p data-i18n="automation.groups_empty">尚无操作组。</p>
+                            <p class="empty-state-hint" data-i18n="automation.groups_empty_hint">创建一个动作组一次，然后运行它，从任何自动化或密钥绑定到"运行动作组"。</p>
+                            <button class="btn btn-primary" onclick="AutomationSettings.showGroupForm(null)" data-i18n="automation.new_group">新建组</button>
                         </div>
                     </div>
                 </div>
@@ -409,14 +409,14 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
-                            <span data-i18n="automation.group_editor_title">Action group</span>
+                            <span data-i18n="automation.group_editor_title">操作组</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="form-grid" id="groupFormGrid"></div>
                         <div class="form-actions">
-                            <button class="btn btn-secondary" onclick="AutomationSettings.hideGroupForm()" data-i18n="common.cancel">Cancel</button>
-                            <button id="groupSaveBtn" class="btn btn-primary" onclick="AutomationSettings.saveGroup()" data-i18n="automation.save_group">Save group</button>
+                            <button class="btn btn-secondary" onclick="AutomationSettings.hideGroupForm()" data-i18n="common.cancel">取消</button>
+                            <button id="groupSaveBtn" class="btn btn-primary" onclick="AutomationSettings.saveGroup()" data-i18n="automation.save_group">保存组</button>
                         </div>
                     </div>
                 </div>

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.trips_title">Trips - OverDrive</title>
+    <title data-i18n="app.trips_title">行程记录 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="../shared/app-icon-dark.webp">
@@ -1346,12 +1346,12 @@
                 <button class="menu-toggle" onclick="toggleSidebar()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
                 </button>
-                <span style="font-weight:600;" data-i18n="trip.page_title_short">Trips</span>
+                <span style="font-weight:600;" data-i18n="trip.page_title_short">行程</span>
                 <div style="width:40px;"></div>
             </div>
 
             <header class="page-header">
-                <h1 class="page-title" data-i18n="trip.settings.title">Trip Analytics</h1>
+                <h1 class="page-title" data-i18n="trip.settings.title">行程能耗与驾驶分析</h1>
                 <div class="header-actions">
                     <div class="header-badge">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -1369,7 +1369,7 @@
                         <div class="score-hero-card" id="scoreHeroCard">
                             <div class="card-title" style="margin-bottom:16px;align-self:flex-start;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                                <span data-i18n="trip.card.driver_score">Driver Score</span>
+                                <span data-i18n="trip.card.driver_score">驾驶能效评分</span>
                             </div>
                             <div class="score-circle">
                                 <canvas id="scoreCircleCanvas" width="320" height="320"></canvas>
@@ -1381,22 +1381,22 @@
                             </div>
                             <div class="score-hero-label" id="scoreHeroLabel">--</div>
                             <div class="score-hero-tooltip" id="scoreHeroTooltip">
-                                <div class="score-hero-tooltip-title" id="scoreTooltipTitle" data-i18n="trip.card.driver_score">Driver Score</div>
+                                <div class="score-hero-tooltip-title" id="scoreTooltipTitle" data-i18n="trip.card.driver_score">驾驶能效评分</div>
                                 <div class="score-hero-tooltip-tier" id="scoreTooltipTiers">
-                                    <span class="score-tier-pill t-poor" data-i18n="trip.score_descriptors.excellent_zone">0–39 Poor</span>
-                                    <span class="score-tier-pill t-average" data-i18n="trip.score_descriptors.average_zone">40–59 Average</span>
-                                    <span class="score-tier-pill t-good" data-i18n="trip.score_descriptors.good_zone">60–79 Good</span>
-                                    <span class="score-tier-pill t-excellent" data-i18n="trip.score_descriptors.high_zone">80–100 Excellent</span>
+                                    <span class="score-tier-pill t-poor" data-i18n="trip.score_descriptors.excellent_zone">0–39 较差</span>
+                                    <span class="score-tier-pill t-average" data-i18n="trip.score_descriptors.average_zone">40–59 一般</span>
+                                    <span class="score-tier-pill t-good" data-i18n="trip.score_descriptors.good_zone">60–79 良好</span>
+                                    <span class="score-tier-pill t-excellent" data-i18n="trip.score_descriptors.high_zone">80–100 优秀</span>
                                 </div>
-                                <div class="score-hero-tooltip-desc" id="scoreTooltipDesc" data-i18n="trip.card.score_tooltip">Your overall driving efficiency score based on 5 criteria: anticipation, smoothness, speed discipline, efficiency, and consistency.</div>
-                                <div class="score-hero-tooltip-tip" id="scoreTooltipTip" data-i18n="trip.card.score_tip">💡 Focus on your weakest category to see the biggest improvement.</div>
+                                <div class="score-hero-tooltip-desc" id="scoreTooltipDesc" data-i18n="trip.card.score_tooltip">综合驾驶评分基于 5 项维度：路况预见性、踏板平顺性、车速守规、综合能效与驾驶连贯性。</div>
+                                <div class="score-hero-tooltip-tip" id="scoreTooltipTip" data-i18n="trip.card.score_tip">💡 针对最薄弱的维度重点提升，可获得最明显的改善效果。</div>
                             </div>
                         </div>
 
                         <div class="range-hero-card" id="rangeHeroCard">
                             <div class="range-hero-title">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                                <span data-i18n="trip.card.personalized_range">Personalized Range</span>
+                                <span data-i18n="trip.card.personalized_range">动态续航预估</span>
                             </div>
                             <div style="position:relative;width:140px;height:140px;margin-bottom:12px;">
                                 <canvas id="rangeCircleCanvas" width="280" height="280" style="width:100%;height:100%;"></canvas>
@@ -1410,7 +1410,7 @@
                             <div id="rangeHeroContent">
                                 <div class="range-hero-no-data">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                                    <div data-i18n="trip.unlock_range">Drive more trips to unlock personalized range estimates</div>
+                                    <div data-i18n="trip.unlock_range">累计更多行程数据以解锁动态续航预估</div>
                                 </div>
                             </div>
                             <div class="range-hero-tooltip" id="rangeHeroTooltip" style="display:none;"></div>
@@ -1420,7 +1420,7 @@
                         <div id="costHeroCard" style="background:linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(245,158,11,0.03) 100%);border:1px solid rgba(245,158,11,0.15);border-radius:20px;padding:20px 18px;display:flex;flex-direction:column;align-items:center;text-align:center;position:relative;overflow:visible;">
                             <div style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--text-secondary);margin-bottom:16px;align-self:flex-start;">
                                 <span style="font-size:18px;">💰</span>
-                                <span data-i18n="trip.card.cost_per">Cost per</span> <span id="costPerDistLabel">km</span>
+                                <span data-i18n="trip.card.cost_per">单位里程能耗花费</span> <span id="costPerDistLabel">km</span>
                             </div>
                             <div id="costNoRate" style="position:relative;">
                                 <div style="position:relative;width:140px;height:140px;margin:0 auto 8px;">
@@ -1432,7 +1432,7 @@
                                     </div>
                                 </div>
                                 <div style="position:absolute;left:-4px;right:-4px;bottom:-8px;background:var(--panel-overlay-bg);border:1px solid var(--warning);border-radius:8px;padding:10px 12px;opacity:0;transition:opacity 0.2s;pointer-events:none;font-size:11px;color:var(--text-muted);text-align:center;z-index:10;" class="cost-hint" data-i18n="trip.cost_hint">
-                                    💡 Set your electricity rate in Trip Storage → Electricity Rate
+                                    💡 请在“行程存储 → 充电电价”中设置你的电价
                                 </div>
                             </div>
                             <div id="costHeroData" style="display:none;">
@@ -1455,7 +1455,7 @@
                         <div class="radar-card">
                             <div class="card-title">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><polygon points="12 2 22 8.5 19 20 5 20 2 8.5"/></svg>
-                                <span data-i18n="trip.dna.title">Driving DNA</span>
+                                <span data-i18n="trip.dna.title">驾驶风格画像</span>
                             </div>
                             <div class="radar-canvas-wrap">
                                 <canvas id="radarChart"></canvas>
@@ -1472,10 +1472,10 @@
                     <!-- Top Bar: Quick Filters + Custom range -->
                     <div class="trips-top-bar" data-tab="trips" id="tripFilters">
                         <div class="filter-tabs">
-                            <button class="filter-tab active" data-days="7" onclick="TRIPS.quickFilter(7, this)" data-i18n="trip.filter.days_7">7 Days</button>
-                            <button class="filter-tab" data-days="14" onclick="TRIPS.quickFilter(14, this)" data-i18n="trip.filter.days_14">14 Days</button>
-                            <button class="filter-tab" data-days="30" onclick="TRIPS.quickFilter(30, this)" data-i18n="trip.filter.days_30">30 Days</button>
-                            <button class="filter-tab" id="tripCustomTab" onclick="TRIPS.toggleCustomRange(this)" data-i18n="trip.filter.custom">Custom</button>
+                            <button class="filter-tab active" data-days="7" onclick="TRIPS.quickFilter(7, this)" data-i18n="trip.filter.days_7">近 7 天</button>
+                            <button class="filter-tab" data-days="14" onclick="TRIPS.quickFilter(14, this)" data-i18n="trip.filter.days_14">近 14 天</button>
+                            <button class="filter-tab" data-days="30" onclick="TRIPS.quickFilter(30, this)" data-i18n="trip.filter.days_30">近 30 天</button>
+                            <button class="filter-tab" id="tripCustomTab" onclick="TRIPS.toggleCustomRange(this)" data-i18n="trip.filter.custom">自定义</button>
                         </div>
                         <!-- Custom date range (hidden until "Custom" is tapped). Each
                              field opens the shared calendar popup — mirrors the
@@ -1484,15 +1484,15 @@
                             <div class="trip-range-dates">
                                 <button class="calendar-toggle" id="tripFromToggle" onclick="TRIPS.openCalendar('from')">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                                    <span id="tripFromText" data-i18n="trip.daterange.from">From</span>
+                                    <span id="tripFromText" data-i18n="trip.daterange.from">起始日期</span>
                                 </button>
                                 <span class="trip-range-arrow">→</span>
                                 <button class="calendar-toggle" id="tripToToggle" onclick="TRIPS.openCalendar('to')">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                                    <span id="tripToText" data-i18n="trip.daterange.to">To</span>
+                                    <span id="tripToText" data-i18n="trip.daterange.to">截止日期</span>
                                 </button>
                             </div>
-                            <button class="btn btn-primary trip-range-apply" onclick="TRIPS.applyCustomRange()" data-i18n="trip.daterange.apply">Apply</button>
+                            <button class="btn btn-primary trip-range-apply" onclick="TRIPS.applyCustomRange()" data-i18n="trip.daterange.apply">确定筛选</button>
                         </div>
                     </div>
 
@@ -1508,31 +1508,31 @@
                     <!-- Empty State -->
                     <div class="empty-state" data-tab="trips" id="tripEmptyState" style="display:none;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 17h2v-7l4 4 4-4 4 4 4-4v7h2"/><path d="M4 5h16"/></svg>
-                        <div class="empty-title" data-i18n="trip.no_trips_yet">No trips recorded yet</div>
-                        <div class="empty-text" data-i18n="trip.no_trips_hint">Enable trip analytics and start driving to see your trips here</div>
+                        <div class="empty-title" data-i18n="trip.no_trips_yet">暂无行程记录</div>
+                        <div class="empty-text" data-i18n="trip.no_trips_hint">开启行程分析并开车行驶，即可在此查看行车轨迹与能耗记录</div>
                         <!-- Shown by _applyEnabledHint() only while trips are OFF. -->
-                        <button class="btn btn-primary" id="tripEnableFromEmpty" style="display:none;margin-top:16px;" onclick="TRIPS.enableFromEmptyState()" data-i18n="trip.enable_now">Turn on trip recording</button>
+                        <button class="btn btn-primary" id="tripEnableFromEmpty" style="display:none;margin-top:16px;" onclick="TRIPS.enableFromEmptyState()" data-i18n="trip.enable_now">开启行程记录</button>
                     </div>
 
-                    <button class="load-more-btn" data-tab="trips" id="loadMoreBtn" style="display:none;" onclick="TRIPS.loadMore()" data-i18n="trip.load_more">Load More Trips</button>
+                    <button class="load-more-btn" data-tab="trips" id="loadMoreBtn" style="display:none;" onclick="TRIPS.loadMore()" data-i18n="trip.load_more">加载更多历史行程</button>
 
                     <!-- Weekly Summary — lives on the Trips tab now (was on Stats);
                          it summarises the visible trip list, so it belongs alongside it. -->
                     <div class="summary-card" data-tab="trips" style="margin-top:20px;">
                         <div class="card-title" style="font-size:14px;">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;color:var(--brand-primary)"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                            <span data-i18n="trip.period_summary">Period Summary</span>
+                            <span data-i18n="trip.period_summary">统计周期总结</span>
                         </div>
                         <div class="summary-grid" id="weeklySummary">
-                            <div class="summary-stat"><div class="summary-stat-value" id="summaryTrips">--</div><div class="summary-stat-label" data-i18n="trip.summary.trips">Trips</div></div>
+                            <div class="summary-stat"><div class="summary-stat-value" id="summaryTrips">--</div><div class="summary-stat-label" data-i18n="trip.summary.trips">总行程数</div></div>
                             <div class="summary-stat"><div class="summary-stat-value" id="summaryDistance">--</div><div class="summary-stat-label" id="summaryDistanceLabel">km</div></div>
-                            <div class="summary-stat"><div class="summary-stat-value" id="summaryTime">--</div><div class="summary-stat-label" data-i18n="trip.summary.hours">Hours</div></div>
-                            <div class="summary-stat"><div class="summary-stat-value" id="summaryEfficiency">--</div><div class="summary-stat-label" data-i18n="trip.summary.avg_score">Avg Score</div></div>
-                            <div class="summary-stat"><div class="summary-stat-value" id="summaryEnergy">--</div><div class="summary-stat-label" data-i18n="trip.summary.kwh">kWh</div></div>
+                            <div class="summary-stat"><div class="summary-stat-value" id="summaryTime">--</div><div class="summary-stat-label" data-i18n="trip.summary.hours">行驶时长</div></div>
+                            <div class="summary-stat"><div class="summary-stat-value" id="summaryEfficiency">--</div><div class="summary-stat-label" data-i18n="trip.summary.avg_score">平均驾驶评分</div></div>
+                            <div class="summary-stat"><div class="summary-stat-value" id="summaryEnergy">--</div><div class="summary-stat-label" data-i18n="trip.summary.kwh">电耗 (kWh)</div></div>
                             <div class="summary-stat"><div class="summary-stat-value" id="summaryConsumption" style="color:var(--brand-primary);">--</div><div class="summary-stat-label" id="summaryConsumptionLabel">kWh/100km</div></div>
                             <div class="summary-stat"><div class="summary-stat-value" id="summaryEfficiency2" style="color:var(--brand-primary);">--</div><div class="summary-stat-label" id="summaryEfficiency2Label">km/kWh</div></div>
-                            <div class="summary-stat phev-only" id="summaryFuelTile" style="display:none;"><div class="summary-stat-value" id="summaryFuel" style="color:var(--warning);">--</div><div class="summary-stat-label" id="summaryFuelLabel" data-i18n="trip.summary.litres">Petrol</div></div>
-                            <div class="summary-stat"><div class="summary-stat-value" id="summaryCost">--</div><div class="summary-stat-label" data-i18n="trip.summary.cost">Cost</div></div>
+                            <div class="summary-stat phev-only" id="summaryFuelTile" style="display:none;"><div class="summary-stat-value" id="summaryFuel" style="color:var(--warning);">--</div><div class="summary-stat-label" id="summaryFuelLabel" data-i18n="trip.summary.litres">油耗 (L)</div></div>
+                            <div class="summary-stat"><div class="summary-stat-value" id="summaryCost">--</div><div class="summary-stat-label" data-i18n="trip.summary.cost">总费用</div></div>
                         </div>
                     </div>
 
@@ -1545,14 +1545,14 @@
                                     <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
                                     <line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/>
                                 </svg>
-                                <span data-i18n="trip.settings.trip_storage_title">Trip Storage</span>
+                                <span data-i18n="trip.settings.trip_storage_title">行程数据存储</span>
                             </div>
                         </div>
                         <div class="card-body">
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="trip.settings.title">Trip Analytics</div>
-                                    <div class="setting-desc" data-i18n="trip.settings.auto_record">Automatically record trips and compute driving scores</div>
+                                    <div class="setting-name" data-i18n="trip.settings.title">行程能耗与驾驶分析</div>
+                                    <div class="setting-desc" data-i18n="trip.settings.auto_record">自动记录行程，并计算驾驶评分</div>
                                 </div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
@@ -1564,8 +1564,8 @@
                             <!-- Electricity Rate -->
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="trip.settings.elec_rate_label">Electricity Rate</div>
-                                    <div class="setting-desc" data-i18n="trip.settings.rate_help">Cost per kWh for trip cost calculation</div>
+                                    <div class="setting-name" data-i18n="trip.settings.elec_rate_label">电力价格</div>
+                                    <div class="setting-desc" data-i18n="trip.settings.rate_help">用于计算行程电费的每度电单价</div>
                                 </div>
                                 <div class="setting-control" style="display:flex;gap:8px;align-items:center;">
                                     <select id="currencySelect" onchange="TRIPS.showApplyNeeded()" style="padding:8px 10px;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;max-width:150px;">
@@ -1636,21 +1636,21 @@
                             <!-- Fuel settings (PHEV only — TRIPS.applyPhevVisibility toggles #phevTankRow + #phevFuelPriceRow) -->
                             <div class="setting-row phev-only" id="phevTankRow" style="display:none;">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="trip.settings.tank_capacity_label">Tank Capacity</div>
-                                    <div class="setting-desc" data-i18n="trip.settings.tank_capacity_help">Fuel tank size — needed to compute litres burned from BYD's % reading</div>
+                                    <div class="setting-name" data-i18n="trip.settings.tank_capacity_label">油箱容量</div>
+                                    <div class="setting-desc" data-i18n="trip.settings.tank_capacity_help">燃油箱容量 — 用于根据 BYD 的百分比读数计算已消耗的升数</div>
                                 </div>
                                 <div class="setting-control" style="display:flex;gap:8px;align-items:center;">
                                     <input type="number" id="tankCapacityInput" placeholder="0.0" step="0.1" min="0" onchange="TRIPS.showApplyNeeded()" style="width:80px;padding:8px 10px;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:'JetBrains Mono',monospace;">
                                     <div class="btn-group">
                                         <button class="btn-toggle active" id="fuelUnitL" onclick="TRIPS.setFuelUnit('L')" data-i18n="trip.settings.fuel_unit_l">L</button>
-                                        <button class="btn-toggle" id="fuelUnitGal" onclick="TRIPS.setFuelUnit('gal')" data-i18n="trip.settings.fuel_unit_gal">gal</button>
+                                        <button class="btn-toggle" id="fuelUnitGal" onclick="TRIPS.setFuelUnit('gal')" data-i18n="trip.settings.fuel_unit_gal">加仑 (gal)</button>
                                     </div>
                                 </div>
                             </div>
                             <div class="setting-row phev-only" id="phevFuelPriceRow" style="display:none;">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="trip.settings.fuel_price_label">Fuel Price</div>
-                                    <div class="setting-desc" data-i18n="trip.settings.fuel_price_help">Price per litre (or gallon) for petrol cost calculation</div>
+                                    <div class="setting-name" data-i18n="trip.settings.fuel_price_label">燃油价格</div>
+                                    <div class="setting-desc" data-i18n="trip.settings.fuel_price_help">用于计算燃油费用的每升（或每加仑）油价</div>
                                 </div>
                                 <div class="setting-control" style="display:flex;gap:8px;align-items:center;">
                                     <input type="number" id="fuelPriceInput" placeholder="0.00" step="0.01" min="0" onchange="TRIPS.showApplyNeeded()" style="width:80px;padding:8px 10px;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-family:'JetBrains Mono',monospace;">
@@ -1660,26 +1660,26 @@
                             <!-- Distance Unit -->
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="trip.settings.distance_unit">Distance Unit</div>
-                                    <div class="setting-desc" data-i18n="trip.settings.distance_unit_desc">Display distances and speeds in km or miles</div>
+                                    <div class="setting-name" data-i18n="trip.settings.distance_unit">距离单位</div>
+                                    <div class="setting-desc" data-i18n="trip.settings.distance_unit_desc">在公里或英里中显示距离和速度</div>
                                 </div>
                                 <div class="setting-control">
                                     <div class="btn-group">
-                                        <button class="btn-toggle active" id="unitKm" onclick="TRIPS.setDistanceUnit('km')" data-i18n="trip.settings.unit_km">🌍 km</button>
-                                        <button class="btn-toggle" id="unitMi" onclick="TRIPS.setDistanceUnit('mi')" data-i18n="trip.settings.unit_miles">🇬🇧 miles</button>
+                                        <button class="btn-toggle active" id="unitKm" onclick="TRIPS.setDistanceUnit('km')" data-i18n="trip.settings.unit_km"> 公里</button>
+                                        <button class="btn-toggle" id="unitMi" onclick="TRIPS.setDistanceUnit('mi')" data-i18n="trip.settings.unit_miles">公里</button>
                                     </div>
                                 </div>
                             </div>
                             <!-- Storage Location Selection -->
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="trip.settings.storage_location">Storage Location</div>
-                                    <div class="setting-desc" data-i18n="trip.settings.storage_location_desc">Choose where to save trip telemetry</div>
+                                    <div class="setting-name" data-i18n="trip.settings.storage_location">存储地点</div>
+                                    <div class="setting-desc" data-i18n="trip.settings.storage_location_desc">选择保存行程车况遥测数据的存储介质</div>
                                 </div>
                                 <div class="setting-control">
                                     <div class="btn-group">
-                                        <button class="btn-toggle active" id="storageInternal" onclick="TRIPS.setStorageType('INTERNAL')" data-i18n="trip.settings.storage_internal">Internal</button>
-                                        <button class="btn-toggle" id="storageSdCard" onclick="TRIPS.setStorageType('SD_CARD')" data-i18n="trip.settings.storage_sd">SD card</button>
+                                        <button class="btn-toggle active" id="storageInternal" onclick="TRIPS.setStorageType('INTERNAL')" data-i18n="trip.settings.storage_internal">内部</button>
+                                        <button class="btn-toggle" id="storageSdCard" onclick="TRIPS.setStorageType('SD_CARD')" data-i18n="trip.settings.storage_sd">SD卡</button>
                                         <button class="btn-toggle" id="storageUsb" onclick="TRIPS.setStorageType('USB')" data-i18n="trip.settings.storage_usb">USB</button>
                                     </div>
                                 </div>
@@ -1688,7 +1688,7 @@
                             <div class="sd-card-status" id="tripSdCardStatus" style="display:none;">
                                 <div class="sd-status-row">
                                     <span class="sd-status-dot" id="tripSdStatusDot"></span>
-                                    <span class="sd-status-text" id="tripSdStatusText" data-i18n="trip.settings.sd_checking">SD Card: Checking...</span>
+                                    <span class="sd-status-text" id="tripSdStatusText" data-i18n="trip.settings.sd_checking">查看...</span>
                                 </div>
                                 <div class="sd-space-info" id="tripSdSpaceInfo" style="display:none;">
                                     <span id="tripSdFree">-- free</span> / <span id="tripSdTotal">-- total</span>
@@ -1698,7 +1698,7 @@
                             <div class="sd-card-status" id="tripUsbStatus" style="display:none;">
                                 <div class="sd-status-row">
                                     <span class="sd-status-dot" id="tripUsbStatusDot"></span>
-                                    <span class="sd-status-text" id="tripUsbStatusText" data-i18n="trip.settings.usb_checking">USB: Checking...</span>
+                                    <span class="sd-status-text" id="tripUsbStatusText" data-i18n="trip.settings.usb_checking">检查...</span>
                                 </div>
                                 <div class="sd-space-info" id="tripUsbSpaceInfo" style="display:none;">
                                     <span id="tripUsbFree">-- free</span> / <span id="tripUsbTotal">-- total</span>
@@ -1706,8 +1706,8 @@
                             </div>
                             <div class="setting-row" style="border-bottom:none;padding-bottom:8px;">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="trip.settings.storage_usage">Storage Usage</div>
-                                    <div class="setting-desc" id="tripStoragePath" data-i18n="trip.settings.storage_path_default">Telemetry saved to Overdrive/trips</div>
+                                    <div class="setting-name" data-i18n="trip.settings.storage_usage">存储使用</div>
+                                    <div class="setting-desc" id="tripStoragePath" data-i18n="trip.settings.storage_path_default">遥测数据保存到 Overdrive/trips</div>
                                 </div>
                             </div>
                             <div class="storage-bar">
@@ -1719,8 +1719,8 @@
                             </div>
                             <div class="setting-row" style="margin-top:16px;">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="trip.settings.storage_limit">Storage Limit</div>
-                                    <div class="setting-desc" data-i18n="trip.settings.storage_limit_desc">Auto-delete oldest when limit reached</div>
+                                    <div class="setting-name" data-i18n="trip.settings.storage_limit">存储限制</div>
+                                    <div class="setting-desc" data-i18n="trip.settings.storage_limit_desc">当达到限制时自动删除最旧</div>
                                 </div>
                                 <div class="setting-control">
                                     <div class="slider-control">
@@ -1740,7 +1740,7 @@
                                 <span data-budget-text></span>
                             </div>
                             <div style="margin-top:12px;display:flex;gap:8px;">
-                                <button class="btn btn-primary" id="storageApplyBtn" onclick="TRIPS.applyStorageSettings()" style="flex:1;" disabled data-i18n="common.apply_changes">Apply Changes</button>
+                                <button class="btn btn-primary" id="storageApplyBtn" onclick="TRIPS.applyStorageSettings()" style="flex:1;" disabled data-i18n="common.apply_changes">应用更改</button>
                             </div>
                         </div>
                     </div>
@@ -1754,19 +1754,19 @@
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.36 2.64L3 8"/><path d="M3 3v5h5"/>
                                 </svg>
-                                <span data-i18n="trip.recover.title">Recover Missing Trips</span>
+                                <span data-i18n="trip.recover.title">恢复缺少的行程</span>
                             </div>
                         </div>
                         <div class="card-body">
                             <div class="setting-row" style="border-bottom:none;">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="trip.recover.action">Rebuild from storage</div>
-                                    <div class="setting-desc" data-i18n="trip.recover.desc">If trips vanished from your history after an SD card was briefly undetected, this rebuilds them from the telemetry files still on disk. Distance, speed, route and elevation are restored; energy, cost and driving scores aren’t available for recovered trips. Safe to run anytime.</div>
+                                    <div class="setting-name" data-i18n="trip.recover.action">从存储器中重建</div>
+                                    <div class="setting-desc" data-i18n="trip.recover.desc">若因存储卡短暂未被识别导致行程记录丢失，可从磁盘上残留的遥测文件中重新生成。里程、车速、路线和海拔均可恢复；已恢复的行程不含电耗、费用及驾驶评分。可随时安全执行。</div>
                                 </div>
                             </div>
                             <div id="tripRecoverResult" class="setting-desc" style="display:none;margin:4px 0 12px;"></div>
                             <div style="margin-top:12px;">
-                                <button class="btn btn-primary" id="tripRecoverBtn" onclick="TRIPS.recoverTrips()" style="width:100%;" data-i18n="trip.recover.button">Scan &amp; Recover Trips</button>
+                                <button class="btn btn-primary" id="tripRecoverBtn" onclick="TRIPS.recoverTrips()" style="width:100%;" data-i18n="trip.recover.button">扫描和恢复行程</button>
                             </div>
                         </div>
                     </div>
@@ -1779,15 +1779,15 @@
                                     <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
                                     <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
                                 </svg>
-                                <span data-i18n="trip.cdr.title">BYD Dashcam Auto-Cleanup</span>
-                                <span class="status-badge" id="tripCdrBadge" data-i18n="status.off">OFF</span>
+                                <span data-i18n="trip.cdr.title">比亚迪行车记录仪自动清理</span>
+                                <span class="status-badge" id="tripCdrBadge" data-i18n="status.off">关</span>
                             </div>
                         </div>
                         <div class="card-body">
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="trip.cdr.auto_delete">Auto-Delete Old Dashcam Files</div>
-                                    <div class="setting-desc" data-i18n="trip.cdr.auto_delete_desc">Free up SD card space by removing oldest BYD dashcam recordings</div>
+                                    <div class="setting-name" data-i18n="trip.cdr.auto_delete">自动清理原厂记录仪旧文件</div>
+                                    <div class="setting-desc" data-i18n="trip.cdr.auto_delete_desc">通过自动循环删除最旧的原厂行车记录仪视频，释放 SD 卡存储空间。</div>
                                 </div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
@@ -1799,23 +1799,23 @@
                             <!-- Recommend banner (shown only when API says recommendAutoCleanup) -->
                             <div class="info-box" id="tripCdrRecommendBanner" style="display:none;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.3);">
                                 <div class="info-row" style="color:var(--warning);">
-                                    <span class="label" data-i18n="trip.cdr.recommend_label">⚠️ Recommended</span>
-                                    <span class="value" data-i18n="trip.cdr.recommend_text">Overdrive uses SD — enable cleanup to keep space free</span>
+                                    <span class="label" data-i18n="trip.cdr.recommend_label">建议</span>
+                                    <span class="value" data-i18n="trip.cdr.recommend_text">OverDrive 正在使用 SD 卡——建议开启自动清理以确保存储空间充足。</span>
                                 </div>
                             </div>
                             <div class="info-box" id="tripCdrInfoBox">
-                                <div class="info-row"><span class="label" data-i18n="trip.cdr.path">Dashcam Path</span><span class="value" id="tripCdrPath">--</span></div>
-                                <div class="info-row"><span class="label" data-i18n="trip.cdr.usage">Dashcam Usage</span><span class="value" id="tripCdrUsage">--</span></div>
-                                <div class="info-row"><span class="label" data-i18n="trip.cdr.files">Files</span><span class="value" id="tripCdrFileCount">--</span></div>
-                                <div class="info-row"><span class="label" data-i18n="trip.cdr.protected">Protected</span><span class="value" id="tripCdrProtected">--</span></div>
-                                <div class="info-row"><span class="label" data-i18n="trip.cdr.deletable">Deletable</span><span class="value" id="tripCdrDeletable">--</span></div>
-                                <div class="info-row"><span class="label" data-i18n="trip.cdr.bg_monitor">Background monitor</span><span class="value" id="tripCdrMonitoring">--</span></div>
-                                <div class="info-row"><span class="label" data-i18n="trip.cdr.last_cleanup">Last cleanup</span><span class="value" id="tripCdrLastCleanup">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.path">原厂记录仪路径</span><span class="value" id="tripCdrPath">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.usage">已占存储空间</span><span class="value" id="tripCdrUsage">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.files">文件总数</span><span class="value" id="tripCdrFileCount">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.protected">受保护</span><span class="value" id="tripCdrProtected">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.deletable">可清理</span><span class="value" id="tripCdrDeletable">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.bg_monitor">后台监控守护</span><span class="value" id="tripCdrMonitoring">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.last_cleanup">最后一次清理</span><span class="value" id="tripCdrLastCleanup">--</span></div>
                             </div>
                             <div class="setting-row" style="margin-top:12px;">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="trip.cdr.reserved">Reserved Space for Overdrive</div>
-                                    <div class="setting-desc" data-i18n="trip.cdr.reserved_desc">Keep this much free on SD card</div>
+                                    <div class="setting-name" data-i18n="trip.cdr.reserved">为 OverDrive 预留空间</div>
+                                    <div class="setting-desc" data-i18n="trip.cdr.reserved_desc">在 SD 卡上为 OverDrive 始终保留的空闲容量</div>
                                 </div>
                                 <div class="setting-control">
                                     <div class="slider-control">
@@ -1826,8 +1826,8 @@
                             </div>
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="trip.cdr.protect_recent">Protect Recent Files</div>
-                                    <div class="setting-desc" data-i18n="trip.cdr.protect_recent_desc">Don't delete dashcam files newer than this</div>
+                                    <div class="setting-name" data-i18n="trip.cdr.protect_recent">保护近期文件</div>
+                                    <div class="setting-desc" data-i18n="trip.cdr.protect_recent_desc">保留指定天数内的记录仪文件不被自动删除</div>
                                 </div>
                                 <div class="setting-control">
                                     <div class="slider-control">
@@ -1838,8 +1838,8 @@
                             </div>
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name" data-i18n="trip.cdr.min_keep">Keep Minimum Files</div>
-                                    <div class="setting-desc" data-i18n="trip.cdr.min_keep_desc">Always keep at least this many newest files</div>
+                                    <div class="setting-name" data-i18n="trip.cdr.min_keep">最少保留文件数</div>
+                                    <div class="setting-desc" data-i18n="trip.cdr.min_keep_desc">始终保留至少这么多份最新录像文件</div>
                                 </div>
                                 <div class="setting-control">
                                     <div class="slider-control">
@@ -1849,11 +1849,11 @@
                                 </div>
                             </div>
                             <button class="btn btn-danger" id="tripCdrCleanupNow" disabled style="width:100%;margin-top:12px;" onclick="TRIPS.triggerCdrCleanup()" data-i18n="trip.cdr.cleanup_now">
-                                🗑️ Clean Up Now
+                                立即清理
                             </button>
                             <div class="info-box" style="margin-top:12px;">
-                                <div class="info-row"><span class="label" data-i18n="trip.cdr.total_freed">Total Freed</span><span class="value" id="tripCdrTotalFreed">--</span></div>
-                                <div class="info-row"><span class="label" data-i18n="trip.cdr.files_deleted_label">Files Deleted</span><span class="value" id="tripCdrTotalDeleted">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.total_freed">累计释放空间</span><span class="value" id="tripCdrTotalFreed">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.files_deleted_label">已清理文件数</span><span class="value" id="tripCdrTotalDeleted">--</span></div>
                             </div>
                         </div>
                     </div>
@@ -1864,7 +1864,7 @@
                     <div class="detail-header">
                         <button class="detail-back-btn" onclick="TRIPS.hideDetail()">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
-                            <span data-i18n="trip.detail.back">Back to Trips</span>
+                            <span data-i18n="trip.detail.back">返回行程列表</span>
                         </button>
                     </div>
 
@@ -1874,24 +1874,24 @@
                         <div style="font-size:13px;color:var(--text-muted);margin-top:4px;" id="detailSubtitle">--</div>
                         <div class="detail-summary-grid">
                             <div class="detail-stat"><div class="detail-stat-value" id="detailDistance">--</div><div class="detail-stat-label" id="detailDistanceLabel">km</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailDuration">--</div><div class="detail-stat-label" data-i18n="trip.detail.duration">Duration</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailSocDelta">--</div><div class="detail-stat-label" data-i18n="trip.detail.soc_used">SoC Used</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailEfficiency">--</div><div class="detail-stat-label" data-i18n="trip.detail.energy">Energy</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailDuration">--</div><div class="detail-stat-label" data-i18n="trip.detail.duration">行程用时</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailSocDelta">--</div><div class="detail-stat-label" data-i18n="trip.detail.soc_used">消耗 SOC 电量</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailEfficiency">--</div><div class="detail-stat-label" data-i18n="trip.detail.energy">消耗电量</div></div>
                             <div class="detail-stat"><div class="detail-stat-value" id="detailConsumption" style="color:var(--brand-primary);">--</div><div class="detail-stat-label" id="detailConsumptionLabel">kWh/100km</div></div>
                             <div class="detail-stat"><div class="detail-stat-value" id="detailEfficiency2" style="color:var(--brand-primary);">--</div><div class="detail-stat-label" id="detailEfficiency2Label">km/kWh</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailAvgSpeed">--</div><div class="detail-stat-label" id="detailAvgSpeedLabel" data-i18n="trip.detail.avg_kmh">Avg km/h</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailMaxSpeed">--</div><div class="detail-stat-label" id="detailMaxSpeedLabel" data-i18n="trip.detail.max_kmh">Max km/h</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailSocStart">--</div><div class="detail-stat-label" data-i18n="trip.detail.start_soc">Start SoC</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailSocEnd">--</div><div class="detail-stat-label" data-i18n="trip.detail.end_soc">End SoC</div></div>
-                            <div class="detail-stat" id="detailOdoStartTile" style="display:none;"><div class="detail-stat-value" id="detailOdoStart">--</div><div class="detail-stat-label" data-i18n="trip.detail.start_odo">Start Odometer</div></div>
-                            <div class="detail-stat" id="detailOdoEndTile" style="display:none;"><div class="detail-stat-value" id="detailOdoEnd">--</div><div class="detail-stat-label" data-i18n="trip.detail.end_odo">End Odometer</div></div>
-                            <div class="detail-stat phev-only" id="detailFuelStartTile" style="display:none;"><div class="detail-stat-value" id="detailFuelStart" style="color:var(--warning);">--</div><div class="detail-stat-label" data-i18n="trip.detail.start_fuel">Start Fuel</div></div>
-                            <div class="detail-stat phev-only" id="detailFuelEndTile" style="display:none;"><div class="detail-stat-value" id="detailFuelEnd" style="color:var(--warning);">--</div><div class="detail-stat-label" data-i18n="trip.detail.end_fuel">End Fuel</div></div>
-                            <div class="detail-stat phev-only" id="detailLitresUsedTile" style="display:none;"><div class="detail-stat-value" id="detailLitresUsed" style="color:var(--warning);">--</div><div class="detail-stat-label" data-i18n="trip.detail.litres_used">Petrol Used</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailTemp">--</div><div class="detail-stat-label" data-i18n="trip.detail.temp_c">Temp °C</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailCost" style="color:var(--warning);">--</div><div class="detail-stat-label" data-i18n="trip.detail.cost">Cost</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailElevGain" style="color:var(--success);">--</div><div class="detail-stat-label" data-i18n="trip.detail.elev_up">Elev ↑</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailElevLoss" style="color:var(--danger);">--</div><div class="detail-stat-label" data-i18n="trip.detail.elev_down">Elev ↓</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailAvgSpeed">--</div><div class="detail-stat-label" id="detailAvgSpeedLabel" data-i18n="trip.detail.avg_kmh">平均车速 (km/h)</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailMaxSpeed">--</div><div class="detail-stat-label" id="detailMaxSpeedLabel" data-i18n="trip.detail.max_kmh">最高车速 (km/h)</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailSocStart">--</div><div class="detail-stat-label" data-i18n="trip.detail.start_soc">起始 SOC</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailSocEnd">--</div><div class="detail-stat-label" data-i18n="trip.detail.end_soc">结束 SOC</div></div>
+                            <div class="detail-stat" id="detailOdoStartTile" style="display:none;"><div class="detail-stat-value" id="detailOdoStart">--</div><div class="detail-stat-label" data-i18n="trip.detail.start_odo">起始总里程</div></div>
+                            <div class="detail-stat" id="detailOdoEndTile" style="display:none;"><div class="detail-stat-value" id="detailOdoEnd">--</div><div class="detail-stat-label" data-i18n="trip.detail.end_odo">结束总里程</div></div>
+                            <div class="detail-stat phev-only" id="detailFuelStartTile" style="display:none;"><div class="detail-stat-value" id="detailFuelStart" style="color:var(--warning);">--</div><div class="detail-stat-label" data-i18n="trip.detail.start_fuel">起始油量</div></div>
+                            <div class="detail-stat phev-only" id="detailFuelEndTile" style="display:none;"><div class="detail-stat-value" id="detailFuelEnd" style="color:var(--warning);">--</div><div class="detail-stat-label" data-i18n="trip.detail.end_fuel">结束油量</div></div>
+                            <div class="detail-stat phev-only" id="detailLitresUsedTile" style="display:none;"><div class="detail-stat-value" id="detailLitresUsed" style="color:var(--warning);">--</div><div class="detail-stat-label" data-i18n="trip.detail.litres_used">消耗燃油</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailTemp">--</div><div class="detail-stat-label" data-i18n="trip.detail.temp_c">环境温度 (°C)</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailCost" style="color:var(--warning);">--</div><div class="detail-stat-label" data-i18n="trip.detail.cost">行程费用</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailElevGain" style="color:var(--success);">--</div><div class="detail-stat-label" data-i18n="trip.detail.elev_up">累计爬升 ↑</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailElevLoss" style="color:var(--danger);">--</div><div class="detail-stat-label" data-i18n="trip.detail.elev_down">累计下降 ↓</div></div>
                         </div>
                         <div style="margin-top:8px;text-align:center;"><span id="detailGradientPill" style="display:none;"></span></div>
                     </div>
@@ -1901,10 +1901,10 @@
                     <div class="recovered-banner" id="detailRecoveredBanner" style="display:none;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
                         <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:0;">
-                            <span id="detailRecoveredNote" data-i18n="trip.recovered.detail_note">Recovered from telemetry. Distance, speed and elevation are reconstructed from GPS; battery, energy, cost and driving scores were not recorded for this trip.</span>
+                            <span id="detailRecoveredNote" data-i18n="trip.recovered.detail_note">已从车况遥测数据中恢复。行驶距离、车速和海拔高度由 GPS 轨迹推算；本次行程未记录电池电量、能耗、费用及驾驶评分。</span>
                             <!-- Shown only when the trip has telemetry but no
                                  driving scores: POST /api/trips/{id}/rescore -->
-                            <button type="button" class="btn btn-secondary" id="detailRescoreBtn" onclick="TRIPS.rescoreCurrentTrip()" style="display:none;align-self:flex-start;font-size:12px;padding:6px 12px;" data-i18n="trip.partial.rescore_button">Compute driving scores</button>
+                            <button type="button" class="btn btn-secondary" id="detailRescoreBtn" onclick="TRIPS.rescoreCurrentTrip()" style="display:none;align-self:flex-start;font-size:12px;padding:6px 12px;" data-i18n="trip.partial.rescore_button">计算驾驶评分</button>
                         </div>
                     </div>
 
@@ -1913,13 +1913,13 @@
                         <div class="timeline-slider-header">
                             <div class="card-title">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;color:var(--brand-primary)"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                                <span data-i18n="trip.timeline.title">Trip Timeline</span>
+                                <span data-i18n="trip.timeline.title">行程时间线</span>
                             </div>
                             <div class="timeline-slider-info" id="sliderInfo">
-                                <span class="timeline-slider-stat"><span data-i18n="trip.timeline.speed">Speed</span>: <span class="tval" id="sliderSpeed">--</span> <span id="sliderSpeedUnit">km/h</span></span>
-                                <span class="timeline-slider-stat"><span data-i18n="trip.timeline.accel">Accel</span>: <span class="tval" id="sliderAccel">--</span>%</span>
-                                <span class="timeline-slider-stat"><span data-i18n="trip.timeline.brake">Brake</span>: <span class="tval" id="sliderBrake">--</span>%</span>
-                                <span class="timeline-slider-stat" style="color:rgba(245,158,11,0.7);"><span data-i18n="trip.timeline.soc">SoC</span>: <span class="tval" id="sliderSoc" style="color:rgba(245,158,11,0.9);">--</span>%</span>
+                                <span class="timeline-slider-stat"><span data-i18n="trip.timeline.speed">车速</span>: <span class="tval" id="sliderSpeed">--</span> <span id="sliderSpeedUnit">km/h</span></span>
+                                <span class="timeline-slider-stat"><span data-i18n="trip.timeline.accel">加速</span>: <span class="tval" id="sliderAccel">--</span>%</span>
+                                <span class="timeline-slider-stat"><span data-i18n="trip.timeline.brake">制动</span>: <span class="tval" id="sliderBrake">--</span>%</span>
+                                <span class="timeline-slider-stat" style="color:rgba(245,158,11,0.7);"><span data-i18n="trip.timeline.soc">剩余电量 (SoC)</span>: <span class="tval" id="sliderSoc" style="color:rgba(245,158,11,0.9);">--</span>%</span>
                             </div>
                         </div>
                         <div class="timeline-slider-wrap">
@@ -1936,7 +1936,7 @@
                     <div class="map-card">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
-                            <span data-i18n="trip.route.title">Route</span>
+                            <span data-i18n="trip.route.title">路线</span>
                         </div>
                         <div id="tripMap"></div>
                         <div class="map-speed-legend">
@@ -1951,21 +1951,21 @@
                     <div class="chart-card">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                            <span data-i18n="trip.timeline.speed_pedal_title">Speed &amp; Pedal Timeline</span>
+                            <span data-i18n="trip.timeline.speed_pedal_title">车速与踏板时间线</span>
                         </div>
                         <div style="display:flex;gap:12px;margin-bottom:8px;font-size:11px;color:var(--text-muted);">
-                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:3px;background:var(--brand-primary);border-radius:2px;display:inline-block;"></span> <span data-i18n="trip.timeline.legend_speed">Speed</span></span>
-                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:8px;background:rgba(14,165,233,0.3);border-radius:2px;display:inline-block;"></span> <span data-i18n="trip.timeline.legend_accel">Accel</span></span>
-                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:8px;background:rgba(239,68,68,0.3);border-radius:2px;display:inline-block;"></span> <span data-i18n="trip.timeline.legend_brake">Brake</span></span>
-                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:0;border-top:2px dashed rgba(245,158,11,0.5);display:inline-block;"></span> <span data-i18n="trip.timeline.legend_soc">SoC%</span></span>
+                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:3px;background:var(--brand-primary);border-radius:2px;display:inline-block;"></span> <span data-i18n="trip.timeline.legend_speed">车速</span></span>
+                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:8px;background:rgba(14,165,233,0.3);border-radius:2px;display:inline-block;"></span> <span data-i18n="trip.timeline.legend_accel">油门踏板</span></span>
+                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:8px;background:rgba(239,68,68,0.3);border-radius:2px;display:inline-block;"></span> <span data-i18n="trip.timeline.legend_brake">制动踏板</span></span>
+                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:0;border-top:2px dashed rgba(245,158,11,0.5);display:inline-block;"></span> <span data-i18n="trip.timeline.legend_soc">SoC 电量</span></span>
                         </div>
                         <div class="chart-canvas-wrap">
                             <canvas id="timelineChart"></canvas>
                         </div>
                         <div style="display:flex;justify-content:space-around;padding-top:10px;border-top:1px solid var(--border-subtle);margin-top:10px;">
-                            <div style="text-align:center;"><span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--text-primary);" id="tlAccelPct">--%</span><div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="trip.timeline.accelerating">Accelerating</div></div>
-                            <div style="text-align:center;"><span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--accent);" id="tlCoastPct">--%</span><div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="trip.timeline.coasting">Coasting</div></div>
-                            <div style="text-align:center;"><span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--danger);" id="tlBrakePct">--%</span><div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="trip.timeline.braking">Braking</div></div>
+                            <div style="text-align:center;"><span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--text-primary);" id="tlAccelPct">--%</span><div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="trip.timeline.accelerating">加速中</div></div>
+                            <div style="text-align:center;"><span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--accent);" id="tlCoastPct">--%</span><div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="trip.timeline.coasting">滑行中</div></div>
+                            <div style="text-align:center;"><span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--danger);" id="tlBrakePct">--%</span><div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="trip.timeline.braking">制动减速</div></div>
                         </div>
                     </div>
 
@@ -1973,15 +1973,15 @@
                     <div class="chart-card">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><rect x="3" y="12" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="12" rx="1"/><rect x="17" y="4" width="4" height="16" rx="1"/></svg>
-                            <span data-i18n="trip.speed_dist.title">Speed Distribution</span>
+                            <span data-i18n="trip.speed_dist.title">速度分布</span>
                         </div>
                         <div class="chart-canvas-wrap">
                             <canvas id="speedHistogram"></canvas>
                         </div>
                         <div class="speed-hist-legend">
-                            <span><span class="legend-dot" style="background:var(--warning);width:8px;height:8px;border-radius:50%;display:inline-block"></span> <span id="speedDistLow" data-i18n="trip.speed_dist.low">Low (&lt;40)</span></span>
-                            <span><span class="legend-dot" style="background:var(--success);width:8px;height:8px;border-radius:50%;display:inline-block"></span> <span id="speedDistNormal" data-i18n="trip.speed_dist.normal">Normal (40–80)</span></span>
-                            <span><span class="legend-dot" style="background:var(--danger);width:8px;height:8px;border-radius:50%;display:inline-block"></span> <span id="speedDistHigh" data-i18n="trip.speed_dist.high">High (&gt;80)</span></span>
+                            <span><span class="legend-dot" style="background:var(--warning);width:8px;height:8px;border-radius:50%;display:inline-block"></span> <span id="speedDistLow" data-i18n="trip.speed_dist.low">低速 (&lt;40 km/h)</span></span>
+                            <span><span class="legend-dot" style="background:var(--success);width:8px;height:8px;border-radius:50%;display:inline-block"></span> <span id="speedDistNormal" data-i18n="trip.speed_dist.normal">中速 (40-80 km/h)</span></span>
+                            <span><span class="legend-dot" style="background:var(--danger);width:8px;height:8px;border-radius:50%;display:inline-block"></span> <span id="speedDistHigh" data-i18n="trip.speed_dist.high">高速 (&gt;80 km/h)</span></span>
                         </div>
                         <div class="speed-hist-summary" id="speedHistSummary"></div>
                     </div>
@@ -1990,7 +1990,7 @@
                     <div class="micro-moments-card" id="microMomentsCard">
                         <div class="card-title" style="margin-bottom:8px;">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-                            <span data-i18n="trip.micro.title">Micro-Moments</span>
+                            <span data-i18n="trip.micro.title">微时刻</span>
                         </div>
                         <div id="microMomentsList"></div>
                     </div>
@@ -1999,7 +1999,7 @@
                     <div class="route-comparison-card" id="routeComparisonCard" style="display:none;">
                         <div class="card-title" style="margin-bottom:12px;">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
-                            <span data-i18n="trip.route_compare.title">Route Comparison</span>
+                            <span data-i18n="trip.route_compare.title">路线比较</span>
                         </div>
                         <div id="routeComparisonContent"></div>
                         <div id="routeMapOverlay" style="display:none;margin-top:12px;">
@@ -2013,69 +2013,69 @@
                         <div class="card-title" style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
                             <div style="display:flex; align-items:center; gap:8px;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><polygon points="12 2 22 8.5 19 20 5 20 2 8.5"/></svg>
-                                <span data-i18n="trip.scores.breakdown_title">Driving DNA Breakdown</span>
+                                <span data-i18n="trip.scores.breakdown_title">驾驶风格画像与能效评分</span>
                             </div>
-                            <span style="font-size:11px; color:var(--brand-primary); cursor:pointer;" data-i18n="trip.scores.tap_for_coaching">Tap rows for coaching 💡</span>
+                            <span style="font-size:11px; color:var(--brand-primary); cursor:pointer;" data-i18n="trip.scores.tap_for_coaching">点击各评分项查看驾驶建议 💡</span>
                         </div>
                         <div id="scoreBreakdown">
                             <div class="score-row" onclick="TRIPS.toggleScoreDetail(this)">
                                 <div class="score-row-top">
                                     <span class="score-icon">🔮</span>
-                                    <span class="score-label" data-i18n="trip.scores.anticipation">Anticipation</span>
+                                    <span class="score-label" data-i18n="trip.scores.anticipation">预见性</span>
                                     <div class="score-bar-track"><div class="score-bar-fill" id="scoreAnticipation" style="width:0%"></div></div>
                                     <span class="score-number" id="scoreAnticipationVal">--</span>
                                 </div>
                                 <div class="score-detail">
-                                    <div class="score-detail-text" data-i18n="trip.scores.anticipation_text">Measures how well you read traffic ahead and lift off the accelerator early before braking. Higher scores mean less energy wasted on sudden stops.</div>
-                                    <div class="score-detail-tip" data-i18n="trip.scores.anticipation_tip">💡 Tip: Coast more before red lights and slow traffic. Lift off the pedal 3–5 seconds earlier than usual.</div>
+                                    <div class="score-detail-text" data-i18n="trip.scores.anticipation_text">衡量你对前方路况的预判能力，提前收油滑行。得分越高，因急刹车损耗的能量越少。</div>
+                                    <div class="score-detail-tip" data-i18n="trip.scores.anticipation_tip">💡 建议：在红灯或缓行路段前多利用动能回收滑行，比平时提前 3–5 秒松开油门踏板。</div>
                                 </div>
                             </div>
                             <div class="score-row" onclick="TRIPS.toggleScoreDetail(this)">
                                 <div class="score-row-top">
                                     <span class="score-icon">🌊</span>
-                                    <span class="score-label" data-i18n="trip.scores.smoothness">Smoothness</span>
+                                    <span class="score-label" data-i18n="trip.scores.smoothness">平顺性</span>
                                     <div class="score-bar-track"><div class="score-bar-fill" id="scoreSmoothness" style="width:0%"></div></div>
                                     <span class="score-number" id="scoreSmoothnessVal">--</span>
                                 </div>
                                 <div class="score-detail">
-                                    <div class="score-detail-text" data-i18n="trip.scores.smoothness_text">Tracks how gradually you apply and release the accelerator and brake pedals. Jerky inputs waste energy and reduce comfort.</div>
-                                    <div class="score-detail-tip" data-i18n="trip.scores.smoothness_tip">💡 Tip: Pretend there's a glass of water on the dashboard. Smooth pedal transitions keep it from spilling.</div>
+                                    <div class="score-detail-text" data-i18n="trip.scores.smoothness_text">监测加速与制动踏板的线性过渡。剧烈突兀的踩踏会损耗电量并降低乘坐舒适性。</div>
+                                    <div class="score-detail-tip" data-i18n="trip.scores.smoothness_tip">💡 建议：想象中控台上放了一杯满水，平缓过渡的脚法能防止水溢出。</div>
                                 </div>
                             </div>
                             <div class="score-row" onclick="TRIPS.toggleScoreDetail(this)">
                                 <div class="score-row-top">
                                     <span class="score-icon">🎯</span>
-                                    <span class="score-label" data-i18n="trip.scores.speed_discipline">Speed Discipline</span>
+                                    <span class="score-label" data-i18n="trip.scores.speed_discipline">车速守规</span>
                                     <div class="score-bar-track"><div class="score-bar-fill" id="scoreSpeedDisc" style="width:0%"></div></div>
                                     <span class="score-number" id="scoreSpeedDiscVal">--</span>
                                 </div>
                                 <div class="score-detail">
-                                    <div class="score-detail-text" data-i18n="trip.scores.speed_disc_text">Evaluates how consistently you maintain appropriate speeds. Frequent speeding and large speed variations reduce this score.</div>
-                                    <div class="score-detail-tip" data-i18n="trip.scores.speed_disc_tip">💡 Tip: Use cruise control on highways. Keeping within 5 km/h of the limit saves significant energy.</div>
+                                    <div class="score-detail-text" data-i18n="trip.scores.speed_disc_text">评估车速控制的稳定性。频繁超速或速度大起大落会显著降低此项得分。</div>
+                                    <div class="score-detail-tip" data-i18n="trip.scores.speed_disc_tip">💡 建议：高速巡航时开启定速巡航，将车速维持在限速 ±5 km/h 以内可大幅降低风阻能耗。</div>
                                 </div>
                             </div>
                             <div class="score-row" onclick="TRIPS.toggleScoreDetail(this)">
                                 <div class="score-row-top">
                                     <span class="score-icon">⚡</span>
-                                    <span class="score-label" data-i18n="trip.scores.efficiency">Efficiency</span>
+                                    <span class="score-label" data-i18n="trip.scores.efficiency">综合能效</span>
                                     <div class="score-bar-track"><div class="score-bar-fill" id="scoreEfficiency" style="width:0%"></div></div>
                                     <span class="score-number" id="scoreEfficiencyVal">--</span>
                                 </div>
                                 <div class="score-detail">
-                                    <div class="score-detail-text" data-i18n="trip.scores.efficiency_text">Compares your energy consumption per km against the optimal baseline for your vehicle, route, and conditions.</div>
-                                    <div class="score-detail-tip" data-i18n="trip.scores.efficiency_tip">💡 Tip: Pre-condition the cabin while plugged in. Avoid full-throttle launches from stops.</div>
+                                    <div class="score-detail-text" data-i18n="trip.scores.efficiency_text">将当前行程的每公里能耗与同工况、同路线下的最优基准进行比对。</div>
+                                    <div class="score-detail-tip" data-i18n="trip.scores.efficiency_tip">💡 建议：插枪充电时提前开启座舱空调预调温；起步时避免全电门地板电冲刺。</div>
                                 </div>
                             </div>
                             <div class="score-row" onclick="TRIPS.toggleScoreDetail(this)">
                                 <div class="score-row-top">
                                     <span class="score-icon">📐</span>
-                                    <span class="score-label" data-i18n="trip.scores.consistency">Consistency</span>
+                                    <span class="score-label" data-i18n="trip.scores.consistency">驾驶连贯性</span>
                                     <div class="score-bar-track"><div class="score-bar-fill" id="scoreConsistency" style="width:0%"></div></div>
                                     <span class="score-number" id="scoreConsistencyVal">--</span>
                                 </div>
                                 <div class="score-detail">
-                                    <div class="score-detail-text" data-i18n="trip.scores.consistency_text">Measures how uniform your driving style is throughout the trip. Erratic behavior (alternating aggressive and calm) lowers this score.</div>
-                                    <div class="score-detail-tip" data-i18n="trip.scores.consistency_tip">💡 Tip: Pick a driving style and stick with it. Consistent habits build muscle memory for efficiency.</div>
+                                    <div class="score-detail-text" data-i18n="trip.scores.consistency_text">评估全程驾驶风格的统一性。若在激进与温和之间反复无常，会拉低连贯性得分。</div>
+                                    <div class="score-detail-tip" data-i18n="trip.scores.consistency_tip">💡 建议：选定一种驾驶风格并坚持下去。持续一致的习惯能养成节能的肌肉记忆。</div>
                                 </div>
                             </div>
                         </div>
@@ -2084,7 +2084,7 @@
                     <!-- Delete Trip -->
                     <button class="detail-delete-btn" id="detailDeleteBtn" onclick="TRIPS.deleteCurrentTrip()">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                        <span data-i18n="trip.detail.delete_trip">Delete Trip</span>
+                        <span data-i18n="trip.detail.delete_trip">删除行程</span>
                     </button>
                 </div>
 
@@ -2110,7 +2110,7 @@
                 </div>
             </div>
             <div class="calendar-grid" id="calendarGrid"></div>
-            <button class="calendar-close" onclick="TRIPS.closeCalendar()" data-i18n="common.close">Close</button>
+            <button class="calendar-close" onclick="TRIPS.closeCalendar()" data-i18n="common.close">关闭</button>
         </div>
     </div>
 

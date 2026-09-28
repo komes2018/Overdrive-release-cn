@@ -26,7 +26,7 @@ BYD.i18n = (function () {
         'en', 'zh-CN', 'zh-TW', 'pt-BR', 'es', 'de', 'fr', 'it',
         'nb', 'nl', 'ja', 'ko', 'th', 'vi', 'hi', 'tr', 'ru', 'ar', 'cs', 'he'
     ];
-    var DEFAULT_LANG = 'en';
+    var DEFAULT_LANG = 'zh-CN';
     var STORAGE_KEY = 'overdrive_locale';
 
     // Right-to-left locales. Drives <html dir="rtl">.
@@ -125,38 +125,39 @@ BYD.i18n = (function () {
         listeners: []
     };
 
-    /** Normalise an arbitrary BCP-47 tag to our supported set, with sensible fallbacks. */
-    function resolveLang(raw) {
-        if (!raw) return DEFAULT_LANG;
-        // Exact match first
+    /** Normalise an arbitrary BCP-47 tag to our supported set, returning null if unmatched. */
+    function matchSupported(raw) {
+        if (!raw) return null;
         for (var i = 0; i < SUPPORTED.length; i++) {
             if (SUPPORTED[i].toLowerCase() === raw.toLowerCase()) return SUPPORTED[i];
         }
-        // Region fallback: zh-Hans → zh-CN, zh-Hant → zh-TW, pt → pt-BR, etc.
         var lower = raw.toLowerCase();
         if (lower.indexOf('zh-hans') === 0 || lower === 'zh-cn' || lower === 'zh') return 'zh-CN';
         if (lower.indexOf('zh-hant') === 0 || lower === 'zh-tw' || lower === 'zh-hk') return 'zh-TW';
         if (lower.indexOf('pt') === 0) return 'pt-BR';
         if (lower.indexOf('no') === 0 || lower.indexOf('nn') === 0) return 'nb';
         if (lower === 'iw' || lower.indexOf('iw-') === 0) return 'he';
-        // Bare-language fallback
         var bare = lower.split('-')[0];
         for (var j = 0; j < SUPPORTED.length; j++) {
             if (SUPPORTED[j].toLowerCase().split('-')[0] === bare) return SUPPORTED[j];
         }
-        return DEFAULT_LANG;
+        return null;
+    }
+
+    /** Normalise an arbitrary BCP-47 tag to our supported set, with sensible fallbacks. */
+    function resolveLang(raw) {
+        if (!raw) return DEFAULT_LANG;
+        return matchSupported(raw) || DEFAULT_LANG;
     }
 
     function detectFromBrowser() {
         if (navigator.languages && navigator.languages.length) {
             for (var i = 0; i < navigator.languages.length; i++) {
-                var resolved = resolveLang(navigator.languages[i]);
-                if (resolved !== DEFAULT_LANG || navigator.languages[i].indexOf('en') === 0) {
-                    return resolved;
-                }
+                var hit = matchSupported(navigator.languages[i]);
+                if (hit) return hit;
             }
         }
-        return resolveLang(navigator.language);
+        return matchSupported(navigator.language) || DEFAULT_LANG;
     }
 
     function getStored() {
@@ -1292,11 +1293,11 @@ BYD.core = {
             return (v && v !== key) ? v : fallback;
         };
         if (state === 'disconnected') {
-            pill.textContent = i18nLookup('status.disconnected', 'Disconnected');
+            pill.textContent = i18nLookup('status.disconnected', '已断开');
             pill.style.background = 'rgba(239,68,68,0.18)';
             pill.style.color = '#ef4444';
         } else {
-            pill.textContent = i18nLookup('status.stale', 'Stale');
+            pill.textContent = i18nLookup('status.stale', '过时');
             pill.style.background = 'rgba(251,191,36,0.18)';
             pill.style.color = '#f59e0b';
         }
@@ -1996,7 +1997,7 @@ BYD.utils._showModal = function (opts) {
         var confirmClass = opts.danger ? 'btn btn-danger' : 'btn btn-primary';
         confirmBtn.className = confirmClass;
         confirmBtn.type = 'button';
-        confirmBtn.textContent = opts.confirmLabel || 'OK';
+        confirmBtn.textContent = opts.confirmLabel || '确定';
         confirmBtn.addEventListener('click', function () { dismiss(true); });
         actions.appendChild(confirmBtn);
 
