@@ -46,6 +46,10 @@ class LogManager private constructor(@Volatile private var config: LogConfig) {
     private val writers = ConcurrentHashMap<String, PrintWriter>()
     private val fileSizes = ConcurrentHashMap<String, Long>()
     private val writeLock = Any()
+    private var lastFlushTime = 0L
+    private var unflushedCount = 0
+    private val flushIntervalMs = 2500L
+    private val maxUnflushedLines = 25
     // ThreadLocal: SimpleDateFormat is NOT thread-safe, and format() below runs
     // OUTSIDE writeLock, concurrently from the daemon-health-check looper, the
     // adb-shell executor and the tunnel-poll looper. A shared instance can throw
@@ -90,22 +94,14 @@ class LogManager private constructor(@Volatile private var config: LogConfig) {
         }
 
         if (cfg.enableFileLog && cfg.logDir.isNotEmpty()) {
-            writeToFile(tag, logLine)
+            val immediate = (level == LogLevel.ERROR || level == LogLevel.WARN)
+            writeToFile(tag, logLine, immediate)
         }
     }
     
-    private fun writeToFile(tag: String, logLine: String) {
+    private fun writeToFile(tag: String, logLine: String, immediateFlush: Boolean) {
         synchronized(writeLock) {
             try {
-                // Self-heal if the live <tag>.log was deleted out from under a
-                // cached append writer. LogCleaner (a separate WorkManager job
-                // in this same process) deletes any *.log past retentionHours,
-                // including the live file of a tag that went quiet. Because the
-                // writer holds an fd to the now-unlinked inode, further writes
-                // would land on an orphaned inode invisible at the path and be
-                // lost on process exit. Detect the missing path and drop the
-                // stale writer so getOrCreateWriter reopens a fresh file. Safe
-                // under writeLock; cheap (one stat) on a path already doing fs I/O.
                 if (writers.containsKey(tag) &&
                     !File(config.logDir, "${tag.lowercase()}.log").exists()) {
                     writers.remove(tag)?.close()
@@ -113,7 +109,13 @@ class LogManager private constructor(@Volatile private var config: LogConfig) {
                 }
                 val writer = getOrCreateWriter(tag)
                 writer.println(logLine)
-                writer.flush()
+                unflushedCount++
+                val now = System.currentTimeMillis()
+                if (immediateFlush || unflushedCount >= maxUnflushedLines || (now - lastFlushTime) >= flushIntervalMs) {
+                    writer.flush()
+                    lastFlushTime = now
+                    unflushedCount = 0
+                }
                 
                 val currentSize = fileSizes.getOrDefault(tag, 0L) + logLine.length + 1
                 fileSizes[tag] = currentSize
@@ -145,15 +147,8 @@ class LogManager private constructor(@Volatile private var config: LogConfig) {
                 rotateExisting(tag)
             }
 
-            // Seed the in-memory counter from the file we are about to APPEND
-            // to (0 if it was just rotated away). Open in append mode — the
-            // previous code used File.outputStream() which has no append flag
-            // and truncated the file to zero on the first write after every
-            // app process start, destroying the prior session's logs (exactly
-            // the logs that would explain a crash-then-relaunch). Mirrors
-            // DaemonLogger's FileOutputStream(logFile, true).
             fileSizes[tag] = if (logFile.exists()) logFile.length() else 0L
-            PrintWriter(FileOutputStream(logFile, true).bufferedWriter(Charsets.UTF_8), true)
+            PrintWriter(FileOutputStream(logFile, true).bufferedWriter(Charsets.UTF_8), false)
         }
     }
 

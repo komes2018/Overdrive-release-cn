@@ -434,13 +434,17 @@ public class SentryDaemon {
         log("=== SHELL FALLBACK COMPLETE ===");
     }
     
+    private static final long WAKELOCK_TIMEOUT_MS = 6 * 60 * 60 * 1000L;
+    
     private static void acquireWakeLock(Context context) {
         try {
             PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
             if (pm != null) {
-                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SentryDaemon::Lock");
-                wakeLock.acquire();
-                log("WakeLock acquired");
+                if (wakeLock == null) {
+                    wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SentryDaemon::Lock");
+                }
+                wakeLock.acquire(WAKELOCK_TIMEOUT_MS);
+                log("WakeLock acquired/renewed (lease 6h)");
             }
         } catch (Exception e) {
             log("WARN: Failed to acquire WakeLock: " + e.getMessage());

@@ -50,6 +50,22 @@ public final class WeatherTemperature {
     // Drives the "rain likely" automation trigger; kept on the same cache clock as temp.
     private static final int PRECIP_HOURS = 6;
     private static volatile int cachedPrecipProb = -1;
+    private static volatile OkHttpClient httpClient;
+
+    private static OkHttpClient getHttpClient() {
+        if (httpClient == null) {
+            synchronized (WeatherTemperature.class) {
+                if (httpClient == null) {
+                    httpClient = new OkHttpClient.Builder()
+                            .proxySelector(ProxyHelper.chainProxySelector())
+                            .connectTimeout(3, TimeUnit.SECONDS)
+                            .readTimeout(3, TimeUnit.SECONDS)
+                            .build();
+                }
+            }
+        }
+        return httpClient;
+    }
 
     private WeatherTemperature() {}
 
@@ -119,14 +135,7 @@ public final class WeatherTemperature {
                     .url(url)
                     .header("User-Agent", "OverDrive/1.0")
                     .build();
-            // Chain selector (proxy → direct) rather than a frozen proxy: a
-            // tailnet-only Tailscale listener would otherwise block the fetch
-            // while probing healthy, and weather's 3s budget can't afford it.
-            OkHttpClient client = new OkHttpClient.Builder()
-                    .proxySelector(ProxyHelper.chainProxySelector())
-                    .connectTimeout(3, TimeUnit.SECONDS)
-                    .readTimeout(3, TimeUnit.SECONDS)
-                    .build();
+            OkHttpClient client = getHttpClient();
             try (Response response = client.newCall(request).execute()) {
                 if (response.isSuccessful() && response.body() != null) {
                     String body = response.body().string();

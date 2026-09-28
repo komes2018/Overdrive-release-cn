@@ -1730,20 +1730,24 @@ public class AccSentryDaemon {
 
     // ==================== WAKELOCK MANAGEMENT ====================
 
+    // 6 hours safety lease. Heartbeat cycles and ACC transitions re-acquire / renew
+    // this lease, preventing accidental infinite CPU wake in case of a fatal native hang.
+    private static final long WAKELOCK_TIMEOUT_MS = 6 * 60 * 60 * 1000L;
+
     private static synchronized void acquireWakeLock() {
         if (appContext == null) return;
 
-        if (wakeLock == null || !wakeLock.isHeld()) {
-            try {
+        try {
+            if (wakeLock == null) {
                 Context permissiveContext = new PermissionBypassContext(appContext);
                 PowerManager pm = (PowerManager) permissiveContext.getSystemService(Context.POWER_SERVICE);
                 wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AccSentry:Core");
                 wakeLock.setReferenceCounted(false);
-                wakeLock.acquire();
-                log("WakeLock Acquired");
-            } catch (Throwable e) {
-                log("WakeLock Error: " + e.getMessage());
             }
+            wakeLock.acquire(WAKELOCK_TIMEOUT_MS);
+            log("WakeLock Acquired/Renewed (lease 6h)");
+        } catch (Throwable e) {
+            log("WakeLock Error: " + e.getMessage());
         }
         acquireWifiLock();
     }

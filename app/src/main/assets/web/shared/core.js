@@ -1030,8 +1030,8 @@ BYD.core = {
             self.refreshStatus().then(function (ok) {
                 self.tickInFlight = false;
                 var delay;
-                if (typeof document !== 'undefined' && document.hidden) {
-                    // Tab not visible — back off to the hidden cadence
+                if (typeof document !== 'undefined' && (document.hidden || (window.BYD && window.BYD._pollingSuspended))) {
+                    // Tab not visible or suspended by native onPause — back off to the hidden cadence
                     // regardless of OK/retry to stop background cellular polling.
                     delay = self.POLL_INTERVAL_HIDDEN_MS;
                 } else {
@@ -1051,10 +1051,19 @@ BYD.core = {
         // no-op if a fetch is already in flight (guarded above).
         if (typeof document !== 'undefined' && document.addEventListener) {
             document.addEventListener('visibilitychange', function () {
-                if (!document.hidden) {
+                if (!document.hidden && !(window.BYD && window.BYD._pollingSuspended)) {
                     if (self.pollInterval) { clearTimeout(self.pollInterval); self.pollInterval = null; }
                     tick();
                 }
+            });
+        }
+        if (typeof window !== 'undefined' && window.addEventListener) {
+            window.addEventListener('byd:suspend-polling', function () {
+                if (self.pollInterval) { clearTimeout(self.pollInterval); self.pollInterval = null; }
+            });
+            window.addEventListener('byd:resume-polling', function () {
+                if (self.pollInterval) { clearTimeout(self.pollInterval); self.pollInterval = null; }
+                tick();
             });
         }
         tick();

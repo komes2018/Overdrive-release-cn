@@ -56,7 +56,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         # assembleDebug: keeps debug flags (no R8 shrink) but now uses our fixed keystore
         # instead of the random per-runner debug keystore → consistent fingerprint every run.
-        run: ./gradlew assembleDebug -PoverdriveVersionName=49.7 -PoverdriveVersionCode=4970 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
+        run: ./gradlew assembleDebug -PoverdriveVersionName=49.8 -PoverdriveVersionCode=4980 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
 
       - name: Verify APK signature fingerprint
         run: |
@@ -79,7 +79,7 @@ jobs:
           mkdir -p release-assets
           APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
           echo "Found built APK: $APK_FILE"
-          cp "$APK_FILE" release-assets/Overdrive-v49.7-cn-sec.apk
+          cp "$APK_FILE" release-assets/Overdrive-v49.8-cn-sec.apk
           ls -lh release-assets/
 
       - name: Upload APK Artifact
@@ -93,29 +93,30 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v49.7-cn-sec
-          name: OverDrive v49.7 - 中文深度定制版 (Parking Intelligence 停车智能)
+          tag_name: v49.8-cn-sec
+          name: OverDrive v49.8 - 安全加固与低功耗优化定制版
           body: |
-            ## OverDrive v49.7 中文深度定制版
+            ## OverDrive v49.8 安全加固与低功耗优化定制版
 
-            ### 🚗 原版 v49.7 核心特性升级
-            - **停车智能中心 (Parking Intelligence)**：熄火自动记录停车位置、离车时长、环视静态照片及周围邻车进出动态
-            - **车库标识与车位 OCR 识别**：端侧轻量 AI 模型自动从环视画面及驶入录像识别地库楼层、分区与车位编号（如 "B2 · C区 · 142车位"）
-            - **停车电量与能耗估算**：实时追踪停车期间动力电池 SOC 变化与估算消耗/充入电量
-            - **Tailscale 智能路由兜底**：优化代理连接逻辑，外网功能（云端、推送、更新等）在代理不可达外网时毫秒级自动回退直连
-            - **Web & 车机端全新 Parking 独立管理页面**：按天直观查看所有停车记录、环视快照、事件与车位标识
+            ### 🛡️ 核心安全加固
+            - **阻断同机网页跨源开锁 (C3)**：敏感车控与备份接口收紧 loopback 信任，必须验证有效 JWT，防车机浏览器恶意网页 CSRF 开锁与凭证窃取
+            - **JS Bridge 强制隔离 (H4)**：同步请求限制仅允许本地 `127.0.0.1` 访问，禁止向外部第三方域名注入 Session Cookie
+            - **暴力破解防护 (H2)**：收紧 `X-Forwarded-For` 采信范围，防伪造来源绕过登录接口频次限制
+            - **供应链完整性校验 (H1)**：OpenH264 原生库下载升级为 HTTPS，构建期强制匹配固定 SHA-256 指纹
 
-            ### 🇨🇳 本项目深度优化（全部保留）
+            ### ⚡ 性能与车载低功耗优化
+            - **WakeLock 6小时安全租约与心跳续租 (P3)**：守护进程心跳与状态流转自动续约，正常工作永不断连；彻底杜绝死锁崩溃导致小电瓶耗尽趴窝
+            - **WebView 退后台自动挂起轮询 (P1)**：中控屏熄屏或切后台时即刻暂停 3s/5s 密集前端轮询，大幅降低 CPU 负载与挂夜发热
+            - **日志批量定时 Flush (P2)**：改用 8KB 缓冲区与 2.5s 定时批量刷盘，减少 90%+ 频繁小 IO，大幅保护车机板载 eMMC 闪存寿命
+            - **消除线程与连接池泄漏 (P10)**：天气接口 OkHttpClient 改为单例复用，消除长期运行内存隐患
+            - **i18n 多语言内存缓存 (P12)**：ConcurrentHashMap 缓存语言包，页面切换响应更加轻快
+            - **首屏非阻塞脚本加载 (P4)**：app-shell 与 leaflet 脚本增加 `defer`，缩短弱算力车机首屏渲染耗时
+
+            ### 🇨🇳 本项目深度特性（持续保留）
             - **企业微信群机器人推送**：国内免代理直连，告警、截图、通知全量直推
             - **国内比亚迪云深度适配**：支持手机号登录、海洋网/王朝网、授权车主账号与远程唤醒
             - **全量简体中文本地化精校**：严格遵循专业汽车与车机术语规范，消灭机翻
-            - **固化签名证书**：支持车机 `pm install -r` 直接无缝覆盖升级，无需卸载
-
-            ### 📝 配置说明（企微推送）
-            ```bash
-            adb shell "echo 'webhook_url=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的KEY' \
-                > /data/local/tmp/wecom_config.properties"
-            ```
-          files: release-assets/Overdrive-v49.7-cn-sec.apk
+            - **固化签名证书**：签名证书完全保持一致，支持车机 `pm install -r` 直接无缝覆盖升级，无需卸载
+          files: release-assets/Overdrive-v49.8-cn-sec.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

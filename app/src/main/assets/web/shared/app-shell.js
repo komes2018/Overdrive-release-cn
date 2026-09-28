@@ -1284,6 +1284,33 @@
     }
     ensureCollapseScript();
 
+    // Global BYD polling lifecycle hooks for native WebView onPause/onResume
+    window.BYD = window.BYD || {};
+    window.BYD.suspendPolling = function () {
+        window.BYD._pollingSuspended = true;
+        try {
+            window.dispatchEvent(new CustomEvent('byd:suspend-polling'));
+        } catch (e) {
+            try {
+                var ev = document.createEvent('Event');
+                ev.initEvent('byd:suspend-polling', true, true);
+                window.dispatchEvent(ev);
+            } catch (_) {}
+        }
+    };
+    window.BYD.resumePolling = function () {
+        window.BYD._pollingSuspended = false;
+        try {
+            window.dispatchEvent(new CustomEvent('byd:resume-polling'));
+        } catch (e) {
+            try {
+                var ev = document.createEvent('Event');
+                ev.initEvent('byd:resume-polling', true, true);
+                window.dispatchEvent(ev);
+            } catch (_) {}
+        }
+    };
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', mount);
     } else {

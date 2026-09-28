@@ -3524,6 +3524,15 @@ var VC = {
                 self.startCloudLockSync();
             }
         });
+        window.addEventListener('byd:suspend-polling', function() {
+            self.stopSyncPollers();
+        });
+        window.addEventListener('byd:resume-polling', function() {
+            self.startStateSync();
+            self.startAcChargeCurrentSync();
+            self.startCloudStatusSync();
+            self.startCloudLockSync();
+        });
     },
 
     stopSyncPollers: function() {

@@ -12,8 +12,11 @@ tasks.register("downloadOpenH264") {
     doLast {
         // Cisco's official binary URLs - only arm64-v8a for BYD cars
         val abiMap = mapOf(
-            "arm64-v8a" to "http://ciscobinary.openh264.org/libopenh264-${openh264Version}-android-arm64.8.so.bz2"
+            "arm64-v8a" to "https://ciscobinary.openh264.org/libopenh264-${openh264Version}-android-arm64.8.so.bz2"
             // Removed armeabi-v7a to reduce APK size
+        )
+        val expectedSha256 = mapOf(
+            "arm64-v8a" to "c702d68c9c8db492a43c1d73a497cea5f31ae5d23e330dcb13bd28cab1dbbf2a"
         )
         
         abiMap.forEach { (abi, url) ->
@@ -28,12 +31,22 @@ tasks.register("downloadOpenH264") {
                 try {
                     ant.invokeMethod("get", mapOf("src" to url, "dest" to bzFile.absolutePath))
                     if (bzFile.exists() && bzFile.length() > 1000) {
+                        val md = java.security.MessageDigest.getInstance("SHA-256")
+                        val actualHash = bzFile.readBytes().let { bytes ->
+                            md.digest(bytes).joinToString("") { "%02x".format(it) }
+                        }
+                        val expected = expectedSha256[abi]
+                        if (expected != null && actualHash != expected) {
+                            bzFile.delete()
+                            throw GradleException("SHA-256 mismatch for OpenH264 $abi: expected $expected, got $actualHash")
+                        }
                         ant.invokeMethod("bunzip2", mapOf("src" to bzFile.absolutePath))
                         file("${libDir}/temp").renameTo(soFile)
-                        println("✓ OpenH264 downloaded for ${abi}")
+                        println("✓ OpenH264 verified and unpacked for ${abi}")
                     }
                 } catch (e: Exception) {
                     println("⚠ Download failed: ${e.message}")
+                    throw e
                 }
             }
         }

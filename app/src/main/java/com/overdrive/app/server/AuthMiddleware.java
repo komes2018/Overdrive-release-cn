@@ -156,12 +156,32 @@ public class AuthMiddleware {
             String addrStr = clientAddress.toString();
             boolean isLoopback = addrStr.contains("127.0.0.1") || addrStr.contains("/0:0:0:0:0:0:0:1");
             if (isLoopback) {
+                if (isStrictSensitivePath(path)) {
+                    log("Loopback bypass rejected for sensitive path: " + path);
+                    return handleUnauthorized(path, out, "Sensitive operation requires explicit JWT");
+                }
                 return true;
             }
         }
 
         return handleUnauthorized(path, out,
             jwt == null || jwt.isEmpty() ? "No session token" : "Invalid session token");
+    }
+
+    /**
+     * Paths that require an explicit JWT even when called from loopback/localhost,
+     * preventing CSRF and cross-origin attacks from malicious pages in the car browser.
+     */
+    public static boolean isStrictSensitivePath(String path) {
+        if (path == null) return false;
+        String p = path.toLowerCase(java.util.Locale.US);
+        return p.startsWith("/api/vehicle/")
+                || p.startsWith("/api/backup/")
+                || p.startsWith("/api/bydcloud/")
+                || p.startsWith("/api/settings/token")
+                || p.startsWith("/api/config/export")
+                || p.startsWith("/ws/communicate")
+                || p.startsWith("/ws/cabin-audio");
     }
 
     /**

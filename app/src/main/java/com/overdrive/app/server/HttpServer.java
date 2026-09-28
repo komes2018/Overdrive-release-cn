@@ -623,11 +623,14 @@ public class HttpServer {
             // present, else socket) to slow brute-force attempts via tunnels.
             if (path.startsWith("/auth/")) {
                 String identity;
-                if (forwardedFor != null && !forwardedFor.isEmpty()) {
+                String clientAddrStr = String.valueOf(client.getRemoteSocketAddress());
+                boolean isClientLoopback = clientAddrStr.contains("127.0.0.1") || clientAddrStr.contains("/0:0:0:0:0:0:0:1");
+                // Only trust X-Forwarded-For if request arrived from a local reverse proxy / tunnel on loopback
+                if (isClientLoopback && forwardedFor != null && !forwardedFor.isEmpty()) {
                     int comma = forwardedFor.indexOf(',');
                     identity = (comma > 0 ? forwardedFor.substring(0, comma) : forwardedFor).trim();
                 } else {
-                    identity = String.valueOf(client.getRemoteSocketAddress());
+                    identity = clientAddrStr;
                 }
                 AuthApiHandler.handle(method, path, body, out, identity);
                 client.close();

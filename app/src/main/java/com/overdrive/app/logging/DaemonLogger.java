@@ -2,6 +2,7 @@ package com.overdrive.app.logging;
 
 import android.util.Log;
 
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
@@ -124,6 +125,10 @@ public class DaemonLogger {
             ThreadLocal.withInitial(() -> new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US));
     private long currentFileSize = 0;
     private volatile boolean writerInitialized = false;
+    private static final long FLUSH_INTERVAL_MS = 2500L;
+    private static final int MAX_UNFLUSHED_LINES = 25;
+    private long lastFlushTime = 0L;
+    private int unflushedLinesCount = 0;
     
     // ==================== CONSTRUCTORS ====================
     
@@ -241,7 +246,8 @@ public class DaemonLogger {
         
         // File log if enabled globally AND for this specific tag
         if (globalConfig.enableFileLog && DaemonLogConfig.isFileLoggingEnabled(tag)) {
-            writeToFile(logLine);
+            boolean immediate = (level == Level.ERROR || level == Level.WARN);
+            writeToFile(logLine, immediate);
         }
     }
     
@@ -314,8 +320,8 @@ public class DaemonLogger {
                 checkAndRotateIfNeeded();
             }
             
-            writer = new PrintWriter(new OutputStreamWriter(
-                new FileOutputStream(logFile, true), "UTF-8"), true);
+            writer = new PrintWriter(new BufferedWriter(new OutputStreamWriter(
+                new FileOutputStream(logFile, true), "UTF-8"), 8192), false);
             writerInitialized = true;
                 
         } catch (Exception e) {
@@ -324,7 +330,7 @@ public class DaemonLogger {
         }
     }
     
-    private void writeToFile(String logLine) {
+    private void writeToFile(String logLine, boolean immediateFlush) {
         synchronized (writeLock) {
             if (writer == null) {
                 initWriter();
@@ -333,12 +339,17 @@ public class DaemonLogger {
             if (writer != null) {
                 try {
                     writer.println(logLine);
-                    writer.flush();
-                    
-                    // Track file size for rotation
                     currentFileSize += logLine.length() + 1;
-                    checkAndRotateIfNeeded();
+                    unflushedLinesCount++;
                     
+                    long now = System.currentTimeMillis();
+                    if (immediateFlush || unflushedLinesCount >= MAX_UNFLUSHED_LINES || (now - lastFlushTime) >= FLUSH_INTERVAL_MS) {
+                        writer.flush();
+                        lastFlushTime = now;
+                        unflushedLinesCount = 0;
+                    }
+                    
+                    checkAndRotateIfNeeded();
                 } catch (Exception e) {
                     Log.e(META_TAG, "Failed to write log: " + e.getMessage());
                 }
@@ -362,11 +373,13 @@ public class DaemonLogger {
      */
     private void rotateLogFile() {
         try {
-            // Close existing writer
+            // Close existing writer (flushing any buffered lines)
             if (writer != null) {
+                writer.flush();
                 writer.close();
                 writer = null;
                 writerInitialized = false;
+                unflushedLinesCount = 0;
             }
             
             File logFile = new File(logFilePath);

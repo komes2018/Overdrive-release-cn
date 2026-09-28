@@ -65,9 +65,9 @@ public class ConfigBackupApiHandler {
                     deviceModel(),
                     System.currentTimeMillis(),
                     includeTrips);
-            HttpResponse.sendJson(out, bundle.toString());
+            HttpResponse.sendJsonNoCors(out, bundle.toString());
         } catch (Exception e) {
-            HttpResponse.sendJsonError(out, "Could not build backup: " + e.getMessage());
+            HttpResponse.sendJsonNoCors(out, 500, "{\"error\":\"Could not build backup: " + e.getMessage() + "\"}");
         }
     }
 
@@ -116,7 +116,7 @@ public class ConfigBackupApiHandler {
             // restartRequired and remains fenced to the old active mode until that restart.
             r.put("reloadRecommended", true);
         }
-        HttpResponse.sendJson(out, r.toString());
+        HttpResponse.sendJsonNoCors(out, r.toString());
     }
 
     /** Exact-match the {@code confirm=true} query parameter (no substring match). */

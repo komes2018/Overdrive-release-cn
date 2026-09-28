@@ -41,6 +41,7 @@ class WebViewFragment : Fragment() {
     companion object {
         const val ARG_PAGE_PATH = "page_path"
         private const val KEY_SAVED_URL = "saved_url"
+        private val i18nCatalogCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
         // Hides the in-page PWA chrome before the first paint. INJECT_JS runs
         // on onPageFinished, which is late enough for the sidebar to flash.
@@ -1449,6 +1450,11 @@ class WebViewFragment : Fragment() {
             var conn: java.net.HttpURLConnection? = null
             try {
                 val url = java.net.URL(urlStr)
+                val isLocalHost = url.host == "127.0.0.1" || url.host == "localhost"
+                if (!isLocalHost) {
+                    android.util.Log.w("WebViewBridge", "Rejecting non-local bridge request: $urlStr")
+                    return "{\"_status\":403,\"error\":\"Forbidden: only local APIs permitted via bridge\"}"
+                }
                 conn = url.openConnection(java.net.Proxy.NO_PROXY) as java.net.HttpURLConnection
                 conn.requestMethod = method
                 val isBydCloudApi = url.path.startsWith("/api/bydcloud")
@@ -1727,7 +1733,8 @@ class WebViewFragment : Fragment() {
         // visibilitychange so only one decoder/socket is created.
         webView?.evaluateJavascript(
             "(function(){if(window.BYD&&BYD.stream&&BYD.stream.resumeAfterBackground){" +
-                "BYD.stream.resumeAfterBackground(true);}})();",
+                "BYD.stream.resumeAfterBackground(true);}" +
+                "if(window.BYD&&BYD.resumePolling){BYD.resumePolling();}})();",
             null
         )
     }
@@ -1799,11 +1806,13 @@ class WebViewFragment : Fragment() {
         val tag = com.overdrive.app.server.LocaleManager.resolveOrNull(
             lang?.trim().orEmpty()
         ) ?: return ""
+        i18nCatalogCache[tag]?.let { return it }
         val ctx = context ?: return ""
         return try {
             ctx.assets.open("web/i18n/$tag.json")
                 .bufferedReader(Charsets.UTF_8)
                 .use { it.readText() }
+                .also { if (it.isNotEmpty()) i18nCatalogCache[tag] = it }
         } catch (_: Exception) {
             ""
         }
@@ -1896,7 +1905,8 @@ class WebViewFragment : Fragment() {
         // .onPause() stops neither JS timers nor the socket.
         webView?.evaluateJavascript(
             "(function(){if(window.BYD&&BYD.stream&&BYD.stream.pauseForBackground){" +
-                "BYD.stream.pauseForBackground();}})();",
+                "BYD.stream.pauseForBackground();}" +
+                "if(window.BYD&&BYD.suspendPolling){BYD.suspendPolling();}})();",
             null
         )
         webView?.onPause()
