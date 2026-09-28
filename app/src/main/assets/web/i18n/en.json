@@ -713,6 +713,8 @@
     "wecom_charging_desc": "Notifications for charge completed, charge interrupted, or critical low battery.",
     "wecom_tyre": "Tyre Pressure Alerts",
     "wecom_tyre_desc": "Alert when tyre pressure falls below or exceeds safe thresholds.",
+    "wecom_trips": "Trip Completion Reports",
+    "wecom_trips_desc": "Automatically post distance, duration, energy efficiency, and driving score summary to webhook when vehicle powers off after a trip.",
     "wecom_saved": "Webhook settings saved",
     "wecom_url_required": "Please enter a Webhook URL first",
     "wecom_test_success": "Test message sent successfully! Check your chat group.",

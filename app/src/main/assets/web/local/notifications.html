@@ -1090,6 +1090,16 @@
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
+                                <div class="notif-row">
+                                    <div class="notif-row-text">
+                                        <div class="notif-row-label" data-i18n="notif.wecom_trips">行程结束报告</div>
+                                        <div class="notif-row-note" data-i18n="notif.wecom_trips_desc">每次行程结束且车辆熄火后，自动向群机器人推送本次行驶里程、耗时、能耗与驾驶评分摘要。</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="wecomTrips" onchange="WeComPrefs.save()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1486,7 +1496,7 @@
                 if (window.BYD && BYD.utils && BYD.utils.toast) BYD.utils.toast(msg, kind || 'info');
             }
             function _repaint(state) {
-                var ids = ['wecomEnabled', 'wecomTierNotices', 'wecomTierAlerts', 'wecomTierCritical', 'wecomMotionImages', 'wecomSendStartPing', 'wecomCharging', 'wecomTyre'];
+                var ids = ['wecomEnabled', 'wecomTierNotices', 'wecomTierAlerts', 'wecomTierCritical', 'wecomMotionImages', 'wecomSendStartPing', 'wecomCharging', 'wecomTyre', 'wecomTrips'];
                 ids.forEach(function (id) {
                     if (!(id in state)) return;
                     var el = $(id); if (!el) return;
@@ -1513,7 +1523,8 @@
                             wecomMotionImages: s.motionImages !== false,
                             wecomSendStartPing: !!s.sendStartPing,
                             wecomCharging: s.charging !== false,
-                            wecomTyre: s.tyre !== false
+                            wecomTyre: s.tyre !== false,
+                            wecomTrips: s.trips !== false
                         });
                     })
                     .catch(function () {});
@@ -1527,7 +1538,8 @@
                     motionImages: $('wecomMotionImages') ? $('wecomMotionImages').checked : true,
                     sendStartPing: $('wecomSendStartPing') ? $('wecomSendStartPing').checked : false,
                     charging: $('wecomCharging') ? $('wecomCharging').checked : true,
-                    tyre: $('wecomTyre') ? $('wecomTyre').checked : true
+                    tyre: $('wecomTyre') ? $('wecomTyre').checked : true,
+                    trips: $('wecomTrips') ? $('wecomTrips').checked : true
                 };
                 if ($('wecomUrlInput')) {
                     payload.url = $('wecomUrlInput').value.trim();

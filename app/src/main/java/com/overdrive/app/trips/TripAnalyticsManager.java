@@ -50,6 +50,8 @@ public class TripAnalyticsManager {
 
     private volatile boolean enabled = false;
     private volatile boolean initialized = false;
+    private volatile boolean isAccOff = false;
+    private volatile TripRecord pendingTripForAccOff = null;
 
     // ==================== LIFECYCLE ====================
 
@@ -157,9 +159,15 @@ public class TripAnalyticsManager {
      */
     public void onAccOff() {
         if (!enabled || detector == null) return;
+        isAccOff = true;
         if (detector.isTripActive()) {
             logger.info("ACC OFF — finalizing active trip");
             detector.finalizeActiveTrip();
+        } else if (pendingTripForAccOff != null) {
+            logger.info("ACC OFF — vehicle powered off, sending pending trip to webhook");
+            TripRecord trip = pendingTripForAccOff;
+            pendingTripForAccOff = null;
+            TripNotifier.notifyTripCompleted(trip);
         }
     }
 
@@ -172,6 +180,8 @@ public class TripAnalyticsManager {
      */
     public void onAccOn() {
         if (!enabled) return;
+        isAccOff = false;
+        pendingTripForAccOff = null;
         logger.info("ACC ON — trip detection ready (waiting for gear D/R)");
 
         // Safety net: probe current gear in case we missed the gear change event
@@ -660,6 +670,7 @@ public class TripAnalyticsManager {
      */
     private void handleTripStarted(TripRecord trip) {
         logger.info("Trip started at " + trip.startTime);
+        pendingTripForAccOff = null;
 
         // Ensure TelemetryDataCollector is polling so we get fresh data
         // It may not be polling if no recording/overlay is active
@@ -1107,6 +1118,15 @@ public class TripAnalyticsManager {
         // 6. Update range estimator
         if (rangeEstimator != null) {
             rangeEstimator.onTripCompleted(trip);
+        }
+
+        // 7. 每次行程结束车熄火后，发送本次行程信息到 webhook
+        if (isAccOff) {
+            logger.info("Vehicle is powered off (ACC OFF) — sending trip completed notification to webhook");
+            TripNotifier.notifyTripCompleted(trip);
+        } else {
+            logger.info("Trip ended while vehicle still powered on (park debounce) — queued for ACC OFF webhook push");
+            pendingTripForAccOff = trip;
         }
         } finally {
             // Row now exists (or insert failed) — drop the in-flight marker so

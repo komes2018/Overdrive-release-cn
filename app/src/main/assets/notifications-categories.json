@@ -172,6 +172,15 @@
       "severity": "warn",
       "defaultClickUrl": "/network.html",
       "note": "当车机热点消耗超过设定的流量限额时触发，并同时自动关闭热点。提高或重置限额后可恢复使用。"
+    },
+    {
+      "id": "vehicle.trip.completed",
+      "label": "行程结束报告",
+      "group": "行程统计",
+      "defaultEnabled": true,
+      "severity": "info",
+      "defaultClickUrl": "/trips.html",
+      "note": "每次行程结束且车辆熄火后，自动向 Webhook 与通知中心推送本次行驶里程、耗时、能耗与驾驶评分摘要。"
     }
   ]
 }

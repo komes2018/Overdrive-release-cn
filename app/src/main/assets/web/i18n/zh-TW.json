@@ -352,6 +352,8 @@
   },
   "notif": {
     "page_title": "通知",
+    "wecom_trips": "行程結束報告",
+    "wecom_trips_desc": "每次行程結束且車輛熄火後，自動向群機器人推送本次行駛里程、耗時、能耗與駕駛評分摘要。",
     "origin_banner": "推送通知需要Zrok或反向代理. Cloudflare 快速道會改變每一次重啟,並使每個訂閱都無效. Tailscale 在簡直的HTTP上提供服務,除非使用反向代理,無法使用Web Push. 在您的手機上開啟預訂的 Zrok或反向代理 URL的儀表板,加入主屏,然後返回此以啟用.",
     "backend_banner": "預備 Zrok URL 透過惡魔屏幕,並重新啟動惡魔,",
     "push_delivery": "推送方式",
