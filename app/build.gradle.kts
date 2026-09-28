@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -31,9 +33,14 @@ tasks.register("downloadOpenH264") {
                 try {
                     ant.invokeMethod("get", mapOf("src" to url, "dest" to bzFile.absolutePath))
                     if (bzFile.exists() && bzFile.length() > 1000) {
-                        val md = java.security.MessageDigest.getInstance("SHA-256")
+                        val md = MessageDigest.getInstance("SHA-256")
                         val actualHash = bzFile.readBytes().let { bytes ->
-                            md.digest(bytes).joinToString("") { "%02x".format(it) }
+                            val digest = md.digest(bytes)
+                            val sb = StringBuilder()
+                            for (b in digest) {
+                                sb.append(String.format("%02x", b))
+                            }
+                            sb.toString()
                         }
                         val expected = expectedSha256[abi]
                         if (expected != null && actualHash != expected) {
