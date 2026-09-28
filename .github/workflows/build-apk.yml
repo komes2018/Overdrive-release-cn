@@ -56,7 +56,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         # assembleDebug: keeps debug flags (no R8 shrink) but now uses our fixed keystore
         # instead of the random per-runner debug keystore → consistent fingerprint every run.
-        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.1 -PoverdriveVersionCode=4991 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
+        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.2 -PoverdriveVersionCode=4992 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
 
       - name: Verify APK signature fingerprint
         run: |
@@ -79,7 +79,7 @@ jobs:
           mkdir -p release-assets
           APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
           echo "Found built APK: $APK_FILE"
-          cp "$APK_FILE" release-assets/Overdrive-v49.9.1-cn-sec.apk
+          cp "$APK_FILE" release-assets/Overdrive-v49.9.2-cn-sec.apk
           ls -lh release-assets/
 
       - name: Upload APK Artifact
@@ -93,10 +93,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v49.9.1-cn-sec
-          name: OverDrive v49.9.1 - 哨兵 Webhook 通知合并与低噪推送优化版
+          tag_name: v49.9.2-cn-sec
+          name: OverDrive v49.9.2 - 行程防抖延长与熄火 Webhook 优化版
           body: |
-            ## OverDrive v49.9.1 哨兵 Webhook 通知合并与低噪推送优化版
+            ## OverDrive v49.9.2 行程防抖延长与熄火 Webhook 优化版
+
+            ### 🚗 行程判定防抖延长与熄火自动推送 (v49.9.2)
+            - **高速服务区休息不中断行程**：将挂入 P 档且静止等待判定行程结束的防抖时长由 120 秒延长至 30 分钟。服务区挂 P 档开空调休息（不熄火）半小时内，切回 D 档即可继续合并为同一次完整行程，杜绝长途行程被频繁截断拆分
+            - **行程结束车熄火自动推送 Webhook**：下电熄火（ACC OFF）瞬间自动结算本次行程能耗、里程、均速、驾驶评分并发送卡片报告到企业微信
 
             ### 📢 哨兵 Webhook 推送去重与综合合并 (Scheme A)
             - **告别连续刷屏**：将原先动检起始预警、录像结束汇总、抓拍图 3 条连续消息精简合并为 **1 条全信息综合卡片 + 1 张高清现场抓拍图**
@@ -126,6 +130,6 @@ jobs:
             - **国内比亚迪云深度适配**：支持手机号登录、海洋网/王朝网、授权车主账号与远程唤醒
             - **全量简体中文本地化精校**：严格遵循专业汽车与车机术语规范，消灭机翻
             - **固化签名证书**：签名证书完全保持一致，支持车机 `pm install -r` 直接无缝覆盖升级，无需卸载
-          files: release-assets/Overdrive-v49.9.1-cn-sec.apk
+          files: release-assets/Overdrive-v49.9.2-cn-sec.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

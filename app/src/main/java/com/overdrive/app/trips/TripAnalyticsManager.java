@@ -755,11 +755,11 @@ public class TripAnalyticsManager {
         }
 
         // Trim the park-debounce tail from the SCORING stream. The recorder keeps
-        // sampling for the full ~120s park debounce (gear=P, speed=0) after the
+        // sampling for the full park debounce (gear=P, speed=0) after the
         // trip really ended; TripDetector already excludes that tail from
         // trip.endTime (= parkStartTime), and the RECOVERY path trims it too —
-        // but these samples still reached the score engine, feeding ~2 minutes
-        // of parked GPS-altitude noise and idle dwell into every trip's scores.
+        // but these samples still reached the score engine, feeding
+        // parked GPS-altitude noise and idle dwell into every trip's scores.
         // Mirror the row's own end-time semantics here.
         if (samples != null && trip.endTime > 0) {
             final long scoringEndMs = trip.endTime + 1_000; // 1s slack for clock skew

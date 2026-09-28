@@ -18,9 +18,9 @@ import java.util.concurrent.TimeUnit;
  *
  * Transitions:
  * - IDLE + gear ∈ {D, R, S, M, N} → create TripRecord, notify listener → ACTIVE
- * - ACTIVE + gear == P + speed == 0 → start 120s debounce timer → PARK_PENDING
- * - PARK_PENDING + gear ∈ {D, R, S, M, N} (within 120s) → cancel timer → ACTIVE
- * - PARK_PENDING + 120s elapsed → finalize trip, notify listener → IDLE
+ * - ACTIVE + gear == P + speed == 0 → start 30-min debounce timer → PARK_PENDING
+ * - PARK_PENDING + gear ∈ {D, R, S, M, N} (within 30m) → cancel timer → ACTIVE
+ * - PARK_PENDING + 30m elapsed → finalize trip, notify listener → IDLE
  *
  * Called from CameraDaemon.onGearChanged() when gear transitions occur.
  */
@@ -29,7 +29,7 @@ public class TripDetector {
     private static final DaemonLogger logger = DaemonLogger.getInstance("TripDetector");
 
     // Constants
-    static final long PARK_DEBOUNCE_MS = 120_000;    // 2 minutes
+    static final long PARK_DEBOUNCE_MS = 1_800_000;    // 30 minutes
     /** Max age of a GPS fix for its speed to veto the park transition. Beyond
      *  this, gear P wins — a cached/disk-restored speed must not wedge the
      *  detector in ACTIVE. 10s is generous vs the ~1s fix cadence. */
@@ -363,7 +363,7 @@ public class TripDetector {
 
         long now = System.currentTimeMillis();
         // Use the time when gear first went to P as the actual trip end time
-        // (not the current time, which includes the 120s debounce wait)
+        // (not the current time, which includes the 30m debounce wait)
         activeTrip.endTime = (parkStartTime > 0) ? parkStartTime : now;
         activeTrip.durationSeconds = (int) ((activeTrip.endTime - activeTrip.startTime) / 1000);
 
@@ -610,7 +610,7 @@ public class TripDetector {
     // ==================== DEBOUNCE TIMER ====================
 
     /**
-     * Start the 120s park debounce timer.
+     * Start the 30-minute park debounce timer.
      * When it fires, the trip is finalized.
      */
     private void startParkDebounceTimer() {
@@ -619,7 +619,7 @@ public class TripDetector {
 
     /**
      * Park debounce with an explicit delay — used by {@link #resumeTrip} to
-     * honour the portion of the 120 s window that already elapsed before a
+     * honour the portion of the 30-minute window that already elapsed before a
      * daemon restart, so a resumed trip finalizes on the same schedule the
      * original process would have.
      */
