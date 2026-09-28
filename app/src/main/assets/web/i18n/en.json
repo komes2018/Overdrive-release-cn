@@ -707,6 +707,8 @@
     "wecom_categories_desc": "Fine-tune specific notification categories pushed via Webhook.",
     "wecom_motion_images": "Surveillance Snapshot Images",
     "wecom_motion_images_desc": "Include detection snapshot photo (Base64 JPEG) directly in the bot message.",
+    "wecom_start_ping": "Instant Motion Ping",
+    "wecom_start_ping_desc": "Send instant text ping when motion is first detected; off by default (recommended to merge into final summary + snapshot).",
     "wecom_charging": "Charging & Power Alerts",
     "wecom_charging_desc": "Notifications for charge completed, charge interrupted, or critical low battery.",
     "wecom_tyre": "Tyre Pressure Alerts",

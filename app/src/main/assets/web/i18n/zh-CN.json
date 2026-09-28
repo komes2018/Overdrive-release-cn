@@ -461,6 +461,8 @@
     "wecom_categories_desc": "细化配置通过 Webhook 推送的具体事件分类。",
     "wecom_motion_images": "哨兵现场抓拍图文",
     "wecom_motion_images_desc": "在机器人推送消息中直接附带哨兵动检抓拍照片（Base64 图片）。",
+    "wecom_start_ping": "动检即时预警",
+    "wecom_start_ping_desc": "检测到移动即刻发送文字预警；默认关闭（推荐合并为录像完成后发送汇总消息+抓拍图）。",
     "wecom_charging": "充电与电量告警",
     "wecom_charging_desc": "推送充电完成、充电中断或低电量保护事件。",
     "wecom_tyre": "胎压告警",

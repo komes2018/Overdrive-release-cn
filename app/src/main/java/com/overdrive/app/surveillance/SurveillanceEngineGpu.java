@@ -8043,15 +8043,18 @@ public class SurveillanceEngineGpu {
         float bestConf = threat != null ? threat.peakConfidence : 0f;
         if (threat != null) detectionLabel = Actor.groupLabel(threat.classGroup);
 
-        // 企微独立直连推送（国内直连，无需代理，完全独立于 Telegram 门控）
-        try {
-            com.overdrive.app.wecom.WeComNotifier.notifyMotion(
-                    detectionLabel,
-                    bestConf > 0f ? bestConf : 1.0f,
-                    camHint,
-                    peakSev != null ? peakSev.name() : null);
-        } catch (Throwable t) {
-            logger.debug("WeComNotifier motion notify failed: " + t.getMessage());
+        // 企微独立直连推送：默认合并至录像完成时推送汇总消息+抓拍图，避免连续发多条消息刷屏。
+        // 若配置显式开启 sendStartPing，则保留开播即时文字预警。
+        if (com.overdrive.app.wecom.WeComNotifier.isSendStartPingEnabled()) {
+            try {
+                com.overdrive.app.wecom.WeComNotifier.notifyMotion(
+                        detectionLabel,
+                        bestConf > 0f ? bestConf : 1.0f,
+                        camHint,
+                        peakSev != null ? peakSev.name() : null);
+            } catch (Throwable t) {
+                logger.debug("WeComNotifier motion notify failed: " + t.getMessage());
+            }
         }
 
         // Telegram start-stage ping gate: by default, Telegram only gets the recording-CLOSE
@@ -8301,11 +8304,15 @@ public class SurveillanceEngineGpu {
         // 企微独立直连推送 Hero 截图与录像通知（国内直连，无需代理，独立于 Telegram 门控）
         try {
             String label = threat != null ? com.overdrive.app.surveillance.Actor.groupLabel(threat.classGroup) : null;
+            float finalConf = threat != null ? threat.peakConfidence : (camAnchor != null ? camAnchor.peakConfidence : 0f);
+            Actor.Severity finalSev = maxOf(eventPeakSeverity, peakSev);
             com.overdrive.app.wecom.WeComNotifier.notifyMotionFinalized(
                     heroPhotoPath,
                     videoFilename,
                     label,
-                    camHint);
+                    camHint,
+                    finalConf > 0f ? finalConf : 1.0f,
+                    finalSev != null ? finalSev.name() : null);
         } catch (Throwable t) {
             logger.debug("WeComNotifier finalized notify failed: " + t.getMessage());
         }

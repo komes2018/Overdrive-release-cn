@@ -53,10 +53,23 @@ public class WeComNotifier {
         return t;
     });
 
+    /**
+     * 是否开启了动检即时预警（开播即推送文字）。
+     * 默认关闭，推荐合并至录像完成时推送 1 条完整汇总 + 抓拍图。
+     */
+    public static boolean isSendStartPingEnabled() {
+        try {
+            return com.overdrive.app.config.UnifiedConfigManager.getWeCom().optBoolean("sendStartPing", false);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     // ==================== 检测到移动/人/车 ====================
 
     /**
-     * 哨兵检测到目标，推送文字告警。
+     * 哨兵检测到目标，推送文字告警（初始即时预警）。
+     * 默认被 suppress，仅当配置显式开启 sendStartPing 时发送。
      *
      * @param aiDetection 检测类型："person" / "vehicle" / "bike" / "animal" / "motion"
      * @param confidence  置信度 0-1
@@ -67,14 +80,15 @@ public class WeComNotifier {
                                     String camera, String severity) {
         motionExecutor.execute(() -> {
             String label = localizeDetection(aiDetection);
-            String camStr = camera != null ? "（" + localizeCamera(camera) + "摄像头）" : "";
-            String sevStr = "CRITICAL".equals(severity) ? "🚨【紧急提醒】" :
-                    "ALERT".equals(severity) ? "⚠️【安全警报】" : "🔍【哨兵动检】";
+            String camStr = camera != null && !camera.isEmpty() ? "（" + localizeCamera(camera) + "摄像头）" : "";
+            String sevStr = "CRITICAL".equals(severity) ? "🚨【哨兵紧急预警】" :
+                    "ALERT".equals(severity) ? "⚠️【哨兵安全预警】" : "🔍【哨兵动检预警】";
             String confText = formatConfidence(confidence);
 
             String msg = sevStr + " 发现" + label + camStr + "\n"
-                    + "• 可信度：" + confText + "\n"
-                    + "• 时间：" + nowStr();
+                    + "• 识别可信度：" + confText + "\n"
+                    + "• 触发时间：" + nowStr() + "\n"
+                    + "• 提示：事件录像与现场抓拍正在生成中…";
             WeComSink.sendText(msg);
         });
     }
@@ -100,31 +114,59 @@ public class WeComNotifier {
     }
 
     /**
-     * 事件录像已完成，同时推送 Hero 截图（base64 图片）。
+     * 事件录像已完成，整合推送包含目标、可信度、录像文件和时间的完整汇总通知，随后附带 Hero 截图。
+     * 将原先分散的“动检开播”、“录像归档”、“抓拍照片”合并为单次精简推送，杜绝多条刷屏。
      *
      * @param heroPhotoPath Hero 截图绝对路径，null 则只发文字
      * @param videoFilename 录像文件名
      * @param aiDetection   检测类型
      * @param camera        摄像头方向
+     * @param confidence    置信度 0-1
+     * @param severity      严重级别："NOTICE"/"ALERT"/"CRITICAL"
      */
     public static void notifyMotionFinalized(String heroPhotoPath, String videoFilename,
-                                             String aiDetection, String camera) {
+                                             String aiDetection, String camera,
+                                             float confidence, String severity) {
         motionExecutor.execute(() -> {
             String label = localizeDetection(aiDetection);
-            String camStr = camera != null ? "（" + localizeCamera(camera) + "摄像头）" : "";
+            String camStr = camera != null && !camera.isEmpty() ? "（" + localizeCamera(camera) + "摄像头）" : "";
+            String sevStr = "CRITICAL".equals(severity) ? "🚨【哨兵紧急警报】" :
+                    "ALERT".equals(severity) ? "⚠️【哨兵安全警报】" : "🎯【哨兵事件提醒】";
+            String confText = formatConfidence(confidence);
 
-            // 先发文字
-            String msg = "🎯【哨兵事件录像完成】\n"
-                    + "• 目标：" + label + camStr + "\n"
-                    + "• 文件：" + (videoFilename != null ? videoFilename : "–") + "\n"
-                    + "• 时间：" + nowStr();
-            WeComSink.sendText(msg);
+            boolean hasPhoto = heroPhotoPath != null && !heroPhotoPath.isEmpty()
+                    && new File(heroPhotoPath).exists()
+                    && WeComSink.isMotionImagesEnabled();
 
-            // 再发截图（如有）
-            if (heroPhotoPath != null && !heroPhotoPath.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            sb.append(sevStr).append(" 发现").append(label).append(camStr).append("\n");
+            sb.append("• 识别可信度：").append(confText).append("\n");
+            if (videoFilename != null && !videoFilename.isEmpty()) {
+                sb.append("• 录像文件：").append(videoFilename).append("\n");
+            }
+            sb.append("• 触发时间：").append(nowStr());
+            if (hasPhoto) {
+                sb.append("\n• 现场抓拍：见下方照片 👇");
+            } else {
+                sb.append("\n• 提示：可在车机或 Web 页面「事件录像」中查看回放");
+            }
+
+            // 发送合并后的唯一文字通知
+            WeComSink.sendText(sb.toString());
+
+            // 紧接着发送现场大图（如有且开启）
+            if (hasPhoto) {
                 sendHeroPhoto(heroPhotoPath);
             }
         });
+    }
+
+    /**
+     * 向后兼容老接口（默认置信度 1.0）
+     */
+    public static void notifyMotionFinalized(String heroPhotoPath, String videoFilename,
+                                             String aiDetection, String camera) {
+        notifyMotionFinalized(heroPhotoPath, videoFilename, aiDetection, camera, 1.0f, null);
     }
 
     // ==================== 隧道 URL ====================

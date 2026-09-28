@@ -595,6 +595,7 @@ object UnifiedConfigManager {
         if (!wecom.has("motionImages")) wecom.put("motionImages", true)
         if (!wecom.has("charging")) wecom.put("charging", true)
         if (!wecom.has("tyre")) wecom.put("tyre", true)
+        if (!wecom.has("sendStartPing")) wecom.put("sendStartPing", false)
 
         // Surveillance defaults
         if (!surveillance.has("minObjectSize")) surveillance.put("minObjectSize", 0.08)

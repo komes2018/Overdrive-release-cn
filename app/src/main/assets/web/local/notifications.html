@@ -1062,6 +1062,16 @@
                                 </div>
                                 <div class="notif-row">
                                     <div class="notif-row-text">
+                                        <div class="notif-row-label" data-i18n="notif.wecom_start_ping">动检即时预警</div>
+                                        <div class="notif-row-note" data-i18n="notif.wecom_start_ping_desc">检测到移动即刻发送文字预警；默认关闭（推荐合并为录像完成后发送汇总消息+抓拍图）。</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="wecomSendStartPing" onchange="WeComPrefs.save()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="notif-row">
+                                    <div class="notif-row-text">
                                         <div class="notif-row-label" data-i18n="notif.wecom_charging">充电与电量告警</div>
                                         <div class="notif-row-note" data-i18n="notif.wecom_charging_desc">推送充电完成、充电中断或低电量保护事件。</div>
                                     </div>
@@ -1476,7 +1486,7 @@
                 if (window.BYD && BYD.utils && BYD.utils.toast) BYD.utils.toast(msg, kind || 'info');
             }
             function _repaint(state) {
-                var ids = ['wecomEnabled', 'wecomTierNotices', 'wecomTierAlerts', 'wecomTierCritical', 'wecomMotionImages', 'wecomCharging', 'wecomTyre'];
+                var ids = ['wecomEnabled', 'wecomTierNotices', 'wecomTierAlerts', 'wecomTierCritical', 'wecomMotionImages', 'wecomSendStartPing', 'wecomCharging', 'wecomTyre'];
                 ids.forEach(function (id) {
                     if (!(id in state)) return;
                     var el = $(id); if (!el) return;
@@ -1501,6 +1511,7 @@
                             wecomTierAlerts: s.tierAlerts !== false,
                             wecomTierCritical: s.tierCritical !== false,
                             wecomMotionImages: s.motionImages !== false,
+                            wecomSendStartPing: !!s.sendStartPing,
                             wecomCharging: s.charging !== false,
                             wecomTyre: s.tyre !== false
                         });
@@ -1514,6 +1525,7 @@
                     tierAlerts: $('wecomTierAlerts') ? $('wecomTierAlerts').checked : true,
                     tierCritical: $('wecomTierCritical') ? $('wecomTierCritical').checked : true,
                     motionImages: $('wecomMotionImages') ? $('wecomMotionImages').checked : true,
+                    sendStartPing: $('wecomSendStartPing') ? $('wecomSendStartPing').checked : false,
                     charging: $('wecomCharging') ? $('wecomCharging').checked : true,
                     tyre: $('wecomTyre') ? $('wecomTyre').checked : true
                 };

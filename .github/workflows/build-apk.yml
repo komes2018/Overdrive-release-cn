@@ -56,7 +56,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         # assembleDebug: keeps debug flags (no R8 shrink) but now uses our fixed keystore
         # instead of the random per-runner debug keystore → consistent fingerprint every run.
-        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9 -PoverdriveVersionCode=4990 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
+        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.1 -PoverdriveVersionCode=4991 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
 
       - name: Verify APK signature fingerprint
         run: |
@@ -79,7 +79,7 @@ jobs:
           mkdir -p release-assets
           APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
           echo "Found built APK: $APK_FILE"
-          cp "$APK_FILE" release-assets/Overdrive-v49.9-cn-sec.apk
+          cp "$APK_FILE" release-assets/Overdrive-v49.9.1-cn-sec.apk
           ls -lh release-assets/
 
       - name: Upload APK Artifact
@@ -93,10 +93,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v49.9-cn-sec
-          name: OverDrive v49.9 - 原生中文首屏与安全性能优化定制版
+          tag_name: v49.9.1-cn-sec
+          name: OverDrive v49.9.1 - 哨兵 Webhook 通知合并与低噪推送优化版
           body: |
-            ## OverDrive v49.9 原生中文首屏与安全性能优化定制版
+            ## OverDrive v49.9.1 哨兵 Webhook 通知合并与低噪推送优化版
+
+            ### 📢 哨兵 Webhook 推送去重与综合合并 (Scheme A)
+            - **告别连续刷屏**：将原先动检起始预警、录像结束汇总、抓拍图 3 条连续消息精简合并为 **1 条全信息综合卡片 + 1 张高清现场抓拍图**
+            - **综合汇总卡片升级**：单条消息囊括事件等级（Notice/Alert/Critical）、最高检测目标、置信度百分比、触发摄像头方位、视频录像文件名以及精准触发时间
+            - **动检即时预警开关**：Web 界面新增“动检即时预警”开关，默认关闭；若需要初始动检即刻报警，用户可在通知设置页随时一键重新启用
 
             ### 🇨🇳 原生中文零延迟首屏 (Native Chinese First Paint)
             - **彻底消除 FOUC 英文闪烁**：全量 26 个 Web 页面模板、导航侧边栏、状态栏与核心组件预置纯正简体中文，毫秒级直出中文首屏，告别“先英文后转中文”的加载体验
@@ -121,6 +126,6 @@ jobs:
             - **国内比亚迪云深度适配**：支持手机号登录、海洋网/王朝网、授权车主账号与远程唤醒
             - **全量简体中文本地化精校**：严格遵循专业汽车与车机术语规范，消灭机翻
             - **固化签名证书**：签名证书完全保持一致，支持车机 `pm install -r` 直接无缝覆盖升级，无需卸载
-          files: release-assets/Overdrive-v49.9-cn-sec.apk
+          files: release-assets/Overdrive-v49.9.1-cn-sec.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
