@@ -139,8 +139,8 @@ public final class TripNotifier {
             try {
                 PlaceResult place = GeocodingResolver.getInstance().resolveCachedOnly(trip.endLat, trip.endLon);
                 if (place != null) {
-                    String placeName = place.shortName != null && !place.shortName.isEmpty()
-                            ? place.shortName : place.displayName;
+                    String placeName = (place.district != null && !place.district.isEmpty())
+                            ? place.district : place.displayName;
                     if (placeName != null && !placeName.isEmpty()) {
                         sb.append("\n• 到达位置：").append(placeName);
                     }
