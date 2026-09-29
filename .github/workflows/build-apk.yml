@@ -56,7 +56,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         # assembleDebug: keeps debug flags (no R8 shrink) but now uses our fixed keystore
         # instead of the random per-runner debug keystore → consistent fingerprint every run.
-        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.5 -PoverdriveVersionCode=4995 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
+        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.6 -PoverdriveVersionCode=4996 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
 
       - name: Verify APK signature fingerprint
         run: |
@@ -79,7 +79,7 @@ jobs:
           mkdir -p release-assets
           APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
           echo "Found built APK: $APK_FILE"
-          cp "$APK_FILE" release-assets/Overdrive-v49.9.5-cn-sec.apk
+          cp "$APK_FILE" release-assets/Overdrive-v49.9.6-cn-sec.apk
           ls -lh release-assets/
 
       - name: Upload APK Artifact
@@ -93,24 +93,20 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v49.9.5-cn-sec
-          name: OverDrive v49.9.5 - 驻车动态 GPS 降频与自愈自校准闭环
+          tag_name: v49.9.6-cn-sec
+          name: OverDrive v49.9.6 - 驻车耗电追踪与点火启动报告推送
           body: |
-            ## OverDrive v49.9.5 能耗优化与状态自愈版
+            ## OverDrive v49.9.6 驻车耗电统计与通知增强版
 
-            ### 🛰️ 驻车动态 GPS 降频与基带深度节能 (v49.9.5)
-            - **驻车自动释放高精 GPS 监听**：`LocationSidecarService` 引入动态 ACC 监听与状态切换。车辆熄火驻车（ACC OFF）时，注销 1s/0m 的高频 `GPS_PROVIDER`，彻底解除对高通 GNSS 射频基带的硬性唤醒；
-            - **网络低功耗守候与被动定位**：驻车期间仅保留低功耗 `NETWORK_PROVIDER`（60s / 10m 移动阈值），在保证车辆位移/拖车防盗感应的同时，杜绝电量虚耗；
-            - **TCP IPC 跨进程通信降频**：驻车状态下 GPS-TCP 发送频率从原先的 1 秒/次（3600次/小时）骤降至 5 分钟/次（12次/小时），减少 99.7% 的静止 IPC 与线程唤醒开销；
-            - **状态自愈与异步对齐闭环 (v49.9.5 新增)**：在服务启动与定时上报时，异步核对 CameraDaemon 本地 `/status` 电源权威状态，解决应用重启/更新未触发点火广播时的保守误判，确保 100% 自动收敛至驻车低功耗模式；
-            - **行车瞬间极速恢复**：车辆启动（ACC ON / IGN ON）瞬间毫秒级恢复 1s/0m 高精度双通道定位与高频遥测。
+            ### 🔋 驻车耗电统计与点火报告推送 (v49.9.6)
+            - **全自动边界状态锚定**：车辆熄火 (ACC OFF) 瞬间，异步持久化停放时间戳、动力电池 SOC、剩余容量 (kWh)、12V 小电瓶电压与 GPS 位置；
+            - **驻车期间 0 额外耗电**：驻车期间无后台轮询、无常驻定时器、无唤醒锁，不产生任何额外静态功耗；
+            - **下次点火启动自动结算推送**：下次点火 (ACC ON) 瞬间自动对比并结算停放总时长、动力电池耗电百分比 (或充入百分比)、时均耗电量以及 12V 小电瓶健康状况；
+            - **Webhook 推送开关支持**：通知设置页 (Web UI) 增加「驻车耗电报告」独立开关，并同步支持多语言 (简中/繁中/英文)；
+            - **智能过滤**：自动过滤 < 2 分钟的瞬时熄火重开，避免无效干扰。
 
-            ### 🌐 比亚迪云端 MQTT 失败指数退避 (v49.9.5)
-            - **长周期重试退避上限**：将 `BydCloudMqttSubscriber` 的重连上限由 300 秒（5 分钟）放宽至 1800 秒（30 分钟），避免因网络或证书异常导致的频繁唤醒无线通信模块与 CPU 轮询。
-
-            ### 🌡️ 核心遥测常驻与行车双录/驻车单录机制
-            - 包含 v49.9.3 车外温度传感器常驻发现与缓存回退。
-            - 适配 OEM Dashcam 驻车单录策略，释放独立 OpenGL ES 上下文与 MediaCodec 编码器。
-          files: release-assets/Overdrive-v49.9.5-cn-sec.apk
+            ### 🛰️ 继承 v49.9.5 驻车基带降频与自校准
+            - 包含驻车动态释放高精度 GNSS 基带、网络低功耗守候与状态自校准闭环。
+          files: release-assets/Overdrive-v49.9.6-cn-sec.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

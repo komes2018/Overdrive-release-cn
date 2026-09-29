@@ -67,6 +67,7 @@ public final class WeComApiHandler {
         boolean charging = cfg.optBoolean("charging", true);
         boolean tyre = cfg.optBoolean("tyre", true);
         boolean trips = cfg.optBoolean("trips", true);
+        boolean parkingDrain = cfg.optBoolean("parkingDrain", true);
         boolean sendStartPing = cfg.optBoolean("sendStartPing", false);
 
         JSONObject resp = new JSONObject();
@@ -81,6 +82,7 @@ public final class WeComApiHandler {
         resp.put("charging", charging);
         resp.put("tyre", tyre);
         resp.put("trips", trips);
+        resp.put("parkingDrain", parkingDrain);
         resp.put("sendStartPing", sendStartPing);
 
         HttpResponse.sendJson(out, resp.toString());
@@ -105,6 +107,7 @@ public final class WeComApiHandler {
             if (req.has("charging")) values.put("charging", req.getBoolean("charging"));
             if (req.has("tyre")) values.put("tyre", req.getBoolean("tyre"));
             if (req.has("trips")) values.put("trips", req.getBoolean("trips"));
+            if (req.has("parkingDrain")) values.put("parkingDrain", req.getBoolean("parkingDrain"));
             if (req.has("sendStartPing")) values.put("sendStartPing", req.getBoolean("sendStartPing"));
 
             UnifiedConfigManager.setWeComValues(values);

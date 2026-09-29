@@ -469,6 +469,8 @@
     "wecom_tyre_desc": "当轮胎胎压过低、过高或异常漏气时发送告警通知。",
     "wecom_trips": "行程结束报告",
     "wecom_trips_desc": "每次行程结束且车辆熄火后，自动向群机器人推送本次行驶里程、耗时、能耗与驾驶评分摘要。",
+    "wecom_parking_drain": "驻车耗电报告",
+    "wecom_parking_drain_desc": "下次点火启动时，自动向群机器人推送上一次熄火停放总时长、动力电池耗电百分比及12V电压变化。",
     "wecom_saved": "Webhook 设置已保存",
     "wecom_url_required": "请先输入 Webhook 地址",
     "wecom_test_success": "测试消息发送成功！请检查群聊接收情况。",

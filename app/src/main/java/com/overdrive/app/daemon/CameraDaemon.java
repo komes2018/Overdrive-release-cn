@@ -8172,6 +8172,13 @@ public class CameraDaemon {
         // repeated ACC-OFF heartbeat cannot finalize the same drive twice.
         notifyTripAnalyticsManager(accIsOff);
 
+        // Parking drain tracking (zero-cost on parked, edge-driven)
+        try {
+            com.overdrive.app.parking.ParkingDrainTracker.onAccEdge(accIsOff);
+        } catch (Throwable t) {
+            log("ParkingDrainTracker edge failed: " + t.getMessage());
+        }
+
         // Parking Intelligence observes the same leased edge. Null check when
         // the feature is off; otherwise a hand-off to its own worker (never
         // blocks this transition). Dedup by generation inside the controller,

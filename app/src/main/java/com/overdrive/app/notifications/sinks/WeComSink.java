@@ -95,6 +95,12 @@ public final class WeComSink implements NotificationBus.Sink {
                 if (!cfg.optBoolean("trips", true)) return;
             }
 
+            // 驻车耗电报告类事件（每次点火启动后推送）
+            boolean isParkingDrain = event.category != null && event.category.equals("vehicle.parking.drain");
+            if (isParkingDrain) {
+                if (!cfg.optBoolean("parkingDrain", true)) return;
+            }
+
             // 等级门控
             boolean userAuthored = "automation.action".equals(event.category);
             if (event.severity == NotificationEvent.Severity.CRITICAL) {
@@ -102,12 +108,12 @@ public final class WeComSink implements NotificationBus.Sink {
             } else if (event.severity == NotificationEvent.Severity.WARN) {
                 if (!cfg.optBoolean("tierAlerts", true)) return;
             } else if (event.severity == NotificationEvent.Severity.INFO) {
-                if (!userAuthored && !isTrip && !cfg.optBoolean("tierNotices", false)) return;
+                if (!userAuthored && !isTrip && !isParkingDrain && !cfg.optBoolean("tierNotices", false)) return;
             }
 
             // 组装消息文本
-            String icon = isTrip ? "🚗" : (event.severity == NotificationEvent.Severity.CRITICAL ? "🚨"
-                    : (event.severity == NotificationEvent.Severity.INFO ? "🔔" : "⚠️"));
+            String icon = isParkingDrain ? "🅿️" : (isTrip ? "🚗" : (event.severity == NotificationEvent.Severity.CRITICAL ? "🚨"
+                    : (event.severity == NotificationEvent.Severity.INFO ? "🔔" : "⚠️")));
             StringBuilder msg = new StringBuilder();
             msg.append(icon).append("【").append(safe(event.title)).append("】");
             if (event.body != null && !event.body.isEmpty()) {

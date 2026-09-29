@@ -715,6 +715,8 @@
     "wecom_tyre_desc": "Alert when tyre pressure falls below or exceeds safe thresholds.",
     "wecom_trips": "Trip Completion Reports",
     "wecom_trips_desc": "Automatically post distance, duration, energy efficiency, and driving score summary to webhook when vehicle powers off after a trip.",
+    "wecom_parking_drain": "Parking Battery Drain Report",
+    "wecom_parking_drain_desc": "Automatically post parked duration, high-voltage battery drain %, and 12V auxiliary battery status to webhook upon next vehicle start.",
     "wecom_saved": "Webhook settings saved",
     "wecom_url_required": "Please enter a Webhook URL first",
     "wecom_test_success": "Test message sent successfully! Check your chat group.",

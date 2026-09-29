@@ -1100,6 +1100,16 @@
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
+                                <div class="notif-row">
+                                    <div class="notif-row-text">
+                                        <div class="notif-row-label" data-i18n="notif.wecom_parking_drain">驻车耗电报告</div>
+                                        <div class="notif-row-note" data-i18n="notif.wecom_parking_drain_desc">下次点火启动时，自动向群机器人推送上一次熄火停放总时长、动力电池耗电百分比及12V电压变化。</div>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="wecomParkingDrain" onchange="WeComPrefs.save()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1496,7 +1506,7 @@
                 if (window.BYD && BYD.utils && BYD.utils.toast) BYD.utils.toast(msg, kind || 'info');
             }
             function _repaint(state) {
-                var ids = ['wecomEnabled', 'wecomTierNotices', 'wecomTierAlerts', 'wecomTierCritical', 'wecomMotionImages', 'wecomSendStartPing', 'wecomCharging', 'wecomTyre', 'wecomTrips'];
+                var ids = ['wecomEnabled', 'wecomTierNotices', 'wecomTierAlerts', 'wecomTierCritical', 'wecomMotionImages', 'wecomSendStartPing', 'wecomCharging', 'wecomTyre', 'wecomTrips', 'wecomParkingDrain'];
                 ids.forEach(function (id) {
                     if (!(id in state)) return;
                     var el = $(id); if (!el) return;
@@ -1524,7 +1534,8 @@
                             wecomSendStartPing: !!s.sendStartPing,
                             wecomCharging: s.charging !== false,
                             wecomTyre: s.tyre !== false,
-                            wecomTrips: s.trips !== false
+                            wecomTrips: s.trips !== false,
+                            wecomParkingDrain: s.parkingDrain !== false
                         });
                     })
                     .catch(function () {});
@@ -1539,7 +1550,8 @@
                     sendStartPing: $('wecomSendStartPing') ? $('wecomSendStartPing').checked : false,
                     charging: $('wecomCharging') ? $('wecomCharging').checked : true,
                     tyre: $('wecomTyre') ? $('wecomTyre').checked : true,
-                    trips: $('wecomTrips') ? $('wecomTrips').checked : true
+                    trips: $('wecomTrips') ? $('wecomTrips').checked : true,
+                    parkingDrain: $('wecomParkingDrain') ? $('wecomParkingDrain').checked : true
                 };
                 if ($('wecomUrlInput')) {
                     payload.url = $('wecomUrlInput').value.trim();
