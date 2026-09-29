@@ -56,7 +56,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         # assembleDebug: keeps debug flags (no R8 shrink) but now uses our fixed keystore
         # instead of the random per-runner debug keystore → consistent fingerprint every run.
-        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.3 -PoverdriveVersionCode=4993 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
+        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.4 -PoverdriveVersionCode=4994 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
 
       - name: Verify APK signature fingerprint
         run: |
@@ -79,7 +79,7 @@ jobs:
           mkdir -p release-assets
           APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
           echo "Found built APK: $APK_FILE"
-          cp "$APK_FILE" release-assets/Overdrive-v49.9.3-cn-sec.apk
+          cp "$APK_FILE" release-assets/Overdrive-v49.9.4-cn-sec.apk
           ls -lh release-assets/
 
       - name: Upload APK Artifact
@@ -93,33 +93,23 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v49.9.3-cn-sec
-          name: OverDrive v49.9.3 - 修复 MQTT 车外温度传感器熄火发现遗漏
+          tag_name: v49.9.4-cn-sec
+          name: OverDrive v49.9.4 - 驻车动态 GPS 降频与云端重连退避优化
           body: |
-            ## OverDrive v49.9.3 核心修复版
+            ## OverDrive v49.9.4 能耗优化版
 
-            ### 🌡️ 修复 MQTT 车外温度传感器熄火启动遗漏 (v49.9.3)
-            - **核心遥测常驻发现机制**：引入 `HomeAssistantDiscovery.CORE_KEYS`，确保 `ext_temp`（车外温度）等核心遥测字段在车机熄火状态（ACC OFF）冷启动时依然常驻发布在 HA 设备发现组件清单（cmps）中，彻底杜绝传感器被判定为不支持而丢失/孤立。
-            - **车外温度末次有效值缓存与天气回退**：`MqttConnectionManager` 增加 `lastOutsideTempC` 内存缓存，在熄火停泊仪表盘未回传期间复用末次已知车况温度；冷启动初次无数据时接入天气接口缓存兜底，确保遥测流平稳连续。
-            - **保持实体 ID 与唯一标识一致性**：自动匹配 HA 已有实体的 unique_id，无缝衔接历史数据与卡片配置。
+            ### 🛰️ 驻车动态 GPS 降频与基带深度节能 (v49.9.4)
+            - **驻车自动释放高精 GPS 监听**：`LocationSidecarService` 引入动态 ACC 监听与状态切换。车辆熄火驻车（ACC OFF）时，注销 1s/0m 的高频 `GPS_PROVIDER`，彻底解除对高通 GNSS 射频基带的硬性唤醒；
+            - **网络低功耗守候与被动定位**：驻车期间仅保留低功耗 `NETWORK_PROVIDER`（60s / 10m 移动阈值），在保证车辆位移/拖车防盗感应的同时，杜绝电量虚耗；
+            - **TCP IPC 跨进程通信降频**：驻车状态下 GPS-TCP 发送频率从原先的 1 秒/次（3600次/小时）骤降至 5 分钟/次（12次/小时），减少 99.7% 的静止 IPC 与线程唤醒开销；
+            - **行车瞬间极速恢复**：车辆启动（ACC ON / IGN ON）瞬间毫秒级恢复 1s/0m 高精度双通道定位与高频遥测。
 
-            ### 🚗 行程判定防抖延长与熄火自动推送 (v49.9.2 持续特性)
-            - **高速服务区休息不中断行程**：将挂入 P 档且静止等待判定行程结束的防抖时长延长至 30 分钟。服务区挂 P 档开空调休息（不熄火）半小时内，切回 D 档即可继续合并为同一次完整行程，杜绝长途行程被频繁截断拆分。
-            - **行程结束车熄火自动推送 Webhook**：下电熄火（ACC OFF）瞬间自动结算本次行程能耗、里程、均速、驾驶评分并发送卡片报告到企业微信。
+            ### 🌐 比亚迪云端 MQTT 失败指数退避 (v49.9.4)
+            - **长周期重试退避上限**：将 `BydCloudMqttSubscriber` 的重连上限由 300 秒（5 分钟）放宽至 1800 秒（30 分钟），避免因网络或证书异常导致的频繁唤醒无线通信模块与 CPU 轮询。
 
-            ### 📢 哨兵 Webhook 推送去重与综合合并 (Scheme A)
-            - **单条全信息综合卡片 + 现场大图**：将动检起始预警、录像结束汇总、抓拍图合并为 1 条综合卡片 + 1 张高清现场大图。
-            - **动检即时预警开关**：Web 界面支持开关“动检即时预警”。
-
-            ### 🇨🇳 原生中文零延迟首屏 (Native Chinese First Paint)
-            - **彻底消除 FOUC 英文闪烁**：全量 26 个 Web 页面模板预置纯正简体中文，毫秒级直出。
-
-            ### 🛡️ 核心安全加固与车载低功耗优化
-            - **阻断跨源开锁 (C3) 与 JS Bridge 限制 (H4)**
-            - **WakeLock 6小时安全租约与心跳续租 (P3)**
-            - **WebView 退后台自动挂起轮询 (P1)**
-            - **日志批量定时 Flush 8KB 缓存 (P2)**
-            - **固化签名证书**：支持车机 `pm install -r` 直接无缝覆盖升级，无需卸载。
-          files: release-assets/Overdrive-v49.9.3-cn-sec.apk
+            ### 🌡️ 核心遥测常驻与行车双录/驻车单录机制
+            - 包含 v49.9.3 车外温度传感器常驻发现与缓存回退。
+            - 适配 OEM Dashcam 驻车单录策略，释放独立 OpenGL ES 上下文与 MediaCodec 编码器。
+          files: release-assets/Overdrive-v49.9.4-cn-sec.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

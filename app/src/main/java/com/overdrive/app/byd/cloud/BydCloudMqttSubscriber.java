@@ -35,7 +35,7 @@ public final class BydCloudMqttSubscriber implements MqttCallback {
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
     private static final int BACKOFF_BASE_SECONDS = 5;
-    private static final int BACKOFF_CAP_SECONDS = 300;
+    private static final int BACKOFF_CAP_SECONDS = 1800;
     // Base for the "broker resolved but connect failed" (downstream/transient)
     // ramp. Starts at the original fast 15s retry for a transient blip, then
     // doubles toward BACKOFF_CAP_SECONDS so a persistently unreachable :8883

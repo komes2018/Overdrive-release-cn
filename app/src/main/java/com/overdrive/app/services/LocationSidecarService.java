@@ -72,6 +72,12 @@ public class LocationSidecarService extends Service implements LocationListener 
     private volatile long fixElapsedMs = 0L;
     private boolean permissionGranted = false;
 
+    // Dynamic GPS power management: 1s cadence while driving, 5m while parked
+    private volatile boolean isParked = false;
+    private static final long PERIODIC_INTERVAL_DRIVING_MS = 1000L;
+    private static final long PERIODIC_INTERVAL_PARKED_MS = 300_000L; // 5 min while parked
+    private android.content.BroadcastReceiver accReceiver = null;
+
     // SOTA: Throttling fields to prevent IPC/Disk spam.
     // Holds the last location that was actually SENT to the daemon or SAVED to disk.
     private Location lastProcessedLocation = null;
@@ -114,6 +120,41 @@ public class LocationSidecarService extends Service implements LocationListener 
         workerThread = new android.os.HandlerThread("location-sidecar");
         workerThread.start();
         handler = new android.os.Handler(workerThread.getLooper());
+
+        locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
+
+        // Register ACC broadcast receiver to dynamically switch between parked/driving GPS cadence
+        accReceiver = new android.content.BroadcastReceiver() {
+            @Override
+            public void onReceive(android.content.Context context, android.content.Intent intent) {
+                if (intent == null || intent.getAction() == null) return;
+                String action = intent.getAction();
+                if ("com.byd.action.ACC_OFF".equals(action)) {
+                    Log.i(TAG, "ACC OFF broadcast received -> switching to parked GPS cadence");
+                    applyLocationCadence(true);
+                } else if ("com.byd.action.ACC_ON".equals(action) || "com.byd.action.IGN_ON".equals(action)) {
+                    Log.i(TAG, "ACC ON broadcast received -> switching to driving GPS cadence");
+                    applyLocationCadence(false);
+                } else if ("com.byd.accmode.ACC_MODE_CHANGED".equals(action)) {
+                    boolean parked = false;
+                    try {
+                        parked = com.overdrive.app.monitor.AccMonitor.probeAccState(context);
+                    } catch (Throwable ignored) {}
+                    applyLocationCadence(parked);
+                }
+            }
+        };
+        android.content.IntentFilter accFilter = new android.content.IntentFilter();
+        accFilter.addAction("com.byd.action.ACC_OFF");
+        accFilter.addAction("com.byd.action.ACC_ON");
+        accFilter.addAction("com.byd.action.IGN_ON");
+        accFilter.addAction("com.byd.accmode.ACC_MODE_CHANGED");
+        try {
+            registerReceiver(accReceiver, accFilter);
+            Log.i(TAG, "Dynamic GPS cadence ACC receiver registered");
+        } catch (Throwable t) {
+            Log.w(TAG, "Failed to register ACC receiver: " + t.getMessage());
+        }
 
         // Create notification channel FIRST
         createNotificationChannel();
@@ -220,33 +261,31 @@ public class LocationSidecarService extends Service implements LocationListener 
                 // callbacks stop for >CALLBACK_STALE_MS we resume polling exactly as
                 // before. Threshold is 3s: comfortably under RoadSense's 5s
                 // fix-staleness cutoff, so a fallback still lands in time.
-                boolean callbacksStale =
-                        (System.currentTimeMillis() - lastCallbackFixAtMs) > CALLBACK_STALE_MS;
-                if (callbacksStale && permissionGranted && locationManager != null) {
-                    try {
-                        Location lastGps = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-                        if (lastGps != null) {
-                            long fixAge = System.currentTimeMillis() - lastGps.getTime();
-                            if (fixAge < 10000) {
-                                // Fresh fix available that we might have missed
-                                processFix(lastGps);
+                // Gate last-known GPS polling: only when driving (!isParked) to avoid waking GNSS provider
+                if (!isParked) {
+                    boolean callbacksStale =
+                            (System.currentTimeMillis() - lastCallbackFixAtMs) > CALLBACK_STALE_MS;
+                    if (callbacksStale && permissionGranted && locationManager != null) {
+                        try {
+                            Location lastGps = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+                            if (lastGps != null) {
+                                long fixAge = System.currentTimeMillis() - lastGps.getTime();
+                                if (fixAge < 10000) {
+                                    // Fresh fix available that we might have missed
+                                    processFix(lastGps);
+                                }
                             }
+                        } catch (SecurityException e) {
+                            // Permission lost
+                        } catch (Exception e) {
+                            // Ignore
                         }
-                    } catch (SecurityException e) {
-                        // Permission lost
-                    } catch (Exception e) {
-                        // Ignore
                     }
                 }
 
-                // Periodic keep-alive / poll / daemon-restart recovery. Dropped
-                // from 4000ms -> 1000ms: at 4s this poll was the ONLY thing
-                // advancing GpsMonitor (the provider callback wasn't delivering),
-                // capping GPS at ~0.25Hz across both the MQTT feed AND the internal
-                // trip track. 1s makes GpsMonitor ~1Hz. Still well under RoadSense's
-                // 5s fix-staleness cutoff; CPU/IPC cost of a localhost write + one
-                // file cache per second is negligible (was 2s originally).
-                handler.postDelayed(this, 1000);
+                // Dynamic cadence: 1s while driving, 5m while parked
+                long nextDelay = isParked ? PERIODIC_INTERVAL_PARKED_MS : PERIODIC_INTERVAL_DRIVING_MS;
+                handler.postDelayed(this, nextDelay);
             }
         };
         handler.postDelayed(periodicSender, 5000);
@@ -298,81 +337,105 @@ public class LocationSidecarService extends Service implements LocationListener 
     }
 
     private void startLocationUpdates() {
-        try {
+        if (!permissionGranted) return;
+        if (locationManager == null) {
             locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
-            
-            if (locationManager == null) {
-                Log.e(TAG, "LocationManager not available");
-                return;
-            }
-            
-            // Keep GPS at 1s / 0m so RoadSense back-projection still sees the
-            // ~2 Hz distinct-fix stream its GpsRingBuffer is designed around
-            // (GPS_POLL_MS≈500, FIX_LATENCY≈700ms). The throttling that cuts
-            // IPC/disk spam happens downstream in onLocationChanged (the
-            // distance/time gate), NOT at the provider — coarsening the
-            // provider here would starve hazard approach detection.
-            //
-            // Register UNCONDITIONALLY — never gate on isProviderEnabled().
-            // The head unit disables location (location_mode=0) whenever the
-            // car is off, and app (re)starts almost always happen parked, so
-            // an isProviderEnabled gate here meant the listener was NEVER
-            // registered for that app instance and the callback path never
-            // delivered — fixes then only arrived via the periodic
-            // getLastKnownLocation poll, riding on the factory nav's own GPS
-            // request while driving. Android accepts registration while a
-            // provider is disabled and starts delivering the moment it comes
-            // on (ACC-on) — exactly the behavior we want.
-            try {
-                locationManager.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER,
-                    1000,  // 1 second
-                    0.0f,  // every fix (no provider-side distance filter)
-                    this,
-                    workerThread.getLooper()  // deliver off the UI thread
-                );
-                Log.i(TAG, "GPS provider registered (1s/0m), enabled="
-                        + locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER));
-            } catch (Exception e) {
-                Log.e(TAG, "GPS provider registration failed: " + e.getMessage());
+        }
+        if (locationManager == null) {
+            Log.e(TAG, "LocationManager not available");
+            return;
+        }
+        boolean initialParked = false;
+        try {
+            initialParked = com.overdrive.app.monitor.AccMonitor.probeAccState(this);
+        } catch (Throwable t) {
+            Log.w(TAG, "Failed to probe initial ACC state: " + t.getMessage());
+        }
+        applyLocationCadence(initialParked);
+    }
+
+    private synchronized void applyLocationCadence(boolean parked) {
+        if (!permissionGranted) return;
+        if (locationManager == null) {
+            locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
+        }
+        if (locationManager == null) return;
+        isParked = parked;
+        Log.i(TAG, "applyLocationCadence: parked=" + parked);
+
+        try {
+            locationManager.removeUpdates(this);
+            if (parked) {
+                // When parked, unhook GPS_PROVIDER so Qualcomm GNSS baseband can sleep.
+                // Keep low-power NETWORK_PROVIDER with relaxed interval (60s / 10m)
+                // so movement/theft/towing is still detectable without battery drain.
+                try {
+                    locationManager.requestLocationUpdates(
+                        LocationManager.NETWORK_PROVIDER,
+                        60000L, // 60 seconds
+                        10.0f,  // 10 meters
+                        this,
+                        workerThread.getLooper()
+                    );
+                    Log.i(TAG, "Registered parked network location provider (60s/10m)");
+                } catch (Exception e) {
+                    Log.w(TAG, "Parked network provider registration failed: " + e.getMessage());
+                }
+            } else {
+                // Driving (ACC ON): register high-rate 1s/0m GPS provider
+                try {
+                    locationManager.requestLocationUpdates(
+                        LocationManager.GPS_PROVIDER,
+                        1000L,  // 1 second
+                        0.0f,   // every fix
+                        this,
+                        workerThread.getLooper()
+                    );
+                    Log.i(TAG, "Driving GPS provider registered (1s/0m)");
+                } catch (Exception e) {
+                    Log.e(TAG, "Driving GPS provider registration failed: " + e.getMessage());
+                }
+
+                try {
+                    locationManager.requestLocationUpdates(
+                        LocationManager.NETWORK_PROVIDER,
+                        5000L,  // 5 seconds
+                        0.0f,
+                        this,
+                        workerThread.getLooper()
+                    );
+                    Log.i(TAG, "Driving network provider registered (5s/0m)");
+                } catch (Exception e) {
+                    Log.e(TAG, "Driving network provider registration failed: " + e.getMessage());
+                }
             }
 
-            // Also use network provider as fallback. 5s cadence is fine; keep
-            // min-distance 0 so it doesn't pre-filter fixes the gate wants.
-            try {
-                locationManager.requestLocationUpdates(
-                    LocationManager.NETWORK_PROVIDER,
-                    5000,  // 5 seconds
-                    0.0f,  // every fix
-                    this,
-                    workerThread.getLooper()  // deliver off the UI thread
-                );
-                Log.i(TAG, "Network provider registered (5s/0m), enabled="
-                        + locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER));
-            } catch (Exception e) {
-                Log.e(TAG, "Network provider registration failed: " + e.getMessage());
-            }
-            
-            // Get last known location immediately
+            // Immediately sample last known location
             Location lastGps = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
             Location lastNetwork = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
-            
-            Log.i(TAG, "Last GPS: " + lastGps + ", Last Network: " + lastNetwork);
-            
             if (lastGps != null) {
                 onLocationChanged(lastGps);
             } else if (lastNetwork != null) {
                 onLocationChanged(lastNetwork);
             } else {
-                // Send initial update (will fail if daemon not running yet, that's OK)
                 sendGpsViaTcp();
-                Log.i(TAG, "No last known location, sent initial update");
             }
-            
+
         } catch (SecurityException e) {
             Log.e(TAG, "Location permission denied: " + e.getMessage());
         } catch (Exception e) {
-            Log.e(TAG, "Failed to start location updates: " + e.getMessage());
+            Log.e(TAG, "Failed in applyLocationCadence: " + e.getMessage());
+        }
+
+        // Adjust periodicSender cadence
+        if (handler != null && periodicSender != null) {
+            handler.removeCallbacks(periodicSender);
+            if (parked) {
+                sendGpsViaTcp();
+                handler.postDelayed(periodicSender, PERIODIC_INTERVAL_PARKED_MS);
+            } else {
+                handler.post(periodicSender);
+            }
         }
     }
 
@@ -844,6 +907,13 @@ public class LocationSidecarService extends Service implements LocationListener 
 
         if (locationManager != null) {
             locationManager.removeUpdates(this);
+        }
+
+        if (accReceiver != null) {
+            try {
+                unregisterReceiver(accReceiver);
+            } catch (Throwable ignored) {}
+            accReceiver = null;
         }
 
         // FINAL FLUSH of the on-disk position cache. saveToLocalCache() is
