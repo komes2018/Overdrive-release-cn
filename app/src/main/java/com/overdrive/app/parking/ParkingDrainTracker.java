@@ -70,6 +70,32 @@ public final class ParkingDrainTracker {
 
     private static void handleAccOff() {
         long now = System.currentTimeMillis();
+
+        // 深度重启/守护进程重启防覆盖保护：
+        // 若已存在合法驻车基准（未被 handleAccOn 消费结算），说明车辆早已处于停放状态，
+        // 绝不覆盖最初的熄火时间戳和起始 SOC，避免驻车时长被截断重置。
+        File existingFile = new File(STATE_FILE_PATH);
+        if (existingFile.exists() && existingFile.length() > 0) {
+            try (FileInputStream fis = new FileInputStream(existingFile)) {
+                byte[] buf = new byte[(int) existingFile.length()];
+                fis.read(buf);
+                JSONObject existing = new JSONObject(new String(buf, StandardCharsets.UTF_8));
+                long existingParkedAtMs = existing.optLong("parkedAtMs", 0L);
+                if (existingParkedAtMs > 1700000000000L) {
+                    long diff = now - existingParkedAtMs;
+                    // 如果在合理驻车周期内 (0 ~ 30天) 或系统时钟尚未完成网络对齐，坚决保护原有基准
+                    if ((diff >= 0 && diff < 30L * 86400_000L) || now < 1700000000000L) {
+                        logger.info("Preserved existing parked baseline across restart: parkedAt="
+                                + existingParkedAtMs + ", startSoc=" + existing.optDouble("startSoc", Double.NaN)
+                                + ", elapsed=" + (diff / 1000) + "s");
+                        return;
+                    }
+                }
+            } catch (Throwable t) {
+                logger.warn("Existing parked state read failed, will overwrite: " + t.getMessage());
+            }
+        }
+
         BydVehicleData data = getVehicleData();
 
         double soc = data != null ? data.socPercent : Double.NaN;
@@ -158,7 +184,20 @@ public final class ParkingDrainTracker {
         double lat = json.optDouble("lat", 0.0);
         double lng = json.optDouble("lng", 0.0);
 
+        // 点火瞬间总线数据就绪等待（若车机刚冷启动唤醒，最多等待 3 秒重试以获取最新总线 SOC 与小电瓶电压）
         BydVehicleData data = getVehicleData();
+        if (data == null || Double.isNaN(data.socPercent)) {
+            for (int i = 0; i < 6; i++) {
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException ignored) {}
+                data = getVehicleData();
+                if (data != null && !Double.isNaN(data.socPercent)) {
+                    break;
+                }
+            }
+        }
+
         double endSoc = data != null ? data.socPercent : Double.NaN;
         double endKwh = data != null ? data.remainKwh : Double.NaN;
         double end12v = data != null ? data.voltage12v : Double.NaN;
