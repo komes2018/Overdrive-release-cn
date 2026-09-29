@@ -56,7 +56,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         # assembleDebug: keeps debug flags (no R8 shrink) but now uses our fixed keystore
         # instead of the random per-runner debug keystore → consistent fingerprint every run.
-        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.2 -PoverdriveVersionCode=4992 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
+        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.3 -PoverdriveVersionCode=4993 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
 
       - name: Verify APK signature fingerprint
         run: |
@@ -79,7 +79,7 @@ jobs:
           mkdir -p release-assets
           APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
           echo "Found built APK: $APK_FILE"
-          cp "$APK_FILE" release-assets/Overdrive-v49.9.2-cn-sec.apk
+          cp "$APK_FILE" release-assets/Overdrive-v49.9.3-cn-sec.apk
           ls -lh release-assets/
 
       - name: Upload APK Artifact
@@ -93,43 +93,33 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v49.9.2-cn-sec
-          name: OverDrive v49.9.2 - 行程防抖延长与熄火 Webhook 优化版
+          tag_name: v49.9.3-cn-sec
+          name: OverDrive v49.9.3 - 修复 MQTT 车外温度传感器熄火发现遗漏
           body: |
-            ## OverDrive v49.9.2 行程防抖延长与熄火 Webhook 优化版
+            ## OverDrive v49.9.3 核心修复版
 
-            ### 🚗 行程判定防抖延长与熄火自动推送 (v49.9.2)
-            - **高速服务区休息不中断行程**：将挂入 P 档且静止等待判定行程结束的防抖时长由 120 秒延长至 30 分钟。服务区挂 P 档开空调休息（不熄火）半小时内，切回 D 档即可继续合并为同一次完整行程，杜绝长途行程被频繁截断拆分
-            - **行程结束车熄火自动推送 Webhook**：下电熄火（ACC OFF）瞬间自动结算本次行程能耗、里程、均速、驾驶评分并发送卡片报告到企业微信
+            ### 🌡️ 修复 MQTT 车外温度传感器熄火启动遗漏 (v49.9.3)
+            - **核心遥测常驻发现机制**：引入 `HomeAssistantDiscovery.CORE_KEYS`，确保 `ext_temp`（车外温度）等核心遥测字段在车机熄火状态（ACC OFF）冷启动时依然常驻发布在 HA 设备发现组件清单（cmps）中，彻底杜绝传感器被判定为不支持而丢失/孤立。
+            - **车外温度末次有效值缓存与天气回退**：`MqttConnectionManager` 增加 `lastOutsideTempC` 内存缓存，在熄火停泊仪表盘未回传期间复用末次已知车况温度；冷启动初次无数据时接入天气接口缓存兜底，确保遥测流平稳连续。
+            - **保持实体 ID 与唯一标识一致性**：自动匹配 HA 已有实体的 unique_id，无缝衔接历史数据与卡片配置。
+
+            ### 🚗 行程判定防抖延长与熄火自动推送 (v49.9.2 持续特性)
+            - **高速服务区休息不中断行程**：将挂入 P 档且静止等待判定行程结束的防抖时长延长至 30 分钟。服务区挂 P 档开空调休息（不熄火）半小时内，切回 D 档即可继续合并为同一次完整行程，杜绝长途行程被频繁截断拆分。
+            - **行程结束车熄火自动推送 Webhook**：下电熄火（ACC OFF）瞬间自动结算本次行程能耗、里程、均速、驾驶评分并发送卡片报告到企业微信。
 
             ### 📢 哨兵 Webhook 推送去重与综合合并 (Scheme A)
-            - **告别连续刷屏**：将原先动检起始预警、录像结束汇总、抓拍图 3 条连续消息精简合并为 **1 条全信息综合卡片 + 1 张高清现场抓拍图**
-            - **综合汇总卡片升级**：单条消息囊括事件等级（Notice/Alert/Critical）、最高检测目标、置信度百分比、触发摄像头方位、视频录像文件名以及精准触发时间
-            - **动检即时预警开关**：Web 界面新增“动检即时预警”开关，默认关闭；若需要初始动检即刻报警，用户可在通知设置页随时一键重新启用
+            - **单条全信息综合卡片 + 现场大图**：将动检起始预警、录像结束汇总、抓拍图合并为 1 条综合卡片 + 1 张高清现场大图。
+            - **动检即时预警开关**：Web 界面支持开关“动检即时预警”。
 
             ### 🇨🇳 原生中文零延迟首屏 (Native Chinese First Paint)
-            - **彻底消除 FOUC 英文闪烁**：全量 26 个 Web 页面模板、导航侧边栏、状态栏与核心组件预置纯正简体中文，毫秒级直出中文首屏，告别“先英文后转中文”的加载体验
-            - **默认中文环境与浏览器语言精准匹配**：`core.js` 默认语言变更为 `zh-CN`，智能匹配浏览器语言偏好，多语言切换能力完整保留
+            - **彻底消除 FOUC 英文闪烁**：全量 26 个 Web 页面模板预置纯正简体中文，毫秒级直出。
 
-            ### 🛡️ 核心安全加固
-            - **阻断同机网页跨源开锁 (C3)**：敏感车控与备份接口收紧 loopback 信任，必须验证有效 JWT，防车机浏览器恶意网页 CSRF 开锁与凭证窃取
-            - **JS Bridge 强制隔离 (H4)**：同步请求限制仅允许本地 `127.0.0.1` 访问，禁止向外部第三方域名注入 Session Cookie
-            - **暴力破解防护 (H2)**：收紧 `X-Forwarded-For` 采信范围，防伪造来源绕过登录接口频次限制
-            - **供应链完整性校验 (H1)**：OpenH264 原生库下载升级为 HTTPS，构建期强制匹配固定 SHA-256 指纹
-
-            ### ⚡ 性能与车载低功耗优化
-            - **WakeLock 6小时安全租约与心跳续租 (P3)**：守护进程心跳与状态流转自动续约，正常工作永不断连；彻底杜绝死锁崩溃导致小电瓶耗尽趴窝
-            - **WebView 退后台自动挂起轮询 (P1)**：中控屏熄屏或切后台时即刻暂停 3s/5s 密集前端轮询，大幅降低 CPU 负载与挂夜发热
-            - **日志批量定时 Flush (P2)**：改用 8KB 缓冲区与 2.5s 定时批量刷盘，减少 90%+ 频繁小 IO，大幅保护车机板载 eMMC 闪存寿命
-            - **消除线程与连接池泄漏 (P10)**：天气接口 OkHttpClient 改为单例复用，消除长期运行内存隐患
-            - **i18n 多语言内存缓存 (P12)**：ConcurrentHashMap 缓存语言包，页面切换响应更加轻快
-            - **首屏非阻塞脚本加载 (P4)**：app-shell 与 leaflet 脚本增加 `defer`，缩短弱算力车机首屏渲染耗时
-
-            ### 💎 本项目深度特性（持续保留）
-            - **企业微信群机器人推送**：国内免代理直连，告警、截图、通知全量直推
-            - **国内比亚迪云深度适配**：支持手机号登录、海洋网/王朝网、授权车主账号与远程唤醒
-            - **全量简体中文本地化精校**：严格遵循专业汽车与车机术语规范，消灭机翻
-            - **固化签名证书**：签名证书完全保持一致，支持车机 `pm install -r` 直接无缝覆盖升级，无需卸载
-          files: release-assets/Overdrive-v49.9.2-cn-sec.apk
+            ### 🛡️ 核心安全加固与车载低功耗优化
+            - **阻断跨源开锁 (C3) 与 JS Bridge 限制 (H4)**
+            - **WakeLock 6小时安全租约与心跳续租 (P3)**
+            - **WebView 退后台自动挂起轮询 (P1)**
+            - **日志批量定时 Flush 8KB 缓存 (P2)**
+            - **固化签名证书**：支持车机 `pm install -r` 直接无缝覆盖升级，无需卸载。
+          files: release-assets/Overdrive-v49.9.3-cn-sec.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -95,6 +95,11 @@ public class MqttConnectionManager {
     // which is synchronized(this), so it needs no separate guard.
     private double lastOdometerKm = -1;
 
+    // Last known valid outside temperature (°C). Cached so when ACC powers off and the
+    // instrument cluster stops returning values, MQTT continues to publish the last valid reading
+    // rather than omitting the field and causing Home Assistant to orphan/drop the sensor.
+    private double lastOutsideTempC = Double.NaN;
+
     // One-way shutdown latch + lifecycle mutex. stopAll() is only ever called on
     // daemon shutdown (never followed by a restart of the same instance), but it
     // runs on the shutdown thread while add/update tasks queued on controlExecutor
@@ -956,9 +961,23 @@ public class MqttConnectionManager {
                 if (heading > 0) payload.put("heading", heading);
             }
 
-            // ext_temp
+            // ext_temp — outside ambient temperature. Prioritize fresh instrument/cloud
+            // reading; fall back to last-known cached temperature or weather data so the field
+            // remains populated and HA doesn't drop the entity when parked with ACC off.
+            double extTemp = Double.NaN;
             if (vd != null && !Double.isNaN(vd.outsideTempC)) {
-                payload.put("ext_temp", vd.outsideTempC);
+                extTemp = vd.outsideTempC;
+                lastOutsideTempC = extTemp;
+            } else if (!Double.isNaN(lastOutsideTempC)) {
+                extTemp = lastOutsideTempC;
+            } else {
+                try {
+                    double wt = com.overdrive.app.weather.WeatherTemperature.getCached();
+                    if (!Double.isNaN(wt)) extTemp = wt;
+                } catch (Throwable ignored) {}
+            }
+            if (!Double.isNaN(extTemp)) {
+                payload.put("ext_temp", extTemp);
             }
 
             // batt_temp

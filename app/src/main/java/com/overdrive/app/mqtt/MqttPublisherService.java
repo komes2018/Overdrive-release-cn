@@ -812,6 +812,7 @@ public class MqttPublisherService implements MqttCallback {
                 chargeCapControlsAnnounced = config.isControlEnabled()
                         && hasVerifiedChargeCapState(snapshot);
                 announcedKeys.addAll(discoverableKeys(snapshot));
+                announcedKeys.addAll(HomeAssistantDiscovery.CORE_KEYS);
                 logger.info("Published HA discovery bundle to " + topic
                         + " (" + announcedKeys.size() + " keys)");
             }

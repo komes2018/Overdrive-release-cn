@@ -31,6 +31,17 @@ public final class HomeAssistantDiscovery {
         return base.replaceAll("[^a-zA-Z0-9_-]", "_");
     }
 
+    /**
+     * Core telemetry fields that are universally present on all BYD vehicles and should
+     * always be announced in discovery, preventing entities from being dropped or orphaned
+     * when the daemon starts up while the vehicle is parked with ACC off.
+     */
+    public static final java.util.Set<String> CORE_KEYS = java.util.Collections.unmodifiableSet(
+            new java.util.HashSet<>(java.util.Arrays.asList(
+                    "ext_temp", "soc", "odometer", "is_parked", "is_charging", "gear",
+                    "batt_temp", "cabin_temp", "volt_12v", "speed"
+            )));
+
     /** Retained config topic for the whole device bundle. */
     public static String deviceConfigTopic(String discoveryPrefix, String deviceId) {
         String prefix = (discoveryPrefix == null || discoveryPrefix.isEmpty()) ? "homeassistant" : discoveryPrefix;
@@ -124,6 +135,15 @@ public final class HomeAssistantDiscovery {
                     if (!TelemetryFieldCatalog.isDiscoverable(key)) continue;
                     cmps.put(key, component(node, baseTopic, TelemetryFieldCatalog.get(key)));
                 }
+            }
+
+            // Core keys: ensure universal vehicle telemetry fields (notably ext_temp) are
+            // always announced even if momentarily absent from the initial snapshot when
+            // starting while parked / ACC off.
+            for (String key : CORE_KEYS) {
+                if (cmps.has(key)) continue;
+                if (!TelemetryFieldCatalog.isDiscoverable(key)) continue;
+                cmps.put(key, component(node, baseTopic, TelemetryFieldCatalog.get(key)));
             }
 
             // device_tracker for GPS (attributes carry lat/lon; map dot in HA)
