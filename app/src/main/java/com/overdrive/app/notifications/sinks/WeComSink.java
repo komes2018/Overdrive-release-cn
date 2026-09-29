@@ -3,6 +3,7 @@ package com.overdrive.app.notifications.sinks;
 import android.util.Log;
 
 import com.overdrive.app.config.UnifiedConfigManager;
+import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.notifications.NotificationBus;
 import com.overdrive.app.notifications.NotificationEvent;
 
@@ -30,6 +31,7 @@ import java.util.concurrent.Executors;
 public final class WeComSink implements NotificationBus.Sink {
 
     private static final String TAG = "WeComSink";
+    private static final DaemonLogger logger = DaemonLogger.getInstance("WeComSink");
     public static final String CONFIG_FILE = "/data/local/tmp/wecom_config.properties";
     private static final int CONNECT_TIMEOUT_MS = 5000;
     private static final int READ_TIMEOUT_MS = 8000;
@@ -121,10 +123,10 @@ public final class WeComSink implements NotificationBus.Sink {
             }
 
             final String text = msg.toString();
-            executor.execute(() -> sendText(text));
+            executor.execute(() -> doSendText(text));
 
         } catch (Throwable t) {
-            Log.w(TAG, "WeComSink forward failed: " + t.getMessage());
+            logger.warn("WeComSink forward failed: " + t.getMessage());
         }
     }
 
@@ -158,9 +160,9 @@ public final class WeComSink implements NotificationBus.Sink {
         if (webhookUrl == null || webhookUrl.isEmpty()) return;
         try {
             String payload = buildTextPayload(webhookUrl, text);
-            post(webhookUrl, payload);
+            postWithRetry(webhookUrl, payload, 3);
         } catch (Exception e) {
-            Log.e(TAG, "doSendText failed: " + e.getMessage());
+            logger.warn("doSendText failed: " + e.getMessage());
         }
     }
 
@@ -184,9 +186,9 @@ public final class WeComSink implements NotificationBus.Sink {
             img.put("base64", base64Jpeg);
             img.put("md5", md5);
             payload.put("image", img);
-            post(webhookUrl, payload.toString());
+            postWithRetry(webhookUrl, payload.toString(), 2);
         } catch (Exception e) {
-            Log.e(TAG, "doSendImage failed: " + e.getMessage());
+            logger.warn("doSendImage failed: " + e.getMessage());
         }
     }
 
@@ -281,37 +283,50 @@ public final class WeComSink implements NotificationBus.Sink {
     }
 
     /**
-     * 发起 HTTP POST 请求。
+     * 发起 HTTP POST 请求（带重试机制，应对车辆熄火下电瞬间 Wi-Fi 断开 / 4G 蜂窝数据激活切换窗口）。
      */
-    private static void post(String webhookUrl, String jsonBody) {
-        HttpURLConnection conn = null;
-        try {
-            URL url = new URL(webhookUrl);
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
-            conn.setReadTimeout(READ_TIMEOUT_MS);
-            conn.setDoOutput(true);
-            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+    private static boolean postWithRetry(String webhookUrl, String jsonBody, int maxRetries) {
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            HttpURLConnection conn = null;
+            try {
+                URL url = new URL(webhookUrl);
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                conn.setReadTimeout(READ_TIMEOUT_MS);
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
 
-            byte[] body = jsonBody.getBytes(StandardCharsets.UTF_8);
-            conn.setRequestProperty("Content-Length", String.valueOf(body.length));
+                byte[] body = jsonBody.getBytes(StandardCharsets.UTF_8);
+                conn.setRequestProperty("Content-Length", String.valueOf(body.length));
 
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(body);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(body);
+                }
+
+                int code = conn.getResponseCode();
+                if (code == 200) {
+                    logger.info("WeCom delivered successfully (attempt " + attempt + ")");
+                    return true;
+                } else {
+                    logger.warn("WeCom HTTP " + code + " (attempt " + attempt + ")");
+                }
+            } catch (Exception e) {
+                logger.warn("WeCom post error (attempt " + attempt + "/" + maxRetries + "): " + e.getMessage());
+            } finally {
+                if (conn != null) conn.disconnect();
             }
 
-            int code = conn.getResponseCode();
-            if (code != 200) {
-                Log.w(TAG, "WeComSink HTTP " + code);
-            } else {
-                Log.d(TAG, "WeComSink delivered OK");
+            if (attempt < maxRetries) {
+                try {
+                    // 渐进式休眠，应对熄火瞬间 Wi-Fi 断开 / 4G 蜂窝数据切换窗口 (2s, 4s)
+                    Thread.sleep(attempt * 2000L);
+                } catch (InterruptedException ignored) {
+                    break;
+                }
             }
-        } catch (Exception e) {
-            Log.e(TAG, "WeComSink post error: " + e.getMessage());
-        } finally {
-            if (conn != null) conn.disconnect();
         }
+        return false;
     }
 
     /**

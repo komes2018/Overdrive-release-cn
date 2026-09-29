@@ -73,7 +73,7 @@ public final class ParkingDrainTracker {
         BydVehicleData data = getVehicleData();
 
         double soc = data != null ? data.socPercent : Double.NaN;
-        double kwh = data != null ? data.remainCapacity : Double.NaN;
+        double kwh = data != null ? data.remainKwh : Double.NaN;
         double volt12v = data != null ? data.voltage12v : Double.NaN;
 
         double lat = 0.0;
@@ -82,11 +82,13 @@ public final class ParkingDrainTracker {
 
         try {
             GpsMonitor gps = GpsMonitor.getInstance();
-            if (gps != null && gps.hasFix()) {
+            if (gps != null && gps.hasLocation()) {
                 lat = gps.getLatitude();
                 lng = gps.getLongitude();
-                PlaceResult pr = GeocodingResolver.resolveCachedOnly(lat, lng);
-                if (pr != null) place = pr.getShortLabel();
+                PlaceResult pr = GeocodingResolver.getInstance().resolveCachedOnly(lat, lng);
+                if (pr != null) {
+                    place = pr.shortName != null && !pr.shortName.isEmpty() ? pr.shortName : pr.displayName;
+                }
             }
         } catch (Throwable ignored) {}
 
@@ -158,13 +160,15 @@ public final class ParkingDrainTracker {
 
         BydVehicleData data = getVehicleData();
         double endSoc = data != null ? data.socPercent : Double.NaN;
-        double endKwh = data != null ? data.remainCapacity : Double.NaN;
+        double endKwh = data != null ? data.remainKwh : Double.NaN;
         double end12v = data != null ? data.voltage12v : Double.NaN;
 
         if (place.isEmpty() && lat != 0.0 && lng != 0.0) {
             try {
-                PlaceResult pr = GeocodingResolver.resolveCachedOnly(lat, lng);
-                if (pr != null) place = pr.getShortLabel();
+                PlaceResult pr = GeocodingResolver.getInstance().resolveCachedOnly(lat, lng);
+                if (pr != null) {
+                    place = pr.shortName != null && !pr.shortName.isEmpty() ? pr.shortName : pr.displayName;
+                }
             } catch (Throwable ignored) {}
         }
 
