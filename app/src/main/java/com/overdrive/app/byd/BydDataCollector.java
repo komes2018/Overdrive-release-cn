@@ -11763,8 +11763,10 @@ public class BydDataCollector {
                 boolean changed = passengerSeatbeltTracker.recordCallback(passengerState);
                 invalidateSeatbeltPairMemo();
                 if (changed) {
-                    logger.info("onSafetyBeltStatusChanged: front passenger="
-                            + (passengerState == 1 ? "buckled" : "unbuckled"));
+                    if (isAccOn()) {
+                        logger.info("onSafetyBeltStatusChanged: front passenger="
+                                + (passengerState == 1 ? "buckled" : "unbuckled"));
+                    }
                 }
                 try {
                     if (isDiLink5ProducerActive()) {
