@@ -71,6 +71,11 @@ public final class ParkingDrainTracker {
     private static void handleAccOff() {
         long now = System.currentTimeMillis();
 
+        // 驻车停放自动释放高通 GNSS 卫星硬件（清理死咬 1s 定位的高德地图等后台）
+        try {
+            Runtime.getRuntime().exec(new String[]{"am", "force-stop", "com.autonavi.amapauto"});
+        } catch (Throwable ignored) {}
+
         // 深度重启/守护进程重启防覆盖保护：
         // 若已存在合法驻车基准（未被 handleAccOn 消费结算），说明车辆早已处于停放状态，
         // 绝不覆盖最初的熄火时间戳和起始 SOC，避免驻车时长被截断重置。
