@@ -87,7 +87,7 @@ public final class ParkingDrainTracker {
                 lng = gps.getLongitude();
                 PlaceResult pr = GeocodingResolver.getInstance().resolveCachedOnly(lat, lng);
                 if (pr != null) {
-                    place = pr.shortName != null && !pr.shortName.isEmpty() ? pr.shortName : pr.displayName;
+                    place = pr.shortLabel();
                 }
             }
         } catch (Throwable ignored) {}
@@ -167,7 +167,7 @@ public final class ParkingDrainTracker {
             try {
                 PlaceResult pr = GeocodingResolver.getInstance().resolveCachedOnly(lat, lng);
                 if (pr != null) {
-                    place = pr.shortName != null && !pr.shortName.isEmpty() ? pr.shortName : pr.displayName;
+                    place = pr.shortLabel();
                 }
             } catch (Throwable ignored) {}
         }
