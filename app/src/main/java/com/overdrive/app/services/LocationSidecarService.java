@@ -136,11 +136,9 @@ public class LocationSidecarService extends Service implements LocationListener 
                     Log.i(TAG, "ACC ON broadcast received -> switching to driving GPS cadence");
                     applyLocationCadence(false);
                 } else if ("com.byd.accmode.ACC_MODE_CHANGED".equals(action)) {
-                    boolean parked = false;
-                    try {
-                        parked = com.overdrive.app.monitor.AccMonitor.probeAccState(context);
-                    } catch (Throwable ignored) {}
-                    applyLocationCadence(parked);
+                    if (handler != null) {
+                        handler.post(LocationSidecarService.this::checkAndReconcileAccState);
+                    }
                 }
             }
         };
@@ -241,6 +239,10 @@ public class LocationSidecarService extends Service implements LocationListener 
             @Override
             public void run() {
                 sendGpsViaTcp();
+
+                // Periodically verify/reconcile ACC state with daemon to ensure
+                // we never stay stuck in driving GPS mode if boot-time probe was conservative.
+                checkAndReconcileAccState();
 
                 // Poll the provider's last-known fix and process it. Our own 1s
                 // GPS request (requestLocationUpdates GPS_PROVIDER, 1000ms) keeps
@@ -352,6 +354,34 @@ public class LocationSidecarService extends Service implements LocationListener 
             Log.w(TAG, "Failed to probe initial ACC state: " + t.getMessage());
         }
         applyLocationCadence(initialParked);
+
+        if (handler != null) {
+            handler.post(this::checkAndReconcileAccState);
+        }
+    }
+
+    private void checkAndReconcileAccState() {
+        try {
+            java.net.HttpURLConnection conn = com.overdrive.app.util.DaemonHttpClient.open(
+                "/status", "GET", 1000, 1000);
+            if (conn.getResponseCode() == 200) {
+                java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(conn.getInputStream()));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) sb.append(line);
+                reader.close();
+                org.json.JSONObject obj = new org.json.JSONObject(sb.toString());
+                boolean daemonAcc = obj.optBoolean("acc", true);
+                boolean expectedParked = !daemonAcc;
+                if (expectedParked != isParked) {
+                    Log.i(TAG, "Reconciling ACC state from daemon /status: acc=" + daemonAcc + " -> isParked=" + expectedParked);
+                    applyLocationCadence(expectedParked);
+                }
+            }
+        } catch (Throwable ignored) {
+            // Local daemon may be restarting or unreachable; keep current cadence
+        }
     }
 
     private synchronized void applyLocationCadence(boolean parked) {
