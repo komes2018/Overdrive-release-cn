@@ -10549,19 +10549,19 @@ public class BydDataCollector {
      */
     static int doorFeatureForArea(int area, boolean rightHandDrive) {
         switch (area) {
-            case 1:
+            case BodyworkConstants.AREA_FRONT_DRIVER:
                 return rightHandDrive
                         ? BydFeatureIds.BODYWORK_DOOR_RF
                         : BydFeatureIds.BODYWORK_DOOR_LF;
-            case 2:
+            case BodyworkConstants.AREA_FRONT_PASSENGER:
                 return rightHandDrive
                         ? BydFeatureIds.BODYWORK_DOOR_LF
                         : BydFeatureIds.BODYWORK_DOOR_RF;
-            case 3: return BydFeatureIds.BODYWORK_DOOR_LR;
-            case 4: return BydFeatureIds.BODYWORK_DOOR_RR;
-            case 5: return BydFeatureIds.BODYWORK_HOOD;
-            case 6: return BydFeatureIds.BODYWORK_TRUNK;
-            case 7: return BydFeatureIds.BODYWORK_FUEL_CAP;
+            case BodyworkConstants.AREA_REAR_LEFT: return BydFeatureIds.BODYWORK_DOOR_LR;
+            case BodyworkConstants.AREA_REAR_RIGHT: return BydFeatureIds.BODYWORK_DOOR_RR;
+            case BodyworkConstants.AREA_HOOD: return BydFeatureIds.BODYWORK_HOOD;
+            case BodyworkConstants.AREA_TRUNK: return BydFeatureIds.BODYWORK_TRUNK;
+            case BodyworkConstants.AREA_FUEL_CAP: return BydFeatureIds.BODYWORK_FUEL_CAP;
             default: return BydFeatureIds.UNRESOLVED_ID;
         }
     }
@@ -10624,15 +10624,17 @@ public class BydDataCollector {
      */
     public int[] readAllDoorOpenStates() {
         boolean rhd = isRightHandDriveForDoorMapping();
-        // Event areas 1/2 are driver/passenger front; doorFeatureForArea maps them to the
-        // physical L/R feature by drive side, so pick the area that yields each physical door.
-        int lf = normalizeDoorOpen(readDoorOpenState(rhd ? 2 : 1, rhd));
-        int rf = normalizeDoorOpen(readDoorOpenState(rhd ? 1 : 2, rhd));
-        int lr = normalizeDoorOpen(readDoorOpenState(3, rhd));
-        int rr = normalizeDoorOpen(readDoorOpenState(4, rhd));
-        int hood = normalizeDoorOpen(readDoorOpenState(5, rhd));
-        int trunk = normalizeDoorOpen(readDoorOpenState(6, rhd));
-        int fuelCap = normalizeDoorOpen(readDoorOpenState(7, rhd));
+        // The front axis is by seat; doorFeatureForArea maps driver/passenger to the physical
+        // L/R feature by drive side, so pick the seat-area that yields each physical door.
+        int lf = normalizeDoorOpen(readDoorOpenState(
+                rhd ? BodyworkConstants.AREA_FRONT_PASSENGER : BodyworkConstants.AREA_FRONT_DRIVER, rhd));
+        int rf = normalizeDoorOpen(readDoorOpenState(
+                rhd ? BodyworkConstants.AREA_FRONT_DRIVER : BodyworkConstants.AREA_FRONT_PASSENGER, rhd));
+        int lr = normalizeDoorOpen(readDoorOpenState(BodyworkConstants.AREA_REAR_LEFT, rhd));
+        int rr = normalizeDoorOpen(readDoorOpenState(BodyworkConstants.AREA_REAR_RIGHT, rhd));
+        int hood = normalizeDoorOpen(readDoorOpenState(BodyworkConstants.AREA_HOOD, rhd));
+        int trunk = normalizeDoorOpen(readDoorOpenState(BodyworkConstants.AREA_TRUNK, rhd));
+        int fuelCap = normalizeDoorOpen(readDoorOpenState(BodyworkConstants.AREA_FUEL_CAP, rhd));
         return new int[] { lf, rf, lr, rr, hood, trunk, fuelCap };
     }
 

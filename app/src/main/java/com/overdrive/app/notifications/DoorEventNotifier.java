@@ -28,13 +28,8 @@ public final class DoorEventNotifier {
     // driveSide config field decides which mapping applies. Default "rhd"
     // since the legacy hardcoded swap was calibrated against RHD vehicles.
     // Rear-axis is symmetric and not affected by drive side.
-    private static final int AREA_1 = 1;
-    private static final int AREA_2 = 2;
-    private static final int AREA_LR = 3;
-    private static final int AREA_RR = 4;
-    private static final int AREA_HOOD = 5;
-    private static final int AREA_TRUNK = 6;
-    private static final int AREA_FUEL_CAP = 7;
+    // Area ids are the shared bodywork constants (front axis is by seat, mapped to
+    // physical L/R by drive side; see BodyworkConstants).
 
     private static final DaemonLogger logger = DaemonLogger.getInstance("DoorEventNotifier");
 
@@ -155,17 +150,17 @@ public final class DoorEventNotifier {
 
     private static String areaLabel(int area) {
         switch (area) {
-            case AREA_1: return Messages.get(isRhd()
+            case BodyworkConstants.AREA_FRONT_DRIVER: return Messages.get(isRhd()
                     ? "notifications.area_front_right"
                     : "notifications.area_front_left");
-            case AREA_2: return Messages.get(isRhd()
+            case BodyworkConstants.AREA_FRONT_PASSENGER: return Messages.get(isRhd()
                     ? "notifications.area_front_left"
                     : "notifications.area_front_right");
-            case AREA_LR: return Messages.get("notifications.area_rear_left");
-            case AREA_RR: return Messages.get("notifications.area_rear_right");
-            case AREA_HOOD: return Messages.get("notifications.area_hood");
-            case AREA_TRUNK: return Messages.get("notifications.area_trunk");
-            case AREA_FUEL_CAP: return Messages.get("notifications.area_fuel_cap");
+            case BodyworkConstants.AREA_REAR_LEFT: return Messages.get("notifications.area_rear_left");
+            case BodyworkConstants.AREA_REAR_RIGHT: return Messages.get("notifications.area_rear_right");
+            case BodyworkConstants.AREA_HOOD: return Messages.get("notifications.area_hood");
+            case BodyworkConstants.AREA_TRUNK: return Messages.get("notifications.area_trunk");
+            case BodyworkConstants.AREA_FUEL_CAP: return Messages.get("notifications.area_fuel_cap");
             default: return Messages.get("notifications.area_door_n", area);
         }
     }

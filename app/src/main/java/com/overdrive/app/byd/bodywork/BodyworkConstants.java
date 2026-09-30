@@ -15,6 +15,17 @@ public final class BodyworkConstants {
     // Door/Window states
     public static final int STATE_CLOSED = 0;
     public static final int STATE_OPEN = 1;
+
+    // Door/lid area ids — the numbering used by getDoorState(area) and the door-event
+    // callbacks. The front axis is by SEAT (driver / passenger), mapped to physical
+    // left/right by the drive-side config; rear/hood/trunk/fuel-cap are fixed positions.
+    public static final int AREA_FRONT_DRIVER = 1;
+    public static final int AREA_FRONT_PASSENGER = 2;
+    public static final int AREA_REAR_LEFT = 3;
+    public static final int AREA_REAR_RIGHT = 4;
+    public static final int AREA_HOOD = 5;
+    public static final int AREA_TRUNK = 6;
+    public static final int AREA_FUEL_CAP = 7;
     
     // Alarm states
     public static final int ALARM_OFF = 0;
