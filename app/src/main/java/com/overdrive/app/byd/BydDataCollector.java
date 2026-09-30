@@ -10615,6 +10615,33 @@ public class BydDataCollector {
         return isValidDoorOpenState(legacyState) ? legacyState : Integer.MIN_VALUE;
     }
 
+    /**
+     * Live open/close state for every door and lid, mapped to physical positions. Reads via the
+     * manager channel (works parked, verified on Di 3.0) with the legacy {@code getDoorState}
+     * fallback — the same read the poll/notifier use, so it stays consistent with door events.
+     *
+     * @return {@code [lf, rf, lr, rr, hood, trunk, fuelCap]}; each 1=open, 0=closed, -1=unknown.
+     */
+    public int[] readAllDoorOpenStates() {
+        boolean rhd = isRightHandDriveForDoorMapping();
+        // Event areas 1/2 are driver/passenger front; doorFeatureForArea maps them to the
+        // physical L/R feature by drive side, so pick the area that yields each physical door.
+        int lf = normalizeDoorOpen(readDoorOpenState(rhd ? 2 : 1, rhd));
+        int rf = normalizeDoorOpen(readDoorOpenState(rhd ? 1 : 2, rhd));
+        int lr = normalizeDoorOpen(readDoorOpenState(3, rhd));
+        int rr = normalizeDoorOpen(readDoorOpenState(4, rhd));
+        int hood = normalizeDoorOpen(readDoorOpenState(5, rhd));
+        int trunk = normalizeDoorOpen(readDoorOpenState(6, rhd));
+        int fuelCap = normalizeDoorOpen(readDoorOpenState(7, rhd));
+        return new int[] { lf, rf, lr, rr, hood, trunk, fuelCap };
+    }
+
+    /** Map the raw door read (which uses MIN_VALUE for unavailable) to the API's 1/0/-1. */
+    private static int normalizeDoorOpen(int raw) {
+        return (raw == BodyworkConstants.STATE_OPEN || raw == BodyworkConstants.STATE_CLOSED)
+                ? raw : -1;
+    }
+
     private void collectDoorLock(BydVehicleData.Builder b) {
         // The BYDAutoDoorLockDevice service does not expose lock state to
         // user-UID processes on most BYD firmwares — every getDoorLockStatus(area)

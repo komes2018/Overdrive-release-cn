@@ -892,6 +892,21 @@ public class VehicleControlApiHandler {
         }
         response.put("doors", doors);
 
+        // Door/lid OPEN state (distinct from lock state above). Live SDK/manager read that
+        // works parked; each key is present only when the state is known (open/closed),
+        // omitted when the trim doesn't report it — never guessed. Mirrors `windowOpen`.
+        JSONObject doorOpen = new JSONObject();
+        try {
+            int[] ds = collector.readAllDoorOpenStates();
+            String[] doorOpenKeys = {"lf", "rf", "lr", "rr", "hood", "trunk", "fuelCap"};
+            for (int i = 0; i < doorOpenKeys.length && i < ds.length; i++) {
+                if (ds[i] == 0 || ds[i] == 1) doorOpen.put(doorOpenKeys[i], ds[i] == 1);
+            }
+        } catch (Exception e) {
+            logger.debug("doorOpen read failed: " + e.getMessage());
+        }
+        response.put("doorOpen", doorOpen);
+
         // Exact local percentage stays authoritative. If it is unavailable, use the local
         // open/closed getter and then a fresh cloud snapshot. A coarse OPEN never becomes 100%.
         JSONObject windows = new JSONObject();
@@ -944,6 +959,10 @@ public class VehicleControlApiHandler {
                     com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
                             ? cloudLockToApi(data.doorLockStatus[4])
                             : data.doorLockStatus[4]);
+        }
+        // Trunk OPEN state (from the same door-open read above), when known.
+        if (doorOpen.has("trunk")) {
+            trunk.put("open", doorOpen.getBoolean("trunk"));
         }
         response.put("trunk", trunk);
 

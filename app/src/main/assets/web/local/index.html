@@ -95,14 +95,14 @@
                                 <rect id="glTyreRR" class="dash-car-tyre" x="119" y="186" width="13" height="34" rx="5"/>
                                 <!-- body + glass -->
                                 <path class="dash-car-body" d="M75 12 C51 12 37 24 35 50 L31 92 L31 196 C31 228 47 248 75 248 C103 248 119 228 119 196 L119 92 L115 50 C113 24 99 12 75 12 Z"/>
-                                <path class="dash-car-glass" d="M48 62 C58 54 92 54 102 62 L98 88 C84 82 66 82 52 88 Z"/>
-                                <path class="dash-car-glass" d="M52 202 C66 208 84 208 98 202 L102 222 C92 230 58 230 48 222 Z"/>
+                                <path id="glGlassFront" class="dash-car-glass" d="M48 62 C58 54 92 54 102 62 L98 88 C84 82 66 82 52 88 Z"/>
+                                <path id="glGlassRear" class="dash-car-glass" d="M52 202 C66 208 84 208 98 202 L102 222 C92 230 58 230 48 222 Z"/>
                                 <rect class="dash-car-roof" x="46" y="98" width="58" height="96" rx="16"/>
                                 <!-- per-door lock pills (locked / unlocked / unknown) -->
-                                <rect id="glDoorLF" class="dash-car-door" x="27" y="98" width="5" height="44" rx="2.5"/>
-                                <rect id="glDoorLR" class="dash-car-door" x="27" y="148" width="5" height="44" rx="2.5"/>
-                                <rect id="glDoorRF" class="dash-car-door" x="118" y="98" width="5" height="44" rx="2.5"/>
-                                <rect id="glDoorRR" class="dash-car-door" x="118" y="148" width="5" height="44" rx="2.5"/>
+                                <rect id="glDoorLF" class="dash-car-door lf" x="27" y="98" width="5" height="44" rx="2.5"/>
+                                <rect id="glDoorLR" class="dash-car-door lr" x="27" y="148" width="5" height="44" rx="2.5"/>
+                                <rect id="glDoorRF" class="dash-car-door rf" x="118" y="98" width="5" height="44" rx="2.5"/>
+                                <rect id="glDoorRR" class="dash-car-door rr" x="118" y="148" width="5" height="44" rx="2.5"/>
                                 <!-- per-corner tyre PSI callouts -->
                                 <text id="glPsiFL" class="dash-car-psi" x="24" y="36" text-anchor="middle">--</text>
                                 <text id="glPsiFR" class="dash-car-psi" x="126" y="36" text-anchor="middle">--</text>
@@ -852,7 +852,7 @@
             stroke: var(--border-default);
             stroke-width: 1.5;
         }
-        .dash-car-glass { fill: rgba(0, 212, 170, 0.10); }
+        .dash-car-glass { fill: rgba(0, 212, 170, 0.10); stroke: transparent; transition: stroke .25s ease; }
         .dash-car-roof {
             fill: var(--bg-surface);
             stroke: var(--border-subtle);
@@ -873,9 +873,21 @@
         .dash-glance.vehicle-fault .dash-car-body { stroke: #e74c3c; }
         .dash-glance.vehicle-parked .dash-car-svg { opacity: 0.74; }
 
-        .dash-car-door { fill: var(--text-tertiary, #9aa0a6); opacity: 0.5; }
+        .dash-car-door {
+            fill: var(--text-tertiary, #9aa0a6); opacity: 0.5;
+            transition: fill .25s ease, opacity .25s ease, transform .25s ease;
+        }
         .dash-car-door.locked   { fill: var(--brand-primary); opacity: 1; }
         .dash-car-door.unlocked { fill: #f5a623; opacity: 1; }
+        /* An OPEN door outranks lock state — warn amber (door-open is WARN severity,
+           the same tier as "unlocked"), and nudged ajar (outward). */
+        .dash-car-door.open { fill: #f5a623; opacity: 1; }
+        .dash-car-door.open.lf, .dash-car-door.open.lr { transform: translateX(-3px); }
+        .dash-car-door.open.rf, .dash-car-door.open.rr { transform: translateX(3px); }
+
+        /* Trunk/hood open → outline the rear/front windshield in warn amber. Uses stroke,
+           so it never clashes with the AC fill tint on the same glass. */
+        .dash-car-glass.open { stroke: #f5a623; stroke-width: 2.5; }
 
         .dash-car-tyre { fill: var(--border-default); }
         .dash-car-tyre.normal { fill: var(--brand-primary); opacity: 0.75; }
@@ -1889,16 +1901,35 @@
                     setRowState('glLockText', lockState === 'locked' ? 'good' : lockState === 'unlocked' ? 'warn' : '');
                     var glyph = document.getElementById('glLockGlyph');
                     if (glyph) glyph.setAttribute('class', 'dash-car-lock' + (lockState ? ' ' + lockState : ''));
-                    if (data.doors) {
+                    // Door pills: an OPEN door (from /api/vehicle/state doorOpen) outranks
+                    // lock state — it's the safety-relevant signal. Falls back to lock
+                    // colour (locked/unlocked) when the door is closed or open is unknown.
+                    var doorOpen = (data.doorOpen && typeof data.doorOpen === 'object') ? data.doorOpen : {};
+                    if (data.doors || data.doorOpen) {
+                        var locks = data.doors || {};
                         var doorMap = { lf: 'glDoorLF', rf: 'glDoorRF', lr: 'glDoorLR', rr: 'glDoorRR' };
                         for (var dk in doorMap) {
                             var dEl = document.getElementById(doorMap[dk]);
                             if (!dEl) continue;
-                            var dv = data.doors[dk];
-                            dEl.setAttribute('class', 'dash-car-door'
-                                + (dv === 1 ? ' locked' : dv === 2 ? ' unlocked' : ''));
+                            var cls = 'dash-car-door ' + dk;
+                            if (doorOpen[dk] === true) {
+                                cls += ' open';
+                            } else {
+                                var dv = locks[dk];
+                                cls += (dv === 1 ? ' locked' : dv === 2 ? ' unlocked' : '');
+                            }
+                            dEl.setAttribute('class', cls);
                         }
                     }
+                    // Trunk/hood open → outline the rear/front windshield (trunk.open
+                    // mirrors doorOpen.trunk).
+                    function setGlassOpen(id, isOpen) {
+                        var el = document.getElementById(id);
+                        if (el) el.classList.toggle('open', isOpen === true);
+                    }
+                    setGlassOpen('glGlassFront', doorOpen.hood === true);
+                    setGlassOpen('glGlassRear', doorOpen.trunk === true
+                        || (data.trunk && data.trunk.open === true));
 
                     // Windows — 0-100 = % open, anything else = no reading.
                     if (data.windows) {
