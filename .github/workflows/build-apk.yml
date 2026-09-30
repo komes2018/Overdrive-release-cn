@@ -56,7 +56,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         # assembleDebug: keeps debug flags (no R8 shrink) but now uses our fixed keystore
         # instead of the random per-runner debug keystore → consistent fingerprint every run.
-        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.9 -PoverdriveVersionCode=4999 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
+        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.10 -PoverdriveVersionCode=49910 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
 
       - name: Verify APK signature fingerprint
         run: |
@@ -79,7 +79,7 @@ jobs:
           mkdir -p release-assets
           APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
           echo "Found built APK: $APK_FILE"
-          cp "$APK_FILE" release-assets/Overdrive-v49.9.9-cn-sec.apk
+          cp "$APK_FILE" release-assets/Overdrive-v49.9.10-cn-sec.apk
           ls -lh release-assets/
 
       - name: Upload APK Artifact
@@ -93,21 +93,17 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v49.9.9-cn-sec
-          name: OverDrive v49.9.9 - 全面精修车机哨兵与行车录像中文本地化
+          tag_name: v49.9.10-cn-sec
+          name: OverDrive v49.9.10 - 移除ABRP与RoadSense冗余模块精简纯净版
           body: |
-            ## OverDrive v49.9.9 本地化与翻译精修版
+            ## OverDrive v49.9.10 纯净精简版
 
-            ### 🌐 核心菜单与设置页面深度精修 (v49.9.9)
-            - **菜单命名规范化**：侧边栏与页面标题统一为「哨兵监控」（原“监控”）与「行车录像」（原“录制设置 / 记录设置”），彻底解决“一页三名”混乱；
-            - **消灭严重错译与机翻事故**：
-              - 修复布防模式被错译为「手电模式 / 手臂模式」的严重 Bug；
-              - 修复时间轴缓冲标记被错译为「经济发展」与「邮件」的重大笑话；
-              - 修复灵敏度滑块档位显示为「其他类型」的程序占位符 Bug；
-              - 修复行车录像模式被错译为「驱动模式」的致命误导；
-              - 修复云服务凭证清除按钮被错译为「清晰的证书」的荒谬机翻；
-              - 修复视频流热图被错译为「在流量上覆盖...」的机翻事故；
-            - **全量原生中文零延迟首屏**：同步更新 `surveillance.html`、`recording.html` 与 `app-shell.js` 内联模板，彻底杜绝 FOUC 瞬间闪烁旧机翻词汇。
-          files: release-assets/Overdrive-v49.9.9-cn-sec.apk
+            ### 🚀 移除国内水土不服的冗余模块 (v49.9.10)
+            - **Web 控制台全面精简**：从侧边栏导航中彻底移除「ABRP」与「RoadSense 路况」入口，避免无用功能干扰，界面更加轻量聚焦；
+            - **原生车机界面同步净化**：车机原生 Navigation Rail 侧边栏与「集成」卡片中同步移除 ABRP 与 RoadSense 入口；
+            - **核心功能 100% 完整保留**：
+              - 完整保留 `com.overdrive.app.abrp.SohEstimator` 电池健康度算法，确保**行程统计**与**驻车电耗报告**的电池容量估算毫发无损；
+              - 哨兵监控、360 多路行车录像、企微/TG 报警推送、MQTT 车况接入全量保持最强状态。
+          files: release-assets/Overdrive-v49.9.10-cn-sec.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

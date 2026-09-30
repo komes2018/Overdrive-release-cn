@@ -158,8 +158,6 @@ open class MainActivity : AppCompatActivity() {
             R.id.railSectionDriving, R.string.rail_section_driving,
             setOf(
                 NavigationRailCatalog.TRIPS,
-                NavigationRailCatalog.ROAD_SENSE,
-                NavigationRailCatalog.MAP,
             )
         ),
         RailSection(
@@ -1734,14 +1732,7 @@ open class MainActivity : AppCompatActivity() {
                 R.drawable.ic_charging, R.string.rail_charging),
             RailItem(NavigationRailCatalog.TRIPS, R.id.railDestTrips, R.id.tripsFragment,
                 R.drawable.ic_trips, R.string.rail_trips),
-            RailItem(NavigationRailCatalog.ROAD_SENSE, R.id.railDestRoadSense,
-                R.id.roadSenseFragment,
-                R.drawable.ic_roadsense, R.string.rail_roadsense),
-            // Hazard Map is a standalone Activity, not a nav-graph fragment,
-            // so it launches via startActivity (destinationId = 0).
-            RailItem(NavigationRailCatalog.MAP, R.id.railDestMap, 0,
-                R.drawable.ic_roadsense_map, R.string.rail_hazard_map,
-                launchActivity = com.overdrive.app.navmap.RoadSenseMapActivity::class.java),
+            // ROAD_SENSE & MAP removed for clean CN experience
             RailItem(NavigationRailCatalog.AUTOMATIONS, R.id.railDestAutomations,
                 R.id.automationsFragment,
                 R.drawable.ic_automations, R.string.rail_automations),

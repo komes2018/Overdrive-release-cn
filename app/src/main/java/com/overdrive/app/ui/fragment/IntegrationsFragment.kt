@@ -73,9 +73,7 @@ class IntegrationsFragment : Fragment() {
         view.findViewById<View>(R.id.cardTelegram).setOnClickListener {
             findNavController().navigateDrillDown(R.id.telegramSettingsFragment)
         }
-        view.findViewById<View>(R.id.cardAbrp).setOnClickListener {
-            findNavController().navigateDrillDown(R.id.abrpSettingsFragment)
-        }
+        view.findViewById<View>(R.id.cardAbrp)?.visibility = View.GONE
         view.findViewById<View>(R.id.cardMqtt).setOnClickListener {
             findNavController().navigateDrillDown(R.id.mqttFragment)
         }

@@ -67,10 +67,9 @@
         { href: 'key-mapping.html',     i18n: 'nav.key_mapping',     label: '按键映射',     svg: '<rect width="20" height="14" x="2" y="5" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M7 13h.01M17 13h.01M11 13h2"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
 
         // ===== Integrations group ===== — mirrors the native Integrations
-        // sub-page (Telegram, ABRP, MQTT, BYD Cloud).
+        // sub-page (Telegram, MQTT, BYD Cloud).
         { divider: true, label: '集成', i18n: 'nav.integrations_group' },
         { href: 'telegram.html',                          i18n: 'nav.telegram',       label: 'Telegram',       svg: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
-        { href: 'abrp.html',                              i18n: 'nav.abrp',           label: 'ABRP',           svg: '<path d="M9 18l6-6-6-6"/><circle cx="18" cy="12" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>' },
         { href: 'mqtt.html',                              i18n: 'nav.mqtt',           label: 'MQTT',           svg: '<circle cx="12" cy="12" r="2"/><path d="M8.46 15.54A5 5 0 0 1 7 12a5 5 0 0 1 1.46-3.54"/><path d="M15.54 8.46A5 5 0 0 1 17 12a5 5 0 0 1-1.46 3.54"/><path d="M5.64 18.36A9 9 0 0 1 3 12a9 9 0 0 1 2.64-6.36"/><path d="M18.36 5.64A9 9 0 0 1 21 12a9 9 0 0 1-2.64 6.36"/>', svgExtra: 'stroke-linecap="round"' },
         { href: 'byd-cloud.html',                         i18n: 'nav.byd_cloud',      label: 'BYD云',      svg: '<path d="M17.5 19a4.5 4.5 0 1 0-2.83-7.97A6 6 0 0 0 4 12.45a3 3 0 0 0 .5 5.95"/><path d="M17.5 19h-12"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
 
@@ -86,7 +85,6 @@
         { divider: true, label: '设置', i18n: 'nav.settings_group' },
         { href: 'surveillance.html',                      i18n: 'nav.surveillance',   label: '哨兵监控',   svg: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>' },
         { href: 'recording.html',                         i18n: 'nav.recording_settings', label: '行车录像', svg: '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>' },
-        { href: 'road-sense.html',                        i18n: 'nav.road_sense',     label: 'RoadSense 路况',     svg: '<path d="M3.2 20.2 L8.6 11 L15.4 11 L20.8 20.2 Z"/><path d="M12 12.4v1.3M12 15.7v1.6M12 18.7v1.1"/><path d="M12 3.2v2.4"/><path d="M12 7.6h.01"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
         { href: 'notifications.html',                     i18n: 'nav.notifications',  label: '通知',  svg: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>' },
 
         // ===== About ===== — version, license, source, support links,

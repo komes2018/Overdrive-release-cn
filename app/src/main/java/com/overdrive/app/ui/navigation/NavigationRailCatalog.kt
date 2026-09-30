@@ -47,8 +47,6 @@ object NavigationRailCatalog {
         NavigationRailOption(AUTOMATIONS, R.string.rail_automations, R.drawable.ic_automations),
         NavigationRailOption(KEY_MAPPING, R.string.rail_key_mapping, R.drawable.ic_key_mapping),
         NavigationRailOption(INTEGRATIONS, R.string.rail_integrations, R.drawable.ic_integrations),
-        NavigationRailOption(ROAD_SENSE, R.string.rail_roadsense, R.drawable.ic_roadsense),
-        NavigationRailOption(MAP, R.string.rail_hazard_map, R.drawable.ic_roadsense_map),
         NavigationRailOption(NETWORK, R.string.rail_network, R.drawable.ic_hotspot),
         NavigationRailOption(DIAGNOSTICS, R.string.rail_diagnostics, R.drawable.ic_diagnostics),
     )
