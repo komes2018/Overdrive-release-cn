@@ -4,6 +4,7 @@ import android.content.Context;
 
 import com.overdrive.app.abrp.SohEstimator;
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.monitor.AccMonitor;
 import com.overdrive.app.monitor.GearMonitor;
 import com.overdrive.app.storage.StorageManager;
 import com.overdrive.app.telemetry.TelemetryDataCollector;
@@ -612,9 +613,28 @@ public class TripAnalyticsManager {
         }
 
         recorder.resumeRecording(row.startTime, journal, history);
-        long remainingDebounce = parked
-                ? TripDetector.PARK_DEBOUNCE_MS - (now - parkStartMs)
-                : TripDetector.PARK_DEBOUNCE_MS;
+        boolean isHardwareAccOff = false;
+        try {
+            isHardwareAccOff = !AccMonitor.isAccOn();
+        } catch (Throwable ignored) {}
+
+        if (isHardwareAccOff) {
+            isAccOff = true;
+        }
+
+        long remainingDebounce;
+        if (parked) {
+            if (isHardwareAccOff) {
+                // Vehicle is already powered off (ACC OFF) across this restart.
+                // Do not wait 30 minutes in PARK_PENDING; give live monitors a brief window
+                // (RESUME_MIN_DEBOUNCE_MS) to settle fresh readings, then finalize immediately.
+                remainingDebounce = TripDetector.RESUME_MIN_DEBOUNCE_MS;
+            } else {
+                remainingDebounce = TripDetector.PARK_DEBOUNCE_MS - (now - parkStartMs);
+            }
+        } else {
+            remainingDebounce = TripDetector.PARK_DEBOUNCE_MS;
+        }
         detector.resumeTrip(row, parked, parkStartMs, remainingDebounce);
         logger.info("Resumed interrupted trip id=" + row.id + " from " + journal.getAbsolutePath()
                 + " (" + history.size() + " journaled samples, last " + (gapMs / 1000) + "s ago, "
@@ -1121,7 +1141,13 @@ public class TripAnalyticsManager {
         }
 
         // 7. 每次行程结束车熄火后，发送本次行程信息到 webhook
-        if (isAccOff) {
+        boolean vehicleAccOff = isAccOff;
+        if (!vehicleAccOff) {
+            try {
+                vehicleAccOff = !AccMonitor.isAccOn();
+            } catch (Throwable ignored) {}
+        }
+        if (vehicleAccOff) {
             logger.info("Vehicle is powered off (ACC OFF) — sending trip completed notification to webhook");
             TripNotifier.notifyTripCompleted(trip);
         } else {

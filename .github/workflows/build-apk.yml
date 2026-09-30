@@ -56,7 +56,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         # assembleDebug: keeps debug flags (no R8 shrink) but now uses our fixed keystore
         # instead of the random per-runner debug keystore → consistent fingerprint every run.
-        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.6 -PoverdriveVersionCode=4996 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
+        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.8 -PoverdriveVersionCode=4998 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
 
       - name: Verify APK signature fingerprint
         run: |
@@ -79,7 +79,7 @@ jobs:
           mkdir -p release-assets
           APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
           echo "Found built APK: $APK_FILE"
-          cp "$APK_FILE" release-assets/Overdrive-v49.9.6-cn-sec.apk
+          cp "$APK_FILE" release-assets/Overdrive-v49.9.8-cn-sec.apk
           ls -lh release-assets/
 
       - name: Upload APK Artifact
@@ -93,10 +93,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v49.9.6-cn-sec
-          name: OverDrive v49.9.6 - 驻车耗电追踪与点火启动报告推送
+          tag_name: v49.9.8-cn-sec
+          name: OverDrive v49.9.8 - 修复熄火重启时序死锁与行程推送
           body: |
-            ## OverDrive v49.9.6 驻车耗电统计与通知增强版
+            ## OverDrive v49.9.8 行程结算与时序死锁修复版
+
+            ### 🛠️ 修复熄火时守护进程重启导致行程推送死锁 (v49.9.8)
+            - **启动回溯同步 ACC 状态**：在 `CameraDaemon.publishTripAnalyticsManager()` 完成发布后，回溯检查当前车辆真实 ACC 状态，若已处于 ACC OFF 状态立即同步 `manager.onAccOff()`，杜绝事件丢失；
+            - **断点恢复防抖自适应**：在 `tryResumeInterruptedTrip()` 中，若车辆处于 P 档且已熄火，不再傻等 30 分钟防抖，直接进入 15 秒快速防抖立即结算；
+            - **行程推送硬件状态兜底**：在 `handleTripEnded()` 中增加 `!AccMonitor.isAccOn()` 硬件兜底判断，确保即使遭遇生命周期事件竞争，行程推送也绝不误入“等待熄火”死队列。
 
             ### 🔋 驻车耗电统计与点火报告推送 (v49.9.6)
             - **全自动边界状态锚定**：车辆熄火 (ACC OFF) 瞬间，异步持久化停放时间戳、动力电池 SOC、剩余容量 (kWh)、12V 小电瓶电压与 GPS 位置；

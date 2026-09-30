@@ -4086,6 +4086,22 @@ public class CameraDaemon {
                 // is recovered by the ACC-ON gear probe in onAccOn(), and by
                 // GearMonitor's next notification.
                 tripAnalyticsManager = manager;
+
+                // Sync current ACC state if already OFF at the time of publication.
+                // If the vehicle was parked/powered off before or during startup,
+                // applyAccTransitionEffects ran while tripAnalyticsManager was null,
+                // causing the ACC-OFF edge to be dropped. Resyncing here ensures any
+                // resumed park-pending trip finalizes immediately instead of waiting
+                // for the 30-minute debounce timer and getting stuck.
+                Boolean currentAccOff = latestAccIsOff;
+                if (Boolean.TRUE.equals(currentAccOff)) {
+                    log("Trip Analytics published while vehicle ACC is OFF — synchronizing onAccOff()");
+                    try {
+                        manager.onAccOff();
+                    } catch (Throwable t) {
+                        log("Trip Analytics initial ACC-OFF sync error: " + t.getMessage());
+                    }
+                }
                 return true;
             } catch (Exception e) {
                 log("Trip Analytics publication failed: "
