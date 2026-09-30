@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.surveillance_title">监控 - OverDrive</title>
+    <title data-i18n="app.surveillance_title">哨兵监控 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="../shared/app-icon-dark.webp">
@@ -140,7 +140,7 @@
                         <!-- Arm mode: Lock (arm on door-lock) vs Power (arm on power-off) -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.arm_mode">手电模式</div>
+                                <div class="setting-name" data-i18n="surveillance.arm_mode">布防模式</div>
                                 <div class="setting-desc" data-i18n="surveillance.arm_mode_desc">车辆熄火下电后的哨兵布防策略。两种模式均遵循已设置的安全地点与定时计划。</div>
                             </div>
                             <div class="setting-control">
@@ -314,14 +314,14 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                            <span data-i18n="surveillance.safe_locations">安全的地方</span>
+                            <span data-i18n="surveillance.safe_locations">安全地点</span>
                             <span class="status-badge inactive" id="safeLocBadge" data-i18n="status.off">关</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.safe_disable">在安全的地方禁用</div>
+                                <div class="setting-name" data-i18n="surveillance.safe_disable">在安全地点停用哨兵</div>
                                 <div class="setting-desc" data-i18n="surveillance.safe_desc">在此处停车时不会启动摄像头。</div>
                             </div>
                             <div class="setting-control">
@@ -390,15 +390,15 @@
                         <!-- Environment Preset -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.env_preset">环境默认</div>
-                                <div class="setting-desc" data-i18n="surveillance.env_desc">快速默认你的停车场情况</div>
+                                <div class="setting-name" data-i18n="surveillance.env_preset">环境预设</div>
+                                <div class="setting-desc" data-i18n="surveillance.env_desc">根据停车场景快速应用推荐配置</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="envPresetBtns">
                                     <button class="btn-toggle" data-value="outdoor" onclick="SurvSettings.setEnvironmentPreset('outdoor')" data-i18n="surveillance.env_outdoor">户外</button>
                                     <button class="btn-toggle" data-value="garage" onclick="SurvSettings.setEnvironmentPreset('garage')" data-i18n="surveillance.env_garage">车库</button>
                                     <button class="btn-toggle" data-value="street" onclick="SurvSettings.setEnvironmentPreset('street')" data-i18n="surveillance.env_street">街道</button>
-                                    <button class="btn-toggle" data-value="custom" id="envPresetCustom" style="opacity:0.7;cursor:default;" data-i18n="surveillance.env_custom">定制</button>
+                                    <button class="btn-toggle" data-value="custom" id="envPresetCustom" style="opacity:0.7;cursor:default;" data-i18n="surveillance.env_custom">自定义</button>
                                 </div>
                             </div>
                         </div>
@@ -407,8 +407,8 @@
                         <!-- Sensitivity -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="surveillance.sensitivity">敏感性</div>
-                                <div class="setting-desc" data-i18n="surveillance.sensitivity_desc">运动是多么容易被检测到的</div>
+                                <div class="setting-name" data-i18n="surveillance.sensitivity">检测灵敏度</div>
+                                <div class="setting-desc" data-i18n="surveillance.sensitivity_desc">画面移动触发检测的灵敏程度</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">

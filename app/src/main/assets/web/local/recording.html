@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title data-i18n="app.recordings_title">记录 - OverDrive</title>
+    <title data-i18n="app.recordings_title">行车录像 - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <script src="../shared/theme.js?v=8"></script>
     <script src="../shared/app-shell.js?v=7"></script>
@@ -70,7 +70,7 @@
                     </div>
                     <div class="card-body">
                         <div class="info-box" style="margin-top:0;">
-                            <div class="info-row"><span class="label" data-i18n="recording.current_state">现状</span><span class="value" id="recState" data-i18n="common.idle">空闲</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.current_state">当前状态</span><span class="value" id="recState" data-i18n="common.idle">空闲</span></div>
                             <div class="info-row">
                                 <span class="label" data-i18n="recording.recordings_today">今日录像</span>
                                 <a href="events.html" class="value link-value" id="recToday">0 →</a>
@@ -137,7 +137,7 @@
                                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="2"/><path d="M12 2v8"/><path d="M4.93 10.93 10 14"/><path d="M19.07 10.93 14 14"/></svg>
                                     </span>
                                     <span class="mode-body">
-                                        <span class="mode-name" data-i18n="recording.mode_drive_name">驱动模式</span>
+                                        <span class="mode-name" data-i18n="recording.mode_drive_name">仅行驶时录像</span>
                                         <span class="mode-desc" data-i18n="recording.mode_drive_desc">仅在行驶时录像（D/R/S/M 挡）</span>
                                     </span>
                                     <span class="mode-radio" aria-hidden="true"></span>
@@ -220,7 +220,7 @@
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name" data-i18n="recording.trigger_sensitivity">触发器敏感性</div>
+                                <div class="setting-name" data-i18n="recording.trigger_sensitivity">触发灵敏度</div>
                                 <div class="setting-desc" data-i18n="recording.trigger_sensitivity_desc">何时开始录制视频</div>
                             </div>
                             <div class="setting-control">
@@ -256,7 +256,7 @@
                         </div>
                         <div class="timeline-visual">
                             <div class="timeline-segment pre">
-                                <span class="timeline-label"><span data-i18n="recording.timeline_pre">经济发展</span> <span id="timelinePre">5s</span></span>
+                                <span class="timeline-label"><span data-i18n="recording.timeline_pre">事件前 (预录)</span> <span id="timelinePre">5s</span></span>
                             </div>
                             <div class="timeline-segment event">
                                 <span class="timeline-label" data-i18n="recording.timeline_event">️事件</span>
@@ -863,7 +863,7 @@
                         <!-- Manual Cleanup Button -->
                         <button class="btn btn-danger" id="cdrCleanupNow" disabled style="width:100%;margin-top:12px;" onclick="RecSettings.triggerCdrCleanup()">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                            <span data-i18n="recording.cdr_cleanup_now_v2">清理起来.</span>
+                            <span data-i18n="recording.cdr_cleanup_now_v2">立即清理</span>
                         </button>
                         <!-- Stats -->
                         <div class="info-box" style="margin-top:12px;">

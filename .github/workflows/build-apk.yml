@@ -56,7 +56,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         # assembleDebug: keeps debug flags (no R8 shrink) but now uses our fixed keystore
         # instead of the random per-runner debug keystore → consistent fingerprint every run.
-        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.8 -PoverdriveVersionCode=4998 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
+        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.9 -PoverdriveVersionCode=4999 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
 
       - name: Verify APK signature fingerprint
         run: |
@@ -79,7 +79,7 @@ jobs:
           mkdir -p release-assets
           APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
           echo "Found built APK: $APK_FILE"
-          cp "$APK_FILE" release-assets/Overdrive-v49.9.8-cn-sec.apk
+          cp "$APK_FILE" release-assets/Overdrive-v49.9.9-cn-sec.apk
           ls -lh release-assets/
 
       - name: Upload APK Artifact
@@ -93,25 +93,21 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v49.9.8-cn-sec
-          name: OverDrive v49.9.8 - 修复熄火重启时序死锁与行程推送
+          tag_name: v49.9.9-cn-sec
+          name: OverDrive v49.9.9 - 全面精修车机哨兵与行车录像中文本地化
           body: |
-            ## OverDrive v49.9.8 行程结算与时序死锁修复版
+            ## OverDrive v49.9.9 本地化与翻译精修版
 
-            ### 🛠️ 修复熄火时守护进程重启导致行程推送死锁 (v49.9.8)
-            - **启动回溯同步 ACC 状态**：在 `CameraDaemon.publishTripAnalyticsManager()` 完成发布后，回溯检查当前车辆真实 ACC 状态，若已处于 ACC OFF 状态立即同步 `manager.onAccOff()`，杜绝事件丢失；
-            - **断点恢复防抖自适应**：在 `tryResumeInterruptedTrip()` 中，若车辆处于 P 档且已熄火，不再傻等 30 分钟防抖，直接进入 15 秒快速防抖立即结算；
-            - **行程推送硬件状态兜底**：在 `handleTripEnded()` 中增加 `!AccMonitor.isAccOn()` 硬件兜底判断，确保即使遭遇生命周期事件竞争，行程推送也绝不误入“等待熄火”死队列。
-
-            ### 🔋 驻车耗电统计与点火报告推送 (v49.9.6)
-            - **全自动边界状态锚定**：车辆熄火 (ACC OFF) 瞬间，异步持久化停放时间戳、动力电池 SOC、剩余容量 (kWh)、12V 小电瓶电压与 GPS 位置；
-            - **驻车期间 0 额外耗电**：驻车期间无后台轮询、无常驻定时器、无唤醒锁，不产生任何额外静态功耗；
-            - **下次点火启动自动结算推送**：下次点火 (ACC ON) 瞬间自动对比并结算停放总时长、动力电池耗电百分比 (或充入百分比)、时均耗电量以及 12V 小电瓶健康状况；
-            - **Webhook 推送开关支持**：通知设置页 (Web UI) 增加「驻车耗电报告」独立开关，并同步支持多语言 (简中/繁中/英文)；
-            - **智能过滤**：自动过滤 < 2 分钟的瞬时熄火重开，避免无效干扰。
-
-            ### 🛰️ 继承 v49.9.5 驻车基带降频与自校准
-            - 包含驻车动态释放高精度 GNSS 基带、网络低功耗守候与状态自校准闭环。
-          files: release-assets/Overdrive-v49.9.6-cn-sec.apk
+            ### 🌐 核心菜单与设置页面深度精修 (v49.9.9)
+            - **菜单命名规范化**：侧边栏与页面标题统一为「哨兵监控」（原“监控”）与「行车录像」（原“录制设置 / 记录设置”），彻底解决“一页三名”混乱；
+            - **消灭严重错译与机翻事故**：
+              - 修复布防模式被错译为「手电模式 / 手臂模式」的严重 Bug；
+              - 修复时间轴缓冲标记被错译为「经济发展」与「邮件」的重大笑话；
+              - 修复灵敏度滑块档位显示为「其他类型」的程序占位符 Bug；
+              - 修复行车录像模式被错译为「驱动模式」的致命误导；
+              - 修复云服务凭证清除按钮被错译为「清晰的证书」的荒谬机翻；
+              - 修复视频流热图被错译为「在流量上覆盖...」的机翻事故；
+            - **全量原生中文零延迟首屏**：同步更新 `surveillance.html`、`recording.html` 与 `app-shell.js` 内联模板，彻底杜绝 FOUC 瞬间闪烁旧机翻词汇。
+          files: release-assets/Overdrive-v49.9.9-cn-sec.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
