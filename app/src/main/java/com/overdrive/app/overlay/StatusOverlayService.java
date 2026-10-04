@@ -93,6 +93,15 @@ public class StatusOverlayService extends Service {
     private ImageView ivRecIcon;
     private ImageView ivTripIcon;
     private ImageView ivMicIcon;
+    /** Last icon opacity/size painted onto the pill. -1 forces a reapply after reinflate. */
+    private int appliedIconOpacity = -1;
+    private int appliedIconSizeDp = -1;
+    private static final int ICON_OPACITY_MIN = 20;
+    private static final int ICON_OPACITY_MAX = 100;
+    private static final int ICON_OPACITY_DEFAULT = 100;
+    private static final int ICON_SIZE_MIN_DP = 12;
+    private static final int ICON_SIZE_MAX_DP = 32;
+    private static final int ICON_SIZE_DEFAULT_DP = 18;
     private ImageView btnModeOff;
     private ImageView btnModeContinuous;
     private ImageView btnModeDrive;
@@ -836,6 +845,29 @@ public class StatusOverlayService extends Service {
         return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    /** Dim and resize the always-on status icons. Labels stay full size and opaque. */
+    private void applyIconAppearance(int opacity, int sizeDp) {
+        if (opacity == appliedIconOpacity && sizeDp == appliedIconSizeDp) return;
+        appliedIconOpacity = opacity;
+        appliedIconSizeDp = sizeDp;
+        float alpha = opacity / 100f;
+        int px = camDp(sizeDp);
+        ImageView[] icons = new ImageView[] { ivRecIcon, ivMicIcon, ivReplayIcon, ivTripIcon };
+        for (ImageView icon : icons) {
+            if (icon == null) continue;
+            icon.setAlpha(alpha);
+            android.view.ViewGroup.LayoutParams lp = icon.getLayoutParams();
+            if (lp == null) continue;
+            lp.width = px;
+            lp.height = px;
+            icon.setLayoutParams(lp);
+        }
+    }
+
     // ── Blind-spot close button (parallel to the camera-view one above) ─────
 
     /** Register the blind-spot-state broadcast receiver once. Same exported contract as
@@ -1152,6 +1184,8 @@ public class StatusOverlayService extends Service {
                 windowManager.removeView(overlayView);
             } catch (Exception ignored) {}
             overlayView = null;
+            appliedIconOpacity = -1;
+            appliedIconSizeDp = -1;
         }
         // Cancel any pending auto-collapse and reset the expanded flag —
         // the View references it tracked are gone, and a stale "true"
@@ -1961,6 +1995,8 @@ public class StatusOverlayService extends Service {
         boolean cameraOverlayEnabled = true;
         boolean tripOverlayEnabled = true;
         boolean replayOverlayEnabled = true;
+        int iconOpacity = ICON_OPACITY_DEFAULT;
+        int iconSizeDp = ICON_SIZE_DEFAULT_DP;
         try {
             // FIX M4: pollStatus() forceReloads once at the top of the
             // tick; the cache is hot here so loadConfig() is free.
@@ -1971,6 +2007,10 @@ public class StatusOverlayService extends Service {
                 cameraOverlayEnabled = statusOverlayCfg.optBoolean("cameraVisible", true);
                 tripOverlayEnabled = statusOverlayCfg.optBoolean("tripVisible", true);
                 replayOverlayEnabled = statusOverlayCfg.optBoolean("replayVisible", true);
+                iconOpacity = clamp(statusOverlayCfg.optInt("iconOpacity", ICON_OPACITY_DEFAULT),
+                        ICON_OPACITY_MIN, ICON_OPACITY_MAX);
+                iconSizeDp = clamp(statusOverlayCfg.optInt("iconSizeDp", ICON_SIZE_DEFAULT_DP),
+                        ICON_SIZE_MIN_DP, ICON_SIZE_MAX_DP);
             }
         } catch (Exception e) {
             Log.w(TAG, "Failed to read statusOverlay prefs: " + e.getMessage());
@@ -2119,6 +2159,7 @@ public class StatusOverlayService extends Service {
         if (overlayView == null) return;
         
         overlayView.setVisibility(View.VISIBLE);
+        applyIconAppearance(iconOpacity, iconSizeDp);
 
         // Recording pill. The pill is the ONLY entry point to the mode
         // action bar (tap → expand → OFF/CONT/DRIVE/PROX chips), so while

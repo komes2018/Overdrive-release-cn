@@ -62,6 +62,14 @@ object StatusOverlayUiWriter {
         }
     }
 
+    /** Same contract as [write], for the icon opacity and size sliders. */
+    @JvmStatic
+    fun writeInt(key: String, value: Int, onResult: (Boolean) -> Unit) {
+        submit("statusOverlay.$key", onResult) {
+            UnifiedConfigManager.setStatusOverlay(JSONObject().put(key, value))
+        }
+    }
+
     /**
      * Persist one arbitrary config boolean off the UI thread, with the same
      * retry + main-thread result contract as [write].

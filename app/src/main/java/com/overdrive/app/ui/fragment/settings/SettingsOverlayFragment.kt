@@ -4,7 +4,9 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.TextView
 import androidx.fragment.app.Fragment
+import com.google.android.material.slider.Slider
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.overdrive.app.R
 import com.overdrive.app.config.UnifiedConfigManager
@@ -37,6 +39,12 @@ class SettingsOverlayFragment : Fragment() {
     // unguarded revert would re-enter persist() with the stale value —
     // ping-ponging forever if the write keeps failing.
     private var applyingStatusOverlayConfig = false
+    private var opacitySlider: Slider? = null
+    private var sizeSlider: Slider? = null
+    private var opacityValue: TextView? = null
+    private var sizeValue: TextView? = null
+    private var persistedOpacity = 100
+    private var persistedSize = 18
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -90,6 +98,7 @@ class SettingsOverlayFragment : Fragment() {
         swRoadSense.setOnCheckedChangeListener { _, checked ->
             if (!applyingRoadSenseConfig) persistRoadSense(checked)
         }
+        bindIconSliders(view, cfg)
         remoteCommunicationBinder = RemoteCommunicationSettingsBinder(view)
     }
 
@@ -106,6 +115,10 @@ class SettingsOverlayFragment : Fragment() {
         remoteCommunicationBinder = null
         roadSenseSwitch = null
         roadSenseRow = null
+        opacitySlider = null
+        sizeSlider = null
+        opacityValue = null
+        sizeValue = null
         super.onDestroyView()
     }
 
@@ -121,6 +134,81 @@ class SettingsOverlayFragment : Fragment() {
      * reverts, mirroring the RoadSense switch below — the control never lies
      * about the stored value.
      */
+    private fun bindIconSliders(view: View, cfg: org.json.JSONObject) {
+        val opacity = view.findViewById<Slider>(R.id.sliderOverlayIconOpacity) ?: return
+        val size = view.findViewById<Slider>(R.id.sliderOverlayIconSize) ?: return
+        opacitySlider = opacity
+        sizeSlider = size
+        opacityValue = view.findViewById(R.id.tvOverlayIconOpacity)
+        sizeValue = view.findViewById(R.id.tvOverlayIconSize)
+
+        val opacityPct = cfg.optInt("iconOpacity", 100).coerceIn(20, 100)
+        val sizeDp = cfg.optInt("iconSizeDp", 18).coerceIn(12, 32)
+        persistedOpacity = opacityPct
+        persistedSize = sizeDp
+        applyingStatusOverlayConfig = true
+        opacity.value = (100 - opacityPct).toFloat()
+        size.value = sizeDp.toFloat()
+        applyingStatusOverlayConfig = false
+        renderOpacity(100 - opacityPct)
+        renderSize(sizeDp)
+
+        opacity.addOnChangeListener { _, value, fromUser ->
+            if (fromUser) renderOpacity(value.toInt())
+        }
+        size.addOnChangeListener { _, value, fromUser ->
+            if (fromUser) renderSize(value.toInt())
+        }
+        val touch = object : Slider.OnSliderTouchListener {
+            override fun onStartTrackingTouch(slider: Slider) = Unit
+
+            override fun onStopTrackingTouch(slider: Slider) {
+                if (applyingStatusOverlayConfig) return
+                if (slider === opacitySlider) {
+                    val next = (100 - slider.value.toInt()).coerceIn(20, 100)
+                    if (next == persistedOpacity) return
+                    persistInt("iconOpacity", next, persistedOpacity) { persistedOpacity = it }
+                } else {
+                    val next = slider.value.toInt().coerceIn(12, 32)
+                    if (next == persistedSize) return
+                    persistInt("iconSizeDp", next, persistedSize) { persistedSize = it }
+                }
+            }
+        }
+        opacity.addOnSliderTouchListener(touch)
+        size.addOnSliderTouchListener(touch)
+    }
+
+    private fun renderOpacity(transparency: Int) {
+        opacityValue?.text = getString(R.string.settings_overlay_icon_opacity_value, transparency)
+    }
+
+    private fun renderSize(sizeDp: Int) {
+        sizeValue?.text = getString(R.string.settings_overlay_icon_size_value, sizeDp)
+    }
+
+    private fun persistInt(key: String, value: Int, previous: Int, onOk: (Int) -> Unit) {
+        val appContext = context?.applicationContext
+        StatusOverlayUiWriter.writeInt(key, value) { ok ->
+            if (ok) {
+                onOk(value)
+                appContext?.let {
+                    com.overdrive.app.overlay.StatusOverlayService.startIfPermitted(it)
+                }
+            } else if (view != null) {
+                applyingStatusOverlayConfig = true
+                if (key == "iconOpacity") {
+                    opacitySlider?.value = (100 - previous).toFloat()
+                    renderOpacity(100 - previous)
+                } else {
+                    sizeSlider?.value = previous.toFloat()
+                    renderSize(previous)
+                }
+                applyingStatusOverlayConfig = false
+            }
+        }
+    }
+
     private fun persist(key: String, value: Boolean, button: android.widget.CompoundButton) {
         val appContext = context?.applicationContext
         StatusOverlayUiWriter.write(key, value) { ok ->
