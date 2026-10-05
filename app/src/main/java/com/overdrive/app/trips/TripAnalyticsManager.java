@@ -109,6 +109,11 @@ public class TripAnalyticsManager {
 
         // 5. Log status
         logger.info("TripAnalyticsManager initialized — enabled=" + config.isEnabled());
+
+        // 6. 自愈补偿：尝试冲刷待发队列中的未送达行程报告
+        try {
+            com.overdrive.app.notifications.sinks.WeComSink.flushPendingQueue();
+        } catch (Throwable ignored) {}
     }
 
     /**
@@ -199,6 +204,11 @@ public class TripAnalyticsManager {
         } catch (Exception e) {
             logger.warn("ACC ON gear probe failed: " + e.getMessage());
         }
+
+        // 补偿冲刷未发队列（点火网络就绪时补发）
+        try {
+            com.overdrive.app.notifications.sinks.WeComSink.flushPendingQueue();
+        } catch (Throwable ignored) {}
     }
 
     // ==================== RUNTIME CONFIG ====================

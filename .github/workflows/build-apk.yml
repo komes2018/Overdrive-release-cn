@@ -56,7 +56,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         # assembleDebug: keeps debug flags (no R8 shrink) but now uses our fixed keystore
         # instead of the random per-runner debug keystore → consistent fingerprint every run.
-        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.11 -PoverdriveVersionCode=49911 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
+        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.12 -PoverdriveVersionCode=49912 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
 
       - name: Verify APK signature fingerprint
         run: |
@@ -79,7 +79,7 @@ jobs:
           mkdir -p release-assets
           APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
           echo "Found built APK: $APK_FILE"
-          cp "$APK_FILE" release-assets/Overdrive-v49.9.11-cn-sec.apk
+          cp "$APK_FILE" release-assets/Overdrive-v49.9.12-cn-sec.apk
           ls -lh release-assets/
 
       - name: Upload APK Artifact
@@ -93,17 +93,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v49.9.11-cn-sec
-          name: OverDrive v49.9.11 - 整合上游核心补丁与车身状态/里程特性
+          tag_name: v49.9.12-cn-sec
+          name: OverDrive v49.9.12 - 行程报告离线持久化待发队列与开机/断网自愈补偿
           body: |
-            ## OverDrive v49.9.11 定制版
+            ## OverDrive v49.9.12 定制版
 
-            ### 🚀 整合上游核心稳定性补丁与实用新特性
-            - **点火唤醒丝滑防卡顿 (PR #323)**：识别比亚迪 Quickboot 休眠唤醒广播 (`from_quickboot=true`)，跳过启动前台 MainActivity，消除上车点火时中控屏 23~52 秒的严重主线程卡顿；
-            - **ADB Watchdog 死连接熔断 (PR #324)**：在 watchdog 超时时强制显式关闭死 socket，杜绝 adbd 瞬时重启导致守护进程长达 5.4 小时排队挂死的隐患；
-            - **车身 7 处门窗/前后盖开闭实时状态 (PR #312)**：`/api/vehicle/state` 新增 `doorOpen` 对象（左前、右前、左后、右后、机盖、后备箱、充电口盖）；Web 控制台车辆俯视图动态联动门窗与机盖开启告警；
-            - **EV / HEV 分项纯电/混动里程统计 (PR #320)**：在状态接口与 Web 首页新增纯电里程与混动里程分项展示（Odometer 卡片），针对 DM-i 车型穿透特权 Manager 接口读取；
-            - **完整保持华哥定制版特权**：企微动检/行程图文推送、锁频 1.056GHz 极低功耗、原生中文零延迟首屏、副驾安全带消音与熄火斩杀高德地图后台全量生效。
-          files: release-assets/Overdrive-v49.9.11-cn-sec.apk
+            ### 🚀 行程报告离线持久化待发队列与开机/断网自愈补偿 (彻底攻克丢单)
+            - **行程与重要通知持久化待发队列 (`pending_wecom_queue.json`)**：针对行程结束结算报告 (`vehicle.trip.completed`)、驻车耗电报告 (`vehicle.parking.drain`) 与严重告警，发送前先同步落盘至 `/data/local/tmp/pending_wecom_queue.json`；只有企微返回 HTTP 200 确认送达后方才移出队列；
+            - **免疫熄火瞬断与系统强杀 (Crash-Safe)**：彻底解决车辆熄火瞬间 Wi-Fi 断开切 4G 网络 DNS 瞬断、叠加原车系统 `vold` 卸载 TF 卡强制中断守护进程导致企微通知在内存中永久丢失的顽疾；
+            - **开机自愈与 30 秒周期性补偿调度**：`WeComSink` 升级为常驻 `ScheduledExecutorService`，守护进程拉起 10 秒后自动执行离线队列冲刷，并以 30 秒为周期自动检查补偿，一旦网络恢复或新进程启动立即秒级自动补发；
+            - **退避时序调优**：单次发送重试间隔优化为 3s、6s，配合持久化队列形成双保险闭环。
+          files: release-assets/Overdrive-v49.9.12-cn-sec.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

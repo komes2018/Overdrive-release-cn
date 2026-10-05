@@ -7,6 +7,7 @@ import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.notifications.NotificationBus;
 import com.overdrive.app.notifications.NotificationEvent;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -19,28 +20,42 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Properties;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 企业微信 / 通用 Webhook 机器人通知 Sink。
  *
  * <p>支持企业微信群机器人、钉钉机器人、飞书自定义机器人及通用 JSON Webhook，
- * 国内直连无需代理。
+ * 国内直连无需代理。内置离线待发持久化队列，应对熄火瞬断与系统杀进程自愈补偿。
  */
 public final class WeComSink implements NotificationBus.Sink {
 
     private static final String TAG = "WeComSink";
     private static final DaemonLogger logger = DaemonLogger.getInstance("WeComSink");
     public static final String CONFIG_FILE = "/data/local/tmp/wecom_config.properties";
+    public static final String PENDING_QUEUE_FILE = "/data/local/tmp/pending_wecom_queue.json";
+    private static final Object QUEUE_LOCK = new Object();
     private static final int CONNECT_TIMEOUT_MS = 5000;
     private static final int READ_TIMEOUT_MS = 8000;
 
-    private static final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
+    private static final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "WeComSink");
         t.setDaemon(true);
         return t;
     });
+
+    static {
+        // 守护进程启动 10 秒后执行首次待发队列补偿，此后每隔 30 秒周期性巡检
+        executor.scheduleWithFixedDelay(() -> {
+            try {
+                flushPendingQueue();
+            } catch (Throwable t) {
+                logger.warn("WeComSink periodic flush error: " + t.getMessage());
+            }
+        }, 10, 30, TimeUnit.SECONDS);
+    }
 
     /**
      * Webhook 是否已全局启用且已配置 URL。
@@ -123,7 +138,22 @@ public final class WeComSink implements NotificationBus.Sink {
             }
 
             final String text = msg.toString();
-            executor.execute(() -> doSendText(text));
+            final String eventId = (event.entityKey != null && !event.entityKey.isEmpty())
+                    ? event.entityKey
+                    : (event.category + ":" + (event.title != null ? event.title.hashCode() : System.currentTimeMillis()));
+            final boolean isDurable = isTrip || isParkingDrain || event.severity == NotificationEvent.Severity.CRITICAL;
+
+            // 关键报告（行程结算、驻车耗电、严重告警）：发送前先持久化落盘，彻底免疫进程被系统杀或断网丢失
+            if (isDurable) {
+                enqueuePending(eventId, text);
+            }
+
+            executor.execute(() -> {
+                boolean delivered = doSendTextWithResult(text);
+                if (isDurable && delivered) {
+                    dequeuePending(eventId);
+                }
+            });
 
         } catch (Throwable t) {
             logger.warn("WeComSink forward failed: " + t.getMessage());
@@ -155,15 +185,194 @@ public final class WeComSink implements NotificationBus.Sink {
 
     // ==================== 内部实现 ====================
 
-    private static void doSendText(String text) {
+    /**
+     * 将待发送的重要消息持久化存盘（离线待发队列）。
+     */
+    private static void enqueuePending(String id, String text) {
+        if (id == null || id.isEmpty() || text == null || text.isEmpty()) return;
+        synchronized (QUEUE_LOCK) {
+            try {
+                JSONArray queue = loadQueueFile();
+                for (int i = 0; i < queue.length(); i++) {
+                    JSONObject item = queue.optJSONObject(i);
+                    if (item != null && id.equals(item.optString("id"))) {
+                        item.put("text", text);
+                        item.put("lastAttemptAt", System.currentTimeMillis());
+                        saveQueueFile(queue);
+                        return;
+                    }
+                }
+                JSONObject item = new JSONObject();
+                item.put("id", id);
+                item.put("text", text);
+                item.put("createdAt", System.currentTimeMillis());
+                item.put("attempts", 0);
+                queue.put(item);
+
+                // 队列上限保护（保留最新 10 条）
+                while (queue.length() > 10) {
+                    queue.remove(0);
+                }
+                saveQueueFile(queue);
+                logger.info("Enqueued pending webhook message: " + id);
+            } catch (Throwable t) {
+                logger.warn("enqueuePending failed: " + t.getMessage());
+            }
+        }
+    }
+
+    /**
+     * 消息成功送达后从持久化队列中移除。
+     */
+    private static void dequeuePending(String id) {
+        if (id == null || id.isEmpty()) return;
+        synchronized (QUEUE_LOCK) {
+            try {
+                JSONArray queue = loadQueueFile();
+                boolean changed = false;
+                JSONArray remaining = new JSONArray();
+                for (int i = 0; i < queue.length(); i++) {
+                    JSONObject item = queue.optJSONObject(i);
+                    if (item != null) {
+                        if (id.equals(item.optString("id"))) {
+                            changed = true;
+                        } else {
+                            remaining.put(item);
+                        }
+                    }
+                }
+                if (changed) {
+                    saveQueueFile(remaining);
+                    logger.info("Dequeued delivered webhook message: " + id);
+                }
+            } catch (Throwable t) {
+                logger.warn("dequeuePending failed: " + t.getMessage());
+            }
+        }
+    }
+
+    /**
+     * 巡检并补发持久化队列中的未送达消息（开机自愈、断网恢复补偿）。
+     */
+    public static void flushPendingQueue() {
+        if (!isEnabled()) return;
         String webhookUrl = readWebhookUrl();
         if (webhookUrl == null || webhookUrl.isEmpty()) return;
+
+        synchronized (QUEUE_LOCK) {
+            try {
+                JSONArray queue = loadQueueFile();
+                if (queue == null || queue.length() == 0) return;
+
+                long now = System.currentTimeMillis();
+                JSONArray remaining = new JSONArray();
+                boolean networkErrorEncountered = false;
+
+                for (int i = 0; i < queue.length(); i++) {
+                    JSONObject item = queue.optJSONObject(i);
+                    if (item == null) continue;
+                    String id = item.optString("id");
+                    String text = item.optString("text");
+                    long createdAt = item.optLong("createdAt", now);
+                    int attempts = item.optInt("attempts", 0);
+
+                    // 1. 过期淘汰：超过 24 小时的旧消息不再补发
+                    if (now - createdAt > 24 * 3600 * 1000L) {
+                        logger.info("Dropping expired pending webhook notification: " + id);
+                        continue;
+                    }
+
+                    // 2. 坏死淘汰：重试超过 20 次且超过 2 小时
+                    if (attempts >= 20 && (now - createdAt > 2 * 3600 * 1000L)) {
+                        logger.warn("Dropping poison pending webhook notification after 20 attempts: " + id);
+                        continue;
+                    }
+
+                    // 3. 网络故障阻断：若上一条发送遭遇明显网络不可达，跳过后续重试等待下个周期
+                    if (networkErrorEncountered) {
+                        remaining.put(item);
+                        continue;
+                    }
+
+                    // 4. 执行重试投递
+                    boolean delivered = false;
+                    try {
+                        String payload = buildTextPayload(webhookUrl, text);
+                        delivered = postWithRetry(webhookUrl, payload, 2);
+                    } catch (Throwable t) {
+                        logger.warn("flushPendingQueue item " + id + " error: " + t.getMessage());
+                    }
+
+                    if (delivered) {
+                        logger.info("Pending webhook compensated & delivered successfully: " + id);
+                    } else {
+                        item.put("attempts", attempts + 1);
+                        item.put("lastAttemptAt", now);
+                        remaining.put(item);
+                        networkErrorEncountered = true;
+                    }
+                }
+
+                saveQueueFile(remaining);
+            } catch (Throwable t) {
+                logger.warn("flushPendingQueue execution failed: " + t.getMessage());
+            }
+        }
+    }
+
+    private static JSONArray loadQueueFile() {
+        File f = new File(PENDING_QUEUE_FILE);
+        if (!f.exists()) return new JSONArray();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                new FileInputStream(f), StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+            String content = sb.toString().trim();
+            if (content.isEmpty()) return new JSONArray();
+            return new JSONArray(content);
+        } catch (Throwable t) {
+            return new JSONArray();
+        }
+    }
+
+    private static void saveQueueFile(JSONArray queue) {
+        File target = new File(PENDING_QUEUE_FILE);
+        if (queue == null || queue.length() == 0) {
+            if (target.exists()) target.delete();
+            return;
+        }
+        File tmp = new File(PENDING_QUEUE_FILE + ".tmp");
+        try {
+            try (OutputStream os = new FileOutputStream(tmp)) {
+                os.write(queue.toString(2).getBytes(StandardCharsets.UTF_8));
+                os.flush();
+            }
+            if (tmp.renameTo(target)) {
+                target.setReadable(true, false);
+                target.setWritable(true, false);
+            }
+        } catch (Throwable t) {
+            logger.warn("saveQueueFile failed: " + t.getMessage());
+        }
+    }
+
+    private static boolean doSendTextWithResult(String text) {
+        String webhookUrl = readWebhookUrl();
+        if (webhookUrl == null || webhookUrl.isEmpty()) return false;
         try {
             String payload = buildTextPayload(webhookUrl, text);
-            postWithRetry(webhookUrl, payload, 3);
+            return postWithRetry(webhookUrl, payload, 3);
         } catch (Exception e) {
             logger.warn("doSendText failed: " + e.getMessage());
+            return false;
         }
+    }
+
+    private static void doSendText(String text) {
+        doSendTextWithResult(text);
     }
 
     private static void doSendMarkdown(String content) {
@@ -319,8 +528,8 @@ public final class WeComSink implements NotificationBus.Sink {
 
             if (attempt < maxRetries) {
                 try {
-                    // 渐进式休眠，应对熄火瞬间 Wi-Fi 断开 / 4G 蜂窝数据切换窗口 (2s, 4s)
-                    Thread.sleep(attempt * 2000L);
+                    // 渐进式休眠，应对熄火瞬间 Wi-Fi 断开 / 4G 蜂窝数据切换窗口 (3s, 6s)
+                    Thread.sleep(attempt * 3000L);
                 } catch (InterruptedException ignored) {
                     break;
                 }
