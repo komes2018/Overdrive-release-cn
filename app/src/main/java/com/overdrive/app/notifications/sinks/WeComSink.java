@@ -138,8 +138,8 @@ public final class WeComSink implements NotificationBus.Sink {
             }
 
             final String text = msg.toString();
-            final String eventId = (event.entityKey != null && !event.entityKey.isEmpty())
-                    ? event.entityKey
+            final String eventId = (event.tag != null && !event.tag.isEmpty())
+                    ? event.tag
                     : (event.category + ":" + (event.title != null ? event.title.hashCode() : System.currentTimeMillis()));
             final boolean isDurable = isTrip || isParkingDrain || event.severity == NotificationEvent.Severity.CRITICAL;
 
