@@ -712,6 +712,10 @@
     <string name="settings_overlay_replay_subtitle">显示 CLIP 徽标：回放录制中为绿色，保存成功后显示蓝色 5 秒，失败时为红色。仅在存在回放绑定或自动化时才会显示。</string>
     <string name="settings_overlay_roadsense_title">RoadSense 悬浮窗</string>
     <string name="settings_overlay_roadsense_subtitle">在 RoadSense 启用时，于屏幕上显示悬浮状态胶囊与路况危险预警卡片。</string>
+    <string name="settings_overlay_icon_opacity">图标透明度</string>
+    <string name="settings_overlay_icon_opacity_value">%1$d%%</string>
+    <string name="settings_overlay_icon_size">图标大小</string>
+    <string name="settings_overlay_icon_size_value">%1$d</string>
     <string name="remote_voice_overlay_title">远程语音对讲</string>
     <string name="remote_voice_mute">静音远程对讲</string>
     <string name="remote_voice_unmute">恢复远程对讲</string>

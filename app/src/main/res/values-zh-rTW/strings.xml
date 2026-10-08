@@ -636,6 +636,10 @@
     <string name="settings_overlay_camera_subtitle">在錄音活動中顯示REC/ PROX標志.</string>
     <string name="settings_overlay_trip_title">表示 Trip</string>
     <string name="settings_overlay_trip_subtitle">顯示TRIP章, 在檢測行程進行時.</string>
+    <string name="settings_overlay_icon_opacity">圖示透明度</string>
+    <string name="settings_overlay_icon_opacity_value">%1$d%%</string>
+    <string name="settings_overlay_icon_size">圖示大小</string>
+    <string name="settings_overlay_icon_size_value">%1$d</string>
     <!-- Was "About & updates" — Check for Updates row was removed from
          the About page, so the menu / rail label is now just "About". -->
     <string name="settings_section_about">關於</string>

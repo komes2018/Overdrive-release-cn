@@ -56,7 +56,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         # assembleDebug: keeps debug flags (no R8 shrink) but now uses our fixed keystore
         # instead of the random per-runner debug keystore → consistent fingerprint every run.
-        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.12 -PoverdriveVersionCode=49912 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
+        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.13 -PoverdriveVersionCode=49913 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
 
       - name: Verify APK signature fingerprint
         run: |
@@ -79,7 +79,7 @@ jobs:
           mkdir -p release-assets
           APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
           echo "Found built APK: $APK_FILE"
-          cp "$APK_FILE" release-assets/Overdrive-v49.9.12-cn-sec.apk
+          cp "$APK_FILE" release-assets/Overdrive-v49.9.13-cn-sec.apk
           ls -lh release-assets/
 
       - name: Upload APK Artifact
@@ -93,16 +93,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v49.9.12-cn-sec
-          name: OverDrive v49.9.12 - 行程报告离线持久化待发队列与开机/断网自愈补偿
+          tag_name: v49.9.13-cn-sec
+          name: OverDrive v49.9.13 - 合并上游 PR #333 悬浮窗状态图标透明度与大小调节
           body: |
-            ## OverDrive v49.9.12 定制版
+            ## OverDrive v49.9.13 定制版
 
-            ### 🚀 行程报告离线持久化待发队列与开机/断网自愈补偿 (彻底攻克丢单)
-            - **行程与重要通知持久化待发队列 (`pending_wecom_queue.json`)**：针对行程结束结算报告 (`vehicle.trip.completed`)、驻车耗电报告 (`vehicle.parking.drain`) 与严重告警，发送前先同步落盘至 `/data/local/tmp/pending_wecom_queue.json`；只有企微返回 HTTP 200 确认送达后方才移出队列；
-            - **免疫熄火瞬断与系统强杀 (Crash-Safe)**：彻底解决车辆熄火瞬间 Wi-Fi 断开切 4G 网络 DNS 瞬断、叠加原车系统 `vold` 卸载 TF 卡强制中断守护进程导致企微通知在内存中永久丢失的顽疾；
-            - **开机自愈与 30 秒周期性补偿调度**：`WeComSink` 升级为常驻 `ScheduledExecutorService`，守护进程拉起 10 秒后自动执行离线队列冲刷，并以 30 秒为周期自动检查补偿，一旦网络恢复或新进程启动立即秒级自动补发；
-            - **退避时序调优**：单次发送重试间隔优化为 3s、6s，配合持久化队列形成双保险闭环。
-          files: release-assets/Overdrive-v49.9.12-cn-sec.apk
+            ### 🎨 悬浮窗状态图标自定义调节 (同步上游 PR #333)
+            - **图标透明度滑动条**：在“状态覆盖 / 悬浮窗设置”中新增状态图标透明度调节（0% ~ 80%），适配不同车机主题与透明壁纸底色；
+            - **图标大小滑动条**：支持 12dp ~ 32dp 图标尺寸平滑调节，完美兼容不同尺寸车机大屏与仪表小屏；
+            - **完整中文化支持**：补齐简体中文（zh/zh-CN）与繁体中文（zh-TW）界面文案，通过 i18n 自动化质检。
+          files: release-assets/Overdrive-v49.9.13-cn-sec.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
