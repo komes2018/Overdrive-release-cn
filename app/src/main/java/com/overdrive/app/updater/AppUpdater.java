@@ -2123,7 +2123,7 @@ public class AppUpdater {
         //
         // We deliberately do NOT plant the OPTIONAL-daemon sentinels
         // (zrok.disabled, telegram_bot_daemon.disabled, tailscale.disabled,
-        // singbox.disabled): they encode a DURABLE user stop that must survive
+        // wireguard.disabled, singbox.disabled): they encode a DURABLE user stop that must survive
         // the update, and overwriting them here (then rm-ing below) would
         // destroy that record and resurrect a user-stopped tunnel/bot. The
         // pkill cascade below takes those daemons out regardless. Mirrors
@@ -2147,6 +2147,8 @@ public class AppUpdater {
         script.append("killall -9 sing-box 2>/dev/null\n");
         script.append(psAwkKillLine("tailscaled"));
         script.append("killall -9 tailscaled 2>/dev/null\n");
+        script.append(psAwkKillLine("wgproxy"));
+        script.append("killall -9 wgproxy 2>/dev/null\n");
         script.append("rm -f /data/local/tmp/start_cam_daemon.sh "
                 + "/data/local/tmp/cam_watchdog.pid 2>/dev/null\n");
         script.append("rm -rf /data/local/tmp/cam_watchdog.lock 2>/dev/null\n");
@@ -2513,10 +2515,10 @@ public class AppUpdater {
         // Step 2: Kill the rest of the daemon families. cam_daemon and
         // acc_sentry are already gone from step 1 — this loop covers the
         // standalone daemons (telegram, proxy) and native binaries
-        // (cloudflared, zrok, sing-box, tailscaled).
+        // (cloudflared, zrok, sing-box, tailscaled, wgproxy).
         String[] daemons = {"sentry_daemon",
                 "telegram_bot_daemon", "sentry_proxy", "cloudflared", "zrok", "sing-box",
-                "tailscaled"};
+                "tailscaled", "wgproxy"};
         
         for (String daemon : daemons) {
             final boolean[] done = {false};
@@ -2597,6 +2599,8 @@ public class AppUpdater {
                 "killall -9 cloudflared 2>/dev/null\n" +
                 "killall -9 zrok 2>/dev/null\n" +
                 "killall -9 tailscaled 2>/dev/null\n" +
+                psAwkKillLine("wgproxy") +
+                "killall -9 wgproxy 2>/dev/null\n" +
                 "killall -9 sing-box 2>/dev/null\n" +
                 "sleep 1\n" +
                 "rm -rf /data/local/tmp/cam_watchdog.lock /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null\n" +

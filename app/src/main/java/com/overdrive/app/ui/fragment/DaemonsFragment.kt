@@ -1,5 +1,6 @@
 package com.overdrive.app.ui.fragment
 
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import android.os.Bundle
 import android.os.Handler
@@ -25,6 +26,7 @@ import com.overdrive.app.ui.model.localizedName
 import com.overdrive.app.R
 import com.overdrive.app.config.UnifiedConfigManager
 import com.overdrive.app.ui.model.DaemonStatus
+import com.overdrive.app.ui.daemon.WireGuardSettingsDialog
 import com.overdrive.app.ui.util.QrCodeGenerator
 import com.overdrive.app.util.DaemonHttpClient
 import org.json.JSONObject
@@ -46,6 +48,15 @@ class DaemonsFragment : Fragment() {
     private lateinit var swWifiAutoEnable: SwitchMaterial
     private lateinit var daemonAdapter: DaemonAdapter
     private var applyingWifiAutoEnable = false
+
+    // Document picker for the WireGuard dialog (.conf or a picture of a QR code).
+    // Registered as a property so it exists before the fragment is STARTED.
+    private var wireGuardDialog: WireGuardSettingsDialog? = null
+    private val wireGuardImportLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) wireGuardDialog?.onFilePicked(uri)
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -88,6 +99,12 @@ class DaemonsFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         if (::swWifiAutoEnable.isInitialized) refreshWifiAutoEnable()
+    }
+
+    override fun onDestroyView() {
+        wireGuardDialog?.dismiss()
+        wireGuardDialog = null
+        super.onDestroyView()
     }
 
     override fun onDestroy() {
@@ -224,6 +241,7 @@ class DaemonsFragment : Fragment() {
         when (type) {
             DaemonType.ZROK_TUNNEL -> showZrokTokenDialog()
             DaemonType.TAILSCALE_TUNNEL -> showTailscaleSettingsDialog()
+            DaemonType.WIREGUARD_TUNNEL -> showWireGuardSettingsDialog()
             DaemonType.CLOUDFLARED_TUNNEL -> {
                 com.overdrive.app.config.CloudflaredPaidConfig.showSettingsDialog(requireContext(), daemonsViewModel)
             }
@@ -235,6 +253,13 @@ class DaemonsFragment : Fragment() {
         }
     }
     
+    private fun showWireGuardSettingsDialog() {
+        val ctx = context ?: return
+        wireGuardDialog = WireGuardSettingsDialog.show(
+            ctx, daemonsViewModel, wireGuardImportLauncher
+        ) { wireGuardDialog = null }
+    }
+
     /**
      * Show dialog to configure Zrok enable token.
      */

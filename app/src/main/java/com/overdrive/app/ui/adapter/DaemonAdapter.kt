@@ -139,10 +139,11 @@ class DaemonAdapter(
             subprocessContainer.visibility = if (isExpanded && hasSubprocesses) View.VISIBLE else View.GONE
             ivExpand.rotation = if (isExpanded) 180f else 0f
             
-            // Show configure icon for configurable daemons (always visible for Cloudflared, Zrok, and Tailscale)
+            // Show configure icon for configurable daemons (always visible for Cloudflared, Zrok, Tailscale, and WireGuard)
             val isConfigurable = (state.type == DaemonType.CLOUDFLARED_TUNNEL || 
                                   state.type == DaemonType.ZROK_TUNNEL || 
-                                  state.type == DaemonType.TAILSCALE_TUNNEL) && onConfigureClick != null
+                                  state.type == DaemonType.TAILSCALE_TUNNEL ||
+                                  state.type == DaemonType.WIREGUARD_TUNNEL) && onConfigureClick != null
             ivConfigure.visibility = if (isConfigurable) View.VISIBLE else View.GONE
             if (isConfigurable) {
                 ivConfigure.setOnClickListener {
@@ -227,6 +228,7 @@ class DaemonAdapter(
             DaemonType.CLOUDFLARED_TUNNEL -> R.drawable.ic_cloud
             DaemonType.ZROK_TUNNEL -> R.drawable.ic_link
             DaemonType.TAILSCALE_TUNNEL -> R.drawable.ic_mqtt
+            DaemonType.WIREGUARD_TUNNEL -> R.drawable.ic_vpn_lock
             DaemonType.TELEGRAM_DAEMON -> R.drawable.ic_telegram
         }
         
@@ -250,14 +252,15 @@ class DaemonAdapter(
          */
         fun getLogFilePath(type: DaemonType): String? {
             return when (type) {
-                DaemonType.CAMERA_DAEMON -> "/data/local/tmp/cam_daemon.log"
-                DaemonType.SENTRY_DAEMON -> "/data/local/tmp/sentry_daemon.log"
-                DaemonType.ACC_SENTRY_DAEMON -> "/data/local/tmp/acc_sentry_daemon.log"
-                DaemonType.CLOUDFLARED_TUNNEL -> "/data/local/tmp/cloudflared.log"
-                DaemonType.ZROK_TUNNEL -> "/data/local/tmp/zrok.log"
-                DaemonType.TAILSCALE_TUNNEL -> "/data/local/tmp/.tailscale/tailscale.log"
-                DaemonType.SINGBOX_PROXY -> "/data/local/tmp/singbox.log"
-                DaemonType.TELEGRAM_DAEMON -> "/data/local/tmp/telegrambotdaemon.log"
+                DaemonType.CAMERA_DAEMON -> com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/cam_daemon.log")
+                DaemonType.SENTRY_DAEMON -> com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/sentry_daemon.log")
+                DaemonType.ACC_SENTRY_DAEMON -> com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/acc_sentry_daemon.log")
+                DaemonType.CLOUDFLARED_TUNNEL -> com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/cloudflared.log")
+                DaemonType.ZROK_TUNNEL -> com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/zrok.log")
+                DaemonType.TAILSCALE_TUNNEL -> com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.tailscale/tailscale.log")
+                DaemonType.WIREGUARD_TUNNEL -> com.overdrive.app.wireguard.WireGuardPaths.LOG
+                DaemonType.SINGBOX_PROXY -> com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/singbox.log")
+                DaemonType.TELEGRAM_DAEMON -> com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/telegrambotdaemon.log")
             }
         }
 
@@ -274,6 +277,7 @@ class DaemonAdapter(
                 DaemonType.CLOUDFLARED_TUNNEL -> "cloudflared"
                 DaemonType.ZROK_TUNNEL -> "zrok"
                 DaemonType.TAILSCALE_TUNNEL -> "tailscale"
+                DaemonType.WIREGUARD_TUNNEL -> "wireguard"
                 DaemonType.SINGBOX_PROXY -> "singbox"
             }
         }

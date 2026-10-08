@@ -13,6 +13,7 @@ own license — those licenses, not MIT, govern those components.
 | zrok | https://github.com/openziti/zrok | based on v1.1.x | Apache-2.0 | **Yes** — see "Modifications" below |
 | sing-box | https://github.com/SagerNet/sing-box | see upstream | **GPL-3.0-or-later** | No |
 | tailscale | https://github.com/tailscale/tailscale | v1.96.4 | BSD-3-Clause | **Yes** — see "Modifications" below |
+| wgproxy (`libwireguard.so`) | OverDrive's own [`tools/wireguard`](tools/wireguard), built on [wireguard-go](https://git.zx2c4.com/wireguard-go) | pinned in `tools/wireguard/go.mod` | MIT (OverDrive code and wireguard-go); bundles gVisor netstack (Apache-2.0) and golang.org/x/{crypto,net,sys,time} (BSD-3-Clause) | No — upstream modules are used unmodified |
 
 ## Machine-learning models (`app/src/main/assets/models/`)
 

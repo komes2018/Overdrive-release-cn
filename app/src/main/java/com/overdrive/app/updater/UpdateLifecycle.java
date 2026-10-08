@@ -126,7 +126,7 @@ public final class UpdateLifecycle {
         //      loop catches them on the next iteration).
         //   2. Remove watchdog scripts so the kernel can't re-exec them.
         //   3. pkill / killall cascade — daemon binaries first, then
-        //      ancillary binaries (cloudflared/zrok/sing-box/tailscaled).
+        //      ancillary binaries (cloudflared/zrok/sing-box/tailscaled/wgproxy).
         //      No self-match risk now.
         //   4. Wait briefly for processes to settle, THEN remove lock files.
         //      Doing this AFTER the kills (rather than before) prevents the
@@ -143,7 +143,7 @@ public final class UpdateLifecycle {
         // acc-sentry). Machine-written markers are wiped again at the end —
         // the transient sentinel just keeps any watchdog we miss with the pkill
         // from re-exec'ing the daemon between our kill and the new process'
-        // launch. OPTIONAL daemons (telegram / zrok / tailscale / singbox) are
+        // launch. OPTIONAL daemons (telegram / zrok / tailscale / wireguard / singbox) are
         // deliberately NOT touched here: their disable sentinel is a DURABLE
         // user-stop signal that must PERSIST across an app update. Planting
         // (and then wiping) the telegram/zrok sentinels here would resurrect a
@@ -182,6 +182,8 @@ public final class UpdateLifecycle {
                 "killall -9 cloudflared 2>/dev/null\n" +
                 "killall -9 zrok 2>/dev/null\n" +
                 "killall -9 tailscaled 2>/dev/null\n" +
+                psAwkKillLine("wgproxy") +
+                "killall -9 wgproxy 2>/dev/null\n" +
                 "killall -9 sing-box 2>/dev/null\n" +
                 // Brief settle so SIGKILL'd daemons release their lockfiles
                 // before we rm the lock files. Without this delay, a daemon

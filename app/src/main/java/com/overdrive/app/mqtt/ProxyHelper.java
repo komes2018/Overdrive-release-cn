@@ -24,9 +24,13 @@ import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 
 /**
- * Shared proxy detection utility for sing-box SOCKS/HTTP proxy.
+ * Shared proxy detection utility for the local SOCKS/HTTP proxies: Tailscale
+ * (8539), WireGuard (8541) and sing-box (8119).
  *
  * The BYD head unit may route internet through a sing-box proxy on port 8119.
+ * The WireGuard listener (wgproxy) sends only destinations inside the peers'
+ * AllowedIPs through the tunnel and dials everything else directly or via
+ * sing-box, so the proxy route chain stays correct when it is selected.
  * This helper probes the proxy availability and provides socket factories
  * for both HTTP clients (OkHttp) and MQTT clients (Paho).
  *
@@ -41,7 +45,9 @@ public class ProxyHelper {
     private static final String PROXY_HOST = "127.0.0.1";
     private static final int PROXY_PORT = 8119;
     private static final int TAILSCALE_PROXY_PORT = 8539;
-    private static final String PROXY_ENABLED_FILE = "/data/local/tmp/.tailscale/proxy_enabled";
+    private static final int WIREGUARD_PROXY_PORT = 8541;
+    private static final String PROXY_ENABLED_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.tailscale/proxy_enabled");
+    private static final String WIREGUARD_PROXY_ENABLED_FILE = com.overdrive.app.wireguard.WireGuardPaths.PROXY_FLAG;
     // Loopback TCP connect budget. 200ms was too tight: a cold/loaded sing-box (or a
     // probe issued while the proxy is still binding) could miss, and a SINGLE miss
     // poisoned a whole minute (see the asymmetric cache below) → every map search /
@@ -106,8 +112,8 @@ public class ProxyHelper {
         lastProbeTime = now;
 
         // Probe each candidate port on its OWN socket. Prefer sing-box (8119) since it is a full
-        // outbound proxy (supports public internet). Fall back to Tailscale (8539) which is primarily
-        // for internal tailnet/LAN communication (e.g. MQTT broker).
+        // outbound proxy (supports public internet). Fall back to Tailscale (8539) or WireGuard (8541)
+        // which are primarily for internal tunnel/LAN communication (e.g. MQTT broker).
         if (probePort(PROXY_PORT)) {
             proxyAvailable = true;
             proxyPort = PROXY_PORT;
@@ -116,6 +122,10 @@ public class ProxyHelper {
             proxyAvailable = true;
             proxyPort = TAILSCALE_PROXY_PORT;
             logger.info("Proxy probe: Tailscale proxy available on port " + TAILSCALE_PROXY_PORT);
+        } else if (probePort(WIREGUARD_PROXY_PORT)) {
+            proxyAvailable = true;
+            proxyPort = WIREGUARD_PROXY_PORT;
+            logger.info("Proxy probe: WireGuard proxy available on port " + WIREGUARD_PROXY_PORT);
         } else {
             proxyAvailable = false;
         }
@@ -151,6 +161,17 @@ public class ProxyHelper {
     }
 
     /**
+     * The SOCKS port we expect when the user enabled a proxy: Tailscale if its flag is on, else
+     * WireGuard if its flag is on, else the Tailscale port. Stable (flag-based, not probe-based),
+     * so "proxy warming up" diagnostics and the fail-closed route name the right endpoint.
+     */
+    public static int getExpectedProxyPort() {
+        if (isFlagEnabled(PROXY_ENABLED_FILE)) return TAILSCALE_PROXY_PORT;
+        if (isFlagEnabled(WIREGUARD_PROXY_ENABLED_FILE)) return WIREGUARD_PROXY_PORT;
+        return TAILSCALE_PROXY_PORT;
+    }
+
+    /**
      * Invalidate the proxy cache.
      * Call this on connection failures so the next attempt re-probes.
      */
@@ -161,12 +182,17 @@ public class ProxyHelper {
 
     /**
      * Whether the user has ENABLED the Tailscale SOCKS proxy (persisted flag written by the
-     * Daemons screen to {@code .tailscale/proxy_enabled}). When true, outbound traffic is
+     * Daemons screen to {@code .tailscale/proxy_enabled}) or the WireGuard tunnel (flag written
+     * by the launcher to {@code .wireguard/proxy_enabled}). When true, outbound traffic is
      * expected to go through the proxy ONLY, so callers must not fall back to a direct dial
      * that cannot reach a proxy-only (e.g. subnet-routed LAN) broker off Wi-Fi.
      */
     public static boolean isProxyExpected() {
-        try (BufferedReader r = new BufferedReader(new FileReader(PROXY_ENABLED_FILE))) {
+        return isFlagEnabled(PROXY_ENABLED_FILE) || isFlagEnabled(WIREGUARD_PROXY_ENABLED_FILE);
+    }
+
+    private static boolean isFlagEnabled(String path) {
+        try (BufferedReader r = new BufferedReader(new FileReader(path))) {
             return isProxyEnabledValue(r.readLine());
         } catch (Exception e) {
             return false;
@@ -190,21 +216,29 @@ public class ProxyHelper {
      * a true outbound proxy like sing-box (8119) is available.
      */
     public static Proxy getHttpProxy() {
-        if (isProxyAvailable()) {
-            if (proxyPort == TAILSCALE_PROXY_PORT) {
-                return Proxy.NO_PROXY;
-            }
-            return new Proxy(Proxy.Type.HTTP, new InetSocketAddress(PROXY_HOST, proxyPort));
+            // Proxy TYPE must match the resolved backend port:
+            //  - Tailscale (8539) is a `tailscaled --socks5-server` that ONLY speaks
+            //    SOCKS5 and REJECTS HTTP CONNECT → it needs Proxy.Type.SOCKS.
+            //  - WireGuard (8541) is wgproxy's SOCKS5 listener (CONNECT only, no auth) → SOCKS too.
+            //  - sing-box (8119) is a "mixed" inbound; v26.8 reached it via HTTP CONNECT
+            //    and that is the PROVEN path. The blanket SOCKS swap (added for the
+            //    Tailscale case) regressed sing-box: route/geocode POSTs to the BYOK
+            //    endpoint began failing whenever sing-box was engaged. Restore HTTP for
+            //    the sing-box port; keep SOCKS only for the Tailscale port that requires it.
+            Proxy.Type type = (proxyPort == TAILSCALE_PROXY_PORT || proxyPort == WIREGUARD_PROXY_PORT)
+                    ? Proxy.Type.SOCKS
+                    : Proxy.Type.HTTP;
+            return new Proxy(type, new InetSocketAddress(PROXY_HOST, proxyPort));
         }
         return Proxy.NO_PROXY;
     }
 
     /**
      * Whether a public outbound proxy (sing-box on 8119) is available.
-     * Returns false if only Tailscale (internal tailnet proxy) is running.
+     * Returns false if only Tailscale or WireGuard (internal tunnel proxies) is running.
      */
     public static boolean isPublicProxyAvailable() {
-        return isProxyAvailable() && proxyPort != TAILSCALE_PROXY_PORT;
+        return isProxyAvailable() && proxyPort != TAILSCALE_PROXY_PORT && proxyPort != WIREGUARD_PROXY_PORT;
     }
 
     /**
@@ -281,7 +315,7 @@ public class ProxyHelper {
             return selected;
         }
         return new Proxy(Proxy.Type.SOCKS,
-                new InetSocketAddress(PROXY_HOST, TAILSCALE_PROXY_PORT));
+                new InetSocketAddress(PROXY_HOST, getExpectedProxyPort()));
     }
 
     /**

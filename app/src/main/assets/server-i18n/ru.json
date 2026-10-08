@@ -225,6 +225,7 @@
       "cloudflare_tunnel": "Туннель \"Cloudflare\"",
       "zrok_tunnel": "Zrok Туннель",
       "tailscale_tunnel": "Tailscale Tunnel",
+      "wireguard_tunnel": "Туннель WireGuard",
       "sing_box": "Польная коробка"
     },
     "buttons": {

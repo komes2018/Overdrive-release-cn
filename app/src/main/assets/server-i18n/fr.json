@@ -220,6 +220,7 @@
       "cloudflare_tunnel": "Tunnel Fusée nuageuse",
       "zrok_tunnel": "Tunnel Zrok",
       "tailscale_tunnel": "Tunnel en écailles de queue",
+      "wireguard_tunnel": "Tunnel WireGuard",
       "sing_box": "Sing-Box"
     },
     "buttons": {

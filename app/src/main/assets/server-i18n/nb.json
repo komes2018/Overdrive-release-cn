@@ -219,6 +219,7 @@
       "cloudflare_tunnel": "Skyflare Tunnel",
       "zrok_tunnel": "Svik tunnel",
       "tailscale_tunnel": "Skala Tunnnel",
+      "wireguard_tunnel": "WireGuard-tunnel",
       "sing_box": "Enkeltboks"
     },
     "buttons": {

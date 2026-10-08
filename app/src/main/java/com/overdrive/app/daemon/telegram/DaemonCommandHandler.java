@@ -38,10 +38,11 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         {"cloudflared", "cloudflared", "shell", "daemon_names.cloudflare_tunnel", "yes"},
         {"zrok", "zrok", "shell", "daemon_names.zrok_tunnel", "yes"},
         {"tailscale", "tailscaled", "shell", "daemon_names.tailscale_tunnel", "yes"},
+        {"wireguard", "wgproxy", "shell", "daemon_names.wireguard_tunnel", "yes"},
         {"singbox", "sing-box", "shell", "daemon_names.sing_box", "yes"},
     };
     
-    private static final String AVAILABLE_DAEMONS = "camera, acc, sentry, cloudflared, zrok, tailscale, singbox";
+    private static final String AVAILABLE_DAEMONS = "camera, acc, sentry, cloudflared, zrok, tailscale, wireguard, singbox";
     
     @Override
     public boolean canHandle(String command) {
@@ -129,6 +130,10 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                                     ctx.tr("daemon.start_failed", displayName));
                             break;
                         }
+                        if ("wireguard".equals(name)) {
+                            ctx.execShell(com.overdrive.app.launcher.WireGuardLauncher
+                                    .buildProxyFlagCommand(true));
+                        }
                         if ("zrok".equals(name) && !waitForHealthyZrok(null, ctx)) {
                             ctx.sendMessage(chatId, ctx.tr("daemon.start_failed", displayName));
                             break;
@@ -194,14 +199,15 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
      */
     private static String sentinelForProcess(String processName) {
         switch (processName) {
-            case "byd_cam_daemon":     return "/data/local/tmp/camera_daemon.disabled";
-            case "sentry_daemon":      return "/data/local/tmp/sentry_daemon.disabled";
-            case "acc_sentry_daemon":  return "/data/local/tmp/acc_sentry_daemon.disabled";
-            case "sing-box":           return "/data/local/tmp/singbox.disabled";
-            case "cloudflared":        return "/data/local/tmp/cloudflared.disabled";
-            case "zrok":               return "/data/local/tmp/zrok.disabled";
-            case "tailscaled":         return "/data/local/tmp/tailscale.disabled";
-            case "telegram_bot_daemon": return "/data/local/tmp/telegram_bot_daemon.disabled";
+            case "byd_cam_daemon":     return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/camera_daemon.disabled");
+            case "sentry_daemon":      return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/sentry_daemon.disabled");
+            case "acc_sentry_daemon":  return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/acc_sentry_daemon.disabled");
+            case "sing-box":           return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/singbox.disabled");
+            case "cloudflared":        return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/cloudflared.disabled");
+            case "zrok":               return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/zrok.disabled");
+            case "tailscaled":         return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/tailscale.disabled");
+            case "wgproxy":            return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/wireguard.disabled");
+            case "telegram_bot_daemon": return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/telegram_bot_daemon.disabled");
             default:                   return null;
         }
     }
@@ -410,6 +416,11 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 || "zrok".equals(processName)
                 || "tailscaled".equals(processName)) {
             ctx.execShell("rm -f /data/local/tmp/.tunnel_last_notified 2>/dev/null");
+        }
+        if ("wgproxy".equals(processName)) {
+            // The proxy is no longer expected once the user stopped it
+            ctx.execShell(com.overdrive.app.launcher.WireGuardLauncher
+                    .buildProxyFlagCommand(false));
         }
         if ("tailscaled".equals(processName)) {
             ctx.execShell(
@@ -1026,6 +1037,32 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
 
                 cmd = tailscaleCmd.toString();
                 processName = "tailscaled";
+                break;
+
+            case "wireguard":
+                // WireGuard tunnel - match UI version (WireGuardLauncher.kt).
+                // Needs a stored config and a payload deployed by this app version.
+                String wgConfig = ctx.execShell("test -s "
+                        + com.overdrive.app.wireguard.WireGuardPaths.CONFIG + " && echo yes");
+                if (wgConfig == null || !"yes".equals(wgConfig.trim())) {
+                    ctx.log("No WireGuard configuration; set it up from the app first");
+                    return false;
+                }
+                String wgDeployment = ctx.execShell(
+                        com.overdrive.app.launcher.WireGuardLauncher.deploymentStatusCommand());
+                if (wgDeployment == null || !"current".equals(wgDeployment.trim())) {
+                    ctx.log("WireGuard binary is stale; waiting for app-side redeployment");
+                    return false;
+                }
+                // Flag first, then clear the previous run's status
+                ctx.execShell(com.overdrive.app.launcher.WireGuardLauncher
+                        .buildProxyFlagCommand(true)
+                        + "; rm -f " + com.overdrive.app.wireguard.WireGuardPaths.STATUS);
+                if (useProxy) {
+                    ctx.log("Using sing-box as upstream for WireGuard...");
+                }
+                cmd = com.overdrive.app.launcher.WireGuardLauncher.buildLaunchCommand(useProxy);
+                processName = "wgproxy";
                 break;
 
             case "singbox":

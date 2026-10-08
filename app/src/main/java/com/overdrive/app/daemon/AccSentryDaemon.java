@@ -9972,7 +9972,7 @@ public class AccSentryDaemon {
             "telegram_bot_daemon",
             "start_zrok", "start_singbox", "start_cloudflared",
             "start_tailscale", "sentry_proxy", "sing-box",
-            "cloudflared", "zrok", "tailscaled"
+            "cloudflared", "zrok", "tailscaled", "wgproxy"
         };
         for (int patternIndex = 0;
                 patternIndex < patterns.length;

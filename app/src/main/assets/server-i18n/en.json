@@ -45,6 +45,9 @@
     "mqtt_invalid_connection_id": "Invalid connection id",
     "ipc_communication_failed": "Failed to communicate with daemon",
     "invalid_request_body_with_detail": "Invalid request body: {0}",
+    "wireguard_body_required": "Send the WireGuard config as JSON: {\"config\": \"...\"}",
+    "wireguard_save_failed": "Could not save the WireGuard config: {0}",
+    "wireguard_delete_failed": "Could not delete the WireGuard config",
     "performance_no_data": "Performance monitoring not started or no data collected yet",
     "soh_not_initialized": "SohEstimator not initialized",
     "reset_no_categories": "No categories specified",
@@ -249,6 +252,7 @@
       "cloudflare_tunnel": "Cloudflare Tunnel",
       "zrok_tunnel": "Zrok Tunnel",
       "tailscale_tunnel": "Tailscale Tunnel",
+      "wireguard_tunnel": "WireGuard Tunnel",
       "sing_box": "Sing-Box"
     },
     "buttons": {

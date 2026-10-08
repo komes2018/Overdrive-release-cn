@@ -259,6 +259,9 @@ public class HttpServer {
                 && !requestLine.startsWith("POST /api/audio/library/");
         if (isAudioUpload) return 72 * 1024 * 1024;
 
+        // A WireGuard config is at most 16 KB; leave room for the JSON wrapper.
+        if (requestLine.startsWith("POST /api/wireguard/")) return 64 * 1024;
+
         final boolean isBackupImport =
                 requestLine.startsWith("POST /api/backup/import ")
                 || requestLine.startsWith("POST /api/backup/import?")
@@ -673,7 +676,12 @@ public class HttpServer {
             boolean remoteDevRequest = pathOnly.equals("/remote-dev-view")
                     || pathOnly.equals("/remote-dev-view.html")
                     || pathOnly.startsWith("/api/dev-view/");
-            boolean authenticated = remoteDevRequest || genAiRequest
+            // The config holds a private key, so loopback callers get no free pass here.
+            boolean wireGuardRequest = pathOnly.equals("/wireguard")
+                    || pathOnly.equals("/wireguard.html")
+                    || pathOnly.equals("/api/wireguard")
+                    || pathOnly.startsWith("/api/wireguard/");
+            boolean authenticated = remoteDevRequest || genAiRequest || wireGuardRequest
                 ? AuthMiddleware.checkJwtOnly(path, cookieHeader, authHeader, out)
                 : AuthMiddleware.checkAuth(path, cookieHeader, authHeader, out,
                     client.getRemoteSocketAddress(), hasTunnelHeaders);
@@ -743,6 +751,10 @@ public class HttpServer {
             } else if (path.equals("/mqtt.html") || path.equals("/mqtt")) {
                 if (!serveStaticFile(out, "local/mqtt.html")) {
                     HttpResponse.sendError(out, 404, "mqtt.html not found");
+                }
+            } else if (path.equals("/wireguard.html") || path.equals("/wireguard")) {
+                if (!serveStaticFile(out, "local/wireguard.html")) {
+                    HttpResponse.sendError(out, 404, "wireguard.html not found");
                 }
             } else if (path.equals("/trips.html") || path.equals("/trips")) {
                 if (!serveStaticFile(out, "local/trips.html")) {
@@ -1069,6 +1081,12 @@ public class HttpServer {
         // MQTT API
         if (path.startsWith("/api/mqtt/")) {
             return MqttApiHandler.handle(method, path, body, out);
+        }
+
+        // WireGuard tunnel config (JWT only, see the auth check above)
+        if (path.equals("/api/wireguard") || path.startsWith("/api/wireguard/")
+                || path.startsWith("/api/wireguard?")) {
+            return WireGuardApiHandler.handle(method, path, body, out);
         }
 
         // Automations API — plus the reusable Action Groups CRUD, which

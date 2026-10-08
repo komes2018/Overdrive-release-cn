@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="daemon_name_wireguard">מנהרת WireGuard</string>
+    <string name="daemon_config_no_wireguard">אין תצורת WireGuard</string>
+    <string name="daemon_status_wireguard_connected">מחובר · %1$s</string>
+    <string name="daemon_status_wireguard_connecting">מתחבר אל %1$s…</string>
+    <string name="daemon_status_wireguard_error">שגיאה: %1$s</string>
+</resources>

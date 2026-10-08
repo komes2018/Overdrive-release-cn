@@ -7,6 +7,7 @@ import com.overdrive.app.launcher.AdbDaemonLauncher
 import com.overdrive.app.launcher.AdbShellExecutor
 import com.overdrive.app.launcher.ZrokLauncher
 import com.overdrive.app.launcher.TailscaleLauncher
+import com.overdrive.app.launcher.WireGuardLauncher
 import com.overdrive.app.logging.LogManager
 import com.overdrive.app.telegram.config.UnifiedTelegramConfig
 import com.overdrive.app.ui.model.DaemonType
@@ -82,6 +83,7 @@ class DaemonStartupManager(
             DaemonType.CLOUDFLARED_TUNNEL,
             DaemonType.ZROK_TUNNEL,
             DaemonType.TAILSCALE_TUNNEL,
+            DaemonType.WIREGUARD_TUNNEL,
             DaemonType.TELEGRAM_DAEMON,
         )
 
@@ -791,6 +793,7 @@ class DaemonStartupManager(
         val cloudflaredEnabled = PreferencesManager.isDaemonEnabled(DaemonType.CLOUDFLARED_TUNNEL)
         val zrokEnabled = PreferencesManager.isDaemonEnabled(DaemonType.ZROK_TUNNEL)
         val tailscaleEnabled = PreferencesManager.isDaemonEnabled(DaemonType.TAILSCALE_TUNNEL)
+        val wireguardEnabled = PreferencesManager.isDaemonEnabled(DaemonType.WIREGUARD_TUNNEL)
 
         // Cloudflared and Zrok are mutually exclusive (both expose the dashboard publicly)
         if (cloudflaredEnabled) {
@@ -815,7 +818,7 @@ class DaemonStartupManager(
                     }
                 }
             }
-        } else if (!tailscaleEnabled) {
+        } else if (!tailscaleEnabled && !wireguardEnabled) {
             log.info(TAG, "No tunnel enabled by user")
         }
 
@@ -829,6 +832,22 @@ class DaemonStartupManager(
                     ifNotUserStopped(DaemonType.TAILSCALE_TUNNEL) {
                         log.info(TAG, "Starting Tailscale (user enabled)...")
                         vm.startDaemon(DaemonType.TAILSCALE_TUNNEL, userInitiated = false)
+                    }
+                }
+            }
+        }
+
+        // WireGuard also runs independently, but only once a config is stored
+        if (wireguardEnabled) {
+            vm.wireguardController.isRunning { isRunning ->
+                if (isRunning) {
+                    log.info(TAG, "WireGuard already running, skipping start")
+                } else {
+                    ifWireGuardConfigured {
+                        ifNotUserStopped(DaemonType.WIREGUARD_TUNNEL) {
+                            log.info(TAG, "Starting WireGuard (user enabled)...")
+                            vm.startDaemon(DaemonType.WIREGUARD_TUNNEL, userInitiated = false)
+                        }
                     }
                 }
             }
@@ -872,6 +891,15 @@ class DaemonStartupManager(
                     ifNotUserStopped(DaemonType.TAILSCALE_TUNNEL) {
                         log.info(TAG, "Boot: Starting Tailscale...")
                         startTailscaleOnBoot()
+                    }
+                }
+
+                if (PreferencesManager.isDaemonEnabled(DaemonType.WIREGUARD_TUNNEL)) {
+                    ifWireGuardConfigured {
+                        ifNotUserStopped(DaemonType.WIREGUARD_TUNNEL) {
+                            log.info(TAG, "Boot: Starting WireGuard...")
+                            startWireGuardOnBoot()
+                        }
                     }
                 }
             }, tunnelDelay)
@@ -940,6 +968,39 @@ class DaemonStartupManager(
         })
     }
 
+    /**
+     * Runs [action] only when a WireGuard config is stored. Without one the
+     * tunnel is left alone instead of cycling through start errors.
+     */
+    private fun ifWireGuardConfigured(action: () -> Unit) {
+        WireGuardLauncher(context, adbLauncher.adbShellExecutor, log).hasConfig { configured ->
+            if (configured) action() else log.debug(TAG, "WireGuard has no config, not starting")
+        }
+    }
+
+    /**
+     * Start WireGuard tunnel on boot using WireGuardLauncher directly.
+     */
+    private fun startWireGuardOnBoot() {
+        // Shared AdbShellExecutor, see startTailscaleOnBoot
+        val wireGuardLauncher = WireGuardLauncher(context, adbLauncher.adbShellExecutor, log)
+
+        wireGuardLauncher.launch(object : WireGuardLauncher.WireGuardCallback {
+            override fun onLog(message: String) {
+                log.debug(TAG, "[WireGuard Boot] $message")
+            }
+
+            override fun onStarted(summary: String?) {
+                log.info(TAG, "Boot: WireGuard started: $summary")
+            }
+
+            override fun onStopped() {}
+
+            override fun onError(error: String) {
+                log.error(TAG, "Boot: WireGuard error: $error")
+            }
+        })
+    }
 
     /**
      * Restart tunnel if enabled. When forceRestart=true, kills existing tunnel first
@@ -949,6 +1010,7 @@ class DaemonStartupManager(
         val cloudflaredEnabled = PreferencesManager.isDaemonEnabled(DaemonType.CLOUDFLARED_TUNNEL)
         val zrokEnabled = PreferencesManager.isDaemonEnabled(DaemonType.ZROK_TUNNEL)
         val tailscaleEnabled = PreferencesManager.isDaemonEnabled(DaemonType.TAILSCALE_TUNNEL)
+        val wireguardEnabled = PreferencesManager.isDaemonEnabled(DaemonType.WIREGUARD_TUNNEL)
 
         // Cloudflared and Zrok are mutually exclusive
         if (cloudflaredEnabled) {
@@ -1006,6 +1068,30 @@ class DaemonStartupManager(
                     handler.post { vm.startDaemon(DaemonType.TAILSCALE_TUNNEL) }
                 } else {
                     log.info(TAG, "Tailscale already running, no restart needed")
+                }
+            }
+        }
+
+        // WireGuard dials non-tunnel destinations via sing-box when it is up,
+        // so it needs a restart to pick up sing-box changes as well
+        if (wireguardEnabled) {
+            vm.wireguardController.isRunning { isRunning ->
+                if (isRunning && forceRestart) {
+                    log.info(TAG, "Restarting WireGuard to apply new proxy settings...")
+                    handler.post {
+                        vm.stopDaemon(DaemonType.WIREGUARD_TUNNEL)
+                        handler.postDelayed({
+                            log.info(TAG, "Starting WireGuard with new settings")
+                            vm.startDaemon(DaemonType.WIREGUARD_TUNNEL)
+                        }, 2000)
+                    }
+                } else if (!isRunning) {
+                    ifWireGuardConfigured {
+                        log.info(TAG, "Starting WireGuard (user enabled)")
+                        handler.post { vm.startDaemon(DaemonType.WIREGUARD_TUNNEL) }
+                    }
+                } else {
+                    log.info(TAG, "WireGuard already running, no restart needed")
                 }
             }
         }
@@ -1214,8 +1300,15 @@ class DaemonStartupManager(
             }
             for (type in candidates) {
                 if (!adbLauncher.processAliveIn(snapshot, type.processName)) {
-                    log.warn(TAG, "Health check: ${type.displayName} is DEAD — relaunching...")
-                    relaunchDaemon(type)
+                    if (type == DaemonType.WIREGUARD_TUNNEL) {
+                        ifWireGuardConfigured {
+                            log.warn(TAG, "Health check: ${type.displayName} is DEAD — relaunching...")
+                            relaunchDaemon(type)
+                        }
+                    } else {
+                        log.warn(TAG, "Health check: ${type.displayName} is DEAD — relaunching...")
+                        relaunchDaemon(type)
+                    }
                 }
             }
         }
@@ -1331,6 +1424,10 @@ class DaemonStartupManager(
                         override fun onTunnelUrl(url: String) { log.info(TAG, "HealthCheck: Zrok URL: $url") }
                         override fun onError(error: String) { log.error(TAG, "HealthCheck: Zrok restart failed: $error") }
                     })
+                }
+                DaemonType.WIREGUARD_TUNNEL -> {
+                    log.info(TAG, "HealthCheck: relaunching WireGuard via boot-path fallback")
+                    startWireGuardOnBoot()
                 }
                 else -> {
                     log.warn(TAG, "Health check: no ADB fallback for ${type.displayName}")

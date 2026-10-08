@@ -223,6 +223,7 @@
                     <div class="card-body">
                         <input type="hidden" id="formId" value="">
                         <div style="font-size:12px;color:var(--text-muted);margin-top:2px;margin-bottom:2px;" data-i18n="mqtt.tailscale_hint">如需连接 Tailnet 上的私有 MQTT 代理服务器：请在 Tailscale 守护进程设置中启用 Tailscale 代理，无需端口转发即可连接。注意：启用后公共代理服务器将无法访问。</div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;margin-bottom:2px;"><span data-i18n="mqtt.wireguard_hint">更倾向使用直连家庭/自建网络的 WireGuard 隧道？可在 WireGuard 页面进行配置。</span> <a href="wireguard.html" style="color:var(--brand-primary);" data-i18n="mqtt.wireguard_link">使用 WireGuard</a></div>
                         <div class="form-grid">
                             <div class="form-group" style="grid-column: span 2;">
                                 <label data-i18n="mqtt.field_name">连接名称</label>

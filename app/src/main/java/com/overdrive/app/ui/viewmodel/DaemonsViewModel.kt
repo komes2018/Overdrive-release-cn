@@ -51,6 +51,9 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
 
     // Expose tailscale controller for tunnel URL access
     val tailscaleController: TailscaleController
+
+    // Expose wireguard controller for status and config checks
+    val wireguardController: WireGuardController
     
     // Expose camera daemon controller for startup manager
     val cameraDaemonController: CameraDaemonController
@@ -81,6 +84,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
         cloudflaredController = CloudflaredController(app, adbLauncher)
         zrokController = ZrokController(app, adbLauncher)
         tailscaleController = TailscaleController(app, adbLauncher)
+        wireguardController = WireGuardController(app, adbLauncher)
         cameraDaemonController = CameraDaemonController(app, adbLauncher)
         singboxController = SingboxController(adbLauncher)
         
@@ -92,6 +96,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             DaemonType.CLOUDFLARED_TUNNEL to cloudflaredController,
             DaemonType.ZROK_TUNNEL to zrokController,
             DaemonType.TAILSCALE_TUNNEL to tailscaleController,
+            DaemonType.WIREGUARD_TUNNEL to wireguardController,
             DaemonType.TELEGRAM_DAEMON to TelegramDaemonController(adbLauncher)
         )
         
@@ -132,6 +137,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
                 refreshDaemonStatus(DaemonType.CLOUDFLARED_TUNNEL)
                 refreshDaemonStatus(DaemonType.ZROK_TUNNEL)
                 refreshDaemonStatus(DaemonType.TAILSCALE_TUNNEL)
+                refreshDaemonStatus(DaemonType.WIREGUARD_TUNNEL)
                 if (!tunnelPollStopped) tunnelPollHandler?.postDelayed(this, 30000)
             }
         }
@@ -406,6 +412,18 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
                 doRefreshDaemonStatus(type, controller, logResult)
             }
             return
+        } else if (type == DaemonType.WIREGUARD_TUNNEL) {
+            wireguardController.hasConfig { configured ->
+                if (!configured) {
+                    updateWireGuardNeedsConfig(appStr(R.string.daemon_config_no_wireguard))
+                    if (logResult) {
+                        LogManager.getInstance().debug("Daemons", "${type.name}: No config")
+                    }
+                    return@hasConfig
+                }
+                doRefreshDaemonStatus(type, controller, logResult)
+            }
+            return
         }
         
         doRefreshDaemonStatus(type, controller, logResult)
@@ -475,6 +493,19 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
                                     }
                                 }
                             }
+                        } else if (type == DaemonType.WIREGUARD_TUNNEL) {
+                            // For wireguard, the status text comes from wgproxy's status.json
+                            wireguardController.readStatus { status ->
+                                val statusText = wireGuardStatusText(status)
+                                updateStateWithSubprocesses(type, DaemonStatus.RUNNING, statusText, uptime, subprocesses)
+                                if (logResult) {
+                                    val uptimeStr = uptime?.let { " (uptime: $it)" } ?: ""
+                                    LogManager.getInstance().info("Daemons", "${type.name}: Running$uptimeStr - $statusText")
+                                    subprocesses.forEach { sp ->
+                                        LogManager.getInstance().debug("Daemons", "  └─ ${sp.name} (PID: ${sp.pid}, uptime: ${sp.uptime})")
+                                    }
+                                }
+                            }
                         } else {
                             updateStateWithSubprocesses(type, DaemonStatus.RUNNING, "Running", uptime, subprocesses)
                             if (logResult) {
@@ -496,6 +527,20 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     
+    private fun wireGuardStatusText(status: org.json.JSONObject?): String {
+        val endpoint = status?.let { com.overdrive.app.launcher.WireGuardLauncher.describeEndpoint(it) }
+            ?: "WireGuard"
+        return when (status?.optString("state", "")) {
+            "connected" -> appStr(R.string.daemon_status_wireguard_connected, endpoint)
+            "connecting", "reloading" -> appStr(R.string.daemon_status_wireguard_connecting, endpoint)
+            "error" -> appStr(
+                R.string.daemon_status_wireguard_error,
+                status?.optString("error", "")?.ifEmpty { "unknown" } ?: "unknown"
+            )
+            else -> appStr(R.string.daemon_status_running)
+        }
+    }
+
     private fun getProcessName(type: DaemonType): String {
         return when (type) {
             DaemonType.CAMERA_DAEMON -> "byd_cam_daemon"
@@ -505,6 +550,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             DaemonType.CLOUDFLARED_TUNNEL -> "cloudflared tunnel"
             DaemonType.ZROK_TUNNEL -> "zrok share"
             DaemonType.TAILSCALE_TUNNEL -> "tailscaled"
+            DaemonType.WIREGUARD_TUNNEL -> "wgproxy"
             DaemonType.TELEGRAM_DAEMON -> "telegram_bot_daemon"
         }
     }
@@ -518,6 +564,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             DaemonType.CLOUDFLARED_TUNNEL -> listOf("cloudflared")
             DaemonType.ZROK_TUNNEL -> listOf("zrok")
             DaemonType.TAILSCALE_TUNNEL -> listOf("tailscaled")
+            DaemonType.WIREGUARD_TUNNEL -> listOf("wgproxy")
             DaemonType.TELEGRAM_DAEMON -> listOf("telegram_bot_daemon")
         }
     }
@@ -581,6 +628,14 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
     fun updateTailscaleNeedsLogin(message: String) {
         publishState(DaemonType.TAILSCALE_TUNNEL,
             DaemonState.needsConfig(DaemonType.TAILSCALE_TUNNEL, message))
+    }
+    
+    /**
+     * Update WireGuard state to indicate configuration is needed.
+     */
+    fun updateWireGuardNeedsConfig(message: String) {
+        publishState(DaemonType.WIREGUARD_TUNNEL,
+            DaemonState.needsConfig(DaemonType.WIREGUARD_TUNNEL, message))
     }
     
     /**

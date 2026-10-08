@@ -33,14 +33,15 @@ enum class DaemonType(
      */
     val sentinelPath: String
 ) {
-    CAMERA_DAEMON("Camera Daemon", "byd_cam_daemon", "/data/local/tmp/camera_daemon.disabled"),
-    SENTRY_DAEMON("Sentry Daemon", "sentry_daemon", "/data/local/tmp/sentry_daemon.disabled"),
-    ACC_SENTRY_DAEMON("ACC Sentry", "acc_sentry_daemon", "/data/local/tmp/acc_sentry_daemon.disabled"),
-    SINGBOX_PROXY("Sing-box Proxy", "sing-box", "/data/local/tmp/singbox.disabled"),
-    CLOUDFLARED_TUNNEL("Cloudflared Tunnel", "cloudflared", "/data/local/tmp/cloudflared.disabled"),
-    ZROK_TUNNEL("Zrok Tunnel", "zrok", "/data/local/tmp/zrok.disabled"),
-    TAILSCALE_TUNNEL("Tailscale Tunnel", "tailscaled", "/data/local/tmp/tailscale.disabled"),
-    TELEGRAM_DAEMON("Telegram Bot", "telegram_bot_daemon", "/data/local/tmp/telegram_bot_daemon.disabled")
+    CAMERA_DAEMON("Camera Daemon", "byd_cam_daemon", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/camera_daemon.disabled")),
+    SENTRY_DAEMON("Sentry Daemon", "sentry_daemon", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/sentry_daemon.disabled")),
+    ACC_SENTRY_DAEMON("ACC Sentry", "acc_sentry_daemon", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/acc_sentry_daemon.disabled")),
+    SINGBOX_PROXY("Sing-box Proxy", "sing-box", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/singbox.disabled")),
+    CLOUDFLARED_TUNNEL("Cloudflared Tunnel", "cloudflared", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/cloudflared.disabled")),
+    ZROK_TUNNEL("Zrok Tunnel", "zrok", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/zrok.disabled")),
+    TAILSCALE_TUNNEL("Tailscale Tunnel", "tailscaled", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/tailscale.disabled")),
+    WIREGUARD_TUNNEL("WireGuard Tunnel", "wgproxy", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/wireguard.disabled")),
+    TELEGRAM_DAEMON("Telegram Bot", "telegram_bot_daemon", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/telegram_bot_daemon.disabled"))
 }
 
 /**
@@ -91,5 +92,6 @@ fun DaemonType.localizedName(context: Context): String = context.getString(when 
     DaemonType.CLOUDFLARED_TUNNEL -> R.string.daemon_name_cloudflared
     DaemonType.ZROK_TUNNEL        -> R.string.daemon_name_zrok
     DaemonType.TAILSCALE_TUNNEL   -> R.string.daemon_name_tailscale
+    DaemonType.WIREGUARD_TUNNEL   -> R.string.daemon_name_wireguard
     DaemonType.TELEGRAM_DAEMON    -> R.string.daemon_name_telegram
 })

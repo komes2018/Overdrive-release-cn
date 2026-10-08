@@ -1060,7 +1060,7 @@ public final class GenAiContext {
         try {
             for (String component : new String[]{
                     "camera", "sentry", "accsentry",
-                    "tailscale", "singbox"}) {
+                    "tailscale", "wireguard", "singbox"}) {
                 String path = DaemonLogPaths.pathFor(component);
                 if (path == null) continue;
                 java.io.File file = new java.io.File(path);

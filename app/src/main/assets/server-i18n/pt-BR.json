@@ -244,6 +244,7 @@
       "cloudflare_tunnel": "Túnel CloudFlare",
       "zrok_tunnel": "Túnel Zrok",
       "tailscale_tunnel": "Túnel Tailscale",
+      "wireguard_tunnel": "Túnel WireGuard",
       "sing_box": "Sing-Box"
     },
     "buttons": {

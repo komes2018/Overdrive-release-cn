@@ -49,6 +49,7 @@ public class SystemCommandHandler implements TelegramCommandHandler {
             {"cloudflared", "cloudflared", "daemon_names.cloudflare_tunnel", "yes", "yes"},
             {"zrok", "zrok", "daemon_names.zrok_tunnel", "yes", "yes"},
             {"tailscale", "tailscaled", "daemon_names.tailscale_tunnel", "yes", "yes"},
+            {"wireguard", "wgproxy", "daemon_names.wireguard_tunnel", "yes", "yes"},
             {"singbox", "sing-box", "daemon_names.sing_box", "yes", "no"}
         };
         

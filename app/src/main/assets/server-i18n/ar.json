@@ -218,6 +218,7 @@
       "cloudflare_tunnel": "نفق Cloudflare",
       "zrok_tunnel": "نفق زروك",
       "tailscale_tunnel": "نفق مخصص",
+      "wireguard_tunnel": "نفق WireGuard",
       "sing_box": "صندوق واحد"
     },
     "buttons": {

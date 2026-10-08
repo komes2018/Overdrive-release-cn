@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wgsetup_title">WireGuard setup</string>
+    <string name="wgsetup_explainer">Connects the car to your home network through WireGuard. Addresses in AllowedIPs (for example your Home Assistant broker) are reached through the tunnel; everything else keeps its normal route. Use the peer (client) config your router exported, for example from OPNsense, Fritz!Box or wg-easy.</string>
+
+    <string name="wgsetup_status_loading">Checking status…</string>
+    <string name="wgsetup_status_none">No configuration yet</string>
+    <string name="wgsetup_status_stopped">Configured, tunnel not running. Switch it on in the Daemons list.</string>
+    <string name="wgsetup_status_connected">Connected to %1$s</string>
+    <string name="wgsetup_status_connecting">Connecting to %1$s…</string>
+    <string name="wgsetup_status_reloading">Applying the new configuration…</string>
+    <string name="wgsetup_status_error">Error: %1$s</string>
+    <string name="wgsetup_status_unavailable">Status unavailable, the daemon is not reachable</string>
+    <string name="wgsetup_handshake_seconds">Last handshake %1$ds ago</string>
+    <string name="wgsetup_handshake_minutes">Last handshake %1$dm ago</string>
+    <string name="wgsetup_handshake_hours">Last handshake %1$dh ago</string>
+    <string name="wgsetup_handshake_none">No handshake yet</string>
+    <string name="wgsetup_detail_address">Tunnel address: %1$s</string>
+    <string name="wgsetup_detail_routes">Routes: %1$s</string>
+
+    <string name="wgsetup_config_hint">Paste your WireGuard config ([Interface] … [Peer] …)</string>
+    <string name="wgsetup_key_note">The private key stays on the car and is never shown again. Saving a new config replaces the old one.</string>
+
+    <string name="wgsetup_paste">Paste</string>
+    <string name="wgsetup_import">Import file</string>
+    <string name="wgsetup_phone">Set up from phone</string>
+    <string name="wgsetup_delete">Delete config</string>
+
+    <string name="wgsetup_clipboard_empty">The clipboard is empty</string>
+    <string name="wgsetup_import_failed">Could not read that file</string>
+    <string name="wgsetup_import_too_large">That file is too large</string>
+    <string name="wgsetup_import_no_qr">No QR code found in that image</string>
+    <string name="wgsetup_imported">Imported. Check the text and tap Save.</string>
+
+    <string name="wgsetup_phone_title">Open this on your phone</string>
+    <string name="wgsetup_phone_steps">Scan the code, sign in, then upload or paste the config your router exported. The phone must reach the car (same Wi-Fi or hotspot, or through an active tunnel).</string>
+    <string name="wgsetup_phone_lan_note">Open this only on your own Wi-Fi or the car hotspot.</string>
+    <string name="wgsetup_phone_no_url">No address available. Connect the car to Wi-Fi, turn on the hotspot or start a tunnel first.</string>
+
+    <string name="wgsetup_empty">Paste or import a config first</string>
+    <string name="wgsetup_saved">WireGuard config saved</string>
+    <string name="wgsetup_delete_title">Delete WireGuard config?</string>
+    <string name="wgsetup_delete_message">The saved config, including its private key, is removed and the tunnel is stopped.</string>
+    <string name="wgsetup_deleted">WireGuard config deleted</string>
+    <string name="wgsetup_delete_failed">Could not delete the config</string>
+</resources>

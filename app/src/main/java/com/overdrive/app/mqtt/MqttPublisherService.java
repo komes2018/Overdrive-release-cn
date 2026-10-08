@@ -144,10 +144,10 @@ public class MqttPublisherService implements MqttCallback {
         // "will retry on first publish" contract at the call site never actually held.
         running = true;
 
-        // issue #182: when the Tailscale SOCKS proxy is ENABLED the broker is normally reachable
+        // issue #182: when the Tailscale or WireGuard SOCKS proxy is ENABLED the broker is normally reachable
         // ONLY through it (e.g. a LAN broker behind a subnet router while the car is on cellular).
         // A DIRECT dial in that state can never succeed off Wi-Fi and strands the connection, so
-        // hold off while the proxy is warming up (tailscaled still binding at boot / after a link
+        // hold off while the proxy is warming up (tailscaled/wgproxy still binding at boot / after a link
         // change) instead of falling through to the direct-socket path below. We do NOT bump
         // consecutiveFailures — the health loop re-probes at the min-interval floor and connects the
         // instant the proxy binds. Bounded by PROXY_WARMUP_GRACE_MS so a genuinely dead proxy can't
@@ -159,15 +159,15 @@ public class MqttPublisherService implements MqttCallback {
             long waitedMs = now - proxyWaitStartMs;
             if (waitedMs < PROXY_WARMUP_GRACE_MS) {
                 connected = false;
-                lastError = "Tailscale proxy enabled but not reachable yet (127.0.0.1:"
-                        + ProxyHelper.getTailscaleProxyPort() + ") — deferring connect until proxy is up";
+                lastError = "Proxy enabled but not reachable yet (127.0.0.1:"
+                        + ProxyHelper.getExpectedProxyPort() + ") — deferring connect until proxy is up";
                 if (!loggedProxyWait) {
                     logger.warn(lastError);
                     loggedProxyWait = true;
                 }
                 return false;
             }
-            logger.warn("Tailscale proxy still unreachable after " + (waitedMs / 1000)
+            logger.warn("Proxy still unreachable after " + (waitedMs / 1000)
                     + "s — attempting a direct connect as a fallback");
         }
         // Proxy is up (or the grace window elapsed) — clear the warm-up state and proceed to connect.

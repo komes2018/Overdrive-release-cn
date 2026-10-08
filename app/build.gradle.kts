@@ -544,6 +544,8 @@ android {
             // llvm-strip after UPX rewrites the tested payload and removes UPX's
             // integrity metadata, so package this one file byte-for-byte.
             keepDebugSymbols += "**/libtailscale.so"
+            // libwireguard.so (wgproxy) is UPX-packed the same way
+            keepDebugSymbols += "**/libwireguard.so"
 
             // Keep only arm64-v8a (You already have this, but good to keep)
             excludes += listOf(

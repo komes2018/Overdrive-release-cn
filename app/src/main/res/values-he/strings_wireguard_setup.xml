@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wgsetup_title">הגדרת WireGuard</string>
+    <string name="wgsetup_explainer">מחבר את הרכב לרשת הביתית שלך דרך WireGuard. כתובות ב-AllowedIPs (למשל ה-broker של Home Assistant) מושגות דרך המנהרה; כל השאר ממשיך בנתיב הרגיל. השתמש בתצורת ה-peer (הלקוח) שהנתב שלך ייצא, למשל מ-OPNsense, Fritz!Box או wg-easy.</string>
+
+    <string name="wgsetup_status_loading">בודק מצב…</string>
+    <string name="wgsetup_status_none">אין עדיין תצורה</string>
+    <string name="wgsetup_status_stopped">מוגדר, המנהרה אינה פועלת. הפעל אותה ברשימת ה-Daemons.</string>
+    <string name="wgsetup_status_connected">מחובר אל %1$s</string>
+    <string name="wgsetup_status_connecting">מתחבר אל %1$s…</string>
+    <string name="wgsetup_status_reloading">מחיל את התצורה החדשה…</string>
+    <string name="wgsetup_status_error">שגיאה: %1$s</string>
+    <string name="wgsetup_status_unavailable">המצב אינו זמין, לא ניתן להגיע ל-daemon</string>
+    <string name="wgsetup_handshake_seconds">לחיצת יד אחרונה לפני %1$d שנ׳</string>
+    <string name="wgsetup_handshake_minutes">לחיצת יד אחרונה לפני %1$d דק׳</string>
+    <string name="wgsetup_handshake_hours">לחיצת יד אחרונה לפני %1$d שע׳</string>
+    <string name="wgsetup_handshake_none">עדיין אין לחיצת יד</string>
+    <string name="wgsetup_detail_address">כתובת המנהרה: %1$s</string>
+    <string name="wgsetup_detail_routes">נתיבים: %1$s</string>
+
+    <string name="wgsetup_config_hint">הדבק את תצורת WireGuard שלך ([Interface] … [Peer] …)</string>
+    <string name="wgsetup_key_note">המפתח הפרטי נשאר ברכב ולעולם אינו מוצג שוב. שמירת תצורה חדשה מחליפה את הישנה.</string>
+
+    <string name="wgsetup_paste">הדבק</string>
+    <string name="wgsetup_import">ייבוא קובץ</string>
+    <string name="wgsetup_phone">הגדרה מהטלפון</string>
+    <string name="wgsetup_delete">מחק תצורה</string>
+
+    <string name="wgsetup_clipboard_empty">הלוח ריק</string>
+    <string name="wgsetup_import_failed">לא ניתן לקרוא את הקובץ</string>
+    <string name="wgsetup_import_too_large">הקובץ גדול מדי</string>
+    <string name="wgsetup_import_no_qr">לא נמצא קוד QR בתמונה</string>
+    <string name="wgsetup_imported">יובא. בדוק את הטקסט ולחץ על שמירה.</string>
+
+    <string name="wgsetup_phone_title">פתח זאת בטלפון שלך</string>
+    <string name="wgsetup_phone_steps">סרוק את הקוד, התחבר, ואז העלה או הדבק את התצורה שהנתב שלך ייצא. הטלפון צריך להגיע אל הרכב (אותה רשת Wi-Fi או נקודה חמה, או דרך מנהרה פעילה).</string>
+    <string name="wgsetup_phone_lan_note">פתח זאת רק ב-Wi-Fi שלך או בנקודה החמה של הרכב.</string>
+    <string name="wgsetup_phone_no_url">אין כתובת זמינה. חבר את הרכב ל-Wi-Fi, הפעל את הנקודה החמה או הפעל מנהרה קודם.</string>
+
+    <string name="wgsetup_empty">הדבק או ייבא תצורה קודם</string>
+    <string name="wgsetup_saved">תצורת WireGuard נשמרה</string>
+    <string name="wgsetup_delete_title">למחוק את תצורת WireGuard?</string>
+    <string name="wgsetup_delete_message">התצורה השמורה, כולל המפתח הפרטי שלה, תוסר והמנהרה תיעצר.</string>
+    <string name="wgsetup_deleted">תצורת WireGuard נמחקה</string>
+    <string name="wgsetup_delete_failed">לא ניתן למחוק את התצורה</string>
+</resources>
