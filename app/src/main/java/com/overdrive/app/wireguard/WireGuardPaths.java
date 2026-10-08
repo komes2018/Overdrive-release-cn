@@ -7,7 +7,7 @@ import com.overdrive.app.util.DaemonStorage;
  * the Telegram/web paths.
  *
  * <p>Permissions: HOME 0711, CONFIG 0600 (holds the private key), STATUS and
- * PROXY_FLAG 0644.
+ * PROXY_FLAG and EXPOSE_FLAG 0644.
  */
 public final class WireGuardPaths {
     private WireGuardPaths() {}
@@ -19,6 +19,8 @@ public final class WireGuardPaths {
     public static final String BINARY = HOME + "/wgproxy";
     public static final String VERSION_FILE = HOME + "/installed_version";
     public static final String PROXY_FLAG = HOME + "/proxy_enabled";
+    /** Opt-in "dashboard reachable over WireGuard" ("true"/"false"); absent means off. */
+    public static final String EXPOSE_FLAG = HOME + "/expose_dashboard";
 
     /** Loopback SOCKS5 listener of wgproxy. */
     public static final int SOCKS_PORT = 8541;

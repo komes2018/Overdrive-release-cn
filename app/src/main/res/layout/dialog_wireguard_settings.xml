@@ -67,6 +67,35 @@
 
         </com.google.android.material.card.MaterialCardView>
 
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/switchWgExpose"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/card_gap_vertical"
+            android:checked="false"
+            android:paddingVertical="8dp"
+            android:text="@string/wgsetup_expose"
+            android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+            android:textColor="?attr/colorOnSurface" />
+
+        <TextView
+            android:id="@+id/tvWgExposeNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/wgsetup_expose_warning"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="?attr/colorOnSurfaceVariant" />
+
+        <TextView
+            android:id="@+id/tvWgExposeUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:fontFamily="monospace"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:visibility="gone" />
+
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/tilWgConfig"
             style="@style/Widget.Material3.TextInputLayout.OutlinedBox"

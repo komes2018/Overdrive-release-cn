@@ -106,6 +106,37 @@ public final class WireGuardStore {
         return new File(WireGuardPaths.CONFIG).isFile();
     }
 
+    /** True when the user opted in to serving the dashboard on the tunnel address. Off when unset. */
+    public static boolean isDashboardExposed() {
+        File f = new File(WireGuardPaths.EXPOSE_FLAG);
+        if (!f.isFile() || f.length() > 16) return false;
+        try {
+            return "true".equalsIgnoreCase(new String(readAll(f), StandardCharsets.UTF_8).trim());
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /** Persist the dashboard opt-in. A running wgproxy applies it after a restart. */
+    public static synchronized void setDashboardExposed(boolean enabled) throws IOException {
+        File home = new File(WireGuardPaths.HOME);
+        if (!home.isDirectory() && !home.mkdirs() && !home.isDirectory()) {
+            throw new IOException("cannot create " + home);
+        }
+        chmod(home, 0711);
+        File tmp = new File(WireGuardPaths.EXPOSE_FLAG + ".tmp");
+        File dest = new File(WireGuardPaths.EXPOSE_FLAG);
+        try {
+            try (FileOutputStream out = new FileOutputStream(tmp)) {
+                out.write((enabled ? "true\n" : "false\n").getBytes(StandardCharsets.UTF_8));
+            }
+            chmod(tmp, 0644);
+            if (!tmp.renameTo(dest)) throw new IOException("cannot move flag into place");
+        } finally {
+            if (tmp.exists()) tmp.delete();
+        }
+    }
+
     /** Summary of the stored config, or null when there is none or it no longer validates. */
     public static WireGuardConfig.Summary readSummary() {
         File f = new File(WireGuardPaths.CONFIG);

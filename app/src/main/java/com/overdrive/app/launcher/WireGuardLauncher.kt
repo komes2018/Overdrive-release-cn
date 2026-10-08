@@ -2,6 +2,7 @@ package com.overdrive.app.launcher
 
 import android.content.Context
 import com.overdrive.app.BuildConfig
+import com.overdrive.app.daemon.CameraDaemon
 import com.overdrive.app.logging.LogManager
 import com.overdrive.app.mqtt.ProxyHelper
 import com.overdrive.app.wireguard.WireGuardPaths
@@ -32,6 +33,11 @@ class WireGuardLauncher(
         // sing-box SOCKS/HTTP port used as upstream for non-tunnel destinations
         private const val UPSTREAM_PORT = 8119
 
+        // Tunnel port -> loopback dashboard. wgproxy prepends PROXY protocol v1,
+        // which HttpServer needs to treat these requests as remote (JWT required).
+        private const val EXPOSE_DASHBOARD_ARG =
+            "-expose ${CameraDaemon.HTTP_PORT}=127.0.0.1:${CameraDaemon.HTTP_PORT}"
+
         private const val STATUS_POLL_ATTEMPTS = 8
         private const val STATUS_POLL_DELAY_MS = 1000L
 
@@ -59,8 +65,10 @@ class WireGuardLauncher(
          * changed); any other exit, including SIGTERM, ends the loop.
          */
         @JvmStatic
-        fun buildLaunchCommand(useUpstream: Boolean): String {
-            val upstream = if (useUpstream) " -upstream 127.0.0.1:$UPSTREAM_PORT" else ""
+        @JvmOverloads
+        fun buildLaunchCommand(useUpstream: Boolean, exposeDashboard: Boolean = false): String {
+            val upstream = (if (useUpstream) " -upstream 127.0.0.1:$UPSTREAM_PORT" else "") +
+                (if (exposeDashboard) " $EXPOSE_DASHBOARD_ARG" else "")
             return "nohup sh -c 'while :; do ${WireGuardPaths.BINARY} " +
                 "-config ${WireGuardPaths.CONFIG} " +
                 "-socks 127.0.0.1:${WireGuardPaths.SOCKS_PORT} " +
@@ -243,20 +251,63 @@ class WireGuardLauncher(
 
     private fun launchInstalled(callback: WireGuardCallback) {
         val useUpstream = ProxyHelper.probePort(UPSTREAM_PORT)
-        // Clear the previous run's status so the poll below only sees fresh state.
-        writeProxyFlag(true, callback, "rm -f ${WireGuardPaths.STATUS}; ") {
-            adbShellExecutor.execute(
-                command = buildLaunchCommand(useUpstream),
-                callback = object : AdbShellExecutor.ShellCallback {
-                    override fun onSuccess(output: String) {
-                        logManager.info(TAG, "WireGuard process started (upstream=$useUpstream)")
-                        callback.onLog("WireGuard process started")
-                        pollStatus(0, callback)
-                    }
+        readExposeFlag { expose ->
+            // Clear the previous run's status so the poll below only sees fresh state.
+            writeProxyFlag(true, callback, "rm -f ${WireGuardPaths.STATUS}; ") {
+                adbShellExecutor.execute(
+                    command = buildLaunchCommand(useUpstream, expose),
+                    callback = object : AdbShellExecutor.ShellCallback {
+                        override fun onSuccess(output: String) {
+                            logManager.info(
+                                TAG,
+                                "WireGuard process started (upstream=$useUpstream, dashboard=$expose)"
+                            )
+                            callback.onLog("WireGuard process started")
+                            pollStatus(0, callback)
+                        }
 
+                        override fun onError(error: String) {
+                            logManager.error(TAG, "Failed to start WireGuard: $error")
+                            callback.onError("Failed to start WireGuard: $error")
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    private fun readExposeFlag(callback: (Boolean) -> Unit) {
+        adbShellExecutor.execute(
+            command = "cat ${WireGuardPaths.EXPOSE_FLAG} 2>/dev/null",
+            callback = object : AdbShellExecutor.ShellCallback {
+                override fun onSuccess(output: String) {
+                    callback(output.trim().equals("true", ignoreCase = true))
+                }
+
+                // Unreadable means off: never expose on a guess.
+                override fun onError(error: String) = callback(false)
+            }
+        )
+    }
+
+    /**
+     * Stop wgproxy and start it again so a changed launch option (the dashboard
+     * opt-in) takes effect. The tunnel stays enabled for the health check.
+     */
+    fun restart(callback: WireGuardCallback) {
+        getPids { pids ->
+            val relaunch = { launch(callback) }
+            if (pids.isEmpty()) {
+                relaunch()
+                return@getPids
+            }
+            adbShellExecutor.execute(
+                command = buildKillPidsCommand(pids),
+                callback = object : AdbShellExecutor.ShellCallback {
+                    override fun onSuccess(output: String) = relaunch()
                     override fun onError(error: String) {
-                        logManager.error(TAG, "Failed to start WireGuard: $error")
-                        callback.onError("Failed to start WireGuard: $error")
+                        logManager.error(TAG, "Failed to stop WireGuard for restart: $error")
+                        callback.onError("Failed to restart WireGuard: $error")
                     }
                 }
             )

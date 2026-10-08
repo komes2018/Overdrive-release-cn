@@ -18,6 +18,11 @@
     <string name="wgsetup_detail_address">כתובת המנהרה: %1$s</string>
     <string name="wgsetup_detail_routes">נתיבים: %1$s</string>
 
+    <string name="wgsetup_expose">הדשבורד נגיש דרך WireGuard</string>
+    <string name="wgsetup_expose_warning">כל peer שמגיע לכתובת המנהרה של הרכב יכול לפתוח את דף ההתחברות. הגבל את הגישה בשרת ה-WireGuard.</string>
+    <string name="wgsetup_expose_url">דשבורד: %1$s</string>
+    <string name="wgsetup_expose_failed">לא ניתן לשנות את הגדרת הדשבורד</string>
+
     <string name="wgsetup_config_hint">הדבק את תצורת WireGuard שלך ([Interface] … [Peer] …)</string>
     <string name="wgsetup_key_note">המפתח הפרטי נשאר ברכב ולעולם אינו מוצג שוב. שמירת תצורה חדשה מחליפה את הישנה.</string>
 

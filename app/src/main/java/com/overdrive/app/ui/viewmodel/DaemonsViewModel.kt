@@ -330,6 +330,23 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
         })
     }
     
+    /** Restart the WireGuard tunnel to apply a changed launch option. No-op sentinel/pref changes. */
+    fun restartWireGuard() {
+        val type = DaemonType.WIREGUARD_TUNNEL
+        wireguardController.restart(object : DaemonCallback {
+            override fun onStatusChanged(status: DaemonStatus, message: String) {
+                updateState(type, status, message)
+            }
+
+            override fun onError(error: String) {
+                updateState(type, DaemonStatus.ERROR, error)
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    refreshDaemonStatus(type)
+                }, 1000)
+            }
+        })
+    }
+
     fun stopDaemon(type: DaemonType) {
         val controller = controllers[type] ?: return
 

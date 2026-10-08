@@ -1061,7 +1061,8 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 if (useProxy) {
                     ctx.log("Using sing-box as upstream for WireGuard...");
                 }
-                cmd = com.overdrive.app.launcher.WireGuardLauncher.buildLaunchCommand(useProxy);
+                cmd = com.overdrive.app.launcher.WireGuardLauncher.buildLaunchCommand(
+                        useProxy, com.overdrive.app.wireguard.WireGuardStore.isDashboardExposed());
                 processName = "wgproxy";
                 break;
 

@@ -18,6 +18,11 @@
     <string name="wgsetup_detail_address">Tunnel address: %1$s</string>
     <string name="wgsetup_detail_routes">Routes: %1$s</string>
 
+    <string name="wgsetup_expose">Dashboard reachable over WireGuard</string>
+    <string name="wgsetup_expose_warning">Every peer that can reach the car\'s tunnel address can open the login page. Restrict access on the WireGuard server.</string>
+    <string name="wgsetup_expose_url">Dashboard: %1$s</string>
+    <string name="wgsetup_expose_failed">Could not change the dashboard setting</string>
+
     <string name="wgsetup_config_hint">Paste your WireGuard config ([Interface] … [Peer] …)</string>
     <string name="wgsetup_key_note">The private key stays on the car and is never shown again. Saving a new config replaces the old one.</string>
 

@@ -47,6 +47,23 @@ public class WireGuardLauncherContractTest {
         assertTrue(command.contains("[ $? -eq 3 ] || break; done'"));
         assertTrue(command.endsWith("> " + WireGuardPaths.LOG + " 2>&1 &"));
         assertFalse(command.contains("-upstream"));
+        assertFalse(command.contains("-expose"));
+    }
+
+    @Test
+    public void dashboardIsExposedOnlyWhenOptedIn() {
+        assertFalse(WireGuardLauncher.buildLaunchCommand(false, false).contains("-expose"));
+        assertFalse(WireGuardLauncher.buildLaunchCommand(true, false).contains("-expose"));
+
+        String command = WireGuardLauncher.buildLaunchCommand(false, true);
+        assertTrue(command.contains(" -expose 8080=127.0.0.1:8080"));
+        assertTrue(command.indexOf("-expose") < command.indexOf("[ $? -eq 3 ]"));
+        assertTrue(WireGuardLauncher.buildLaunchCommand(true, true).contains("-upstream 127.0.0.1:8119 -expose"));
+    }
+
+    @Test
+    public void exposeFlagIsStoredNextToTheProxyFlag() {
+        assertEquals(WireGuardPaths.HOME + "/expose_dashboard", WireGuardPaths.EXPOSE_FLAG);
     }
 
     @Test
@@ -135,6 +152,23 @@ public class WireGuardLauncherContractTest {
         assertTrue(config > wgCase && config < deployment);
         assertTrue(stale > deployment && stale < launch);
         assertTrue(source.substring(stale, launch).contains("return false;"));
+    }
+
+    @Test
+    public void everyLaunchPathReadsTheOptInAndFailsClosed() throws Exception {
+        String telegram = read(
+                "app/src/main/java/com/overdrive/app/daemon/telegram/DaemonCommandHandler.java");
+        String launcher = read(
+                "app/src/main/java/com/overdrive/app/launcher/WireGuardLauncher.kt");
+        String api = read("app/src/main/java/com/overdrive/app/server/WireGuardApiHandler.java");
+        int wgCase = telegram.indexOf("case \"wireguard\":");
+
+        assertTrue(telegram.indexOf("WireGuardStore.isDashboardExposed()", wgCase) > wgCase);
+        assertTrue(launcher.contains("buildLaunchCommand(useUpstream, expose)"));
+        // An unreadable flag must mean "off".
+        int onError = launcher.indexOf("callback(false)", launcher.indexOf("private fun readExposeFlag("));
+        assertTrue(onError > 0);
+        assertTrue(api.contains("\"/api/wireguard/expose\""));
     }
 
     @Test

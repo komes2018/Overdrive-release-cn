@@ -15,6 +15,7 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.appcompat.app.AlertDialog
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.switchmaterial.SwitchMaterial
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.overdrive.app.R
@@ -53,6 +54,8 @@ class WireGuardSettingsDialog private constructor(
     private lateinit var tilConfig: TextInputLayout
     private lateinit var etConfig: TextInputEditText
     private lateinit var phoneContainer: View
+    private lateinit var switchExpose: SwitchMaterial
+    private lateinit var tvExposeUrl: TextView
     private var closed = false
 
     private val poll = object : Runnable {
@@ -70,6 +73,9 @@ class WireGuardSettingsDialog private constructor(
         tilConfig = view.findViewById(R.id.tilWgConfig)
         etConfig = view.findViewById(R.id.etWgConfig)
         phoneContainer = view.findViewById(R.id.wgPhoneContainer)
+        switchExpose = view.findViewById(R.id.switchWgExpose)
+        tvExposeUrl = view.findViewById(R.id.tvWgExposeUrl)
+        switchExpose.setOnCheckedChangeListener(exposeListener)
 
         view.findViewById<MaterialButton>(R.id.btnWgPaste).setOnClickListener { pasteFromClipboard() }
         view.findViewById<MaterialButton>(R.id.btnWgImport).setOnClickListener {
@@ -111,6 +117,59 @@ class WireGuardSettingsDialog private constructor(
         main.post(poll)
     }
 
+    // ---- dashboard opt-in ----
+
+    private val exposeListener = android.widget.CompoundButton.OnCheckedChangeListener { button, checked ->
+        button.isEnabled = false
+        io.execute {
+            val body = JSONObject().put("enabled", checked).toString()
+            val ok = request("POST", "/api/wireguard/expose", body)
+                ?.second?.optBoolean("success", false) == true
+            val running = ok && request("GET", "/api/wireguard", null)
+                ?.second?.optBoolean("running", false) == true
+            main.post {
+                button.isEnabled = true
+                if (!ok) {
+                    setExposeChecked(!checked)
+                    toast(R.string.wgsetup_expose_failed)
+                    return@post
+                }
+                // wgproxy takes its launch options at start, so a running tunnel restarts.
+                if (running) daemonsViewModel.restartWireGuard()
+                if (!closed) refreshStatus()
+            }
+        }
+    }
+
+    private fun setExposeChecked(checked: Boolean) {
+        if (switchExpose.isChecked == checked) return
+        switchExpose.setOnCheckedChangeListener(null)
+        switchExpose.isChecked = checked
+        switchExpose.setOnCheckedChangeListener(exposeListener)
+    }
+
+    /** Tunnel address and port the dashboard answers on, taken from the live status. */
+    private fun renderExposeUrl(json: JSONObject, status: JSONObject?) {
+        val exposed = json.optBoolean("expose_dashboard", false)
+        setExposeChecked(exposed)
+        val ports = status?.optJSONArray("expose")
+        val addrs = status?.optJSONArray("addresses")
+        val live = ports != null && ports.length() > 0 && addrs != null && addrs.length() > 0
+        if (!exposed || !live) {
+            tvExposeUrl.visibility = View.GONE
+            return
+        }
+        val urls = (0 until addrs!!.length()).mapNotNull { i ->
+            val ip = addrs.optString(i).substringBefore('/')
+            if (ip.isEmpty()) return@mapNotNull null
+            val host = if (ip.contains(':')) "[$ip]" else ip
+            val suffix = if (ports!!.optInt(0) == 80) "" else ":${ports.optInt(0)}"
+            "http://$host$suffix"
+        }
+        tvExposeUrl.text = context.getString(R.string.wgsetup_expose_url, urls.joinToString(", "))
+        tvExposeUrl.visibility = if (urls.isEmpty()) View.GONE else View.VISIBLE
+    }
+
     // ---- status ----
 
     private fun refreshStatus() {
@@ -136,6 +195,7 @@ class WireGuardSettingsDialog private constructor(
         val running = json.optBoolean("running", false)
         val summary = json.optJSONObject("summary")
         val status = if (running) json.optJSONObject("status") else null
+        renderExposeUrl(json, status)
         dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.visibility =
             if (configured) View.VISIBLE else View.GONE
 

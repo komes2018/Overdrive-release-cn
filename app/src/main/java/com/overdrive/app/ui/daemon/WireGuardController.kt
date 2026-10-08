@@ -52,6 +52,28 @@ class WireGuardController(
         })
     }
 
+    /** Restart wgproxy so the dashboard opt-in is applied. */
+    fun restart(callback: DaemonCallback) {
+        callback.onStatusChanged(DaemonStatus.STARTING, "Restarting WireGuard tunnel...")
+        ProxyHelper.invalidateCache()
+        wireGuardLauncher.restart(object : WireGuardLauncher.WireGuardCallback {
+            override fun onLog(message: String) =
+                callback.onStatusChanged(DaemonStatus.STARTING, message)
+
+            override fun onStarted(summary: String?) {
+                ProxyHelper.invalidateCache()
+                callback.onStatusChanged(DaemonStatus.RUNNING, summary ?: "")
+            }
+
+            override fun onStopped() {}
+
+            override fun onError(error: String) {
+                ProxyHelper.invalidateCache()
+                callback.onError(error)
+            }
+        })
+    }
+
     override fun stop(callback: DaemonCallback) {
         callback.onStatusChanged(DaemonStatus.STOPPING, "Stopping WireGuard tunnel...")
 

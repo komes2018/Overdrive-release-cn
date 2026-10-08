@@ -43,6 +43,15 @@ func main() {
 	bootstrap := flag.String("bootstrap-dns", "1.1.1.1:53,8.8.8.8:53,9.9.9.9:53",
 		"resolvers for endpoint host names when the system resolver is unusable")
 	upstream := flag.String("upstream", "", "optional loopback HTTP CONNECT proxy (sing-box) for destinations outside the tunnel")
+	var exposes []exposeSpec
+	flag.Func("expose", "publish a tunnel port on a loopback backend with PROXY protocol v1, <port>=<host:port> (repeatable)",
+		func(v string) error {
+			sp, err := parseExpose(v)
+			if err == nil {
+				exposes = append(exposes, sp)
+			}
+			return err
+		})
 	check := flag.Bool("check", false, "validate the config, print a JSON summary and exit")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
@@ -90,6 +99,7 @@ func main() {
 	r := newRunner(cfg, newSystemResolver(splitList(*bootstrap)), *statusPath)
 	r.configPath = *configPath
 	r.upstream = *upstream
+	r.expose = exposes
 	err = r.run(*socksAddr)
 	switch {
 	case errors.Is(err, errReload):
@@ -114,6 +124,7 @@ type runner struct {
 	statusPath  string
 	configPath  string
 	upstream    string
+	expose      []exposeSpec
 	configStamp fileStamp
 
 	tnet *netstack.Net
@@ -206,6 +217,18 @@ func (r *runner) run(socksAddr string) error {
 			log.Printf("socks: %v", err)
 		}
 	}()
+	for _, sp := range r.expose {
+		es := newExposeServer(sp)
+		defer es.close()
+		for _, a := range r.cfg.Addresses {
+			l, err := r.tnet.ListenTCPAddrPort(netip.AddrPortFrom(a.Addr(), sp.Port))
+			if err != nil {
+				return fmt.Errorf("expose %d on %s: %w", sp.Port, a.Addr(), err)
+			}
+			go es.serve(l)
+			log.Printf("exposing %s -> %s (PROXY v1)", netip.AddrPortFrom(a.Addr(), sp.Port), sp.Backend)
+		}
+	}
 	log.Printf("wgproxy %s up, socks5 on %s, routes %v", version, socksAddr, r.cfg.Routes())
 
 	tick := time.NewTicker(5 * time.Second)
@@ -506,6 +529,7 @@ type status struct {
 	Updated   int64      `json:"updated"`
 	Addresses []string   `json:"addresses"`
 	Routes    []string   `json:"routes"`
+	Expose    []int      `json:"expose,omitempty"`
 	Peers     []peerStat `json:"peers"`
 }
 
@@ -548,6 +572,9 @@ func (r *runner) writeStatusFull(state, errMsg string, st peerStats) {
 	}
 	for _, p := range r.cfg.Routes() {
 		s.Routes = append(s.Routes, p.String())
+	}
+	for _, sp := range r.expose {
+		s.Expose = append(s.Expose, int(sp.Port))
 	}
 	if s.Peers == nil {
 		s.Peers = []peerStat{}
