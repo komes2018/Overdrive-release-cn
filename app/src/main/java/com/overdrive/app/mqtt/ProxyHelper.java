@@ -216,6 +216,7 @@ public class ProxyHelper {
      * a true outbound proxy like sing-box (8119) is available.
      */
     public static Proxy getHttpProxy() {
+        if (isProxyAvailable()) {
             // Proxy TYPE must match the resolved backend port:
             //  - Tailscale (8539) is a `tailscaled --socks5-server` that ONLY speaks
             //    SOCKS5 and REJECTS HTTP CONNECT → it needs Proxy.Type.SOCKS.
