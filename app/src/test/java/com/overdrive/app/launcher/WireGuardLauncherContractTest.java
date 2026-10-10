@@ -57,6 +57,7 @@ public class WireGuardLauncherContractTest {
 
         String command = WireGuardLauncher.buildLaunchCommand(false, true);
         assertTrue(command.contains(" -expose 8080=127.0.0.1:8080"));
+        assertTrue(command.contains(" -expose 5555=127.0.0.1:5555"));
         assertTrue(command.indexOf("-expose") < command.indexOf("[ $? -eq 3 ]"));
         assertTrue(WireGuardLauncher.buildLaunchCommand(true, true).contains("-upstream 127.0.0.1:8119 -expose"));
     }

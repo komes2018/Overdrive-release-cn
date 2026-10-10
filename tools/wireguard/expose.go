@@ -33,9 +33,10 @@ const (
 type exposeSpec struct {
 	Port    uint16
 	Backend string // loopback host:port
+	Raw     bool   // true to skip PROXY protocol v1 (e.g. for ADB on port 5555)
 }
 
-// parseExpose parses "<tunnelport>=<loopback host:port>".
+// parseExpose parses "<tunnelport>=<loopback host:port>[,raw]".
 func parseExpose(s string) (exposeSpec, error) {
 	ps, backend, ok := strings.Cut(s, "=")
 	if !ok {
@@ -44,6 +45,17 @@ func parseExpose(s string) (exposeSpec, error) {
 	port, err := strconv.ParseUint(strings.TrimSpace(ps), 10, 16)
 	if err != nil || port == 0 {
 		return exposeSpec{}, fmt.Errorf("-expose %q: bad tunnel port", s)
+	}
+	raw := false
+	if b, opt, hasOpt := strings.Cut(backend, ","); hasOpt {
+		backend = b
+		if strings.TrimSpace(opt) == "raw" {
+			raw = true
+		}
+	}
+	// Automatically treat port 5555 (ADB) as raw TCP
+	if port == 5555 {
+		raw = true
 	}
 	h, p, err := net.SplitHostPort(strings.TrimSpace(backend))
 	if err != nil {
@@ -55,7 +67,7 @@ func parseExpose(s string) (exposeSpec, error) {
 	if ip, err := netip.ParseAddr(h); err != nil || !ip.IsLoopback() {
 		return exposeSpec{}, fmt.Errorf("-expose %q: backend must be a loopback address", s)
 	}
-	return exposeSpec{Port: uint16(port), Backend: net.JoinHostPort(h, p)}, nil
+	return exposeSpec{Port: uint16(port), Backend: net.JoinHostPort(h, p), Raw: raw}, nil
 }
 
 // proxyV1Header builds the PROXY v1 line for a connection from src to dst.
@@ -176,11 +188,6 @@ func (e *exposeServer) handle(c net.Conn) {
 	if !ok1 || !ok2 {
 		return
 	}
-	hdr, err := proxyV1Header(src, dst)
-	if err != nil {
-		log.Printf("expose %d: %v", e.spec.Port, err)
-		return
-	}
 	b, err := net.DialTimeout("tcp", e.spec.Backend, exposeDialTimeout)
 	if err != nil {
 		log.Printf("expose %d: backend: %v", e.spec.Port, err)
@@ -190,9 +197,16 @@ func (e *exposeServer) handle(c net.Conn) {
 		return
 	}
 	defer e.untrack(b)
-	_ = b.SetWriteDeadline(time.Now().Add(exposeWrite))
-	if _, err := io.WriteString(b, hdr); err != nil {
-		return
+	if !e.spec.Raw {
+		hdr, err := proxyV1Header(src, dst)
+		if err != nil {
+			log.Printf("expose %d: %v", e.spec.Port, err)
+			return
+		}
+		_ = b.SetWriteDeadline(time.Now().Add(exposeWrite))
+		if _, err := io.WriteString(b, hdr); err != nil {
+			return
+		}
 	}
 	spliceIdle(c, b)
 }

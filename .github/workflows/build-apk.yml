@@ -56,7 +56,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         # assembleDebug: keeps debug flags (no R8 shrink) but now uses our fixed keystore
         # instead of the random per-runner debug keystore → consistent fingerprint every run.
-        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.13 -PoverdriveVersionCode=49913 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
+        run: ./gradlew assembleDebug -PoverdriveVersionName=49.9.14 -PoverdriveVersionCode=49914 -PoverdriveUpdateChannel=alpha --stacktrace --no-daemon
 
       - name: Verify APK signature fingerprint
         run: |
@@ -79,7 +79,7 @@ jobs:
           mkdir -p release-assets
           APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -1)
           echo "Found built APK: $APK_FILE"
-          cp "$APK_FILE" release-assets/Overdrive-v49.9.13-cn-sec.apk
+          cp "$APK_FILE" release-assets/Overdrive-v49.9.14-cn-sec.apk
           ls -lh release-assets/
 
       - name: Upload APK Artifact
@@ -93,15 +93,23 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v49.9.13-cn-sec
-          name: OverDrive v49.9.13 - 合并上游 PR #333 悬浮窗状态图标透明度与大小调节
+          tag_name: v49.9.14-cn-sec
+          name: OverDrive v49.9.14 - 原生 WireGuard 隧道集成与 ADB 端口映射支持
           body: |
-            ## OverDrive v49.9.13 定制版
+            ## OverDrive v49.9.14 定制版
 
-            ### 🎨 悬浮窗状态图标自定义调节 (同步上游 PR #333)
-            - **图标透明度滑动条**：在“状态覆盖 / 悬浮窗设置”中新增状态图标透明度调节（0% ~ 80%），适配不同车机主题与透明壁纸底色；
-            - **图标大小滑动条**：支持 12dp ~ 32dp 图标尺寸平滑调节，完美兼容不同尺寸车机大屏与仪表小屏；
-            - **完整中文化支持**：补齐简体中文（zh/zh-CN）与繁体中文（zh-TW）界面文案，通过 i18n 自动化质检。
-          files: release-assets/Overdrive-v49.9.13-cn-sec.apk
+            ### 🌐 原生 WireGuard 隧道集成 (同步上游 PR #340)
+            - **用户态 wgproxy 守护进程**：基于 Go + gVisor netstack 开发，完全运行在 Shell UID 用户态，免 Root、免 Android VPN 权限；
+            - **直连家庭/自建局域网**：可无缝配合 EasyTier VPN Portal（`--vpn-portal`）或 OPNsense / wg-easy，实现车机遥测与内网穿透；
+            - **本地 SOCKS5 代理路由**：AllowedIPs 范围内的请求（如 Home Assistant MQTT Broker）经由隧道直连，公网流量保持常规直连；
+            - **端侧配置与扫码导入**：车机端与 Web 均支持配置粘贴、`.conf` 文件导入及手机扫码配置。
+
+            ### 🔌 原生远程 ADB 端口映射 (5555 端口纯 TCP 直通)
+            - **ADB 端口直通映射**：在隧道开放模式下，不仅暴露 Web Dashboard (8080)，同时将车机本地 ADB (5555) 端口映射至 WireGuard 虚拟 IP；
+            - **Raw TCP 传输优化**：针对 ADB 协议特性，绕过 HTTP PROXY v1 报头前缀，实现原汁原味的二进制流转发，支持远程 `adb connect` 秒级直连调试。
+
+            ### 🇨🇳 深度汉化与本地化支持
+            - 补齐 WireGuard 隧道设置界面的全部中文文案（`values-zh`、`values-zh-rCN`、Web & Server i18n），通过自动化质量巡检。
+          files: release-assets/Overdrive-v49.9.14-cn-sec.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -45,6 +45,17 @@ func TestParseExpose(t *testing.T) {
 	if err != nil || ok.Port != 8080 || ok.Backend != "127.0.0.1:8080" {
 		t.Fatalf("%+v %v", ok, err)
 	}
+	if ok.Raw {
+		t.Errorf("expected 8080 to not be raw, got %+v", ok)
+	}
+	adb, err := parseExpose("5555=127.0.0.1:5555")
+	if err != nil || adb.Port != 5555 || !adb.Raw {
+		t.Fatalf("expected raw mode for ADB: %+v %v", adb, err)
+	}
+	customRaw, err := parseExpose("9000=127.0.0.1:9000,raw")
+	if err != nil || customRaw.Port != 9000 || !customRaw.Raw {
+		t.Fatalf("expected custom raw mode: %+v %v", customRaw, err)
+	}
 	if _, err := parseExpose("80=[::1]:8080"); err != nil {
 		t.Errorf("v6 loopback: %v", err)
 	}

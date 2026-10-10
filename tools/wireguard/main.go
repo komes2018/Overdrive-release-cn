@@ -226,7 +226,11 @@ func (r *runner) run(socksAddr string) error {
 				return fmt.Errorf("expose %d on %s: %w", sp.Port, a.Addr(), err)
 			}
 			go es.serve(l)
-			log.Printf("exposing %s -> %s (PROXY v1)", netip.AddrPortFrom(a.Addr(), sp.Port), sp.Backend)
+			mode := "PROXY v1"
+			if sp.Raw {
+				mode = "raw"
+			}
+			log.Printf("exposing %s -> %s (%s)", netip.AddrPortFrom(a.Addr(), sp.Port), sp.Backend, mode)
 		}
 	}
 	log.Printf("wgproxy %s up, socks5 on %s, routes %v", version, socksAddr, r.cfg.Routes())

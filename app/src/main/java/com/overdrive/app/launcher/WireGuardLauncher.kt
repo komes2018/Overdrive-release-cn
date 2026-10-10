@@ -33,10 +33,10 @@ class WireGuardLauncher(
         // sing-box SOCKS/HTTP port used as upstream for non-tunnel destinations
         private const val UPSTREAM_PORT = 8119
 
-        // Tunnel port -> loopback dashboard. wgproxy prepends PROXY protocol v1,
-        // which HttpServer needs to treat these requests as remote (JWT required).
+        // Tunnel port -> loopback dashboard (PROXY v1) & loopback ADB 5555 (raw TCP).
+        private const val ADB_PORT = 5555
         private const val EXPOSE_DASHBOARD_ARG =
-            "-expose ${CameraDaemon.HTTP_PORT}=127.0.0.1:${CameraDaemon.HTTP_PORT}"
+            "-expose ${CameraDaemon.HTTP_PORT}=127.0.0.1:${CameraDaemon.HTTP_PORT} -expose $ADB_PORT=127.0.0.1:$ADB_PORT"
 
         private const val STATUS_POLL_ATTEMPTS = 8
         private const val STATUS_POLL_DELAY_MS = 1000L
