@@ -1402,8 +1402,13 @@ public class SurveillanceApiHandler {
                 }
                 if (resetScreenDeterrent) {
                     try {
-                        com.overdrive.app.surveillance.ScreenDeterrent
-                                .getInstance().reset();
+                        if (Boolean.TRUE.equals(screenDeterrentEnabledValue)) {
+                            com.overdrive.app.surveillance.ScreenDeterrent
+                                    .getInstance().reset();
+                        } else {
+                            com.overdrive.app.surveillance.ScreenDeterrent
+                                    .resetIfInitialized();
+                        }
                     } catch (Exception ignored) {}
                 }
             }

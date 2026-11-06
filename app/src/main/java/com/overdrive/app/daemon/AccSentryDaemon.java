@@ -5487,6 +5487,7 @@ public class AccSentryDaemon {
                     ? "armed (mobile data was ON at sentry entry)"
                     : "not armed (mobile data OFF/unknown at sentry entry)"));
             long tick = 0;
+            lastMobileDataAssertElapsedMs = 0L;
 
             while (running && isKeepAliveCommitCurrent(transitionGeneration)) {
                 boolean panelReapplyRequestedThisTick = false;
@@ -5496,6 +5497,10 @@ public class AccSentryDaemon {
                         if (tick % DILINK5_ADB_CHECK_EVERY_TICKS == 0) {
                             recoverDilink5AdbIfNeeded(transitionGeneration);
                         }
+                    } else if (tick % ISP_VOTE_REASSERT_EVERY_TICKS == 0) {
+                        // Renew the 6h AccSentry:Core lease every 5 min on DiLink 3/4 so
+                        // multi-hour parked sessions (>6h) never drop to single-wakelock.
+                        acquireWakeLock();
                     }
                     // Parked keep-alive lease (Experimental): re-reads the
                     // toggle, samples 12 V, re-asserts or releases its levers.
@@ -6898,6 +6903,49 @@ public class AccSentryDaemon {
      * radio rule that turns data off mid-park is honoured via the same suppression-flag
      * pattern as WiFi.
      */
+    private static volatile long lastMobileDataAssertElapsedMs = 0L;
+    private static final long MOBILE_DATA_HEALTHY_REASSERT_MS = 60_000L;
+
+    /**
+     * Fast in-process check (<0.5 ms, zero process fork) verifying that both global
+     * mobile-data switches remain ON and an active cellular INTERNET bearer exists.
+     * Any ambiguity or exception returns false so ensureMobileDataEnabled immediately
+     * falls back to the shell `svc data enable` repair on the current 10s tick.
+     */
+    private static boolean isCellularKeepAliveHealthy() {
+        Context ctx = appContext;
+        if (ctx == null) return false;
+        try {
+            android.content.ContentResolver cr = ctx.getContentResolver();
+            if (cr == null) return false;
+            if (android.provider.Settings.Global.getInt(cr, "mobile_data", 0) != 1) {
+                return false;
+            }
+            if (android.provider.Settings.Global.getInt(cr, "mobile_data_always_on", 0) != 1) {
+                return false;
+            }
+            Context permissiveCtx = new PermissionBypassContext(ctx);
+            android.net.ConnectivityManager cm =
+                    (android.net.ConnectivityManager) permissiveCtx.getSystemService(
+                            Context.CONNECTIVITY_SERVICE);
+            if (cm == null) return false;
+            android.net.Network[] networks = cm.getAllNetworks();
+            if (networks == null) return false;
+            for (android.net.Network net : networks) {
+                if (net == null) continue;
+                android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(net);
+                if (nc != null
+                        && nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)
+                        && nc.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                    return true;
+                }
+            }
+        } catch (Throwable ignored) {
+            // Fall through to shell re-assertion on any Binder/SecurityException error.
+        }
+        return false;
+    }
+
     private static void ensureMobileDataEnabled(long transitionGeneration) {
         // Respect a user's explicit "data off" automation / key-mapping, exactly like
         // the WiFi flag above. Fail-open (read error → false → we re-enable).
@@ -6907,11 +6955,20 @@ public class AccSentryDaemon {
         if (!isKeepAliveCommitCurrent(transitionGeneration)) {
             return;
         }
+        long nowElapsed = android.os.SystemClock.elapsedRealtime();
+        long lastAssert = lastMobileDataAssertElapsedMs;
+        if (lastAssert != 0L
+                && (nowElapsed - lastAssert) < MOBILE_DATA_HEALTHY_REASSERT_MS
+                && isCellularKeepAliveHealthy()) {
+            return;
+        }
         ShellResult result = execShellResult(
                 CMD_DATA_ENABLE() + "; " + CMD_DATA_ALWAYS_ON(),
                 DEFAULT_SHELL_TIMEOUT_MS,
                 () -> isKeepAliveCommitCurrent(transitionGeneration));
-        if (!result.success && !result.canceled) {
+        if (result.success) {
+            lastMobileDataAssertElapsedMs = android.os.SystemClock.elapsedRealtime();
+        } else if (!result.canceled) {
             log("Mobile-data keepalive command failed: " + result.describeFailure());
         }
     }

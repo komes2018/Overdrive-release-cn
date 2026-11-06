@@ -3102,7 +3102,7 @@ public class CameraDaemon {
         // killProcess/halt do not run Java shutdown hooks. Perform the safety-critical hook-only
         // cleanup here while the terminal deadline independently guarantees process exit.
         try {
-            com.overdrive.app.surveillance.ScreenDeterrent.getInstance().cancel();
+            com.overdrive.app.surveillance.ScreenDeterrent.cancelIfInitialized();
             java.util.Map<String, Object> reset = new java.util.HashMap<>();
             reset.put("screenDeterrentActiveUntilMs", 0L);
             reset.put("screenDeterrentForceStop", false);
@@ -3647,7 +3647,7 @@ public class CameraDaemon {
                 //    cancel() is non-blocking; the executor's finally block
                 //    clears UCM and turns the backlight off.
                 try {
-                    com.overdrive.app.surveillance.ScreenDeterrent.getInstance().cancel();
+                    com.overdrive.app.surveillance.ScreenDeterrent.cancelIfInitialized();
                     // Defensive: clear cross-process flags directly in case
                     // the executor doesn't get a chance to finish (SIGKILL
                     // or VM dying mid-cleanup).

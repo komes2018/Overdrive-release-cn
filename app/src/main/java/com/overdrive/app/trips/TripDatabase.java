@@ -34,7 +34,7 @@ public class TripDatabase {
     // AUTO_COMPACT_FILL_RATE=0: idle-CPU tuning shared by all H2 stores.
     private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH +
             ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
-            ";AUTO_COMPACT_FILL_RATE=0";
+            ";AUTO_COMPACT_FILL_RATE=0;WRITE_DELAY=5000";
 
     // volatile: reassigned by reconnect() (now synchronized); the fence gives a
     // happens-before edge so any reader sees the freshly-swapped connection.

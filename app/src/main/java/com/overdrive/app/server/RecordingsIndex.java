@@ -94,7 +94,7 @@ public final class RecordingsIndex {
     // Disables background MVStore compaction loop while parked, saving ~25% CPU.
     private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH +
             ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
-            ";AUTO_COMPACT_FILL_RATE=0";
+            ";AUTO_COMPACT_FILL_RATE=0;WRITE_DELAY=5000";
 
     // Filename patterns mirror RecordingsApiHandler exactly. Kept in sync
     // there too because the parser is the single point of truth — any

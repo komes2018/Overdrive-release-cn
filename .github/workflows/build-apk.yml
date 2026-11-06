@@ -99,25 +99,22 @@ jobs:
         if: github.ref == 'refs/heads/main'
         with:
           tag_name: "v${{ env.APP_VERSION }}-cn-sec"
-          name: "OverDrive v${{ env.APP_VERSION }} - 合入上游关键稳定性修复与DiLink5驻车保活"
+          name: "OverDrive v${{ env.APP_VERSION }} - 熄火驻车能耗深度优化与双唤醒锁续租加固"
           body: |
             ## OverDrive v${{ env.APP_VERSION }} 定制版
 
-            ### 🚀 1. DiLink 5.0 驻车防休眠保活 (QNX 车辆网络协议)
-            - **底层免云端保活**：调用底层 `IQnx` 通信协议，熄火后每 30 秒维持车辆网络清醒，彻底杜绝驻车哨兵 1 分钟被 MCU 强制休眠；
-            - **小电瓶安全保护**：实时监听 12V 电瓶电压，低于 12V/11V 或超时自动释放断开，防止小电瓶亏电。
+            ### 🔋 1. 熄火驻车 CPU 与空载能耗深度优化
+            - **UI 骨架屏动画防泄漏 (`Skeleton`)**：监听宿主窗口可见性与视图解绑状态，退后台或熄屏后立即自动暂停无限 `ValueAnimator` 渲染，消除主线程约 `11.8%` 空转 CPU；
+            - **配置中心锁权限纠偏与突变时钟上限 (`UnifiedConfigManager`)**：仅在 `UID 2000` 守护进程侧执行锁文件权限设置，消除 SELinux `avc: denied` 内核审计刷屏；对 `__overdriveMutationClocks` 实施 LRU 16 条封顶裁剪，根治 `overdrive_config.json` 膨胀；
+            - **屏幕威慑按需懒加载与缓存降频 (`ScreenDeterrent`)**：未启用屏幕威慑时不再提前拉起后台轮询线程，热缓存同步切为内存监听 + 10s 兜底；
+            - **H2 存储引擎后台刷盘降频**：全部 8 个 H2 MVStore 实例追加 `WRITE_DELAY=5000`，将后台写线程唤醒频率降低 10 倍；
+            - **蜂窝保活零进程派生快检 (`AccSentryDaemon`)**：驻车蜂窝健康时改用进程内 `Settings.Global` + `ConnectivityManager` 毫秒级校验，将 `svc data enable` 子进程派生削减 83%。
 
-            ### 🔄 2. 根治车机重启/更新后电池容量变成 "Tap to set" 缺陷
-            - **启动期平滑过渡**：SOH 评估器未就绪时自动兜底读取持久化配置，避免仪表盘闪烁或清空已配置电池容量。
+            ### 🛡️ 2. DiLink 3/4 驻车双唤醒锁 6 小时超期断档修复
+            - **核心唤醒锁自动续租**：修复 DiLink 3/4 驻车超过 6 小时后 `AccSentry:Core` 租约到期不续租导致退化为单唤醒锁的隐患，每 5 分钟稳态续租；
+            - **远程 OTA 升级桥接锁 (`UpgradeWakeLockBridge`)**：内置独立 UID-2000 升级唤醒锁桥接器，支持远程熄火静默升级全程双锁冗余护航。
 
-            ### 🌐 3. Cloudflared 隧道断网自愈与退出清理增强
-            - **退避重连缩短**：指数退避上限压降至 5（最长 5 分钟），解决出地下车库后 4G 信号恢复却长时间无法重连的死锁；
-            - **进程查杀纠偏**：修正 `libcloudflared.so` 真实运行二进制查杀逻辑与开机自愈。
-
-            ### ⚡ 4. 车身自动化新增解锁来源与便利进出信号
-            - **信号扩展**：增加 `unlockSource`（遥控钥匙/蓝牙/远程解锁源）与 `easyEntry`（便利进出/座椅迎宾动作状态）自动化条件。
-
-            ### 🔒 5. 门禁验证与安全发布
+            ### 🔒 3. 门禁验证与安全发布
             - 严格通过 `scripts/i18n_check.py` 门禁；
             - 补齐简体中文国际化配置；
             - APK 采用独立车机永久密钥签名，安全防冲。

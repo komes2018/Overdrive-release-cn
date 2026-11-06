@@ -12179,7 +12179,7 @@ public class SurveillanceEngineGpu {
         // the render thread (in this same process) sees the flag, releases its
         // surface, and turns the backlight off in its finally block.
         try {
-            ScreenDeterrent.getInstance().cancel();
+            ScreenDeterrent.cancelIfInitialized();
         } catch (Throwable ignored) {}
 
         // P1 #15: cancel pending YOLO work and clear shared state BEFORE

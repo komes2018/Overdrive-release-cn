@@ -101,7 +101,7 @@ public final class ScreenDeterrent {
     private static final int FALLBACK_DISPLAY_W = 1920;
     private static final int FALLBACK_DISPLAY_H = 1080;
 
-    private static final long HOT_CACHE_TTL_MS = 1_000;
+    private static final long HOT_CACHE_TTL_MS = 10_000;
     private static final long GATE_REFRESH_INTERVAL_MS = 1_000;
     private static final long INPUT_READY_TIMEOUT_MS = 4_000;
     private static final long INPUT_READY_POLL_MS = 50;
@@ -190,20 +190,32 @@ public final class ScreenDeterrent {
     private boolean restorePanelAfterSession = false;
 
     private ScreenDeterrent() {
-        // Refresh hot cache from disk every second on a dedicated background
-        // thread. Bootstraps with one immediate read so first-motion isn't
-        // forced to wait a full second.
+        // Pure in-memory listener (runs inside UCM's OS file lock — zero I/O)
+        // so same-JVM config mutations update the hot cache immediately.
+        UnifiedConfigManager.addListener((section, config) -> {
+            if ("surveillance".equals(section)) {
+                applySurveillanceConfig(config);
+            } else if ("all".equals(section) && config != null) {
+                applySurveillanceConfig(config.optJSONObject("surveillance"));
+            }
+        });
+        // Refresh hot cache from disk every 10s on a dedicated background
+        // thread to pick up cross-process writes without 1 Hz JSON re-parsing.
         cacheScheduler.scheduleWithFixedDelay(
             this::refreshHotCacheFromDisk, 0, HOT_CACHE_TTL_MS,
             java.util.concurrent.TimeUnit.MILLISECONDS);
     }
 
+    private void applySurveillanceConfig(JSONObject s) {
+        if (s == null) return;
+        hotCacheEnabled = s.optBoolean("screenDeterrentEnabled", false);
+        int sec = s.optInt("screenDeterrentDurationSeconds", DEFAULT_DURATION_SEC);
+        hotCacheDurationSec = Math.max(3, Math.min(30, sec));
+    }
+
     private void refreshHotCacheFromDisk() {
         try {
-            JSONObject s = UnifiedConfigManager.getSurveillance();
-            hotCacheEnabled = s.optBoolean("screenDeterrentEnabled", false);
-            int sec = s.optInt("screenDeterrentDurationSeconds", DEFAULT_DURATION_SEC);
-            hotCacheDurationSec = Math.max(3, Math.min(30, sec));
+            applySurveillanceConfig(UnifiedConfigManager.getSurveillance());
         } catch (Throwable ignored) {
             // Keep last known good values on read failure.
         }
@@ -218,6 +230,22 @@ public final class ScreenDeterrent {
             }
         }
         return instance;
+    }
+
+    /** Cancels an active session without lazily starting cacheScheduler if never used. */
+    public static void cancelIfInitialized() {
+        ScreenDeterrent current = instance;
+        if (current != null) {
+            current.cancel();
+        }
+    }
+
+    /** Resets an existing instance without lazily starting cacheScheduler if disabled. */
+    public static void resetIfInitialized() {
+        ScreenDeterrent current = instance;
+        if (current != null) {
+            current.reset();
+        }
     }
 
     /** Called by SurveillanceIpcServer when the focused Activity opens its tokened socket. */

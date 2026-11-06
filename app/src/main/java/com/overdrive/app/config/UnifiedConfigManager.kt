@@ -288,8 +288,10 @@ object UnifiedConfigManager {
                 lf.parentFile?.mkdirs()
                 lf.createNewFile()
             }
-            lf.setReadable(true, false)
-            lf.setWritable(true, false)
+            if (android.os.Process.myUid() == SHELL_DAEMON_UID) {
+                lf.setReadable(true, false)
+                lf.setWritable(true, false)
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Lock file provisioning skipped: ${e.message}")
         }
@@ -3844,6 +3846,8 @@ object UnifiedConfigManager {
         return newest
     }
 
+    private const val MAX_MUTATION_CLOCK_ORIGINS = 16
+
     private fun recordMutationApplied(
         config: JSONObject,
         section: String,
@@ -3857,7 +3861,21 @@ object UnifiedConfigManager {
             sectionClock.put(key, stamp.sequence)
         }
         originClock.put(section, sectionClock)
+        clocks.remove(stamp.origin)
         clocks.put(stamp.origin, originClock)
+        while (clocks.length() > MAX_MUTATION_CLOCK_ORIGINS) {
+            var evictKey: String? = null
+            val iter = clocks.keys()
+            while (iter.hasNext()) {
+                val candidate = iter.next()
+                if (candidate != stamp.origin && candidate != processMutationOrigin) {
+                    evictKey = candidate
+                    break
+                }
+            }
+            if (evictKey == null) break
+            clocks.remove(evictKey)
+        }
         config.put(MUTATION_CLOCKS_KEY, clocks)
     }
 
