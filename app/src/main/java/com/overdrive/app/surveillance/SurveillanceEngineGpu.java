@@ -1268,10 +1268,15 @@ public class SurveillanceEngineGpu {
     // engine + aiExecutor threads, read on the engine thread at stop.
     private volatile boolean eventTriggerWasMotionOnly = false;  // motion-source trigger, not tracker/deferred-person
     private volatile String eventInitialTriggerCamera = null;    // camera quadrant name ("front"/"right"/"rear"/"left") that triggered this event
-    // 驻车统计：驻车开始时间戳与本次驻车累计事件计数
+    // 驻车统计：驻车开始时间戳与本次驻车累计事件计数（与 ParkingDrainTracker 持久化基准同步）
     private static volatile long currentParkingSessionStartMs = 0L;
     private static final java.util.concurrent.atomic.AtomicInteger parkingSessionEventCount =
             new java.util.concurrent.atomic.AtomicInteger(0);
+
+    public static void syncParkingSession(long parkedAtMs, int eventCount) {
+        currentParkingSessionStartMs = parkedAtMs;
+        parkingSessionEventCount.set(Math.max(0, eventCount));
+    }
     private volatile boolean eventEverApproaching = false;       // any non-static actor read APPROACHING this event
     private volatile boolean eventEverSawPerson = false;         // any YOLO-classified PERSON this event (any conf/sev/static) → hard KEEP
     private volatile boolean eventEverSawMovingObject = false;   // any YOLO-classified MOVING (!isStaticForTimeline) vehicle/bike/animal → hard KEEP (parked cars excluded — they are the FP target)
@@ -8480,18 +8485,26 @@ public class SurveillanceEngineGpu {
     }
 
     private String formatParkingSessionStats() {
+        long trackerParkedMs = com.overdrive.app.parking.ParkingDrainTracker.getParkedAtMs();
+        if (trackerParkedMs > 0L) {
+            currentParkingSessionStartMs = trackerParkedMs;
+        }
         long startMs = currentParkingSessionStartMs;
-        int count = parkingSessionEventCount.get();
+        int count = com.overdrive.app.parking.ParkingDrainTracker.incrementAndGetParkedEventCount();
+        parkingSessionEventCount.set(count);
         if (startMs <= 0L) {
             return count > 0 ? "第 " + count + " 次触发" : null;
         }
         long durationMs = Math.max(0, System.currentTimeMillis() - startMs);
         long mins = durationMs / 60_000L;
-        long hours = mins / 60;
+        long days = mins / (24 * 60);
+        long hours = (mins % (24 * 60)) / 60;
         long remMins = mins % 60;
 
         String timeStr;
-        if (hours > 0) {
+        if (days > 0) {
+            timeStr = days + "天" + hours + "小时" + remMins + "分";
+        } else if (hours > 0) {
             timeStr = hours + "小时" + remMins + "分";
         } else {
             timeStr = Math.max(1, remMins) + "分钟";
@@ -10247,9 +10260,9 @@ public class SurveillanceEngineGpu {
         eventTriggerWasMotionOnly = false;
         eventInitialTriggerCamera = null;
         if (currentParkingSessionStartMs <= 0L) {
-            currentParkingSessionStartMs = System.currentTimeMillis();
+            long trackerParkedMs = com.overdrive.app.parking.ParkingDrainTracker.getParkedAtMs();
+            currentParkingSessionStartMs = trackerParkedMs > 0L ? trackerParkedMs : System.currentTimeMillis();
         }
-        parkingSessionEventCount.incrementAndGet();
         eventEverApproaching = false;
         eventEverSawPerson = false;
         eventEverSawMovingObject = false;
@@ -11761,6 +11774,14 @@ public class SurveillanceEngineGpu {
         // idle so the first real detection is a genuine transition. Both modes
         // (continuous / smart) flow through here after the ACC guard. try/catch inside
         // the helpers — never blocks arming.
+        try {
+            long trackerParkedMs = com.overdrive.app.parking.ParkingDrainTracker.getParkedAtMs();
+            if (trackerParkedMs > 0L) {
+                currentParkingSessionStartMs = trackerParkedMs;
+            } else if (currentParkingSessionStartMs <= 0L) {
+                currentParkingSessionStartMs = System.currentTimeMillis();
+            }
+        } catch (Throwable ignored) {}
         try {
             com.overdrive.app.automation.Automations.update(
                     com.overdrive.app.automation.condition.BydEvent.SURVEILLANCE_ARMED, "on");

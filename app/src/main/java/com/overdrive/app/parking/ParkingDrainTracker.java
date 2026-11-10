@@ -41,6 +41,10 @@ public final class ParkingDrainTracker {
     // 过滤不足 2 分钟的瞬时熄火重开
     private static final long MIN_PARKED_DURATION_MS = 120_000L;
 
+    // 内存态驻车基准时间戳与已推送哨兵事件计数（与持久化文件同步，支持跨守护进程重启）
+    private static volatile long cachedParkedAtMs = 0L;
+    private static volatile int cachedEventCount = 0;
+
     private static final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "ParkingDrainWorker");
         t.setDaemon(true);
@@ -48,6 +52,64 @@ public final class ParkingDrainTracker {
     });
 
     private ParkingDrainTracker() {}
+
+    /**
+     * 获取当前驻车周期的真实熄火时间戳（毫秒）。
+     * 优先返回内存缓存；若守护进程中途重启导致内存缓存为空，则从持久化状态文件恢复。
+     */
+    public static long getParkedAtMs() {
+        long cached = cachedParkedAtMs;
+        if (cached > 1700000000000L) {
+            return cached;
+        }
+        File f = new File(STATE_FILE_PATH);
+        if (f.exists() && f.isFile() && f.length() > 0) {
+            try (FileInputStream fis = new FileInputStream(f)) {
+                byte[] buf = new byte[(int) f.length()];
+                fis.read(buf);
+                JSONObject json = new JSONObject(new String(buf, StandardCharsets.UTF_8));
+                long diskParkedAt = json.optLong("parkedAtMs", 0L);
+                if (diskParkedAt > 1700000000000L) {
+                    cachedParkedAtMs = diskParkedAt;
+                    cachedEventCount = Math.max(cachedEventCount, json.optInt("eventCount", 0));
+                    return diskParkedAt;
+                }
+            } catch (Throwable ignored) {}
+        }
+        return 0L;
+    }
+
+    /**
+     * 递增并返回本次驻车周期已确认推送的哨兵事件次数（持久化写回磁盘，防守护进程重启重置计数）。
+     */
+    public static synchronized int incrementAndGetParkedEventCount() {
+        if (cachedParkedAtMs <= 0L) {
+            getParkedAtMs();
+        }
+        final int nextCount = ++cachedEventCount;
+        executor.execute(() -> {
+            File f = new File(STATE_FILE_PATH);
+            if (!f.exists() || !f.isFile() || f.length() == 0) {
+                return;
+            }
+            try {
+                JSONObject json;
+                try (FileInputStream fis = new FileInputStream(f)) {
+                    byte[] buf = new byte[(int) f.length()];
+                    fis.read(buf);
+                    json = new JSONObject(new String(buf, StandardCharsets.UTF_8));
+                }
+                json.put("eventCount", nextCount);
+                File tmp = new File(STATE_FILE_PATH + ".tmp");
+                try (FileOutputStream fos = new FileOutputStream(tmp)) {
+                    fos.write(json.toString().getBytes(StandardCharsets.UTF_8));
+                    fos.flush();
+                }
+                tmp.renameTo(f);
+            } catch (Throwable ignored) {}
+        });
+        return nextCount;
+    }
 
     /**
      * ACC 边沿触发入口 (由 CameraDaemon 权威 transition 调用)
@@ -91,8 +153,14 @@ public final class ParkingDrainTracker {
                     long diff = now - existingParkedAtMs;
                     // 如果在合理驻车周期内 (0 ~ 30天) 或系统时钟尚未完成网络对齐，坚决保护原有基准
                     if ((diff >= 0 && diff < 30L * 86400_000L) || now < 1700000000000L) {
+                        int existingCount = existing.optInt("eventCount", 0);
+                        cachedParkedAtMs = existingParkedAtMs;
+                        cachedEventCount = Math.max(cachedEventCount, existingCount);
+                        com.overdrive.app.surveillance.SurveillanceEngineGpu.syncParkingSession(
+                                cachedParkedAtMs, cachedEventCount);
                         logger.info("Preserved existing parked baseline across restart: parkedAt="
                                 + existingParkedAtMs + ", startSoc=" + existing.optDouble("startSoc", Double.NaN)
+                                + ", eventCount=" + cachedEventCount
                                 + ", elapsed=" + (diff / 1000) + "s");
                         return;
                     }
@@ -101,6 +169,10 @@ public final class ParkingDrainTracker {
                 logger.warn("Existing parked state read failed, will overwrite: " + t.getMessage());
             }
         }
+
+        cachedParkedAtMs = now;
+        cachedEventCount = 0;
+        com.overdrive.app.surveillance.SurveillanceEngineGpu.syncParkingSession(now, 0);
 
         BydVehicleData data = getVehicleData();
 
@@ -127,6 +199,7 @@ public final class ParkingDrainTracker {
         JSONObject json = new JSONObject();
         try {
             json.put("parkedAtMs", now);
+            json.put("eventCount", 0);
             if (!Double.isNaN(soc)) json.put("startSoc", soc);
             if (!Double.isNaN(kwh)) json.put("startKwh", kwh);
             if (!Double.isNaN(volt12v)) json.put("start12v", volt12v);
@@ -152,6 +225,10 @@ public final class ParkingDrainTracker {
     }
 
     private static void handleAccOn() {
+        cachedParkedAtMs = 0L;
+        cachedEventCount = 0;
+        com.overdrive.app.surveillance.SurveillanceEngineGpu.syncParkingSession(0L, 0);
+
         File f = new File(STATE_FILE_PATH);
         if (!f.exists() || !f.isFile()) {
             return;
