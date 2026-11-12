@@ -600,33 +600,7 @@ public class GpuMosaicRecorder {
                 // this disk-writer thread (it's being torn down) — fire it on a
                 // short-lived daemon thread.
                 final String abortReason = reason;
-                final HardwareEventRecorderGpu abortedEncoder = encoder;
-                final String abortedPath = abortedEncoder != null
-                    ? abortedEncoder.getCurrentOutputPath() : null;
                 Thread t = new Thread(() -> {
-                    // A card that began refusing writes mid-recording: latch it so the
-                    // restart below lands on internal storage.
-                    if (abortedPath != null) {
-                        try {
-                            com.overdrive.app.storage.StorageManager.getInstance()
-                                .reportWriteFault(new java.io.File(abortedPath).getParentFile());
-                        } catch (Throwable inner) {
-                            logger.warn("writer-abort write-fault check failed: " + inner.getMessage());
-                        }
-                    }
-                    // A continuous sentry session on this recorder has no tick to notice; after the
-                    // fault check, so a card latched as refusing writes restarts it on internal.
-                    try {
-                        com.overdrive.app.surveillance.GpuSurveillancePipeline p =
-                            com.overdrive.app.daemon.CameraDaemon.getGpuPipeline();
-                        SurveillanceEngineGpu sentry = (p != null && p.getRecorder() == GpuMosaicRecorder.this)
-                            ? p.getSentry() : null;
-                        if (sentry != null) {
-                            sentry.onContinuousWriterAborted(abortReason);
-                        }
-                    } catch (Throwable inner) {
-                        logger.warn("writer-abort sentry restart failed: " + inner.getMessage());
-                    }
                     try {
                         com.overdrive.app.recording.RecordingModeManager rmm =
                             com.overdrive.app.daemon.CameraDaemon.getRecordingModeManager();
@@ -1530,18 +1504,7 @@ public class GpuMosaicRecorder {
                     + " activeType=" + storageManager.getActiveRecordingsStorageType()
                     + " prefix=" + prefix);
             } catch (Throwable ignore) { /* diagnostics must never block a start */ }
-            if (!startRecording(outputPath) && storageManager.reportWriteFault(targetDir)) {
-                // The card refuses writes: it now resolves to internal — retry this start there once.
-                java.io.File internal = storageManager.resolveTargetWithEnospcFallback(
-                    targetDir, 100 * 1024 * 1024, true);
-                if (internal != null && !internal.equals(targetDir)) {
-                    if (!internal.exists()) internal.mkdirs();
-                    storageManager.ensureRecordingsSpaceForRecorder(100 * 1024 * 1024, internal);
-                    logger.warn("Recording start failed on a card that refuses writes ("
-                        + targetDir.getAbsolutePath() + ") — retrying on " + internal.getAbsolutePath());
-                    startRecording(new java.io.File(internal, filename).getAbsolutePath());
-                }
-            }
+            startRecording(outputPath);
         } catch (Exception e) {
             long ms = (System.nanoTime() - startNs) / 1_000_000L;
             logger.error("Failed to start recording after " + ms + "ms: " + e.getMessage());
