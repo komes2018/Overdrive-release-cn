@@ -641,21 +641,29 @@ static float stage4b_flowCoherence(
         // ~64 samples; require average per-sample deviation ≥ 6 luma.
         if (texture < sampleCount * 6) continue;
 
-        // Integer SAD block-match over the ±R window (stride-4 grayscale),
-        // matching the cached current samples against the N-3 reference.
+        // 【上游优化 PR #629 / 3ac08cdd】：SAD 块匹配提前剪枝
+        // SAD 是非负差值的累加。一旦当前累加值已经超过或等于已找到的 bestSad，后续像素绝不可能击败当前最优，直接截断。
+        // 保留严格小于判定和原始扫描顺序，确保运动光流向量与威胁判定完全一致。
         long bestSad = -1;
         int bestDx = 0, bestDy = 0;
-        for (int dy = -V2_FLOW_SEARCH_RADIUS; dy <= V2_FLOW_SEARCH_RADIUS; dy++) {
-            for (int dx = -V2_FLOW_SEARCH_RADIUS; dx <= V2_FLOW_SEARCH_RADIUS; dx++) {
+        for (int dy = -V2_FLOW_SEARCH_RADIUS;
+                dy <= V2_FLOW_SEARCH_RADIUS && bestSad != 0; dy++) {
+            for (int dx = -V2_FLOW_SEARCH_RADIUS;
+                    dx <= V2_FLOW_SEARCH_RADIUS && bestSad != 0; dx++) {
                 long sad = 0;
                 int si = 0;
-                for (int y = 0; y < V2_BLOCK_SIZE; y += 4) {
+                bool canImprove = true;
+                for (int y = 0; y < V2_BLOCK_SIZE && canImprove; y += 4) {
                     for (int x = 0; x < V2_BLOCK_SIZE; x += 4) {
                         int ref = lumaAt(reference, x0 + x + dx, y0 + y + dy);
                         sad += std::abs(curSamp[si++] - ref);
+                        if (bestSad >= 0 && sad >= bestSad) {
+                            canImprove = false;
+                            break;
+                        }
                     }
                 }
-                if (bestSad < 0 || sad < bestSad) {
+                if (canImprove && (bestSad < 0 || sad < bestSad)) {
                     bestSad = sad;
                     bestDx = dx;
                     bestDy = dy;
@@ -1282,16 +1290,22 @@ void v2_processFrame(
         if (!config->quadrantEnabled[q]) continue;
         QuadrantState* qs = &state->quadrants[q];
         
-        // Quick mean luma calculation (same as stage1 but without modifying state)
-        extractQuadrant(frame, width, height, q, quadrantBuf);
+        // 【上游优化 PR #629 / 3ac08cdd】：消除象限冗余 memcpy 内存拷贝
+        // 亮度预扫描 Stage 1 每 8 个像素采样一次，直接从 640x480 的全景大图对应行列跨步读取即可，
+        // 彻底免除将 320x240 RGB 图像整帧 memcpy 拷贝到 quadrantBuf 的 Native 内存与 CPU 开销。
         float meanLuma = 0;
         int sampleCount = 0;
+        const int startX = (q % 2) * (width / 2);
+        const int startY = (q / 2) * (height / 2);
+        const int rowStride = width * V2_BYTES_PER_PIXEL;
         for (int y = 0; y < V2_QUADRANT_HEIGHT; y += 8) {
+            const int rowOffset = (startY + y) * rowStride
+                    + startX * V2_BYTES_PER_PIXEL;
             for (int x = 0; x < V2_QUADRANT_WIDTH; x += 8) {
-                int idx = (y * V2_QUADRANT_WIDTH + x) * V2_BYTES_PER_PIXEL;
-                int r = quadrantBuf[idx] & 0xFF;
-                int g = quadrantBuf[idx + 1] & 0xFF;
-                int b = quadrantBuf[idx + 2] & 0xFF;
+                int idx = rowOffset + x * V2_BYTES_PER_PIXEL;
+                int r = frame[idx] & 0xFF;
+                int g = frame[idx + 1] & 0xFF;
+                int b = frame[idx + 2] & 0xFF;
                 meanLuma += (r + (g << 1) + b) >> 2;
                 sampleCount++;
             }

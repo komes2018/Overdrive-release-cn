@@ -2173,17 +2173,11 @@ public class AppUpdater {
         // never a broad overdrive_config* / *.json glob.
         script.append("rm -f /data/local/tmp/overdrive_config.json.tmp.* "
                 + "/data/local/tmp/overdrive_config.json.bak.tmp 2>/dev/null\n");
-        // Clear only machine-written CORE markers. Pre-existing UI/Telegram
-        // markers are durable manual stop intent and survive the update.
-        // POST_UPDATE_FILE / UPDATE_IN_PROGRESS_FILE stay in place; the new
-        // process consumes them via UpdateLifecycle.
-        script.append("for S in /data/local/tmp/camera_daemon.disabled "
-                + "/data/local/tmp/acc_sentry_daemon.disabled; do\n");
-        script.append("  R=$(head -1 \"$S\" 2>/dev/null)\n");
-        script.append("  case \"$R\" in 'disabled for update'*|"
-                + "'disabled by stopAllDaemons sweep'*|'disabled by killDaemon'*) "
-                + "rm -f \"$S\" 2>/dev/null;; esac\n");
-        script.append("done\n");
+        // 【上游缺陷修复 PR #602 / 5f04e9ec】：防止更新期间守护进程过早复活导致 Binder 饥饿死锁
+        // 严禁在 pm install 之前过早删除 acc_sentry_daemon.disabled / camera_daemon.disabled 哨兵文件！
+        // 若在 APK 卸载安装期间哨兵被提前删除，Shell 看门狗会立刻复活守护进程，而此时 App 进程已死亡，
+        // 守护进程发送的广播超时无人应答，会耗尽 system_server 全部 32 个 Binder 线程导致车机死机并引发 Watchdog 重启。
+        // 这些哨兵由 UpdateLifecycle.hardResetDaemons() 在新 APK 成功安装并就绪后统一清理。
         script.append("sleep 2\n");
         // Step 4: install. `pm install -r -d` allows downgrades (-d) so a
         // bad release doesn't strand the user, and replaces the existing app

@@ -61,45 +61,56 @@ public class HttpServer {
         this.port = port;
     }
 
-    /**
-     * Extracts web assets from APK to filesystem.
-     * Call this during initialization with a valid AssetManager.
-     */
+    // 【上游优化 PR #628 / 992af508】：守护进程免重复解压 18MB Web 静态资源
+    // 每次守护进程重启时，重复解包 18MB 网页资源、翻译与 3D 模型会造成 Flash 读写磨损并拖慢启动时间。
+    // 使用 APK 文件指纹印戳进行校验，APK 未升级或内容完整时直接复用现有解压文件；升级或损坏时自动重新全量解包。
+    private static final String WEB_ASSET_STAMP = ".overdrive-apk-assets-v1";
+
+    /** 兼容旧入口（无 APK 路径时强制全量解压） */
     public static void extractWebAssets(AssetManager assetManager) {
+        extractWebAssets(assetManager, null);
+    }
+
+    /**
+     * 单次 APK 安装仅解压一次 Web 静态资源
+     */
+    public static synchronized void extractWebAssets(AssetManager assetManager, String apkPath) {
         if (assetManager == null) {
             CameraDaemon.log("AssetManager is null, skipping web asset extraction");
             return;
         }
-        
+
+        String expectedStamp = apkAssetStamp(apkPath);
         try {
             File webRoot = new File(WEB_ROOT);
-            
-            // Always delete and recreate to ensure fresh files on app update
-            if (webRoot.exists()) {
-                deleteRecursive(webRoot);
-                CameraDaemon.log("Deleted existing web assets for fresh extraction");
-            }
-            webRoot.mkdirs();
-            
-            // Extract web/local and web/shared directories
-            extractAssetDir(assetManager, "web/local", new File(WEB_ROOT, "local"));
-            extractAssetDir(assetManager, "web/shared", new File(WEB_ROOT, "shared"));
-            // Extract i18n catalogs (one JSON per supported locale).
-            // The web/i18n directory is created by the NLLB translation pipeline
-            // — at minimum web/i18n/en.json must exist for the runtime to load.
-            extractAssetDir(assetManager, "web/i18n", new File(WEB_ROOT, "i18n"));
-            // Extract server-side i18n catalogs (Messages.java lookup source).
-            // Kept distinct from web/i18n so the HTTP /i18n/ route doesn't accidentally
-            // expose internal error keys, and the two catalogs can diverge if needed.
-            extractAssetDir(assetManager, "server-i18n", new File(WEB_ROOT, "server-i18n"));
+            boolean cacheHit = expectedStamp != null
+                    && webAssetCacheValid(webRoot, expectedStamp);
+            if (cacheHit) {
+                CameraDaemon.log("Reusing existing web assets (APK unchanged)");
+            } else {
+                // APK 发生变化，或解压目录缺失/未完成，执行全量刷新
+                if (webRoot.exists()) {
+                    deleteRecursive(webRoot);
+                    CameraDaemon.log("Deleted existing web assets for fresh extraction");
+                }
+                if (!webRoot.mkdirs() && !webRoot.isDirectory()) {
+                    throw new java.io.IOException("Cannot create web assets directory: " + webRoot);
+                }
 
-            // Extract overlay icons for telemetry overlay
-            extractAssetDir(assetManager, "overlay", new File("/data/local/tmp/overlay"));
-            
+                // Extract web/local and web/shared directories
+                extractAssetDir(assetManager, "web/local", new File(WEB_ROOT, "local"));
+                extractAssetDir(assetManager, "web/shared", new File(WEB_ROOT, "shared"));
+                // Extract i18n catalogs (one JSON per supported locale).
+                extractAssetDir(assetManager, "web/i18n", new File(WEB_ROOT, "i18n"));
+                // Extract server-side i18n catalogs (Messages.java lookup source).
+                extractAssetDir(assetManager, "server-i18n", new File(WEB_ROOT, "server-i18n"));
+
+                // Extract overlay icons for telemetry overlay
+                extractAssetDir(assetManager, "overlay", new File("/data/local/tmp/overlay"));
+            }
+
             // Extract BYD cloud crypto tables — re-extract whenever the cache
-            // is missing or fails magic/size validation, so a stale or
-            // truncated /data/local/tmp file from a prior build can't poison
-            // every reader with "Bad magic: expected BGTB".
+            // is missing or fails magic/size validation
             try {
                 File bydTablesFile = new File(com.overdrive.app.byd.cloud.crypto.BangcleTablesFile.CACHE_PATH);
                 if (!com.overdrive.app.byd.cloud.crypto.BangcleTablesFile.isValid(bydTablesFile)) {
@@ -113,9 +124,7 @@ public class HttpServer {
                 CameraDaemon.log("Could not extract BYD Bangcle tables: " + e.getMessage());
             }
 
-            // Same for the China (CN) WBSK tables — only relevant when a CN
-            // account is configured, but pre-extracting is harmless and primes
-            // the cache so the first CN login doesn't pay the extract cost.
+            // Same for the China (CN) WBSK tables
             try {
                 File wbskTablesFile = new File(com.overdrive.app.byd.cloud.crypto.WbskTablesFile.CACHE_PATH);
                 if (!com.overdrive.app.byd.cloud.crypto.WbskTablesFile.isValid(wbskTablesFile)) {
@@ -128,10 +137,65 @@ public class HttpServer {
             } catch (Exception e) {
                 CameraDaemon.log("Could not extract BYD WBSK tables: " + e.getMessage());
             }
-            
-            CameraDaemon.log("Web assets extracted to " + WEB_ROOT);
+
+            // 仅在全部资源提取成功后才写入印戳文件，避免解压中途崩溃导致残缺目录被判定有效
+            if (!cacheHit && expectedStamp != null) {
+                writeWebAssetStamp(webRoot, expectedStamp);
+            }
+            if (!cacheHit) CameraDaemon.log("Web assets extracted to " + WEB_ROOT);
         } catch (Exception e) {
             CameraDaemon.log("Failed to extract web assets: " + e.getMessage());
+        }
+    }
+
+    private static String apkAssetStamp(String apkPath) {
+        if (apkPath == null || apkPath.isEmpty()) return null;
+        try {
+            File apk = new File(apkPath);
+            if (!apk.isFile() || apk.length() <= 0L || apk.lastModified() <= 0L) return null;
+            String identity = "v1\n" + apk.getCanonicalPath() + "\n"
+                    + apk.length() + "\n" + apk.lastModified();
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(
+                    identity.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(Character.forDigit((b >>> 4) & 0x0f, 16));
+                hex.append(Character.forDigit(b & 0x0f, 16));
+            }
+            return hex.toString();
+        } catch (Exception e) {
+            CameraDaemon.log("Could not identify APK assets; extracting normally: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static boolean webAssetCacheValid(File webRoot, String expectedStamp) {
+        if (!new File(webRoot, "local/index.html").isFile()
+                || !new File(webRoot, "shared/app-shell.js").isFile()
+                || !new File(webRoot, "i18n/en.json").isFile()
+                || !new File(webRoot, "server-i18n/en.json").isFile()
+                || !new File("/data/local/tmp/overlay", "seat-belt.png").isFile()) {
+            return false;
+        }
+        File marker = new File(webRoot, WEB_ASSET_STAMP);
+        if (!marker.isFile()) return false;
+        try (BufferedReader in = new BufferedReader(new InputStreamReader(
+                new FileInputStream(marker), java.nio.charset.StandardCharsets.UTF_8))) {
+            return expectedStamp.equals(in.readLine()) && in.readLine() == null;
+        } catch (java.io.IOException ignored) {
+            return false;
+        }
+    }
+
+    private static void writeWebAssetStamp(File webRoot, String stamp) throws java.io.IOException {
+        File marker = new File(webRoot, WEB_ASSET_STAMP);
+        File pending = new File(webRoot, WEB_ASSET_STAMP + ".tmp");
+        try (FileOutputStream out = new FileOutputStream(pending)) {
+            out.write((stamp + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            out.getFD().sync();
+        }
+        if (!pending.renameTo(marker)) {
+            throw new java.io.IOException("Cannot finalize web asset stamp: " + marker);
         }
     }
     

@@ -3170,7 +3170,10 @@ public class BydDataCollector {
             t.setDaemon(true);
             return t;
         });
-        pollScheduler.scheduleAtFixedRate(() -> {
+        // 【上游优化 PR #627 / d396a4c8】：防止比亚迪 VHAL 轮询背压导致 CPU 连续追赶狂扫
+        // 原 scheduleAtFixedRate 在车机卡顿、休眠或 HAL 响应慢时会连续不间断追赶执行，打满 CPU。
+        // 改用 scheduleWithFixedDelay 确保两次轮询之间严格保留指定间隔，给系统和相机留出喘息空闲。
+        pollScheduler.scheduleWithFixedDelay(() -> {
             try {
                 if (!collectAllFromScheduler(schedulerGeneration)) return;
                 // Log when data actually changes
@@ -3682,7 +3685,9 @@ public class BydDataCollector {
                 t.setDaemon(true);
                 return t;
             });
-            pollScheduler.scheduleAtFixedRate(() -> {
+            // 【上游优化 PR #627 / d396a4c8】：防止比亚迪 VHAL 轮询背压导致 CPU 连续追赶狂扫
+            // 改用 scheduleWithFixedDelay 确保两次轮询之间严格保留指定间隔，给系统和相机留出喘息空闲。
+            pollScheduler.scheduleWithFixedDelay(() -> {
                 try {
                     if (!collectAllFromScheduler(schedulerGeneration)) return;
                     BydVehicleData d = snapshot.get();

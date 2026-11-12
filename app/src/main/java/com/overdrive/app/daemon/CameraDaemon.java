@@ -4601,8 +4601,8 @@ public class CameraDaemon {
                         apkAssets = mgr;
                         log("AssetManager created from APK: " + apkPath);
 
-                        // Extract web assets for HTTP server
-                        HttpServer.extractWebAssets(assetManager);
+                        // 【上游优化 PR #628 / 992af508】：APK 未升级时跨守护进程重启复用已解压 Web 静态资源
+                        HttpServer.extractWebAssets(assetManager, apkPath);
                     } else {
                         log("Failed to add asset path (cookie=0)");
                     }

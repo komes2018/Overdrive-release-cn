@@ -187,11 +187,51 @@ public class NetworkMonitor {
 
     // ==================== SHELL FALLBACK ====================
 
+    private static final java.util.regex.Pattern IPV4_PATTERN =
+            java.util.regex.Pattern.compile("^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$");
+
+    /**
+     * 【上游优化 PR #626 / 1ba9fa81】：合并网络接口探测为单次 Shell 探测
+     * 一次性执行 `ip addr show` 并在 Java 内存中解析各个网卡的 IPv4 地址，
+     * 避免原来多达 6 次独立 fork 子进程与管道 grep/awk/cut 导致的系统抖动与 CPU 飙升。
+     */
+    private static java.util.Map<String, String> shellInterfaceIpv4Snapshot() {
+        String output = execShell("ip addr show 2>/dev/null");
+        java.util.Map<String, String> addresses = new java.util.HashMap<>();
+        String currentIface = null;
+        for (String line : output.split("\n")) {
+            String trimmed = line.trim();
+            if (!line.isEmpty() && !Character.isWhitespace(line.charAt(0))) {
+                // Header format: `2: wlan0: <BROADCAST,...>`
+                int firstColon = line.indexOf(':');
+                int secondColon = firstColon < 0 ? -1 : line.indexOf(':', firstColon + 1);
+                currentIface = null;
+                if (secondColon > firstColon) {
+                    String iface = line.substring(firstColon + 1, secondColon).trim();
+                    int peer = iface.indexOf('@');
+                    currentIface = peer >= 0 ? iface.substring(0, peer) : iface;
+                }
+            } else if (currentIface != null && trimmed.startsWith("inet ")
+                    && !addresses.containsKey(currentIface)) {
+                String addressWithMask = trimmed.substring(5).split("\\s+", 2)[0];
+                int slash = addressWithMask.indexOf('/');
+                String address = slash >= 0
+                        ? addressWithMask.substring(0, slash) : addressWithMask;
+                if (IPV4_PATTERN.matcher(address).matches()) {
+                    addresses.put(currentIface, address);
+                }
+            }
+        }
+        return addresses;
+    }
+
     private static void tryShellFallback() {
         try {
+            java.util.Map<String, String> addresses = shellInterfaceIpv4Snapshot();
+
             // Check wlan0 for WiFi
-            String wlanIp = execShell("ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1");
-            if (!wlanIp.isEmpty()) {
+            String wlanIp = addresses.get("wlan0");
+            if (wlanIp != null && !wlanIp.isEmpty()) {
                 networkType = "wifi";
                 ipAddress = wlanIp;
                 String ssid = shellGetWifiSsid();
@@ -204,8 +244,8 @@ public class NetworkMonitor {
             // Check rmnet for mobile data
             String[] rmnetIfaces = {"rmnet_data0", "rmnet_data1", "rmnet_data2", "rmnet_data3"};
             for (String iface : rmnetIfaces) {
-                String rmnetIp = execShell("ip addr show " + iface + " 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1");
-                if (!rmnetIp.isEmpty()) {
+                String rmnetIp = addresses.get(iface);
+                if (rmnetIp != null && !rmnetIp.isEmpty()) {
                     networkType = "cellular";
                     ipAddress = rmnetIp;
                     wifiSsid = "";
@@ -216,8 +256,8 @@ public class NetworkMonitor {
             }
 
             // Check eth0
-            String ethIp = execShell("ip addr show eth0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1");
-            if (!ethIp.isEmpty()) {
+            String ethIp = addresses.get("eth0");
+            if (ethIp != null && !ethIp.isEmpty()) {
                 networkType = "ethernet";
                 ipAddress = ethIp;
                 wifiSsid = "";

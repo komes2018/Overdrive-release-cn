@@ -995,20 +995,34 @@ BYD.core = {
 
     /**
      * Start clock update (if element exists)
+     * 【上游优化 PR #624 / 403c9db9】：时钟更新对齐到分钟边界，页面隐藏时暂停，消除无意义的每秒 DOM 遍历与日期格式化
      */
     startClock() {
+        if (this.clockStarted) { return; }
+        this.clockStarted = true;
+        const self = this;
         const update = () => {
-            const el = document.getElementById('currentTime');
-            if (el) {
-                el.textContent = new Date().toLocaleTimeString(BYD.i18n.getLang(), {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: false
-                });
+            if (!document.hidden) {
+                const el = document.getElementById('currentTime');
+                if (el) {
+                    const time = new Date().toLocaleTimeString(BYD.i18n.getLang(), {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    });
+                    if (el.textContent !== time) { el.textContent = time; }
+                }
             }
+            // Align the next wakeup with the next minute boundary.
+            self.clockTimer = setTimeout(update, 60000 - (Date.now() % 60000) + 20);
         };
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                clearTimeout(self.clockTimer);
+                update();
+            }
+        });
         update();
-        setInterval(update, 1000);
     },
 
     /**
