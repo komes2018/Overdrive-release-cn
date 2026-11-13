@@ -99,25 +99,22 @@ jobs:
         if: github.ref == 'refs/heads/main'
         with:
           tag_name: "v${{ env.APP_VERSION }}-cn-sec"
-          name: "OverDrive v${{ env.APP_VERSION }} - 熄火驻车能耗深度优化与双唤醒锁续租加固"
+          name: "OverDrive v${{ env.APP_VERSION }} - 熄火驻车二次功耗治理与上游阶段一性能优化"
           body: |
             ## OverDrive v${{ env.APP_VERSION }} 定制版
 
-            ### 🔋 1. 熄火驻车 CPU 与空载能耗深度优化
-            - **UI 骨架屏动画防泄漏 (`Skeleton`)**：监听宿主窗口可见性与视图解绑状态，退后台或熄屏后立即自动暂停无限 `ValueAnimator` 渲染，消除主线程约 `11.8%` 空转 CPU；
-            - **配置中心锁权限纠偏与突变时钟上限 (`UnifiedConfigManager`)**：仅在 `UID 2000` 守护进程侧执行锁文件权限设置，消除 SELinux `avc: denied` 内核审计刷屏；对 `__overdriveMutationClocks` 实施 LRU 16 条封顶裁剪，根治 `overdrive_config.json` 膨胀；
-            - **屏幕威慑按需懒加载与缓存降频 (`ScreenDeterrent`)**：未启用屏幕威慑时不再提前拉起后台轮询线程，热缓存同步切为内存监听 + 10s 兜底；
-            - **H2 存储引擎后台刷盘降频**：全部 8 个 H2 MVStore 实例追加 `WRITE_DELAY=5000`，将后台写线程唤醒频率降低 10 倍；
-            - **蜂窝保活零进程派生快检 (`AccSentryDaemon`)**：驻车蜂窝健康时改用进程内 `Settings.Global` + `ConnectivityManager` 毫秒级校验，将 `svc data enable` 子进程派生削减 83%。
+            ### 🔋 1. 熄火驻车 P1 功耗治理（基于车机实机诊断）
+            - **蜂窝保活长间隔兜底 (`AccSentryDaemon`)**：健康态下已每 10s 进程内校验蜂窝承载，将无条件 `svc data enable` ART 子进程派生间隔由 60s 放宽至 30 分钟；
+            - **SafeZone 锁门状态机防重入 (`CameraDaemon`)**：新增 `doorLockGateSuppressed` 独立抑制态，在保持 `isDoorLockArmed() == false` 契约的前提下消除 SafeZone / 禁用状态下每 5s 重入及对账自旋；`disarm-watchdog` 静默常规心跳刷屏，并将空载轮询放宽至 15s；
+            - **SafeZone 冷启零延迟消除 (`SafeLocationManager` / `LocationSidecarService`)**：启动后立即评估新鲜缓存定位并补充 Sidecar 首次 IPC `ConnectException` 退避重试，避免守护进程重启后长达十余分钟才抑制哨兵；
+            - **H2 录像索引库启动期自动紧缩 (`RecordingsIndex`)**：保留运行期零后台整理低功耗配置，当 `.mv.db` 超过 32 MiB 时于启动建连期执行一次 `SHUTDOWN COMPACT` 回收空闲页。
 
-            ### 🛡️ 2. DiLink 3/4 驻车双唤醒锁 6 小时超期断档修复
-            - **核心唤醒锁自动续租**：修复 DiLink 3/4 驻车超过 6 小时后 `AccSentry:Core` 租约到期不续租导致退化为单唤醒锁的隐患，每 5 分钟稳态续租；
-            - **远程 OTA 升级桥接锁 (`UpgradeWakeLockBridge`)**：内置独立 UID-2000 升级唤醒锁桥接器，支持远程熄火静默升级全程双锁冗余护航。
+            ### ⚡ 2. 合入上游 Stage-1 性能优化与安全修复
+            - **UI/渲染/IO 降载**：包括 `motion_pipeline_v2` SAD 分支剪枝、`GpuMosaicRecorder` 去畸变直通与 GL 对象复用、`NetworkMonitor` 快照合并、`HttpServer` APK 戳记资源复用、`BydDataCollector` 固定延迟背压、`AppUpdater` 更新防死锁及前端时钟按分钟对齐降频。
 
             ### 🔒 3. 门禁验证与安全发布
-            - 严格通过 `scripts/i18n_check.py` 门禁；
-            - 补齐简体中文国际化配置；
-            - APK 采用独立车机永久密钥签名，安全防冲。
+            - 通过 `scripts/i18n_check.py` 门禁检查；
+            - APK 采用独立车机永久密钥签名（`pm install -r` 平滑覆盖升级）。
           files: release-assets/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

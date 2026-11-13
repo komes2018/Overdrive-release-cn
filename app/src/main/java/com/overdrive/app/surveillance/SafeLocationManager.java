@@ -76,6 +76,33 @@ public class SafeLocationManager {
         CameraDaemon.log(TAG + ": Initialized with " + zones.size() + " zones, feature=" + featureEnabled);
     }
 
+    /**
+     * Evaluate geofence state immediately at startup using a persisted cached GPS fix
+     * when it is still recent enough to trust.
+     *
+     * <p>Prevents a parked daemon restart/upgrade from leaving surveillance armed (or
+     * running the lock gate) until the sidecar's next live IPC fix arrives, while leaving
+     * {@code GpsMonitor.loadedFromCache} untouched for geo-tagging staleness checks.
+     */
+    public boolean seedFromCachedLocationIfFresh(double lat, double lng, long cachedTimeMs, long maxAgeMs) {
+        if (zones.isEmpty() || maxAgeMs <= 0L) {
+            return false;
+        }
+        if (!Double.isFinite(lat) || !Double.isFinite(lng) || (lat == 0.0 && lng == 0.0)) {
+            return false;
+        }
+        long nowMs = System.currentTimeMillis();
+        // Allow up to 60s clock skew across reboots, reject ancient/missing timestamps.
+        if (cachedTimeMs <= 0L || cachedTimeMs > nowMs + 60_000L || (nowMs - cachedTimeMs) > maxAgeMs) {
+            return false;
+        }
+        onLocationUpdate(lat, lng);
+        long ageSec = Math.max(0L, (nowMs - cachedTimeMs) / 1000L);
+        CameraDaemon.log(TAG + ": Seeded initial zone from cached GPS fix (age="
+                + ageSec + "s, inSafeZone=" + isInSafeZone() + ", zone=" + cachedZoneName + ")");
+        return true;
+    }
+
     // ========================================================================
     // ZONE CRUD
     // ========================================================================

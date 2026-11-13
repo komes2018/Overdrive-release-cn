@@ -177,6 +177,11 @@ public class CameraDaemon {
     // Lock detection runs in CameraDaemon's process where cloud MQTT is active.
     // Surveillance is only armed after doors are locked (reduces false triggers from owner exiting).
     private static volatile boolean doorLockListenerArmed = false;
+    // Set when a locked event cannot arm surveillance due to a persistent policy
+    // suppression (Safe Zone or user preference disabled). Unlike doorLockListenerArmed,
+    // this keeps isDoorLockArmed() == false while suppressing the 5s unlock-poll
+    // re-entry & reconciliation loop until state changes.
+    private static volatile boolean doorLockGateSuppressed = false;
 
     // Lock-mode fallback signal: set true the moment ANY lock source delivers a
     // DEFINITE lock/unlock reading (applyLockEvent is only ever called with a
@@ -209,6 +214,7 @@ public class CameraDaemon {
     private static Thread accOnDisarmWatchdog = null;
     private static long accOnDisarmWatchdogGeneration;
     private static final long ACC_ON_DISARM_POLL_INTERVAL_MS = 5_000;
+    private static final long ACC_ON_DISARM_IDLE_POLL_INTERVAL_MS = 15_000;
     private static final long DOOR_LOCK_ARM_TIMEOUT_MS = 60_000;  // 60s grace period
     private static final long UNLOCK_POLL_INTERVAL_MS = 5_000;
     private static final int DOOR_STATE_INVALID = 0;
@@ -1136,8 +1142,25 @@ public class CameraDaemon {
         // Initialize GPS monitor with app context for standard LocationManager access
         initGpsMonitor();
 
-        // Initialize Safe Location Manager (geofence zones)
-        com.overdrive.app.surveillance.SafeLocationManager.getInstance().init();
+        // Initialize Safe Location Manager (geofence zones) and immediately seed from
+        // persisted GPS cache (if reasonably fresh) so a parked daemon restart/upgrade
+        // doesn't wait minutes for the sidecar's next live fix before suppressing sentry.
+        com.overdrive.app.surveillance.SafeLocationManager safeLocMgr =
+                com.overdrive.app.surveillance.SafeLocationManager.getInstance();
+        safeLocMgr.init();
+        try {
+            com.overdrive.app.monitor.GpsMonitor.GpsFixSnapshot cachedFix =
+                    com.overdrive.app.monitor.GpsMonitor.getInstance().getFixSnapshot();
+            if (cachedFix.hasLocation()) {
+                safeLocMgr.seedFromCachedLocationIfFresh(
+                        cachedFix.latitude,
+                        cachedFix.longitude,
+                        cachedFix.lastUpdate,
+                        4L * 60L * 60L * 1000L);
+            }
+        } catch (Throwable t) {
+            log("SafeLocationManager cached-fix seed skipped: " + t.getMessage());
+        }
 
         // RoadSense: daemon-side road-hazard detection (D-019/D-023). BydDataCollector
         // + GpsMonitor are up by now (initGpsMonitor above; collector re-init on ACC ON),
@@ -2073,6 +2096,10 @@ public class CameraDaemon {
      * onObservedAccStateChanged(), which is the same generation-linearized path used by IPC edges.
      */
     private static AccProbeResult probeAccStateWithBackoff(String tag) {
+        return probeAccStateWithBackoff(tag, true);
+    }
+
+    private static AccProbeResult probeAccStateWithBackoff(String tag, boolean logSuccess) {
         boolean lastReading = !com.overdrive.app.monitor.AccMonitor.isAccOn();
         for (int attempt = 0; attempt < 3; attempt++) {
             Integer level;
@@ -2087,8 +2114,10 @@ public class CameraDaemon {
                         + attempt + ")");
                 }
                 lastReading = reading;
-                log("ACC HW probe (" + tag + ") returned trustworthy accIsOff="
-                    + reading + " level=" + level + " on attempt " + (attempt + 1));
+                if (logSuccess) {
+                    log("ACC HW probe (" + tag + ") returned trustworthy accIsOff="
+                        + reading + " level=" + level + " on attempt " + (attempt + 1));
+                }
                 return new AccProbeResult(reading, true);
             }
             log("WARN: ACC HW probe (" + tag + ") attempt " + attempt
@@ -5057,6 +5086,7 @@ public class CameraDaemon {
             log("enableSurveillance() REJECTED — ACC is ON or not yet authoritatively known");
             return;
         }
+        doorLockGateSuppressed = false;
         enableSurveillanceForAccGeneration(generation, "public/deferred request");
     }
 
@@ -5350,6 +5380,7 @@ public class CameraDaemon {
             return;
         }
         doorLockListenerArmed = false;
+        doorLockGateSuppressed = false;
         // Reset the fallback signal for this ACC-off cycle. Flipped true by
         // applyLockEvent() the first time any source delivers a definite
         // lock/unlock reading; the 60s force-arm only fires when it stayed false
@@ -5642,15 +5673,27 @@ public class CameraDaemon {
                     log("lock automation publish failed: " + t.getMessage());
                 }
                 if (locked) {
-                    if (doorLockListenerArmed) return;
+                    if (doorLockListenerArmed || doorLockGateSuppressed) return;
                     log("LOCK GATE [" + source + "]: LOCKED — arming surveillance");
                     boolean enabled = enableSurveillanceForAccGeneration(
                         transitionGeneration, "door-lock event/" + source);
                     doorLockListenerArmed = enabled;
                     if (!enabled) {
-                        requestAccTransitionReconciliation(false);
+                        if (isAccTransitionCurrent(transitionGeneration, true)
+                                && gpuPipeline != null
+                                && (safeZoneSuppressed
+                                    || !com.overdrive.app.config.UnifiedConfigManager
+                                        .isSurveillanceEnabled())) {
+                            // Keep doorLockListenerArmed=false per SafeZone/pref contract,
+                            // while stopping the 5s re-entry & reconciliation loop until unlock,
+                            // safe-zone exit, user enable, or ACC ON.
+                            doorLockGateSuppressed = true;
+                        } else {
+                            requestAccTransitionReconciliation(false);
+                        }
                     }
                 } else {
+                    doorLockGateSuppressed = false;
                     if (!doorLockListenerArmed) return;
                     log("LOCK GATE [" + source
                         + "]: UNLOCKED — disarming surveillance (owner returning)");
@@ -5755,9 +5798,15 @@ public class CameraDaemon {
                 try {
                     log("ACC-ON disarm watchdog started");
                     while (true) {
+                        com.overdrive.app.surveillance.GpuSurveillancePipeline pipelineSnap =
+                            gpuPipeline;
+                        boolean idleMode = (safeZoneSuppressed || !surveillanceEnabled)
+                            && (pipelineSnap == null || !pipelineSnap.isSurveillanceMode());
+                        long sleepMs = idleMode
+                            ? ACC_ON_DISARM_IDLE_POLL_INTERVAL_MS
+                            : ACC_ON_DISARM_POLL_INTERVAL_MS;
                         try {
-                            Thread.sleep(
-                                ACC_ON_DISARM_POLL_INTERVAL_MS);
+                            Thread.sleep(sleepMs);
                         } catch (InterruptedException interrupted) {
                             return;
                         }
@@ -5777,7 +5826,7 @@ public class CameraDaemon {
                         }
                         AccProbeResult probe =
                             probeAccStateWithBackoff(
-                                "disarm-watchdog");
+                                "disarm-watchdog", false);
                         if (!isAccObservationCurrent(
                                 observationGeneration)) {
                             return;
@@ -6699,6 +6748,7 @@ public class CameraDaemon {
      */
     private static void cleanupDoorLockGate() {
         doorLockListenerArmed = false;
+        doorLockGateSuppressed = false;
         sawValidLockReading = false;
         stopDoorLockTimeoutThread();
 
@@ -8728,6 +8778,7 @@ public class CameraDaemon {
                 log("Clearing safeZoneSuppressed flag on ACC ON (was set during last sentry suppression)");
                 safeZoneSuppressed = false;
             }
+            doorLockGateSuppressed = false;
 
             // Recreate app context if it was broken (system server was dead during init).
             // createAppContext() can block, but no transition monitor is held; a newer
@@ -9059,6 +9110,9 @@ public class CameraDaemon {
 
     public static void setSafeZoneSuppressed(boolean suppressed) {
         safeZoneSuppressed = suppressed;
+        if (!suppressed) {
+            doorLockGateSuppressed = false;
+        }
     }
 
     // ==================== SCHEDULE CHECKER ====================

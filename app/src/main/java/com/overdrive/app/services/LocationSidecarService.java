@@ -798,8 +798,17 @@ public class LocationSidecarService extends Service implements LocationListener 
     // (connect+handshake+teardown) at ~1-2Hz; now one socket is reused and the
     // send runs on the existing worker looper — zero thread spawns, zero
     // connects in steady state. The daemon server loops per-connection.
+    private static final long INITIAL_IPC_RETRY_DELAY_MS = 5_000L;
+    private static final int INITIAL_IPC_MAX_RETRIES = 6;
+
     private java.net.Socket ipcSocket = null;
     private java.io.OutputStream ipcOut = null;
+    // Worker-thread only: bounded retry when the very first IPC fix drops with
+    // ConnectException during daemon boot/restart so parked SafeZone state doesn't
+    // wait the full 5m parked periodic cadence.
+    private boolean initialIpcDelivered = false;
+    private int initialIpcRetriesRemaining = INITIAL_IPC_MAX_RETRIES;
+    private final Runnable initialIpcRetryRunnable = this::sendGpsViaTcp;
 
     private void sendGpsViaTcp() {
         // Snapshot the volatile fields on the caller, build + write on the
@@ -848,18 +857,42 @@ public class LocationSidecarService extends Service implements LocationListener 
     private void writeGpsWithReconnect(byte[] payload, boolean allowReconnect) {
         try {
             if (ipcSocket == null) {
-                if (!allowReconnect || !openIpcSocket()) return;
+                if (!allowReconnect || !openIpcSocket()) {
+                    scheduleInitialIpcRetryIfNeeded();
+                    return;
+                }
             }
             ipcOut.write(payload);
             ipcOut.flush();
+            if (!initialIpcDelivered) {
+                initialIpcDelivered = true;
+                initialIpcRetriesRemaining = 0;
+                android.os.Handler h = handler;
+                if (h != null) {
+                    h.removeCallbacks(initialIpcRetryRunnable);
+                }
+            }
             // Fire-and-forget: we don't block reading the ack (the old code read
             // one line purely to log a warning; the daemon applies the update
             // regardless). Skipping the read removes a per-fix round-trip wait.
         } catch (java.net.ConnectException e) {
             closeIpcSocket();  // daemon not up — expected on startup, drop fix
+            scheduleInitialIpcRetryIfNeeded();
         } catch (Exception e) {
             closeIpcSocket();
             if (allowReconnect) writeGpsWithReconnect(payload, false);
+        }
+    }
+
+    private void scheduleInitialIpcRetryIfNeeded() {
+        if (initialIpcDelivered || initialIpcRetriesRemaining <= 0) {
+            return;
+        }
+        android.os.Handler h = handler;
+        if (h != null) {
+            initialIpcRetriesRemaining--;
+            h.removeCallbacks(initialIpcRetryRunnable);
+            h.postDelayed(initialIpcRetryRunnable, INITIAL_IPC_RETRY_DELAY_MS);
         }
     }
 
@@ -926,8 +959,11 @@ public class LocationSidecarService extends Service implements LocationListener 
     public void onDestroy() {
         super.onDestroy();
         
-        if (handler != null && periodicSender != null) {
-            handler.removeCallbacks(periodicSender);
+        if (handler != null) {
+            if (periodicSender != null) {
+                handler.removeCallbacks(periodicSender);
+            }
+            handler.removeCallbacks(initialIpcRetryRunnable);
         }
         // Close the persistent IPC socket on the worker thread that owns it,
         // before quitSafely() lets the looper drain and stop.

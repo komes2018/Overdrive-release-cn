@@ -11,6 +11,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -92,6 +93,9 @@ public final class RecordingsIndex {
     // directly; it reads via /api/recordings.
     // AUTO_COMPACT_FILL_RATE=0: idle-CPU tuning shared by all H2 stores.
     // Disables background MVStore compaction loop while parked, saving ~25% CPU.
+    // AUTO_COMPACT_FILL_RATE=0 keeps idle CPU near zero, so dead MVStore chunks
+    // are reclaimed at startup via SHUTDOWN COMPACT once the file exceeds 32 MiB.
+    private static final long COMPACT_THRESHOLD_BYTES = 32L * 1024L * 1024L;
     private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH +
             ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
             ";AUTO_COMPACT_FILL_RATE=0;WRITE_DELAY=5000";
@@ -329,7 +333,8 @@ public final class RecordingsIndex {
         int retryDelayMs = 1000;
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                connection = compactStoreIfBloated(
+                        DriverManager.getConnection(JDBC_URL, "sa", ""));
                 logger.info("H2 recordings connection established");
                 try (Statement stmt = connection.createStatement()) {
                     // 8 MiB cache — same as TripDatabase. Tuned for the
@@ -399,6 +404,34 @@ public final class RecordingsIndex {
         // Retries exhausted without success — same reasoning as above.
         initFailedPermanently = true;
         return false;
+    }
+
+    /**
+     * Reclaim dead MVStore chunks once at startup when the store has grown past 32 MiB.
+     * Runtime keeps AUTO_COMPACT_FILL_RATE=0 to avoid background CPU burn while parked,
+     * so deleting/updating clips over time leaves orphaned space until SHUTDOWN COMPACT.
+     */
+    private Connection compactStoreIfBloated(Connection conn) throws SQLException {
+        File dbFile = new File(DB_PATH + ".mv.db");
+        long sizeBefore = dbFile.exists() ? dbFile.length() : 0L;
+        if (sizeBefore <= COMPACT_THRESHOLD_BYTES) {
+            return conn;
+        }
+        logger.info("H2 recordings store bloated (" + (sizeBefore / (1024 * 1024))
+                + " MiB > 32 MiB) — running startup SHUTDOWN COMPACT");
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute("SHUTDOWN COMPACT");
+        } catch (Exception e) {
+            logger.warn("H2 SHUTDOWN COMPACT failed (continuing normally): " + e.getMessage());
+        } finally {
+            try {
+                conn.close();
+            } catch (Exception ignored) {}
+        }
+        long sizeAfter = dbFile.exists() ? dbFile.length() : 0L;
+        logger.info("H2 recordings compact complete: " + (sizeBefore / (1024 * 1024))
+                + " MiB -> " + (sizeAfter / (1024 * 1024)) + " MiB");
+        return DriverManager.getConnection(JDBC_URL, "sa", "");
     }
 
     public synchronized void close() {

@@ -6904,7 +6904,11 @@ public class AccSentryDaemon {
      * pattern as WiFi.
      */
     private static volatile long lastMobileDataAssertElapsedMs = 0L;
-    private static final long MOBILE_DATA_HEALTHY_REASSERT_MS = 60_000L;
+    // Healthy cellular bearer/settings are already verified in-process every 10s
+    // via isCellularKeepAliveHealthy(); limit unconditional `svc data enable` shell
+    // forks (which spawn an ART process on every call) to once every 30 minutes as a
+    // defensive backstop instead of every 60s.
+    private static final long MOBILE_DATA_HEALTHY_REASSERT_MS = 30 * 60_000L;
 
     /**
      * Fast in-process check (<0.5 ms, zero process fork) verifying that both global
