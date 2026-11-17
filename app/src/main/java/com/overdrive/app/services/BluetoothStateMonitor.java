@@ -96,6 +96,7 @@ public final class BluetoothStateMonitor {
     // not reliably readable from the app UID. Cached with a TTL so the gate costs
     // at most one small loopback GET per TTL, not one per tick.
     private static final long REASSERT_GATE_TTL_MS = 5L * 60_000L;
+    private static final long REASSERT_GATE_IDLE_TTL_MS = 30L * 60_000L;
     private volatile long gateCheckedAtMs = 0L;
     // FAIL OPEN: default true so that until we have a definitive answer (or if the
     // daemon is unreachable) the re-assert behaves exactly as it did before this
@@ -105,13 +106,15 @@ public final class BluetoothStateMonitor {
 
     /**
      * True when the periodic re-assert is worth doing. Re-queries the daemon at
-     * most once per {@link #REASSERT_GATE_TTL_MS}; on any error the cached value
-     * is kept (and the initial value is {@code true}), so this can only ever
-     * reduce work when we are CERTAIN no bluetooth automation is configured.
+     * most once per {@link #REASSERT_GATE_TTL_MS} (or {@link #REASSERT_GATE_IDLE_TTL_MS}
+     * when idle); on any error the cached value is kept (and the initial value is
+     * {@code true}), so this can only ever reduce work when we are CERTAIN no bluetooth
+     * automation is configured.
      */
     private boolean btAutomationInUse() {
         long now = System.currentTimeMillis();
-        if (now - gateCheckedAtMs < REASSERT_GATE_TTL_MS) return gateBtInUse;
+        long ttlMs = (gateCheckedAtMs > 0L && !gateBtInUse) ? REASSERT_GATE_IDLE_TTL_MS : REASSERT_GATE_TTL_MS;
+        if (now - gateCheckedAtMs < ttlMs) return gateBtInUse;
         gateCheckedAtMs = now;
         HttpURLConnection conn = null;
         try {

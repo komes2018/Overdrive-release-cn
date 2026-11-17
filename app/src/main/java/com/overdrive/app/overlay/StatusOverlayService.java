@@ -51,7 +51,7 @@ public class StatusOverlayService extends Service {
     private static final String CHANNEL_ID = "status_overlay";
     private static final int NOTIFICATION_ID = 9001;
     private static final long POLL_INTERVAL_MS = 3000;
-    private static final long POLL_INTERVAL_ACC_OFF_MS = 10000; // Slower polling when ACC is off
+    private static final long POLL_INTERVAL_ACC_OFF_MS = 30000; // Slower polling when ACC is off
 
     // Persisted overlay position
     private static final String PREFS_NAME = "status_overlay_prefs";
@@ -2094,9 +2094,10 @@ public class StatusOverlayService extends Service {
         if (!accOn) {
             // Same rationale as the daemon-unreachable branch: clear the
             // action bar state so it doesn't pop up half-rendered when
-            // ACC returns.
+            // ACC returns. Detach the overlay surface when parked so SurfaceFlinger
+            // has zero overlay surface overhead while the car sits idle.
             setActionBarExpanded(false);
-            if (overlayView != null) overlayView.setVisibility(View.GONE);
+            removeOverlay();
             return;
         }
         

@@ -4935,22 +4935,26 @@ public class HardwareEventRecorderGpu {
             // ~250, halving CPU at idle while preserving sub-frame
             // responsiveness when the encoder restarts producing.
             long emptyDrainSleepMs = 4L;
+            int emptyDrainStreak = 0;
             final long minEmptySleepMs = 4L;
             final long maxEmptySleepMs = 16L;
+            final long maxIdleEmptySleepMs = 250L;
             while (drainerRunning) {
                 try {
                     int drained = drainEncoderInternal();
                     if (drained > 0) {
                         // Real work flowed — reset backoff and skip sleep.
                         // Next iteration's 10 ms blocking dequeue paces us.
+                        emptyDrainStreak = 0;
                         emptyDrainSleepMs = minEmptySleepMs;
                     } else {
-                        // No frames — back off. The 10 ms blocking dequeue
-                        // already absorbed up to 10 ms idle, so adding
-                        // (4..16) ms here keeps the upper-bound responsiveness
-                        // at ≈26 ms — well under one frame at 30 fps.
+                        emptyDrainStreak++;
+                        boolean activeConsumer = recording || isWritingToFile || !streamCallbacks.isEmpty();
+                        long currentMaxSleepMs = (activeConsumer || emptyDrainStreak < 20)
+                                ? maxEmptySleepMs
+                                : maxIdleEmptySleepMs;
                         Thread.sleep(emptyDrainSleepMs);
-                        emptyDrainSleepMs = Math.min(maxEmptySleepMs,
+                        emptyDrainSleepMs = Math.min(currentMaxSleepMs,
                                 emptyDrainSleepMs * 2L);
                     }
                 } catch (InterruptedException e) {
@@ -5228,7 +5232,8 @@ public class HardwareEventRecorderGpu {
             while (diskWriterRunning || !muxerWriteQueue.isEmpty()) {
                 MuxerPacket packet = null;
                 try {
-                    packet = muxerWriteQueue.pollFirst(50,
+                    long pollTimeoutMs = (isWritingToFile || recording) ? 50L : 500L;
+                    packet = muxerWriteQueue.pollFirst(pollTimeoutMs,
                             java.util.concurrent.TimeUnit.MILLISECONDS);
                     if (packet == null) continue;
                     // FLUSH_HISTORY control job (pre-record/slow-SD fix):
@@ -5748,7 +5753,8 @@ public class HardwareEventRecorderGpu {
         while (true) {
             int outputBufferIndex;
             try {
-                long dequeueTimeoutUs = firstDequeue ? 10_000L : 0L;
+                boolean activeOrUnseeded = recording || isWritingToFile || !streamCallbacks.isEmpty() || savedFormat == null;
+                long dequeueTimeoutUs = (firstDequeue && activeOrUnseeded) ? 10_000L : 0L;
                 outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, dequeueTimeoutUs);
                 firstDequeue = false;
             } catch (Exception e) {

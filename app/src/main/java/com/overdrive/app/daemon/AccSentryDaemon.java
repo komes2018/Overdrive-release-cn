@@ -4891,6 +4891,10 @@ public class AccSentryDaemon {
                 }
             }
 
+            if (isPanelRequestCurrent(generation, true)) {
+                restoreDrivingPowerSlimming();
+            }
+
             // Verified-panel platforms (DiLink 4/5) park with the vendor
             // TurnBacklightOffWithLock held. Everything above is backlight-API
             // only and shares its blind spot: getPowerScreenStatus() reports
@@ -5002,6 +5006,45 @@ public class AccSentryDaemon {
             }
         }
         return false;
+    }
+
+    /**
+     * Suppresses parked background bloat (voice wake-word service, karaoke) and
+     * hides status-bar icon redraws while the panel backlight is off to keep the
+     * head unit idle and drop SystemUI/SurfaceFlinger CPU draw without dropping 24/7
+     * network or ADB reachability.
+     */
+    private static void applyParkedPowerSlimming(long transitionGeneration) {
+        if (!isKeepAliveCommitCurrent(transitionGeneration)) return;
+        try {
+            ShellResult res = execShellResult(
+                    "am force-stop com.byd.autovoice >/dev/null 2>&1; "
+                            + "am force-stop com.byd.minikaraoke >/dev/null 2>&1; "
+                            + "settings put global policy_control immersive.full=* >/dev/null 2>&1; "
+                            + "settings put secure icon_blacklist mobile,wifi,bluetooth,location,volume,alarm_clock,rotate,headset,data_saver,hotspot,zen >/dev/null 2>&1",
+                    DEFAULT_SHELL_TIMEOUT_MS,
+                    () -> isKeepAliveCommitCurrent(transitionGeneration));
+            if (res.success) {
+                log("Parked power slimming applied (autovoice/minikaraoke stopped, statusbar suppressed)");
+            }
+        } catch (Throwable t) {
+            log("applyParkedPowerSlimming error: " + t.getMessage());
+        }
+    }
+
+    /** Restores driving UI status-bar state and BYD voice service when ACC turns ON. */
+    private static void restoreDrivingPowerSlimming() {
+        try {
+            execShellResult(
+                    "settings put global policy_control immersive.full=com.smg.dydesktop >/dev/null 2>&1; "
+                            + "settings delete secure icon_blacklist >/dev/null 2>&1; "
+                            + "am startservice -n com.byd.autovoice/.service.VoiceService >/dev/null 2>&1 || true",
+                    DEFAULT_SHELL_TIMEOUT_MS,
+                    null);
+            log("Restored driving UI statusbar and BYD voice service");
+        } catch (Throwable t) {
+            log("restoreDrivingPowerSlimming error: " + t.getMessage());
+        }
     }
 
     /**
@@ -5501,6 +5544,10 @@ public class AccSentryDaemon {
                         // Renew the 6h AccSentry:Core lease every 5 min on DiLink 3/4 so
                         // multi-hour parked sessions (>6h) never drop to single-wakelock.
                         acquireWakeLock();
+                    }
+                    if (tick % ISP_VOTE_REASSERT_EVERY_TICKS == 0
+                            && isKeepAliveCommitCurrent(transitionGeneration)) {
+                        applyParkedPowerSlimming(transitionGeneration);
                     }
                     // Parked keep-alive lease (Experimental): re-reads the
                     // toggle, samples 12 V, re-asserts or releases its levers.
