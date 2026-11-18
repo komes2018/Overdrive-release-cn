@@ -8,6 +8,7 @@
   <b><a href="Readme.md">简体中文</a></b> •
   <a href="README_EN.md">English</a> •
   <a href="docs/USER_GUIDE.md">📖 保姆级安装指南</a> •
+  <a href="#实车界面预览">📸 界面预览</a> •
   <a href="#国内车机优化">🇨🇳 国内优化</a> •
   <a href="#零流量千里眼方案">零流量千里眼</a> •
   <a href="#功耗实测与防亏电双保险">🔋 功耗实测</a> •
@@ -24,6 +25,44 @@
 > 📖 **新手必看**：首次装车请先阅读保姆级图文教程 [**《OverDrive 车友安装使用指南》**](docs/USER_GUIDE.md)（涵盖 USB 调试、停用路况监测、U 盘 / ADB 安装、手机远程组网与常见问题）。
 >
 > 🙏 本专版基于优秀上游开源项目 [**yash-srivastava/Overdrive-release**](https://github.com/yash-srivastava/Overdrive-release) 本土化二次开发，**核心创意与绝大部分代码均出自原作者**，详见 [致谢原作者与上游项目](#致谢原作者与上游项目)。
+
+---
+
+<a id="实车界面预览"></a>
+## 📸 实车界面预览
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/images/showcase/dashboard.webp" alt="仪表盘与快捷车控" width="100%"/><br/>
+      <sub><b>首页仪表盘</b>：电量/续航/5G月流量/胎压/定位与远程快捷控车</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/images/showcase/live-360.webp" alt="360度四路实时监控" width="100%"/><br/>
+      <sub><b>360° 实时画面</b>：地库也能手机远程秒开 4 路高清环视与抓拍</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/images/showcase/recordings.webp" alt="AI目标识别与多维录像筛选" width="100%"/><br/>
+      <sub><b>多维录像回放</b>：按行人/车辆/动物、告警级别、距离与存储精准筛选</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/images/showcase/battery-soh.webp" alt="动力电池健康度SOH与充电统计" width="100%"/><br/>
+      <sub><b>电池健康度 SOH &amp; 充电曲线</b>：高压电池健康度、电量曲线与成本统计</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/images/showcase/wecom-push.webp" alt="企业微信消息推送" width="72%"/><br/>
+      <sub><b>企业微信直连推送</b>：哨兵现场抓拍拼图、驻车耗电报告与行程日报</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/images/showcase/trips.webp" alt="行程能耗与驾驶分析" width="90%"/><br/>
+      <sub><b>行程能耗分析</b>：按天统计耗时、里程、电耗、驾驶评分与单次费用</sub>
+    </td>
+  </tr>
+</table>
 
 ---
 
