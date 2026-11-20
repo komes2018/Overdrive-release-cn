@@ -3919,6 +3919,20 @@ public class StorageManager {
         }
     }
 
+    private StorageType externalVolumeOf(File dir) {
+        if (dir == null) return null;
+        String p = dir.getAbsolutePath();
+        if (isUnderRoot(p, sdCardPath)) return StorageType.SD_CARD;
+        if (isUnderRoot(p, usbPath)) return StorageType.USB;
+        return null;
+    }
+
+    private static boolean isUnderRoot(String path, String root) {
+        if (root == null || root.isEmpty()) return false;
+        String r = root.endsWith("/") ? root.substring(0, root.length() - 1) : root;
+        return path.equals(r) || path.startsWith(r + "/");
+    }
+
     /**
      * Live recordings directory with a mount-liveness check. The availability
      * flag can lag a just-removed card until the volume watchdog runs; do not
