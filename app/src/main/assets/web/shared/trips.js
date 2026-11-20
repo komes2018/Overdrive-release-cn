@@ -866,13 +866,18 @@ const TRIPS = {
         if (usbBtn) usbBtn.classList.toggle('active', s.storageType === 'USB');
         this._paintVolumeAvailability(s);
         const slider = document.getElementById('storageLimitSlider');
+        const noLimitCheck = document.getElementById('tripsNoLimit');
         const sliderMax = this.tripsMaxFor(s.storageType, s);
+        const limitMb = typeof s.limitMb === 'number' ? s.limitMb : 500;
+        const noLimit = limitMb === 0;
+        if (noLimitCheck) noLimitCheck.checked = noLimit;
         if (slider) {
             slider.max = sliderMax;
-            slider.value = Math.min(s.limitMb || 500, sliderMax);
+            slider.value = noLimit ? Math.max(100, Math.min(500, sliderMax)) : Math.min(limitMb, sliderMax);
+            slider.disabled = noLimit;
         }
-        this.updateLimitLabel(s.limitMb || 500);
-        this.renderStorageUsage(s.usedMb || 0, s.limitMb || 500, s.tripsCount || 0, s.usedUnit || 'MB');
+        this.updateLimitLabel(limitMb);
+        this.renderStorageUsage(s.usedMb || 0, limitMb, s.tripsCount || 0, s.usedUnit || 'MB');
 
         const pathEl = document.getElementById('tripStoragePath');
         if (pathEl && s.storagePath) {
@@ -1052,8 +1057,22 @@ const TRIPS = {
         this.showApplyNeeded();
     },
 
+    setNoLimit(enabled) {
+        const meta = this.storageMeta || {};
+        const type = this.pendingStorageType || meta.storageType || 'INTERNAL';
+        const maxLimit = this.tripsMaxFor(type, meta);
+        const nextLimit = enabled ? 0 : Math.max(100, Math.min(500, maxLimit));
+        const slider = document.getElementById('storageLimitSlider');
+        if (slider) {
+            if (!enabled) slider.value = nextLimit;
+            slider.disabled = enabled;
+        }
+        this.setStorageLimit(nextLimit);
+        this.renderStorageUsage(meta.usedMb || 0, nextLimit, meta.tripsCount || 0, meta.usedUnit || 'MB');
+    },
+
     setStorageLimit(limitMb) {
-        this.pendingStorageLimit = parseInt(limitMb);
+        this.pendingStorageLimit = parseInt(limitMb, 10);
         this.updateLimitLabel(limitMb);
         this.showApplyNeeded();
     },
@@ -1063,8 +1082,9 @@ const TRIPS = {
         // the adjacent desc line is a translated sentence, and writing the raw
         // "500 MB" label into it would clobber that copy.
         const el = document.getElementById('storageLimitValue');
-        const v = parseInt(val);
-        const label = v >= 1000 ? (v / 1000) + ' GB' : v + ' MB';
+        const v = parseInt(val, 10);
+        const label = v === 0 ? BYD.i18n.t('storage.no_limit')
+            : (v >= 1000 ? (v / 1000) + ' GB' : v + ' MB');
         if (el) el.textContent = label;
         // Hooked here rather than in setStorageLimit: the slider fires oninput →
         // updateLimitLabel on every drag frame but onchange → setStorageLimit only
@@ -1091,10 +1111,14 @@ const TRIPS = {
         // need this because their oninput handler commits to this.config first.
         let mb = pendingMb;
         if (mb == null) {
-            const slider = document.getElementById('storageLimitSlider');
-            const live = slider ? parseInt(slider.value, 10) : NaN;
-            mb = !isNaN(live) ? live
-               : (this.pendingStorageLimit != null ? this.pendingStorageLimit : meta.limitMb);
+            if (this.pendingStorageLimit === 0) {
+                mb = 0;
+            } else {
+                const slider = document.getElementById('storageLimitSlider');
+                const live = slider && !slider.disabled ? parseInt(slider.value, 10) : NaN;
+                mb = !isNaN(live) ? live
+                   : (this.pendingStorageLimit != null ? this.pendingStorageLimit : meta.limitMb);
+            }
         }
         // ONLY a genuine unsaved pick counts as pending. Passing meta.storageType here
         // made every render look like a volume switch whenever storageMeta was stale
@@ -1765,18 +1789,22 @@ const TRIPS = {
         const countText = document.getElementById('storageTripsCount');
         const u = unit || 'MB';
 
+        const noLimit = limitMb === 0;
         if (fill) {
-            const pct = u === 'KB' ? ((usedMb / 1024) / limitMb * 100) : (usedMb / limitMb * 100);
-            fill.style.width = Math.min(100, Math.max(pct, count > 0 ? 0.5 : 0)) + '%';
+            const pct = (!noLimit && limitMb > 0)
+                ? (u === 'KB' ? ((usedMb / 1024) / limitMb * 100) : (usedMb / limitMb * 100))
+                : 0;
+            fill.style.width = noLimit ? '0%' : (Math.min(100, Math.max(pct, count > 0 ? 0.5 : 0)) + '%');
         }
 
         if (usedText) {
+            const limitLabel = noLimit ? BYD.i18n.t('storage.no_limit') : (limitMb + ' MB');
             if (u === 'KB') {
-                usedText.textContent = usedMb + ' KB / ' + limitMb + ' MB';
+                usedText.textContent = usedMb + ' KB / ' + limitLabel;
             } else if (usedMb === 0 && count > 0) {
-                usedText.textContent = '< 1 MB / ' + limitMb + ' MB';
+                usedText.textContent = '< 1 MB / ' + limitLabel;
             } else {
-                usedText.textContent = usedMb.toFixed(1) + ' MB / ' + limitMb + ' MB';
+                usedText.textContent = usedMb.toFixed(1) + ' MB / ' + limitLabel;
             }
         }
 

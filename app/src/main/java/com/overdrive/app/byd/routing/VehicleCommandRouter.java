@@ -2896,6 +2896,7 @@ public final class VehicleCommandRouter {
      */
     private boolean cloudHandshakeSatisfied(VehicleCommand cmd) {
         if (!cmd.hasCloudPath()) return false;
+        if (!hasActiveInternetNetwork()) return false;
         try {
             BydCloudConfig cfg = BydCloudConfig.fromUnifiedConfig();
             if (!cfg.isVerified()) return false;
@@ -2906,6 +2907,23 @@ public final class VehicleCommandRouter {
             return true;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    private static boolean hasActiveInternetNetwork() {
+        try {
+            android.content.Context ctx = com.overdrive.app.daemon.CameraDaemon.getAppContext();
+            if (ctx == null) return true;
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager)
+                    ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
+            if (cm == null) return true;
+            android.net.Network network = cm.getActiveNetwork();
+            if (network == null) return false;
+            android.net.NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+            return caps != null
+                    && caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        } catch (Throwable ignored) {
+            return true;
         }
     }
 

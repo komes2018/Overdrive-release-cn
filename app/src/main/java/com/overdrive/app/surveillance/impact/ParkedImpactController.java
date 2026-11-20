@@ -19,6 +19,10 @@ public abstract class ParkedImpactController {
     public static String currentSensitivity = null;
     public static long lastStartTime = 0;
     public static long g = 0;
+    private static String sensorState = "waiting";
+    private static String sensorName = "";
+    private static long lastSensorReportMs = 0L;
+    private static long lastSampleCount = 0L;
 
     public static void startMonitoring() {
         synchronized (lock) {
@@ -94,7 +98,57 @@ public abstract class ParkedImpactController {
                     currentSensitivity = null;
                     logger.info("Stopped parked impact sensor service");
                 }
+                sensorState = "inactive";
+                sensorName = "";
+                lastSensorReportMs = 0L;
+                lastSampleCount = 0L;
             }
+        }
+    }
+
+    /** Record the app-process sensor heartbeat. */
+    public static void onSensorStatus(String state, long samples, String name) {
+        if (!"registered".equals(state) && !"sampling".equals(state)
+                && !"unavailable".equals(state)) return;
+        synchronized (lock) {
+            sensorState = state;
+            sensorName = name == null ? "" : name;
+            lastSampleCount = Math.max(0L, samples);
+            lastSensorReportMs = System.currentTimeMillis();
+        }
+    }
+
+    /** Snapshot for the WebUI; stale heartbeats are never presented as healthy. */
+    public static JSONObject getSensorStatus() {
+        boolean enabled = false;
+        try {
+            JSONObject config = UnifiedConfigManager.getSurveillance();
+            if (config != null) {
+                enabled = config.optBoolean("impactDetection", false);
+            }
+        } catch (Throwable ignored) {}
+        boolean watchWindow = false;
+        try {
+            boolean inSentry = AccMonitor.isInSentryMode();
+            boolean accOn = AccMonitor.isAccOn();
+            boolean surveillanceActive = CameraDaemon.isSurveillanceActive() || CameraDaemon.isSurveillanceEnabled();
+            watchWindow = (inSentry || !accOn) && surveillanceActive;
+        } catch (Throwable ignored) {}
+        synchronized (lock) {
+            long age = lastSensorReportMs == 0 ? Long.MAX_VALUE
+                    : Math.max(0L, System.currentTimeMillis() - lastSensorReportMs);
+            String state = age > 45_000L ? (enabled && watchWindow ? "stale" : "inactive")
+                    : sensorState;
+            JSONObject result = new JSONObject();
+            try {
+                result.put("enabled", enabled);
+                result.put("watchWindow", watchWindow);
+                result.put("state", state);
+                result.put("sensor", sensorName);
+                result.put("lastReportAgeMs", age == Long.MAX_VALUE ? JSONObject.NULL : age);
+                result.put("samples", lastSampleCount);
+            } catch (Exception ignored) {}
+            return result;
         }
     }
 

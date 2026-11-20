@@ -3668,7 +3668,7 @@ public class GpuSurveillancePipeline {
                 // and defer + retry instead of hanging.
                 java.io.File probeDir = resolveProbeDirWithEnospcFallback(
                         (outputDir != null) ? outputDir
-                                : StorageManager.getInstance().getRecordingsDir());
+                                : StorageManager.getInstance().getLiveRecordingsDirIfMounted());
                 if (!isStorageWriteReady(probeDir)) {
                     logger.warn("Recordings volume not write-ready (probe failed/timed out) — "
                         + "deferring and scheduling retry");
@@ -3708,8 +3708,8 @@ public class GpuSurveillancePipeline {
                     // records nothing because the old code (a) logged a false
                     // "Normal recording started" and (b) never retried.
                     // Defer + retry until storage settles.
-                    logger.warn("Recording did not start — storage not write-ready "
-                        + "(USB still mounting?); deferring and scheduling retry");
+                    logger.warn("Recording did not start — camera warming up or "
+                        + "storage not write-ready; deferring and scheduling retry");
                     pendingRecordingDir = outputDir;
                     pendingRecordingPrefix = prefix;
                     recordingMode = true;
@@ -3809,7 +3809,7 @@ public class GpuSurveillancePipeline {
         // schedule the storage-ready retry instead of pinning the
         // PendingRecKickoff thread.
         java.io.File probeDir = resolveProbeDirWithEnospcFallback(
-                (dir != null) ? dir : StorageManager.getInstance().getRecordingsDir());
+                (dir != null) ? dir : StorageManager.getInstance().getLiveRecordingsDirIfMounted());
         if (!isStorageWriteReady(probeDir)) {
             logger.warn("Deferred start: storage volume not write-ready (probe failed/timed out) — "
                 + "rescheduling retry instead of issuing inner recorder.startRecording");
@@ -3954,7 +3954,7 @@ public class GpuSurveillancePipeline {
                     // only the gate target is redirected (symmetric with the direct sites).
                     java.io.File probeDir = resolveProbeDirWithEnospcFallback(
                             (outputDir != null) ? outputDir
-                                    : StorageManager.getInstance().getRecordingsDir());
+                                    : StorageManager.getInstance().getLiveRecordingsDirIfMounted());
                     // FIX (audit R1): snapshot recorder + re-verify pipeline is
                     // running BEFORE startRecording so a concurrent stop() that
                     // nulled recorder/encoder mid-probe can't drop us into
@@ -4094,7 +4094,7 @@ public class GpuSurveillancePipeline {
                     // retry forever. startRecording still gets the ORIGINAL outputDir.
                     java.io.File probeDir = resolveProbeDirWithEnospcFallback(
                             (outputDir != null) ? outputDir
-                                    : StorageManager.getInstance().getRecordingsDir());
+                                    : StorageManager.getInstance().getLiveRecordingsDirIfMounted());
                     // FIX (audit R1): snapshot recorder + re-verify pipeline
                     // is running before startRecording (concurrent-stop NPE
                     // / zombie-recording guard).
@@ -4639,6 +4639,7 @@ public class GpuSurveillancePipeline {
      */
     public void onAccOn() {
         logger.info("ACC ON detected - stopping surveillance and finalizing recordings");
+        final boolean wasSurveillance = currentMode == Mode.SURVEILLANCE;
 
         try {
             // First, stop any active recording immediately (synchronous)
@@ -4721,8 +4722,15 @@ public class GpuSurveillancePipeline {
                     || com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
             } catch (Throwable ignored) {}
             if (camera != null && running && !persistentCamera) {
-                camera.reopenCamera();
-                logger.info("ACC ON transition complete - all recordings finalized, camera reopened");
+                if (wasSurveillance && camera.hasLiveNativeSharedCamera()) {
+                    // The native BYD app already owns primary and our secondary
+                    // feed is fresh. Reopening would discard a working stream
+                    // and repeat the handoff/warmup unnecessarily.
+                    logger.info("ACC ON: preserving live secondary AVM camera");
+                } else {
+                    camera.reopenCamera();
+                    logger.info("ACC ON transition complete - all recordings finalized, camera reopened");
+                }
             } else if (persistentCamera) {
                 logger.info("ACC ON transition complete - DiLink camera stays alive (no reopen)");
                 // A parked DI4 HAL may have intentionally paused its producer
@@ -4733,6 +4741,12 @@ public class GpuSurveillancePipeline {
                 }
             } else {
                 logger.info("ACC ON transition complete - all recordings finalized");
+            }
+
+            if (wasSurveillance && running && encoder != null) {
+                // Arm after the OEM handoff decision. The first cam_* file
+                // must use a newly encoded post-ACC frame, never parked pre-roll.
+                encoder.requireFreshFrameForNextDriveClip();
             }
         } catch (Throwable t) {
             // Any failure mid-transition leaves the pipeline in a half-mutated

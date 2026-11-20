@@ -763,6 +763,7 @@
                                 <div class="slider-control">
                                     <span class="slider-value" id="recLimitValue">500 MB</span>
                                     <input type="range" class="slider" id="recLimitSlider" min="100" max="100000" step="100" value="500" oninput="RecSettings.updateRecLimit(this.value)">
+                                    <label class="st-no-limit" style="display:flex;align-items:center;gap:6px;margin-top:8px;color:var(--on-surface-variant);font-size:12px;cursor:pointer;"><input type="checkbox" id="recordingsNoLimit" onchange="RecSettings.setNoLimit(this.checked)"> <span data-i18n="storage.no_limit">无限制</span></label>
                                 </div>
                             </div>
                         </div>

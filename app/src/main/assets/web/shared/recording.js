@@ -462,7 +462,7 @@ BYD.recording = {
                 // storageInfo/ceiling fields below are display-only and always
                 // refresh. Mirrors the clip-duration mid-flight guard above.
                 if (!this.hasUnsavedChanges) {
-                    this.config.recordingsLimitMb = data.recordingsLimitMb || 500;
+                    this.config.recordingsLimitMb = typeof data.recordingsLimitMb === 'number' ? data.recordingsLimitMb : 500;
                     this.config.recordingsStorageType = data.recordingsStorageType || 'INTERNAL';
                 }
                 // Active (resolved) type may differ from configured when the
@@ -573,12 +573,15 @@ BYD.recording = {
                     + (counts.proximity.bytes || 0);
                 if (usedEl) usedEl.textContent = BYD.i18n.t('recording.storage_used', {size: this.formatSize(usedBytes)});
 
-                const limitMb = this.config.recordingsLimitMb || 500;
-                if (limitEl) limitEl.textContent = BYD.i18n.t('recording.storage_limit_mb', {mb: limitMb});
+                const limitMb = typeof this.config.recordingsLimitMb === 'number' ? this.config.recordingsLimitMb : 500;
+                const noLimit = limitMb === 0;
+                if (limitEl) limitEl.textContent = noLimit
+                    ? BYD.i18n.t('storage.no_limit')
+                    : BYD.i18n.t('recording.storage_limit_mb', {mb: limitMb});
 
                 // Calculate percentage
                 const limitBytes = limitMb * 1024 * 1024;
-                const percent = Math.min(100, Math.round(usedBytes * 100 / limitBytes));
+                const percent = (!noLimit && limitBytes > 0) ? Math.min(100, Math.round(usedBytes * 100 / limitBytes)) : 0;
                 if (fillEl) fillEl.style.width = percent + '%';
 
                 // Update Recordings Today count
@@ -644,16 +647,22 @@ BYD.recording = {
     updateStorageLimitUI() {
         const slider = document.getElementById('recLimitSlider');
         const value = document.getElementById('recLimitValue');
+        const noLimitCheck = document.getElementById('recordingsNoLimit');
+        const mb = typeof this.config.recordingsLimitMb === 'number' ? this.config.recordingsLimitMb : 500;
+        const noLimit = mb === 0;
 
         const maxLimit = this.effectiveMaxLimitMb();
 
+        if (noLimitCheck) noLimitCheck.checked = noLimit;
         if (slider) {
             slider.max = maxLimit;
-            slider.value = Math.min(this.config.recordingsLimitMb, maxLimit);
+            slider.value = noLimit ? Math.max(100, Math.min(500, maxLimit)) : Math.min(mb, maxLimit);
+            slider.disabled = noLimit;
         }
         if (value) {
-            const mb = this.config.recordingsLimitMb;
-            value.textContent = mb >= 1000 ? BYD.i18n.t('recording.unit_gb', {n: (mb / 1000)}) : BYD.i18n.t('recording.unit_mb', {n: mb});
+            value.textContent = noLimit
+                ? BYD.i18n.t('storage.no_limit')
+                : (mb >= 1000 ? BYD.i18n.t('recording.unit_gb', {n: (mb / 1000)}) : BYD.i18n.t('recording.unit_mb', {n: mb}));
         }
 
         const minLabel = document.getElementById('recLimitMin');
@@ -662,6 +671,14 @@ BYD.recording = {
         if (maxLabel) maxLabel.textContent = maxLimit >= 1000 ? BYD.i18n.t('recording.unit_gb', {n: (maxLimit / 1000)}) : BYD.i18n.t('recording.unit_mb', {n: maxLimit});
 
         this.updateBudgetBanner();
+    },
+
+    setNoLimit(enabled) {
+        const maxLimit = this.effectiveMaxLimitMb();
+        this.config.recordingsLimitMb = enabled ? 0 : Math.max(100, Math.min(500, maxLimit));
+        this.updateStorageLimitUI();
+        this.loadStorageStats();
+        this.markChanged();
     },
 
     /**

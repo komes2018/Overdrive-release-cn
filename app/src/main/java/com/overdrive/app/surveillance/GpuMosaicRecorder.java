@@ -1400,7 +1400,8 @@ public class GpuMosaicRecorder {
             //     hot remount; one-shot — cleared after consumption so the
             //     next call falls back to live StorageManager.getRecordingsDir()
             //     unless the watchdog re-pokes it again).
-            //  3) Live StorageManager.getRecordingsDir() (default).
+            //  3) Live configured recordings dir (default), not the cached
+            //     field which is frozen while a recording is active.
             java.io.File overrideDir = this.pendingOutputDirOverride;
             java.io.File targetDir;
             if (outputDir != null) {
@@ -1426,7 +1427,7 @@ public class GpuMosaicRecorder {
                         + targetDir.getAbsolutePath() + " (was " + overrideDir.getAbsolutePath() + ")");
                 }
             } else {
-                targetDir = storageManager.getRecordingsDir();
+                targetDir = storageManager.getLiveRecordingsDirIfMounted();
             }
 
             // ENOSPC fallback (false-GREEN fix): if the resolved target lives on
@@ -1483,6 +1484,13 @@ public class GpuMosaicRecorder {
 
             // Use target directory
             String outputPath = new java.io.File(targetDir, filename).getAbsolutePath();
+            // Camera warmup is not a storage failure. Defer this first drive
+            // file until a post-ACC encoded frame exists; the pipeline's
+            // existing retry path will start it when the frame barrier clears.
+            if (encoder != null && encoder.isWaitingForFreshDriveFrame(outputPath)) {
+                logger.info("ACC ON camera warmup: deferring first drive muxer");
+                return;
+            }
             // DIAGNOSTIC (root-cause confirm for "REC green, no file"): log the
             // FINAL resolved target + its free space + configured-vs-active
             // storage type at each segment open. With the user-reported trigger

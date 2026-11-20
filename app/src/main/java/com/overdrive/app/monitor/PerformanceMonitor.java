@@ -37,7 +37,7 @@ public class PerformanceMonitor {
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
     
     // Singleton
-    private static PerformanceMonitor instance;
+    private static volatile PerformanceMonitor instance;
     private static final Object lock = new Object();
     
     // Configuration
@@ -80,9 +80,15 @@ public class PerformanceMonitor {
     // Lets the freq-ratio fallback tag its estimate honestly (issue #173).
     // Sampler-thread-confined (collectMetrics runs on a single scheduler task).
     private boolean lastGpuMaxFreqWasReal = false;
-    // Cache the resolved sysfs path once we find one that returns valid data,
-    // so we don't pay 4× File.exists() every second forever.
+    // Cache immutable hardware-ceiling sources and the unavailable result.
+    // devfreq max_freq nodes are policy caps and can change at runtime, so
+    // those values are deliberately re-read instead of being cached.
+    // 0 = unresolved; -1 = resolved-absent (use the conservative default).
+    private double cachedGpuMaxFreqMhz = 0;
+    // Cache the resolved busy-counter path, including a confirmed missing path.
+    // The kernel's sysfs topology is stable for the daemon's lifetime.
     private java.io.File resolvedGpuBusyFile = null;
+    private boolean gpuBusyPathAbsent = false;
     private boolean gpuBusyResolutionLogged = false;
 
     // Cache the resolved CPU/GPU thermal-zone /temp paths. The original code
@@ -95,6 +101,11 @@ public class PerformanceMonitor {
     private static final java.io.File TEMP_PATH_NOT_FOUND = new java.io.File("");
     private java.io.File resolvedCpuTempFile = null;
     private java.io.File resolvedGpuTempFile = null;
+    // CPU and GPU temperature discovery share the same thermal-zone topology.
+    // Read each zone type once instead of independently opening every /type
+    // file during both first-use scans. Null means the shared index is unresolved.
+    private String[] cachedThermalZoneTypes = null;
+    private boolean[] loadedThermalZoneTypes = null;
     
     // Scheduler
     private ScheduledExecutorService scheduler;
@@ -120,19 +131,33 @@ public class PerformanceMonitor {
     // ==================== LIFECYCLE ====================
     
     public void init(Context context) {
-        this.context = context;
-        if (context != null) {
-            this.activityManager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        // A singleton must not retain an Activity across configuration changes.
+        this.context = context == null ? null : context.getApplicationContext();
+        if (this.context != null) {
+            this.activityManager = (ActivityManager) this.context.getSystemService(Context.ACTIVITY_SERVICE);
         }
         this.pid = Process.myPid();
         this.uid = Process.myUid();
         logger.info("PerformanceMonitor initialized (PID: " + pid + ", UID: " + uid + ")");
     }
     
-    public void start() {
+    public synchronized void start() {
         if (isRunning) return;
+        // The previous viewer may have disconnected minutes ago. Reusing the
+        // old /proc and kgsl counters would make the first new sample average
+        // over that entire idle gap instead of the configured 2-second period.
+        lastCpuTime = 0;
+        lastIdleTime = 0;
+        lastAppCpuTime = 0;
+        lastCpuTimeForApp = 0;
+        lastGpuBusy = -1;
+        lastGpuTotal = -1;
+        synchronized (history) {
+            history.clear();
+        }
+        latestSnapshot.set(null);
         isRunning = true;
-        
+
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "PerfMonitor");
             t.setPriority(Thread.MIN_PRIORITY);
@@ -143,7 +168,7 @@ public class PerformanceMonitor {
         logger.info("Performance monitoring started");
     }
     
-    public void stop() {
+    public synchronized void stop() {
         isRunning = false;
         if (scheduler != null) {
             scheduler.shutdownNow();
@@ -158,7 +183,7 @@ public class PerformanceMonitor {
      * Register a client connection. Starts monitoring if this is the first client.
      * @param clientId Unique identifier for the client (e.g., session ID or IP:port)
      */
-    public void clientConnected(String clientId) {
+    public synchronized void clientConnected(String clientId) {
         if (clientId == null || clientId.isEmpty()) {
             clientId = "anonymous-" + System.currentTimeMillis();
         }
@@ -193,7 +218,7 @@ public class PerformanceMonitor {
      * Unregister a client connection. Stops monitoring if this was the last client.
      * @param clientId Client identifier
      */
-    public void clientDisconnected(String clientId) {
+    public synchronized void clientDisconnected(String clientId) {
         if (clientId == null) return;
         
         Long removed = activeClients.remove(clientId);
@@ -212,7 +237,7 @@ public class PerformanceMonitor {
     /**
      * Start the client cleanup scheduler to remove stale clients.
      */
-    private void startClientCleanup() {
+    private synchronized void startClientCleanup() {
         if (clientCleanupScheduler != null) return;
         
         clientCleanupScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -228,7 +253,7 @@ public class PerformanceMonitor {
     /**
      * Stop the client cleanup scheduler.
      */
-    private void stopClientCleanup() {
+    private synchronized void stopClientCleanup() {
         if (clientCleanupScheduler != null) {
             clientCleanupScheduler.shutdownNow();
             clientCleanupScheduler = null;
@@ -249,8 +274,16 @@ public class PerformanceMonitor {
         }
         
         for (String clientId : staleClients) {
-            logger.debug("Removing stale client: " + clientId);
-            clientDisconnected(clientId);
+            // A heartbeat may have refreshed this client after the scan.
+            // Compare-and-remove under the same lock as connect/disconnect so
+            // an old cleanup pass cannot evict a live dashboard session.
+            synchronized (this) {
+                Long lastSeen = activeClients.get(clientId);
+                if (lastSeen != null && now - lastSeen > CLIENT_TIMEOUT_MS) {
+                    logger.debug("Removing stale client: " + clientId);
+                    clientDisconnected(clientId);
+                }
+            }
         }
     }
     
@@ -304,9 +337,10 @@ public class PerformanceMonitor {
     private void collectCpuMetrics(PerformanceSnapshot snapshot) {
         try {
             // Read /proc/stat for system CPU
-            RandomAccessFile reader = new RandomAccessFile("/proc/stat", "r");
-            String line = reader.readLine();
-            reader.close();
+            String line;
+            try (RandomAccessFile reader = new RandomAccessFile("/proc/stat", "r")) {
+                line = reader.readLine();
+            }
             
             if (line != null && line.startsWith("cpu ")) {
                 String[] parts = line.split("\\s+");
@@ -335,15 +369,20 @@ public class PerformanceMonitor {
             }
             
             // Read /proc/[pid]/stat for app CPU
-            RandomAccessFile appReader = new RandomAccessFile("/proc/" + pid + "/stat", "r");
-            String appLine = appReader.readLine();
-            appReader.close();
+            String appLine;
+            try (RandomAccessFile appReader = new RandomAccessFile("/proc/" + pid + "/stat", "r")) {
+                appLine = appReader.readLine();
+            }
             
             if (appLine != null) {
-                String[] parts = appLine.split("\\s+");
-                if (parts.length > 14) {
-                    long utime = Long.parseLong(parts[13]);
-                    long stime = Long.parseLong(parts[14]);
+                // /proc/<pid>/stat field 2 (comm) is parenthesized and may
+                // itself contain spaces or ')'. Splitting the whole line both
+                // allocates an array of every field and misindexes CPU times
+                // when the process name contains whitespace. Read only fields
+                // 14 (utime) and 15 (stime), anchored after the final ')'.
+                long utime = readProcStatField(appLine, 14);
+                long stime = readProcStatField(appLine, 15);
+                if (utime >= 0 && stime >= 0) {
                     long appCpuTime = utime + stime;
                     
                     if (lastAppCpuTime > 0 && lastCpuTime > 0) {
@@ -396,27 +435,61 @@ public class PerformanceMonitor {
     }
 
     
+    /**
+     * Read one numeric field from /proc/<pid>/stat without splitting the line.
+     * Linux field 2 (comm) is enclosed in parentheses but can contain spaces
+     * and closing parentheses, so field numbering must begin after its final
+     * closing parenthesis. Returns -1 when the requested field is absent or
+     * malformed; CPU time fields are non-negative.
+     */
+    private static long readProcStatField(String statLine, int targetField) {
+        if (statLine == null || targetField < 3) return -1;
+        int commandEnd = statLine.lastIndexOf(')');
+        if (commandEnd < 0) return -1;
+
+        int cursor = commandEnd + 1;
+        int field = 3;
+        while (field <= targetField) {
+            while (cursor < statLine.length()
+                    && Character.isWhitespace(statLine.charAt(cursor))) {
+                cursor++;
+            }
+            if (cursor >= statLine.length()) return -1;
+
+            int start = cursor;
+            while (cursor < statLine.length()
+                    && !Character.isWhitespace(statLine.charAt(cursor))) {
+                cursor++;
+            }
+            if (field == targetField) {
+                try {
+                    return Long.parseLong(statLine.substring(start, cursor));
+                } catch (NumberFormatException e) {
+                    return -1;
+                }
+            }
+            field++;
+        }
+        return -1;
+    }
+
     private void collectMemoryMetrics(PerformanceSnapshot snapshot) {
         try {
-            // System memory from /proc/meminfo
-            BufferedReader reader = new BufferedReader(new FileReader("/proc/meminfo"));
-            String line;
-            long memTotal = 0, memFree = 0, memAvailable = 0, buffers = 0, cached = 0;
-            
-            while ((line = reader.readLine()) != null) {
-                String[] parts = line.split("\\s+");
-                if (parts.length >= 2) {
-                    long value = Long.parseLong(parts[1]); // in KB
-                    switch (parts[0]) {
-                        case "MemTotal:": memTotal = value; break;
-                        case "MemFree:": memFree = value; break;
-                        case "MemAvailable:": memAvailable = value; break;
-                        case "Buffers:": buffers = value; break;
-                        case "Cached:": cached = value; break;
+            // Only MemTotal and MemAvailable contribute to the dashboard's
+            // memory metrics. Avoid regex splitting and parsing unrelated
+            // /proc/meminfo values on every sample.
+            long memTotal = 0;
+            long memAvailable = 0;
+            try (BufferedReader reader = new BufferedReader(new FileReader("/proc/meminfo"))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.startsWith("MemTotal:")) {
+                        memTotal = parseMemInfoValueKb(line);
+                    } else if (line.startsWith("MemAvailable:")) {
+                        memAvailable = parseMemInfoValueKb(line);
                     }
                 }
             }
-            reader.close();
             
             snapshot.memTotalMb = memTotal / 1024.0;
             snapshot.memUsedMb = (memTotal - memAvailable) / 1024.0;
@@ -435,6 +508,24 @@ public class PerformanceMonitor {
         }
     }
     
+    /** Parse the numeric kB value after a /proc/meminfo field label. */
+    private static long parseMemInfoValueKb(String line) {
+        int index = line.indexOf(':') + 1;
+        while (index < line.length() && Character.isWhitespace(line.charAt(index))) {
+            index++;
+        }
+        int valueStart = index;
+        while (index < line.length() && line.charAt(index) >= '0' && line.charAt(index) <= '9') {
+            index++;
+        }
+        if (valueStart == index) return 0;
+        try {
+            return Long.parseLong(line.substring(valueStart, index));
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
+    }
+
     private void collectGpuMetrics(PerformanceSnapshot snapshot) {
         try {
             // Auto-detect GPU via /sys/class/devfreq/.
@@ -494,7 +585,9 @@ public class PerformanceMonitor {
             // failed the monotonicity check and bled through to the freq-ratio
             // fallback, which inflates at idle (governor parks at ~257/650 MHz
             // → ~40% baseline) and pegs near 100% on any burst.
-            if (snapshot.gpuUsagePercent == 0) {
+            // A measured 0% means the GPU is idle, not that the reading failed.
+            // Only probe the next sysfs source when the prior source is unavailable.
+            if ("unavailable".equals(snapshot.gpuUsageSource)) {
                 java.io.File gpuBusyFile = resolveGpuBusyFile();
                 if (gpuBusyFile != null) {
                     try (BufferedReader br = new BufferedReader(new FileReader(gpuBusyFile))) {
@@ -542,7 +635,7 @@ public class PerformanceMonitor {
             // If still no usage, estimate from frequency ratio. This is what
             // the original code did and what the user is used to seeing —
             // governor's clock ratio, not real busy time, but always populated.
-            if (snapshot.gpuUsagePercent == 0 && snapshot.gpuFreqMhz > 0) {
+            if ("unavailable".equals(snapshot.gpuUsageSource) && snapshot.gpuFreqMhz > 0) {
                 double maxFreq = readGpuMaxFrequency();
                 if (maxFreq > 0) {
                     snapshot.gpuUsagePercent = Math.min(100, (snapshot.gpuFreqMhz / maxFreq) * 100);
@@ -568,6 +661,11 @@ public class PerformanceMonitor {
      * conservative Adreno default if no sysfs path resolves.
      */
     private double readGpuMaxFrequency() {
+        if (cachedGpuMaxFreqMhz != 0) {
+            lastGpuMaxFreqWasReal = cachedGpuMaxFreqMhz > 0;
+            return cachedGpuMaxFreqMhz > 0 ? cachedGpuMaxFreqMhz : 650.0;
+        }
+
         lastGpuMaxFreqWasReal = false;
         String[] paths = {
             "/sys/class/kgsl/kgsl-3d0/max_gpuclk",
@@ -590,11 +688,27 @@ public class PerformanceMonitor {
                             if (v > maxRaw) maxRaw = v;
                         } catch (NumberFormatException ignored) {}
                     }
-                    if (maxRaw > 0) { lastGpuMaxFreqWasReal = true; return normalizeFrequency(maxRaw); }
+                    if (maxRaw > 0) {
+                        lastGpuMaxFreqWasReal = true;
+                        double maxMhz = normalizeFrequency(maxRaw);
+                        cachedGpuMaxFreqMhz = maxMhz;
+                        return maxMhz;
+                    }
                 } else {
                     try {
                         long v = Long.parseLong(line.trim());
-                        if (v > 0) { lastGpuMaxFreqWasReal = true; return normalizeFrequency(v); }
+                        if (v > 0) {
+                            lastGpuMaxFreqWasReal = true;
+                            double maxMhz = normalizeFrequency(v);
+                            // devfreq max_freq is a runtime policy cap, not a
+                            // hardware ceiling. Keep it live; the KGSL/Mali
+                            // hardware-max and available_frequencies nodes are
+                            // immutable for the daemon's lifetime.
+                            boolean immutableMaximum = path.endsWith("max_gpuclk")
+                                    || path.endsWith("max_clock");
+                            if (immutableMaximum) cachedGpuMaxFreqMhz = maxMhz;
+                            return maxMhz;
+                        }
                     } catch (NumberFormatException ignored) {}
                 }
             } catch (Exception ignored) {}
@@ -602,6 +716,7 @@ public class PerformanceMonitor {
         // Conservative estimate for Adreno GPUs — matches the original behavior
         // before the multi-sample rewrite. lastGpuMaxFreqWasReal stays false so
         // the caller can tag this as a hardcoded (not measured) ratio.
+        cachedGpuMaxFreqMhz = -1;
         return 650.0;
     }
 
@@ -617,12 +732,15 @@ public class PerformanceMonitor {
      */
     private java.io.File resolveGpuBusyFile() {
         if (resolvedGpuBusyFile != null) return resolvedGpuBusyFile;
+        if (gpuBusyPathAbsent) return null;
 
         // Single canonical kgsl path — matches pre-session behavior. Probing
         // alternates risked promoting an unrelated counter (e.g. one that
         // resets per-read) over the freq-ratio fallback the user is used to.
         java.io.File f = new java.io.File("/sys/class/kgsl/kgsl-3d0/gpu_busy");
-        if (f.exists() && f.canRead()) {
+        if (!f.exists()) {
+            gpuBusyPathAbsent = true;
+        } else if (f.canRead()) {
             try (BufferedReader br = new BufferedReader(new FileReader(f))) {
                 String line = br.readLine();
                 if (line != null) {
@@ -657,17 +775,25 @@ public class PerformanceMonitor {
     }
     
     /**
-     * Robust single-line file reader - strips non-numeric chars for parsing
+     * Read the leading non-negative integer from a sysfs value, ignoring
+     * optional suffixes such as "%" or "@frequency".
      */
     private long readLongFromFile(java.io.File file) {
         if (!file.exists() || !file.canRead()) return -1;
         try (BufferedReader br = new BufferedReader(new FileReader(file))) {
             String line = br.readLine();
             if (line == null) return -1;
-            // Scrub non-numeric characters (handles "45 %" or "45@1000")
-            String numOnly = line.replaceAll("[^0-9]", "").trim();
-            if (numOnly.isEmpty()) return -1;
-            return Long.parseLong(numOnly);
+            // Read the leading number only. Concatenating every digit would
+            // misread "45@1000" as 451000; a negative value is not valid data.
+            String value = line.trim();
+            int end = 0;
+            while (end < value.length()) {
+                char c = value.charAt(end);
+                if (c < '0' || c > '9') break;
+                end++;
+            }
+            if (end == 0) return -1;
+            return Long.parseLong(value.substring(0, end));
         } catch (Exception e) {
             return -1;
         }
@@ -773,29 +899,22 @@ public class PerformanceMonitor {
         };
 
         for (int i = 0; i < 30; i++) {
-            try {
-                String typePath = "/sys/class/thermal/thermal_zone" + i + "/type";
-                BufferedReader typeReader = new BufferedReader(new FileReader(typePath));
-                String type = typeReader.readLine();
-                typeReader.close();
-
-                if (type != null) {
-                    String typeLower = type.toLowerCase().trim();
-                    for (String keyword : cpuThermalKeywords) {
-                        if (typeLower.contains(keyword)) {
-                            java.io.File tempFile = new java.io.File(
-                                "/sys/class/thermal/thermal_zone" + i + "/temp");
-                            Double result = readTempFile(tempFile, true);
-                            // Only accept a zone that yields a sane temperature,
-                            // then cache it so subsequent samples skip the scan.
-                            if (result != null) {
-                                resolvedCpuTempFile = tempFile;
-                                return result;
-                            }
-                        }
+            String type = getThermalZoneType(i);
+            if (type == null) continue;
+            String typeLower = type.toLowerCase().trim();
+            for (String keyword : cpuThermalKeywords) {
+                if (typeLower.contains(keyword)) {
+                    java.io.File tempFile = new java.io.File(
+                        "/sys/class/thermal/thermal_zone" + i + "/temp");
+                    Double result = readTempFile(tempFile, true);
+                    // Only accept a zone that yields a sane temperature,
+                    // then cache it so subsequent samples skip the scan.
+                    if (result != null) {
+                        resolvedCpuTempFile = tempFile;
+                        return result;
                     }
                 }
-            } catch (Exception ignored) {}
+            }
         }
 
         // Fallback to direct paths.
@@ -817,6 +936,28 @@ public class PerformanceMonitor {
         // Nothing usable on this device — remember that so we never re-scan.
         resolvedCpuTempFile = TEMP_PATH_NOT_FOUND;
         return 0;
+    }
+
+    /**
+     * Read each thermal-zone type at most once across CPU and GPU discovery.
+     * Resolve entries lazily so a match near the start of the zone list does
+     * not force reads of every later zone. Missing entries are cached too.
+     */
+    private String getThermalZoneType(int index) {
+        if (cachedThermalZoneTypes == null) {
+            cachedThermalZoneTypes = new String[30];
+            loadedThermalZoneTypes = new boolean[30];
+        }
+        if (loadedThermalZoneTypes[index]) return cachedThermalZoneTypes[index];
+
+        try (BufferedReader reader = new BufferedReader(new FileReader(
+                "/sys/class/thermal/thermal_zone" + index + "/type"))) {
+            cachedThermalZoneTypes[index] = reader.readLine();
+        } catch (Exception ignored) {
+            // A missing/unreadable zone is cached as null.
+        }
+        loadedThermalZoneTypes[index] = true;
+        return cachedThermalZoneTypes[index];
     }
 
     /**
@@ -948,27 +1089,20 @@ public class PerformanceMonitor {
         };
 
         for (int i = 0; i < 30; i++) {
-            try {
-                String typePath = "/sys/class/thermal/thermal_zone" + i + "/type";
-                BufferedReader typeReader = new BufferedReader(new FileReader(typePath));
-                String type = typeReader.readLine();
-                typeReader.close();
-
-                if (type != null) {
-                    String typeLower = type.toLowerCase().trim();
-                    for (String keyword : gpuThermalKeywords) {
-                        if (typeLower.contains(keyword)) {
-                            java.io.File tempFile = new java.io.File(
-                                "/sys/class/thermal/thermal_zone" + i + "/temp");
-                            Double result = readTempFile(tempFile, false);
-                            if (result != null) {
-                                resolvedGpuTempFile = tempFile;
-                                return result;
-                            }
-                        }
+            String type = getThermalZoneType(i);
+            if (type == null) continue;
+            String typeLower = type.toLowerCase().trim();
+            for (String keyword : gpuThermalKeywords) {
+                if (typeLower.contains(keyword)) {
+                    java.io.File tempFile = new java.io.File(
+                        "/sys/class/thermal/thermal_zone" + i + "/temp");
+                    Double result = readTempFile(tempFile, false);
+                    if (result != null) {
+                        resolvedGpuTempFile = tempFile;
+                        return result;
                     }
                 }
-            } catch (Exception ignored) {}
+            }
         }
 
         // Fallback: try direct GPU thermal paths.

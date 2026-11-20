@@ -1058,6 +1058,50 @@
                     </div>
                 </div>
 
+                <!-- 驻车碰撞震动检测卡片（常规页签） -->
+                <div class="card" data-tab="general">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                            <span data-i18n="surveillance.impact_title">驻车碰撞震动检测</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="surveillance.impact_enable">熄火驻车时检测车身碰撞震动</div>
+                                <div class="setting-desc" data-i18n="surveillance.impact_enable_desc">在熄火布防期间启用车机加速度传感器监测异常震动并推送告警通知（实验性功能：部分车型熄火后会切断惯性传感器供电）。</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="impactDetection" onchange="SurvSettings.updateImpact('impactDetection', this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-desc" style="margin: 0 0 12px 16px;" data-i18n="surveillance.impact_notify_only">碰撞检测目前仅发送告警通知，不会触发视频录制或生成事件片段。</div>
+                        <div class="setting-row" id="impactSensorStatusRow">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="surveillance.impact_sensor_status">碰撞传感器状态</div>
+                                <div class="setting-desc" id="impactSensorStatus" aria-live="polite" data-i18n="surveillance.impact_status_waiting">正在等待传感器状态…</div>
+                            </div>
+                        </div>
+                        <div class="setting-row" id="impactSensitivityRow" style="display:none;">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="surveillance.impact_sensitivity">检测灵敏度</div>
+                                <div class="setting-desc" data-i18n="surveillance.impact_sensitivity_desc">更高的灵敏度可捕捉轻微剐蹭，但也更容易受大车路过或强风干扰。</div>
+                            </div>
+                            <div class="setting-control">
+                                <select class="select-control" id="impactSensitivity" onchange="SurvSettings.updateImpact('impactSensitivity', this.value)">
+                                    <option value="low" data-i18n="surveillance.impact_sensitivity_low">低</option>
+                                    <option value="medium" data-i18n="surveillance.impact_sensitivity_medium">中</option>
+                                    <option value="high" data-i18n="surveillance.impact_sensitivity_high">高</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Place Tagging (reverse geocoding) — General tab.
                      This card controls the "surveillance" flow only — sentry
                      and proximity-while-parked event clips. Dashcam tagging
@@ -1565,6 +1609,7 @@
                                 <div class="slider-control">
                                     <span class="slider-value" id="survLimitValue">500 MB</span>
                                     <input type="range" class="slider" id="survLimitSlider" min="100" max="100000" step="100" value="500" oninput="SurvSettings.updateSurvLimit(this.value)">
+                                    <label class="st-no-limit" style="display:flex;align-items:center;gap:6px;margin-top:8px;color:var(--on-surface-variant);font-size:12px;cursor:pointer;"><input type="checkbox" id="surveillanceNoLimit" onchange="SurvSettings.setNoLimit(this.checked)"> <span data-i18n="storage.no_limit">无限制</span></label>
                                 </div>
                             </div>
                         </div>

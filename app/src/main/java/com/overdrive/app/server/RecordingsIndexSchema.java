@@ -18,7 +18,8 @@ final class RecordingsIndexSchema {
     // peak_confidence (Parking Intelligence session grouping + camera and
     // confidence filters). Added via ALTER TABLE ADD COLUMN IF NOT EXISTS in
     // ensure(); the v4 identity migration is untouched.
-    static final int VERSION = 5;
+    // v7: independent watched-recordings table; survives recording row upserts.
+    static final int VERSION = 7;
 
     private static final String[] LEGACY_COLUMNS = {
         "filename", "abs_path", "type", "camera_id", "ts_ms", "size_bytes",
@@ -45,6 +46,13 @@ final class RecordingsIndexSchema {
         ensureV5Columns(connection);
         try (Statement statement = connection.createStatement()) {
             createIndexes(statement);
+            // Keep watched state separate from the derived recording rows:
+            // MERGE/upsert of a sidecar must not reset the watched flag.
+            statement.execute("CREATE TABLE IF NOT EXISTS recordings_watched ("
+                    + "recording_id VARCHAR(64) PRIMARY KEY, "
+                    + "size_bytes BIGINT NOT NULL, "
+                    + "mp4_mtime BIGINT NOT NULL, "
+                    + "watched_at BIGINT NOT NULL)");
             statement.execute("UPDATE recordings SET type = 'replay'"
                     + " WHERE type <> 'replay'"
                     + " AND filename LIKE 'replay\\_%' ESCAPE '\\'");
