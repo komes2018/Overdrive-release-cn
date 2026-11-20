@@ -38,6 +38,8 @@ BYD.surveillance = {
         activeRecordingEstimate: null,
         surveillanceLimitMb: 500,
         surveillanceStorageType: 'INTERNAL',
+        impactDetection: false,
+        impactSensitivity: 'medium',
         // V2 Motion Detection
         environmentPreset: 'outdoor',
         sensitivityLevel: 3,
@@ -297,6 +299,12 @@ BYD.surveillance = {
         ]);
         this.savedConfig = JSON.parse(JSON.stringify(this.config));
         this.updateUI();
+        this.refreshImpactSensorStatus();
+        if (!this._impactStatusTimer) {
+            this._impactStatusTimer = setInterval(() => {
+                if (document.visibilityState === 'visible') this.refreshImpactSensorStatus();
+            }, 5000);
+        }
         this._hydrated = true;
         this.startClock();
 
@@ -533,7 +541,7 @@ BYD.surveillance = {
                 // and snap the slider back. Display-only storageInfo/ceilings below
                 // always refresh.
                 if (!this.hasUnsavedChanges) {
-                    this.config.surveillanceLimitMb = data.surveillanceLimitMb || 500;
+                    this.config.surveillanceLimitMb = typeof data.surveillanceLimitMb === 'number' ? data.surveillanceLimitMb : 500;
                     this.config.surveillanceStorageType = data.surveillanceStorageType || 'INTERNAL';
                 }
                 // Active = where surveillance ACTUALLY writes right now. Differs
@@ -618,13 +626,16 @@ BYD.surveillance = {
                 const sentryBytesFormatted = counts.sentry.bytesFormatted || data.sentrySizeFormatted;
                 if (usedEl) usedEl.textContent = BYD.i18n.t('surveillance.size_used', {size: sentryBytesFormatted});
 
-                const limitMb = this.config.surveillanceLimitMb || 500;
-                if (limitEl) limitEl.textContent = BYD.i18n.t('surveillance.size_limit_mb', {mb: limitMb});
+                const limitMb = typeof this.config.surveillanceLimitMb === 'number' ? this.config.surveillanceLimitMb : 500;
+                const noLimit = limitMb === 0;
+                if (limitEl) limitEl.textContent = noLimit
+                    ? BYD.i18n.t('storage.no_limit')
+                    : BYD.i18n.t('surveillance.size_limit_mb', {mb: limitMb});
 
                 // Calculate percentage
                 const usedBytes = counts.sentry.bytes || 0;
                 const limitBytes = limitMb * 1024 * 1024;
-                const percent = Math.min(100, Math.round(usedBytes * 100 / limitBytes));
+                const percent = (!noLimit && limitBytes > 0) ? Math.min(100, Math.round(usedBytes * 100 / limitBytes)) : 0;
                 if (fillEl) fillEl.style.width = percent + '%';
 
                 // Update Events Today count
@@ -738,16 +749,22 @@ BYD.surveillance = {
     updateStorageLimitUI() {
         const slider = document.getElementById('survLimitSlider');
         const value = document.getElementById('survLimitValue');
+        const noLimitCheck = document.getElementById('surveillanceNoLimit');
+        const mb = typeof this.config.surveillanceLimitMb === 'number' ? this.config.surveillanceLimitMb : 500;
+        const noLimit = mb === 0;
 
         const maxLimit = this.effectiveMaxLimitMb();
 
+        if (noLimitCheck) noLimitCheck.checked = noLimit;
         if (slider) {
             slider.max = maxLimit;
-            slider.value = Math.min(this.config.surveillanceLimitMb, maxLimit);
+            slider.value = noLimit ? Math.max(100, Math.min(500, maxLimit)) : Math.min(mb, maxLimit);
+            slider.disabled = noLimit;
         }
         if (value) {
-            const mb = this.config.surveillanceLimitMb;
-            value.textContent = mb >= 1000 ? (mb / 1000) + ' GB' : mb + ' MB';
+            value.textContent = noLimit
+                ? BYD.i18n.t('storage.no_limit')
+                : (mb >= 1000 ? (mb / 1000) + ' GB' : mb + ' MB');
         }
 
         const minLabel = document.getElementById('survLimitMin');
@@ -756,6 +773,15 @@ BYD.surveillance = {
         if (maxLabel) maxLabel.textContent = maxLimit >= 1000 ? (maxLimit / 1000) + ' GB' : maxLimit + ' MB';
 
         this.updateBudgetBanner();
+    },
+
+    setNoLimit(enabled) {
+        const maxLimit = this.effectiveMaxLimitMb();
+        this.config.surveillanceLimitMb = enabled ? 0 : Math.max(100, Math.min(500, maxLimit));
+        this.updateStorageLimitUI();
+        this.loadStorageStats();
+        this.markChanged();
+        var _su = document.getElementById('storageUnsaved'); if (_su) _su.classList.add('show');
     },
 
     /**
@@ -4122,7 +4148,80 @@ BYD.surveillance = {
             });
     },
 
+    updateImpact(field, value) {
+        if (field !== 'impactDetection' && field !== 'impactSensitivity') return;
+        const previous = this.config[field];
+        const writeVersion = this._nextImmediateWrite(field);
+        this.config[field] = value;
+        this.updateImpactUI();
+        const payload = {};
+        payload[field] = value;
+        this._writeJson('/api/surveillance/config', payload)
+            .then(() => {
+                if (this.savedConfig) this.savedConfig[field] = value;
+                if (!this._isLatestImmediateWrite(field, writeVersion)) return;
+                this.config[field] = value;
+                this.updateImpactUI();
+            }).catch(e => {
+                if (!this._isLatestImmediateWrite(field, writeVersion)) return;
+                this.config[field] = this.savedConfig && (field in this.savedConfig)
+                    ? this.savedConfig[field] : previous;
+                this.updateImpactUI();
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast((e && e.message) || 'Could not save impact setting', 'error');
+                }
+            });
+    },
+
+    async refreshImpactSensorStatus() {
+        const target = document.getElementById('impactSensorStatus');
+        if (!target) return;
+        const tr = (key, fallback, vars) => {
+            const v = BYD.i18n && BYD.i18n.t ? BYD.i18n.t(key, vars) : null;
+            return v && v !== key ? v : fallback;
+        };
+        if (this.config.impactDetection !== true) {
+            target.textContent = tr('surveillance.impact_status_disabled', '已停用');
+            return;
+        }
+        try {
+            const response = await fetch('/api/surveillance/impact/status', { cache: 'no-store' });
+            const data = await response.json();
+            if (!data.success || !data.status) throw new Error('status unavailable');
+            const status = data.status;
+            const fallbacks = {
+                registered: '传感器已注册，正在等待采样确认',
+                sampling: '正在正常接收加速度计采样',
+                unavailable: '未检测到可用的加速度传感器',
+                stale: '近期无传感器心跳 — 驻车传感器可能已休眠',
+                inactive: '未激活（车辆当前未处于驻车哨兵守卫窗口）',
+                waiting: '正在等待传感器状态…'
+            };
+            const label = fallbacks[status.state]
+                ? tr('surveillance.impact_status_' + status.state, fallbacks[status.state])
+                : tr('surveillance.impact_status_unknown', '状态未知');
+            const samples = status.samples > 0
+                ? ' · ' + tr('surveillance.impact_status_samples', status.samples + ' 次采样/15秒', { n: status.samples })
+                : '';
+            target.textContent = label + (status.sensor ? ' · ' + status.sensor : '') + samples;
+        } catch (_) {
+            target.textContent = tr('surveillance.impact_status_error', '状态不可用 — 守护进程或传感器服务未上报');
+        }
+    },
+
+    updateImpactUI() {
+        const enabled = this.config.impactDetection === true;
+        const toggle = document.getElementById('impactDetection');
+        if (toggle) toggle.checked = enabled;
+        const row = document.getElementById('impactSensitivityRow');
+        if (row) row.style.display = enabled ? '' : 'none';
+        const select = document.getElementById('impactSensitivity');
+        if (select) select.value = this.config.impactSensitivity || 'medium';
+        this.refreshImpactSensorStatus();
+    },
+
     updateDeterrentUI() {
+        this.updateImpactUI();
         const action = this.config.deterrentAction || 'silent';
         const select = document.getElementById('deterrentAction');
         if (select) select.value = action;

@@ -1925,7 +1925,9 @@
     "evidence_pack_body": "OverDrive sends only filtered event metadata to your configured AI provider. The video stays local and is added only to the downloaded evidence pack.",
     "evidence_pack_confirm": "Create pack",
     "evidence_pack_create_failed": "Could not create evidence pack",
-    "evidence_pack_invalid_id": "The daemon returned an invalid pack id"
+    "evidence_pack_invalid_id": "The daemon returned an invalid pack id",
+    "watched_clip": "Watched",
+    "unwatched_clip": "Unwatched"
   },
   "surveillance": {
     "tab_general": "General",
@@ -2390,7 +2392,27 @@
     "deterrent_test_failed": "Failed to trigger deterrent",
     "screen_deterrent_placeholder": "YOU ARE ON CAMERA",
     "roi_status_default": "Front: Full frame (ROI off)",
-    "usb_power_hardware_note": "This mode can keep Android awake, but parked USB and SD-card power remains best-effort because the vehicle firmware controls the physical rail."
+    "usb_power_hardware_note": "This mode can keep Android awake, but parked USB and SD-card power remains best-effort because the vehicle firmware controls the physical rail.",
+    "impact_title": "Impact Detection",
+    "impact_enable": "Detect knocks and bumps while parked",
+    "impact_enable_desc": "Uses the head unit's motion sensor while the car is off and sentry is armed, and sends a notification when the car is knocked. Experimental: not every vehicle keeps the sensor powered while parked.",
+    "impact_notify_only": "Impact detections currently send a notification only; they do not create a recording or an event clip.",
+    "impact_sensor_status": "Motion sensor status",
+    "impact_sensitivity": "Sensitivity",
+    "impact_sensitivity_desc": "Higher sensitivity catches lighter knocks but may react to heavy traffic or wind.",
+    "impact_sensitivity_low": "Low",
+    "impact_sensitivity_medium": "Medium",
+    "impact_sensitivity_high": "High",
+    "impact_status_disabled": "Disabled",
+    "impact_status_registered": "Sensor listener registered; waiting for sample confirmation",
+    "impact_status_sampling": "Receiving accelerometer samples",
+    "impact_status_unavailable": "No usable accelerometer is available",
+    "impact_status_stale": "No recent sensor heartbeat — parked sensor may be asleep",
+    "impact_status_inactive": "Not active (vehicle is not in the parked sentry watch window)",
+    "impact_status_waiting": "Waiting for sensor status…",
+    "impact_status_unknown": "Status unknown",
+    "impact_status_samples": "{n} samples/15s",
+    "impact_status_error": "Status unavailable — the sensor service is not reporting"
   },
   "mqtt": {
     "tab_connections": "Connections",
@@ -3164,6 +3186,7 @@
     "ivi_reboot_btn": "Reboot IVI",
     "ivi_reboot_sent": "IVI reboot requested",
     "ivi_reboot_failed": "IVI reboot failed",
+    "ivi_reboot_desc": "Reboot IVI (parked only)",
     "climate_duration": "Runtime duration",
     "windows_vent": "Vent windows",
     "windows_close": "Close all windows",
@@ -4507,6 +4530,7 @@
     "provider_openai_compatible": "OpenAI-compatible"
   },
   "storage": {
+    "no_limit": "No Limit",
     "unit_mb": "{n} MB",
     "unit_gb": "{n} GB",
     "unit_gb_approx": "~{n} GB",

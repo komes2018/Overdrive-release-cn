@@ -458,12 +458,18 @@ public class QualitySettingsApiHandler {
             new Thread(() -> {
                 try {
                     long recDelta = 0, survDelta = 0;
-                    long recSize = storage.getRecordingsSize();
-                    long recLimitBytes = storage.getRecordingsLimitMb() * 1024 * 1024;
-                    if (recSize > recLimitBytes) recDelta = recSize - recLimitBytes;
-                    long survSize = storage.getSurveillanceSize();
-                    long survLimitBytes = storage.getSurveillanceLimitMb() * 1024 * 1024;
-                    if (survSize > survLimitBytes) survDelta = survSize - survLimitBytes;
+                    long recLimitMb = storage.getRecordingsLimitMb();
+                    if (recLimitMb > 0) {
+                        long recSize = storage.getRecordingsSize();
+                        long recLimitBytes = recLimitMb * 1024 * 1024;
+                        if (recSize > recLimitBytes) recDelta = recSize - recLimitBytes;
+                    }
+                    long survLimitMb = storage.getSurveillanceLimitMb();
+                    if (survLimitMb > 0) {
+                        long survSize = storage.getSurveillanceSize();
+                        long survLimitBytes = survLimitMb * 1024 * 1024;
+                        if (survSize > survLimitBytes) survDelta = survSize - survLimitBytes;
+                    }
                     if (recDelta > 0 || survDelta > 0) {
                         CameraDaemon.log("Storage limit change will reap ~"
                             + StorageManager.formatSize(recDelta) + " recordings, ~"

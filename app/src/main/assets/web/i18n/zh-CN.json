@@ -1684,7 +1684,9 @@
     "evidence_pack_body": "OverDrive 仅向配置的 AI 服务提供商发送脱敏后的事件元数据。视频全程保存在本地，仅打包进下载的事故取证归档包中。",
     "evidence_pack_confirm": "创建取证包",
     "evidence_pack_create_failed": "无法创建事故取证包",
-    "evidence_pack_invalid_id": "守护进程返回了无效的取证包 ID"
+    "evidence_pack_invalid_id": "守护进程返回了无效的取证包 ID",
+    "watched_clip": "已观看",
+    "unwatched_clip": "未观看"
   },
   "surveillance": {
     "tab_general": "常规",
@@ -2149,7 +2151,27 @@
     "deterrent_test_failed": "触发威慑声光失败",
     "screen_deterrent_placeholder": "注意：您已进入车辆监控范围",
     "roi_status_default": "前向：全画幅监测 (已关闭自定义检测区域)",
-    "usb_power_hardware_note": "该模式可保持 Android 系统持续唤醒，但驻车状态下的 USB 及 SD 卡物理供电由车辆底层固件控制，供电保持视车型固件支持情况而定。"
+    "usb_power_hardware_note": "该模式可保持 Android 系统持续唤醒，但驻车状态下的 USB 及 SD 卡物理供电由车辆底层固件控制，供电保持视车型固件支持情况而定。",
+    "impact_title": "驻车碰撞震动检测",
+    "impact_enable": "熄火驻车时检测车身碰撞震动",
+    "impact_enable_desc": "在熄火布防期间启用车机加速度传感器监测异常震动并推送告警通知（实验性功能：部分车型熄火后会切断惯性传感器供电）。",
+    "impact_notify_only": "碰撞检测目前仅发送告警通知，不会触发视频录制或生成事件片段。",
+    "impact_sensor_status": "碰撞传感器状态",
+    "impact_sensitivity": "检测灵敏度",
+    "impact_sensitivity_desc": "更高的灵敏度可捕捉轻微剐蹭，但也更容易受大车路过或强风干扰。",
+    "impact_sensitivity_low": "低",
+    "impact_sensitivity_medium": "中",
+    "impact_sensitivity_high": "高",
+    "impact_status_disabled": "已停用",
+    "impact_status_registered": "传感器已注册，正在等待采样确认",
+    "impact_status_sampling": "正在正常接收加速度计采样",
+    "impact_status_unavailable": "未检测到可用的加速度传感器",
+    "impact_status_stale": "近期无传感器心跳 — 驻车传感器可能已休眠",
+    "impact_status_inactive": "未激活（车辆当前未处于驻车哨兵守卫窗口）",
+    "impact_status_waiting": "正在等待传感器状态…",
+    "impact_status_unknown": "状态未知",
+    "impact_status_samples": "{n} 次采样/15秒",
+    "impact_status_error": "状态不可用 — 传感器服务未上报"
   },
   "mqtt": {
     "tab_connections": "连接列表",
@@ -2926,6 +2948,7 @@
     "ivi_reboot_btn": "重启车机",
     "ivi_reboot_sent": "已请求重启车机",
     "ivi_reboot_failed": "重启车机失败",
+    "ivi_reboot_desc": "仅限驻车状态下重启车机中控系统",
     "ventilated_not_available": "该配置车型不支持座椅通风",
     "driver_seat_cool": "主驾座椅通风",
     "passenger_seat_cool": "副驾座椅通风",
@@ -3866,6 +3889,7 @@
     "qc_saved": "快捷按钮已保存"
   },
   "storage": {
+    "no_limit": "无限制",
     "unit_mb": "{n} MB",
     "unit_gb": "{n} GB",
     "unit_gb_approx": "约 {n} GB",

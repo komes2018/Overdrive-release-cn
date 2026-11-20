@@ -108,6 +108,21 @@ public class SurveillanceApiHandler {
             }
             return true;
         }
+        if (cleanPath.equals("/api/surveillance/impact/status") && method.equals("POST")) {
+            JSONObject report = new JSONObject(body == null ? "{}" : body);
+            com.overdrive.app.surveillance.impact.ParkedImpactController.onSensorStatus(
+                    report.optString("state", ""), report.optLong("samples", 0L),
+                    report.optString("sensor", ""));
+            HttpResponse.sendJsonSuccess(out);
+            return true;
+        }
+        if (cleanPath.equals("/api/surveillance/impact/status") && method.equals("GET")) {
+            JSONObject result = new JSONObject();
+            result.put("success", true);
+            result.put("status", com.overdrive.app.surveillance.impact.ParkedImpactController.getSensorStatus());
+            HttpResponse.sendJson(out, result.toString());
+            return true;
+        }
         if (cleanPath.equals("/api/surveillance/impact") && method.equals("POST")) {
             handleImpact(out, body);
             return true;
@@ -664,6 +679,8 @@ public class SurveillanceApiHandler {
         if (survConfig == null) survConfig = new JSONObject();
         config.put("deterrentAction", survConfig.optString("deterrentAction", "silent"));
         config.put("deterrentCooldownSeconds", survConfig.optInt("deterrentCooldownSeconds", 60));
+        config.put("impactDetection", survConfig.optBoolean("impactDetection", false));
+        config.put("impactSensitivity", survConfig.optString("impactSensitivity", "medium"));
         config.put("screenDeterrentEnabled", survConfig.optBoolean("screenDeterrentEnabled", false));
         config.put("screenDeterrentDurationSeconds", survConfig.optInt("screenDeterrentDurationSeconds", 8));
         config.put("screenDeterrentMessage", survConfig.optString("screenDeterrentMessage", ""));
@@ -1354,6 +1371,20 @@ public class SurveillanceApiHandler {
                 if (cooldown >= 10 && cooldown <= 600) {
                     com.overdrive.app.config.UnifiedConfigManager.updateValues(
                             "surveillance", java.util.Collections.singletonMap("deterrentCooldownSeconds", cooldown));
+                }
+            }
+
+            if (configJson.has("impactDetection") || configJson.has("impactSensitivity")) {
+                java.util.Map<String, Object> impactUpdates = new java.util.HashMap<>();
+                Object enabled = configJson.opt("impactDetection");
+                if (enabled instanceof Boolean) impactUpdates.put("impactDetection", enabled);
+                String sens = configJson.optString("impactSensitivity", null);
+                if ("low".equals(sens) || "medium".equals(sens) || "high".equals(sens)) {
+                    impactUpdates.put("impactSensitivity", sens);
+                }
+                if (!impactUpdates.isEmpty()) {
+                    com.overdrive.app.config.UnifiedConfigManager.updateValues("surveillance", impactUpdates);
+                    com.overdrive.app.surveillance.impact.ParkedImpactController.triggerCheck();
                 }
             }
 

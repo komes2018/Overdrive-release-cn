@@ -3829,10 +3829,10 @@ public class StorageManager {
                     // persisted intent (clamp only to the absolute sentinel); runtime
                     // enforcement is already bounded to internal capacity by
                     // effectiveReapLimitBytes during the fallback. See loadTimeCeilingMb.
-                    recordingsLimitMb   = Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(recordingsStorageType),   recordingsLimitMb));
-                    surveillanceLimitMb = Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(surveillanceStorageType), surveillanceLimitMb));
-                    proximityLimitMb    = Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(recordingsStorageType), proximityLimitMb));  // proximity follows recordings (ACC-ON) volume
-                    tripsLimitMb        = Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(tripsStorageType),        tripsLimitMb));
+                    recordingsLimitMb = recordingsLimitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(recordingsStorageType),   recordingsLimitMb));
+                    surveillanceLimitMb = surveillanceLimitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(surveillanceStorageType), surveillanceLimitMb));
+                    proximityLimitMb = proximityLimitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(recordingsStorageType), proximityLimitMb));  // proximity follows recordings (ACC-ON) volume
+                    tripsLimitMb = tripsLimitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(tripsStorageType),        tripsLimitMb));
                     
                     logInfo("Loaded storage config: recordings=" + recordingsLimitMb + "MB (" + recordingsStorageType + 
                         "), surveillance=" + surveillanceLimitMb + "MB (" + surveillanceStorageType + 
@@ -3900,6 +3900,41 @@ public class StorageManager {
     
     public File getRecordingsDir() {
         return recordingsDir;
+    }
+
+    /**
+     * Resolve the configured recordings volume live instead of reading the
+     * cached {@link #recordingsDir}. The cached field is intentionally frozen
+     * while a recording is active so cleanup and directory migration cannot
+     * move an in-flight session. That also means it can remain on the old
+     * internal fallback after the configured SD card has mounted, which is
+     * wrong for independent writers such as instant-replay exports and for a
+     * new recorder session that has no explicit output-dir override.
+     */
+    public File getLiveRecordingsDir() {
+        synchronized (recordingsCleanupLock) {
+            ResolvedDir resolved = resolveActive(recordingsStorageType,
+                internalRecordingsDir, sdCardRecordingsDir, usbRecordingsDir, "recordings");
+            return resolved.dir;
+        }
+    }
+
+    /**
+     * Live recordings directory with a mount-liveness check. The availability
+     * flag can lag a just-removed card until the volume watchdog runs; do not
+     * hand a fresh writer a stale removable-volume path during that window.
+     * Normal configured-volume fallback semantics remain unchanged.
+     */
+    public File getLiveRecordingsDirIfMounted() {
+        File live = getLiveRecordingsDir();
+        StorageType volume = externalVolumeOf(live);
+        if (volume == null) return live;
+        String root = (volume == StorageType.SD_CARD) ? sdCardPath : usbPath;
+        if (root != null && isPathLikelyMounted(root)) return live;
+        File internal = internalRecordingsDir;
+        logWarn("Recordings restart: " + volume + " at " + root + " is not reachable — using "
+            + (internal != null ? internal.getAbsolutePath() : "the live dir"));
+        return (internal != null) ? internal : live;
     }
     
     public File getSurveillanceDir() {
@@ -4155,7 +4190,7 @@ public class StorageManager {
     // *LimitMb fields. Same monitor the storage-type setters and reclamp use.
     public void setRecordingsLimitMb(long limitMb) {
         synchronized (configChangeLock) {
-            recordingsLimitMb = Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(recordingsStorageType), limitMb));
+            recordingsLimitMb = limitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(recordingsStorageType), limitMb));
             saveConfig();
         }
         markStorageDirty();  // idle gate: a lowered cap may need a reap
@@ -4163,7 +4198,7 @@ public class StorageManager {
 
     public void setSurveillanceLimitMb(long limitMb) {
         synchronized (configChangeLock) {
-            surveillanceLimitMb = Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(surveillanceStorageType), limitMb));
+            surveillanceLimitMb = limitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(surveillanceStorageType), limitMb));
             saveConfig();
         }
         markStorageDirty();  // idle gate: a lowered cap may need a reap
@@ -4176,7 +4211,7 @@ public class StorageManager {
      */
     public void setProximityLimitMb(long limitMb) {
         synchronized (configChangeLock) {
-            proximityLimitMb = Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(recordingsStorageType), limitMb));  // proximity follows recordings (ACC-ON) volume
+            proximityLimitMb = limitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(recordingsStorageType), limitMb));  // proximity follows recordings (ACC-ON) volume
             saveConfig();
             logInfo("setProximityLimitMb(" + limitMb + "): stored but NOT enforced —"
                 + " proximity shares the recordings cap (" + recordingsLimitMb + " MB)");
@@ -4185,7 +4220,7 @@ public class StorageManager {
 
     public void setTripsLimitMb(long limitMb) {
         synchronized (configChangeLock) {
-            tripsLimitMb = Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(tripsStorageType), limitMb));
+            tripsLimitMb = limitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(tripsStorageType), limitMb));
             saveConfig();
         }
         markStorageDirty();  // idle gate: a lowered cap may need a reap
@@ -4311,7 +4346,7 @@ public class StorageManager {
             // getEffectiveMaxLimitMb applies for a positive total (mirrors the
             // converged reclampCeilingMb path).
             long ceilingMb = volumeCeilingMb(liveTotal);
-            recordingsLimitMb = Math.max(MIN_LIMIT_MB, Math.min(ceilingMb, recordingsLimitMb));
+            recordingsLimitMb = recordingsLimitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(ceilingMb, recordingsLimitMb));
             // Proximity follows THIS volume (see configuredTypeForCategory), so it
             // clamps here — the surveillance setter used to do it against the wrong
             // volume's ceiling while this one skipped it entirely.
@@ -4469,7 +4504,7 @@ public class StorageManager {
             // would do a second StatFs read that can race to 0 and collapse to
             // internal's ~8GB ceiling (see setRecordingsStorageType).
             long ceilingMb = volumeCeilingMb(liveTotal);
-            surveillanceLimitMb = Math.max(MIN_LIMIT_MB, Math.min(ceilingMb, surveillanceLimitMb));
+            surveillanceLimitMb = surveillanceLimitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(ceilingMb, surveillanceLimitMb));
             // NOT proximity: it rides RECORDINGS' volume (configuredTypeForCategory /
             // activeTypeForCategory both map proximity → recordingsStorageType), so
             // clamping it here shrank it to the ceiling of a volume it never writes to.
@@ -4537,7 +4572,7 @@ public class StorageManager {
             // Reuse the single guard-clearing read; getEffectiveMaxLimitMb(type)
             // would do a second StatFs read that can race to 0 and collapse to
             // internal's ~8GB ceiling (see setRecordingsStorageType).
-            tripsLimitMb = Math.max(MIN_LIMIT_MB, Math.min(volumeCeilingMb(liveTotal), tripsLimitMb));
+            tripsLimitMb = tripsLimitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(volumeCeilingMb(liveTotal), tripsLimitMb));
         }
         updateActiveDirectories();
         saveConfig();
@@ -5316,7 +5351,7 @@ public class StorageManager {
      */
     private long reclampTargetMb(StorageType type, long currentLimitMb) {
         long ceiling = reclampCeilingMb(type, currentLimitMb);
-        return Math.max(MIN_LIMIT_MB, Math.min(ceiling, currentLimitMb));
+        return currentLimitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(ceiling, currentLimitMb));
     }
 
     /**
@@ -5338,6 +5373,7 @@ public class StorageManager {
      * volume that can hold it.
      */
     private long effectiveReapLimitMb(StorageType activeType, long configuredMb) {
+        if (configuredMb == 0) return 0; // No Limit: physical-volume emergency cleanup still applies.
         long ceiling = getEffectiveMaxLimitMb(activeType);
         return Math.max(MIN_LIMIT_MB, Math.min(configuredMb, ceiling));
     }
@@ -5366,6 +5402,7 @@ public class StorageManager {
      * fill to physical-full.
      */
     private long activeExternalReapLimitBytes(StorageType activeType, long configuredMb) {
+        if (configuredMb == 0) return 0; // No Limit: do not apply category retention.
         long configuredBytes = configuredMb * 1024L * 1024L;
         long totalBytes = liveVolumeTotalBytes(activeType);
         if (totalBytes <= 0) {
@@ -5470,6 +5507,7 @@ public class StorageManager {
      *  limit. Matches the limit {@link #ensureSpace} actually applies. */
     private long scopedLimitBytesForCategory(String category) {
         long configuredMb = configuredLimitMbForCategory(category);
+        if (configuredMb == 0) return 0;
         if (isFallbackActiveForCategory(category)) {
             return effectiveReapLimitBytes(StorageType.INTERNAL, configuredMb);
         }
@@ -7595,6 +7633,7 @@ public class StorageManager {
     private boolean ensureSpace(String category, List<File> dirs, File activeDir,
                                 String namePrefix,
                                 long limitBytes, long reserveBytes, int maxDeletes) {
+        if (limitBytes == 0) return true; // No Limit: physical-space emergency reaping is independent.
         final boolean budgeted = maxDeletes > 0;
         // Active-volume scoping: if writes have fallen back from a configured
         // external volume onto internal, bound internal to the configured limit
@@ -7644,6 +7683,11 @@ public class StorageManager {
             limitBytes = Math.min(limitBytes,
                 activeExternalReapLimitBytes(activeType, configuredLimitMbForCategory(category)));
         }
+
+        // A concurrent No Limit update may have changed the scoped target after the
+        // caller captured its original positive byte limit. Never interpret zero as
+        // a target of zero bytes (which would delete the entire category).
+        if (limitBytes == 0) return true;
 
         if (activeDir != null && (!activeDir.exists() || !activeDir.isDirectory())) {
             activeDir.mkdirs();
@@ -9013,6 +9057,7 @@ public class StorageManager {
      * it to the active volume internally, so we hand it the raw configured cap here.
      */
     private long rawLimitBytesForCategory(String category) {
+        if (configuredLimitMbForCategory(category) == 0) return 0;
         switch (category) {
             case "recordings":   return recordingsLimitMb   * 1024 * 1024;
             case "surveillance": return surveillanceLimitMb * 1024 * 1024;

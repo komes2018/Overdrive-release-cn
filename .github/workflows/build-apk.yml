@@ -2,6 +2,12 @@ name: Build BYD Overdrive APK
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publish GitHub Release (requires main branch)'
+        required: false
+        default: 'false'
+        type: boolean
   push:
     branches: [ main, master ]
 
@@ -96,7 +102,7 @@ jobs:
 
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.publish_release == 'true')
         with:
           tag_name: "v${{ env.APP_VERSION }}-cn-sec"
           name: "OverDrive v${{ env.APP_VERSION }} - 熄火驻车 P0+P1+P2 深度降功耗版（24h 远程在线）"

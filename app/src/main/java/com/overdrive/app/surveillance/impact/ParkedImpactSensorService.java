@@ -29,6 +29,7 @@ public final class ParkedImpactSensorService extends Service implements SensorEv
     private static final DaemonLogger logger = DaemonLogger.getInstance("ParkedImpactSensor");
     private static final String CHANNEL_ID = "parked_impact";
     private static final int NOTIFICATION_ID = 9988;
+    private static final long HEARTBEAT_MS = 15_000L;
 
     private HandlerThread handlerThread;
     private Handler handler;
@@ -37,6 +38,14 @@ public final class ParkedImpactSensorService extends Service implements SensorEv
     private ImpactDetector detector;
     private String currentSensitivity = "medium";
     private long lastHeartbeatTime = 0;
+    private long samplesSinceHeartbeat = 0L;
+    private String sensorName = "";
+    private final java.util.concurrent.ExecutorService statusExecutor =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "parked-impact-status");
+                t.setDaemon(true);
+                return t;
+            });
 
     @Override
     public void onCreate() {
@@ -88,18 +97,36 @@ public final class ParkedImpactSensorService extends Service implements SensorEv
             sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         }
 
-        if (sensorManager != null && !isRegistered) {
+        if (sensorManager == null) {
+            logger.warn("no SensorManager — impact detection unavailable");
+            reportStatusToDaemon("unavailable", 0L, "");
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
+        if (!isRegistered) {
             Sensor accel = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
             if (accel != null) {
+                sensorName = accel.getName() != null ? accel.getName() : "Accelerometer";
                 isRegistered = sensorManager.registerListener(
                         this,
                         accel,
                         SensorManager.SENSOR_DELAY_NORMAL,
                         handler
                 );
-                logger.info("Accelerometer registered for parked impact detection (sensitivity=" + sensitivity + ")");
+                lastHeartbeatTime = SystemClock.elapsedRealtime();
+                samplesSinceHeartbeat = 0L;
+                logger.info("Accelerometer registered for parked impact detection (sensitivity=" + sensitivity + ", registered=" + isRegistered + ")");
+                if (isRegistered) {
+                    reportStatusToDaemon("registered", 0L, sensorName);
+                } else {
+                    reportStatusToDaemon("unavailable", 0L, sensorName);
+                    stopSelf();
+                }
             } else {
                 logger.warn("No accelerometer found on this vehicle hardware");
+                reportStatusToDaemon("unavailable", 0L, "");
+                stopSelf();
             }
         }
         return START_STICKY;
@@ -117,6 +144,7 @@ public final class ParkedImpactSensorService extends Service implements SensorEv
             handlerThread = null;
             handler = null;
         }
+        statusExecutor.shutdownNow();
         logger.info("ParkedImpactSensorService stopped");
     }
 
@@ -125,10 +153,14 @@ public final class ParkedImpactSensorService extends Service implements SensorEv
         if (event.sensor.getType() != Sensor.TYPE_ACCELEROMETER) return;
         if (event.values == null || event.values.length < 3) return;
 
+        samplesSinceHeartbeat++;
         long now = SystemClock.elapsedRealtime();
-        if (now - lastHeartbeatTime >= 300000L) { // Log liveness every 5 mins
+        if (now - lastHeartbeatTime >= HEARTBEAT_MS) {
+            long count = samplesSinceHeartbeat;
+            samplesSinceHeartbeat = 0L;
             lastHeartbeatTime = now;
-            logger.info("Parked impact sensor active (accel OK)");
+            logger.info("Parked impact sensor active (" + count + " samples/15s)");
+            reportStatusToDaemon("sampling", count, sensorName);
         }
 
         if (detector == null) return;
@@ -136,6 +168,41 @@ public final class ParkedImpactSensorService extends Service implements SensorEv
         if (!Float.isNaN(peak)) {
             logger.warn(String.format("Impact detected! Peak magnitude: %.2f m/s^2", peak));
             reportImpactToDaemon(peak);
+        }
+    }
+
+    private void reportStatusToDaemon(String state, long samples, String name) {
+        try {
+            statusExecutor.execute(() -> {
+                try {
+                    HttpURLConnection conn = DaemonHttpClient.open(
+                            "/api/surveillance/impact/status",
+                            "POST",
+                            1000,
+                            1500
+                    );
+                    conn.setDoOutput(true);
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    JSONObject json = new JSONObject();
+                    json.put("state", state);
+                    json.put("samples", samples);
+                    json.put("sensor", name);
+                    json.put("timestamp", System.currentTimeMillis());
+                    byte[] bytes = json.toString().getBytes(StandardCharsets.UTF_8);
+                    try (OutputStream os = conn.getOutputStream()) {
+                        os.write(bytes);
+                    }
+                    int code = conn.getResponseCode();
+                    if (code < 200 || code >= 300) {
+                        logger.warn("Impact status report rejected: HTTP " + code);
+                    }
+                    conn.disconnect();
+                } catch (Throwable t) {
+                    logger.warn("Impact status report failed: " + t.getMessage());
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            // Service is shutting down.
         }
     }
 
