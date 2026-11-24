@@ -1717,6 +1717,11 @@ public class HardwareEventRecorderGpu {
         try {
             initOnce();
         } catch (Exception hevcFailure) {
+            // Interruption is cancellation, not a codec failure. Never trigger the DiLink 5 fallback.
+            if (hevcFailure instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+                throw (InterruptedException) hevcFailure;
+            }
             if (!shouldRetryInitWithAvc()) throw hevcFailure;
             logger.warn("DI5 HEVC encoder init failed synchronously ("
                 + hevcFailure.getMessage() + ") — retrying THIS SESSION with "
@@ -1758,6 +1763,10 @@ public class HardwareEventRecorderGpu {
     }
 
     private void initOnce() throws Exception {
+        // A pending interrupt would make the first join look like a codec timeout.
+        if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedException("Encoder initialization interrupted before worker start");
+        }
         // Reinit latch reset. release() leaves drainerRestartSuppressed
         // latched (its job: make release's FINAL drainer stop stick across
         // closeEventRecording's restart). This instance is now being
@@ -1876,13 +1885,24 @@ public class HardwareEventRecorderGpu {
         final MediaFormat finalFormat = format;
         final String finalCodecMimeType = codecMimeType;
         
-        // Create encoder with timeout
+        // Create encoder with timeout. A MediaCodec call can outlive the join timeout even after
+        // its worker is interrupted. Close the handoff before returning so a late native encoder
+        // is released by whichever side wins the publication race.
         logger.info("Creating MediaCodec encoder...");
-        final MediaCodec[] encoderResult = {null};
+        final LateResourceHandoff<MediaCodec> createHandoff =
+                new LateResourceHandoff<>();
         final Exception[] createError = {null};
         Thread createThread = new Thread(() -> {
             try {
-                encoderResult[0] = MediaCodec.createEncoderByType(finalCodecMimeType);
+                MediaCodec created = MediaCodec.createEncoderByType(finalCodecMimeType);
+                if (!createHandoff.publish(created) && created != null) {
+                    try {
+                        created.release();
+                    } catch (Throwable releaseError) {
+                        logger.warn("Late encoder creation cleanup failed: "
+                                + releaseError.getMessage());
+                    }
+                }
             } catch (Exception e) {
                 createError[0] = e;
             }
@@ -1891,17 +1911,32 @@ public class HardwareEventRecorderGpu {
         try {
             createThread.join(10000);
         } catch (InterruptedException e) {
-            logger.warn("Encoder create interrupted");
+            Thread.currentThread().interrupt();
+            createThread.interrupt();
+            throw e;
         }
         if (createThread.isAlive()) {
             logger.error("MediaCodec.createEncoderByType TIMEOUT - hardware encoder stuck");
+            MediaCodec lateEncoder = createHandoff.abandon();
+            if (lateEncoder != null) {
+                try {
+                    lateEncoder.release();
+                } catch (Throwable releaseError) {
+                    logger.warn("Timed-out encoder cleanup failed: "
+                            + releaseError.getMessage());
+                }
+            }
             createThread.interrupt();
             throw new RuntimeException("Encoder create timeout - try restarting mediaserver");
         }
         if (createError[0] != null) {
             throw createError[0];
         }
-        encoder = encoderResult[0];
+        encoder = createHandoff.take();
+        if (encoder == null) {
+            throw new IllegalStateException(
+                    "MediaCodec.createEncoderByType returned no encoder");
+        }
         // Confirm the negotiated codec name on this device, not just our intent.
         // If the device-side codec selection silently downgraded HEVC→AVC (rare,
         // but possible if the platform encoder list rejects HEVC for our params),
@@ -1931,7 +1966,9 @@ public class HardwareEventRecorderGpu {
         try {
             configThread.join(10000);
         } catch (InterruptedException e) {
-            logger.warn("Encoder config interrupted");
+            Thread.currentThread().interrupt();
+            configThread.interrupt();
+            throw e;
         }
         if (!configDone[0]) {
             if (configThread.isAlive()) {
@@ -1949,11 +1986,21 @@ public class HardwareEventRecorderGpu {
         
         // Create input surface with timeout
         logger.info("Creating input surface...");
-        final Surface[] surfaceResult = {null};
+        final MediaCodec surfaceEncoder = encoder;
+        final LateResourceHandoff<Surface> surfaceHandoff =
+                new LateResourceHandoff<>();
         final Exception[] surfaceError = {null};
         Thread surfaceThread = new Thread(() -> {
             try {
-                surfaceResult[0] = encoder.createInputSurface();
+                Surface created = surfaceEncoder.createInputSurface();
+                if (!surfaceHandoff.publish(created) && created != null) {
+                    try {
+                        created.release();
+                    } catch (Throwable releaseError) {
+                        logger.warn("Late input-surface cleanup failed: "
+                                + releaseError.getMessage());
+                    }
+                }
             } catch (Exception e) {
                 surfaceError[0] = e;
             }
@@ -1962,21 +2009,33 @@ public class HardwareEventRecorderGpu {
         try {
             surfaceThread.join(10000);
         } catch (InterruptedException e) {
-            logger.warn("Surface create interrupted");
+            Thread.currentThread().interrupt();
+            surfaceThread.interrupt();
+            throw e;
         }
-        if (surfaceResult[0] == null) {
-            if (surfaceThread.isAlive()) {
-                logger.error("createInputSurface TIMEOUT - hardware encoder stuck");
-                surfaceThread.interrupt();
-                try { encoder.release(); } catch (Exception e) {}
-                encoder = null;
-                throw new RuntimeException("Surface create timeout");
+        if (surfaceThread.isAlive()) {
+            logger.error("createInputSurface TIMEOUT - hardware encoder stuck");
+            Surface lateSurface = surfaceHandoff.abandon();
+            if (lateSurface != null) {
+                try {
+                    lateSurface.release();
+                } catch (Throwable releaseError) {
+                    logger.warn("Timed-out input-surface cleanup failed: "
+                            + releaseError.getMessage());
+                }
             }
-            if (surfaceError[0] != null) {
-                throw surfaceError[0];
-            }
+            surfaceThread.interrupt();
+            try { encoder.release(); } catch (Exception e) {}
+            encoder = null;
+            throw new RuntimeException("Surface create timeout");
         }
-        inputSurface = surfaceResult[0];
+        if (surfaceError[0] != null) {
+            throw surfaceError[0];
+        }
+        inputSurface = surfaceHandoff.take();
+        if (inputSurface == null) {
+            throw new IllegalStateException("createInputSurface returned no surface");
+        }
         logger.info("Input surface created");
         
         // Start encoder with timeout
@@ -1997,7 +2056,9 @@ public class HardwareEventRecorderGpu {
         try {
             startThread.join(10000); // 10 second timeout
         } catch (InterruptedException e) {
-            logger.warn("Encoder start interrupted");
+            Thread.currentThread().interrupt();
+            startThread.interrupt();
+            throw e;
         }
         
         if (!startDone[0]) {
@@ -2011,7 +2072,15 @@ public class HardwareEventRecorderGpu {
                     // Ignore
                 }
                 encoder = null;
-                inputSurface = null;
+                if (inputSurface != null) {
+                    try {
+                        inputSurface.release();
+                    } catch (Throwable releaseError) {
+                        logger.warn("Input surface cleanup after encoder start timeout failed: "
+                            + releaseError.getMessage());
+                    }
+                    inputSurface = null;
+                }
                 throw new RuntimeException("Encoder start timeout - hardware encoder busy or stuck");
             }
             if (startError[0] != null) {

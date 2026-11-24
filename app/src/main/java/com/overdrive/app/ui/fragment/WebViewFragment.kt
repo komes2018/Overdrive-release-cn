@@ -49,6 +49,7 @@ class WebViewFragment : Fragment() {
         // tags the standalone HTML dashboard with that attribute, and it must
         // keep its nav.
         private const val EMBED_ATTR = "data-android-embed"
+        private const val EMBED_MARKER = "setAttribute('$EMBED_ATTR','1')"
         private const val FETCH_BRIDGE_JS = """
 (function() {
     if (!window.AndroidBridge || window._fetchPatched) return;
@@ -112,7 +113,10 @@ class WebViewFragment : Fragment() {
          *  `<html>` and then the document start. */
         @JvmStatic
         fun spliceEmbedChrome(html: String): String {
-            if (html.contains(EMBED_ATTR)) return html
+            // Key on the injected setAttribute, not the bare attribute name:
+            // pages style themselves with :root[data-android-embed="1"], and
+            // matching that skipped the splice, so the flag was never set.
+            if (html.contains(EMBED_MARKER)) return html
             for (tag in arrayOf("<head", "<html")) {
                 val open = html.indexOf(tag, ignoreCase = true)
                 if (open < 0) continue
