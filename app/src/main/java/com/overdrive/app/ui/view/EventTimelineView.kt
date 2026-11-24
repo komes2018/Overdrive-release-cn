@@ -3,6 +3,7 @@ package com.overdrive.app.ui.view
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -39,6 +40,7 @@ class EventTimelineView @JvmOverloads constructor(
     private val paintCar = Paint().apply { color = 0xCC4488FF.toInt(); isAntiAlias = true }
     private val paintBike = Paint().apply { color = 0xCC44CC44.toInt(); isAntiAlias = true }
     private val paintAnimal = Paint().apply { color = 0xCCA855F7.toInt(); isAntiAlias = true }
+    private val animalDiamond = Path()
     private val paintPlayhead = Paint().apply { color = 0xFFFFFFFF.toInt(); isAntiAlias = true }
 
     fun setEvents(events: List<TimelineEvent>, durationMs: Long) {
@@ -177,14 +179,13 @@ class EventTimelineView @JvmOverloads constructor(
                     canvas.drawCircle(left + 7f, centerY, 2f, paintPlayhead)
                 }
                 "animal" -> {
-                    val path = android.graphics.Path().apply {
-                        moveTo(left + 4f, centerY - 4f)
-                        lineTo(left + 8f, centerY)
-                        lineTo(left + 4f, centerY + 4f)
-                        lineTo(left, centerY)
-                        close()
-                    }
-                    canvas.drawPath(path, paintPlayhead)
+                    animalDiamond.rewind()
+                    animalDiamond.moveTo(left + 4f, centerY - 4f)
+                    animalDiamond.lineTo(left + 8f, centerY)
+                    animalDiamond.lineTo(left + 4f, centerY + 4f)
+                    animalDiamond.lineTo(left, centerY)
+                    animalDiamond.close()
+                    canvas.drawPath(animalDiamond, paintPlayhead)
                 }
                 else -> canvas.drawRect(left, barTop, left + 2f, barBottom, paintPlayhead)
             }

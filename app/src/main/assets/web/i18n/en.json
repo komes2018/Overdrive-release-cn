@@ -701,6 +701,7 @@
     "tab_wecom": "Webhook",
     "tab_telegram": "Telegram",
     "tab_devices": "Devices",
+    "tab_vehicle": "Vehicle setup",
     "telegram": "Telegram delivery",
     "telegram_sub": "Send surveillance events to a paired Telegram chat. Pair the bot in the Telegram daemon settings; toggles below decide which severities reach the chat. Off tiers are still recorded — only the message is suppressed.",
     "telegram_delivery_sub": "What kind of events Telegram receives. Independent from the per-tier filter above — these toggle entire categories on or off.",
@@ -3542,6 +3543,8 @@
   "dashboard": {
     "heading": "Dashboard",
     "subtitle": "Vehicle status, position and main controls.",
+    "parked_drain": "Used {soc} while parked",
+    "parked_drain_kwh": "Used {soc} while parked (≈{kwh} kWh)",
     "chip_device_pending": "Device --",
     "chip_device_online": "Vehicle Online",
     "chip_surveillance_pending": "Surveillance --",

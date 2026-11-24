@@ -105,25 +105,20 @@ jobs:
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.publish_release == 'true')
         with:
           tag_name: "v${{ env.APP_VERSION }}-cn-sec"
-          name: "OverDrive v${{ env.APP_VERSION }} - 后台 Binder 死锁防护、硬编码器超时清理、采样降负与版本显示修复"
+          name: "OverDrive v${{ env.APP_VERSION }} - 通知导航栏入口、车辆设置独立分栏、驻车耗电展示、强动检触发与动物时间轴修正"
           body: |
-            ## OverDrive v${{ env.APP_VERSION }} 定制版（实车验证通过）
+            ## OverDrive v${{ env.APP_VERSION }} 定制版（实车与 Web 端全链路验证通过）
 
-            ### 🛡️ 1. 核心稳定性与性能修复 (P0)
-            - **防止 MediaScanner 广播风暴与 Shell 阻塞耗尽 `system_server` Binder 池 (`StorageManager` / `SentryDaemon`，PR #881)**：新增单线程 `mediaScanExecutor` 串行执行录像媒体索引、`5s` 子进程超时强杀与并发流排空、启动补扫 `50` 文件上限与连续 `2` 次超时熔断及单调递增水印；`SentryDaemon.execShell` 增加 `15s` 超时强杀与流排空，定位服务重启超时提前短路；
-            - **硬件编码器初始化超时资源清理与中断传播 (`HardwareEventRecorderGpu` / `LateResourceHandoff`，PR #908 / #917 / #919)**：引入 `LateResourceHandoff` 原子交接释放超时后晚到的 `MediaCodec` / `Surface`，补齐 `start` 超时漏放的 `inputSurface`，正确传播 `InterruptedException` 避免误触发编解码回退；
-            - **守护进程 `getApplicationContext()` 防空指针 (`AccSentryDaemon` / `DaemonBootstrap` / `SentryDaemon`，PR #906)**：当底层返回 `null` 时回退 `this`，防止 BYD 原生 SDK 监听注册空指针导致 ACC-OFF 检出或哨兵异常；
-            - **`/proc/stat` 无分配缓冲采样 (`PerformanceMonitor`，PR #904)**：改用 `BufferedReader` 与 `parseAggregateCpuTimes()` 原地解析，消灭 `RandomAccessFile` 逐字节读取与正则 `split` 临时对象分配；
-            - **车机内嵌 WebView 注入修复与地图界面优化 (`WebViewFragment` / `live-view.html`，PR #918)**：改按 `EMBED_MARKER` 判重修复页面 CSS 含 `data-android-embed` 时跳过注入的缺陷，车机内嵌模式下自动隐藏“我的位置”与距离胶囊；
-            - **仪表盘 `leaflet.js` 加载顺序优化 (`index.html`，PR #892)**：将 `leaflet.js` 移至 `map.js` 正前方，避免阻塞首屏解析并消除脚本执行顺序竞态。
+            ### 🚀 1. 核心功能与体验升级 (P1 功能包)
+            - **原生侧边栏新增「通知」入口 (`MainActivity` / `NavigationRailCatalog` / `nav_graph`，PR #910)**：在横竖屏侧边栏系统分组中新增「通知」直达入口（加载 `/notifications`），同步补全 `values`、`values-zh-rCN` 与镜像 `values-zh` 中文资源；
+            - **通知页独立「车辆设置」底栏分页并保留企业微信直推 (`notifications.html` / `zh-CN.json`，PR #909)**：将车辆布局（左/右舵）与轮胎压力限制归纳至独立 `车辆设置` 分页，完整保留国内定制的 `企业微信 / Webhook` 分页，支持 `#tyreLimitsSection` 等深链直达自动切页与滚动定位；
+            - **Web 仪表盘 Hero 驻车耗电展示 (`index.html` / `zh-CN.json`，PR #893)**：在仪表盘副标题下方新增驻车期间耗电显示（优先读取 `/api/parking/current` 活跃驻车能耗，未开启或返车后回退 `/api/performance/parking-delta?maxAgeHours=72`），严格兼容车机 ES5 运行环境；
+            - **AI 加载时遵守「强动检触发录像」开关 (`SurveillanceEngineGpu`，PR #922)**：在保留国内版持续动检 `!timeoutExpired` 兜底触发的前提下引入 `!salienceExempts` 豁免，主动开启强动检后可在 AI 在线期间即时放行触发录像；
+            - **按片段帧证据修正动物时间轴闪跳 (`EventTimelineCollector` / `SurveillanceEngineGpu` / `EventTimelineView` / `VideoPlayerFragment`，PR #861)**：用每片段 `AnimalFrameEvidence` 状态机替代基于 Actor 快照的事后修正，贯穿预录环形缓冲并对齐 320×240 跨象限坐标；补充 `${it}动物` 播放器图例并复用 `Path` 对象避免绘制内存抖动。
 
-            ### 🔧 2. 基础防御修复与中文版优化
-            - **修复 ADB 覆盖升级后 Web 面板版本号滞留旧值 (`AppUpdater`)**：当 `/data/local/tmp/overdrive_version` 中持久化版本号低于当前运行 APK 的 `BuildConfig.VERSION_NAME` 时，自动忽略旧缓存并回退显示真实运行版本；
-            - **GPS 无效坐标过滤与跨 Geohash 边界缓存清理 (`GeoCoordinates` / `GeoCache` / `Geohash` / `GeocodingResolver` / `GeoBackfillSweep` / `GeoSnapshot`，PR #896 / #897)**：屏蔽 `(0,0)` 与越界坐标污染逆地理缓存，修复安全地点改名后跨 Geohash 前缀边界残留旧地名；
-            - **基础健壮性与区域无关解析 (`FileUtils` / `app-collapse.js` / `AvmByteCallbackProbe` / `CameraDaemon` / `QualitySettingsApiHandler` / `StreamingApiHandler` / `GpuPipelineConfig`，PR #895 / #891 / #890 / #903)**：增强目录创建校验、避免折叠卡片内控件按键冒泡误折叠、限定 AVM 探测编码器 EOS 排空 `2s` 上限，以及画质/编码枚举解析统一传入 `Locale.ROOT`。
-
-            ### 🔒 3. 门禁验证与升级说明
-            - 已通过 `scripts/i18n_check.py` 双端 i18n 门禁检查（`errors=0`）、JS 语法校验与源码契约检查，并已在实车 DiLink 3.0（Android 10）完成覆盖安装与三大守护进程平稳运行验证；
+            ### 🔒 2. 门禁验证与升级说明
+            - 已通过 `scripts/i18n_check.py` 双端 i18n 门禁检查（`errors=0`）、全量 ES5 脚本语法检查与源码契约检查；
+            - 已在实车 DiLink 3.0（Android 10）与 Web 端（直连车机 + 飞牛网桥 `8088`）完成安装、三大守护进程自愈、登录及全部 P1 页面功能实测；
             - 沿用独立车机永久密钥签名（SHA-256 指纹已锁死校验），支持应用内检查更新直接覆盖，或通过两步法 `adb push` + `pm install -r` 无损升级。
           files: release-assets/*.apk
         env:

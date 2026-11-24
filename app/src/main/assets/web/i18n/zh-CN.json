@@ -454,6 +454,7 @@
     "tab_wecom": "企业微信 / Webhook",
     "tab_telegram": "Telegram",
     "tab_devices": "设备",
+    "tab_vehicle": "车辆设置",
     "telegram": "Telegram 消息推送",
     "telegram_sub": "将驻车哨兵事件发送到已配对的 Telegram 聊天。请在 Telegram 守护进程设置中配对机器人；下方的开关决定哪些严重级别的事件会发送到该聊天。被关闭的级别仍会记录 — 只是不再发送消息。",
     "telegram_delivery_sub": "Telegram 接收哪类事件。独立于上面的每层过滤器——这些开关会整体打开或关闭整个类别。",
@@ -3301,6 +3302,8 @@
   "dashboard": {
     "heading": "仪表盘",
     "subtitle": "整车状态、实时位置与快捷车控",
+    "parked_drain": "驻车期间耗电 {soc}",
+    "parked_drain_kwh": "驻车期间耗电 {soc}（约 {kwh} kWh）",
     "chip_device_pending": "车机 --",
     "chip_device_online": "车机 在线",
     "chip_surveillance_pending": "哨兵 --",
