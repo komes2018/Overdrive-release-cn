@@ -852,6 +852,7 @@ class VideoPlayerFragment : Fragment() {
                 stats.optInt("person", 0).takeIf { it > 0 }?.let { parts.add("${it}人") }
                 stats.optInt("car", 0).takeIf { it > 0 }?.let { parts.add("${it}车") }
                 stats.optInt("bike", 0).takeIf { it > 0 }?.let { parts.add("${it}骑行") }
+                stats.optInt("animal", 0).takeIf { it > 0 }?.let { parts.add("${it}动物") }
                 stats.optInt("motion", 0).takeIf { it > 0 }?.let { parts.add("${it}移动") }
                 append(parts.joinToString(" · "))
             }

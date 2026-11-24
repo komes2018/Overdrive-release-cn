@@ -666,6 +666,7 @@
     <string name="nav_page_abrp">ABRP</string>
     <string name="nav_page_mqtt">MQTT</string>
     <string name="nav_page_byd_cloud">比亚迪云服务</string>
+    <string name="nav_page_notifications">通知</string>
     <string name="nav_page_assistant">AI 助手</string>
     <string name="status_overlay_notif_title">OverDrive 状态</string>
     <string name="status_overlay_notif_text">状态浮层已启用</string>
@@ -686,6 +687,7 @@
     <string name="rail_key_mapping">按键映射</string>
     <string name="rail_seat_positions">座椅记忆</string>
     <string name="rail_integrations">集成</string>
+    <string name="rail_notifications">通知</string>
     <string name="rail_diagnostics">诊断</string>
     <string name="rail_settings">设置</string>
     <string name="rail_expand">显示导航标签</string>

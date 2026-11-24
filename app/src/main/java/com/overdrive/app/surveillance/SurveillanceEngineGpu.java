@@ -4380,7 +4380,11 @@ public class SurveillanceEngineGpu {
                     // With AI available, only a current-sequence person or
                     // new/moved non-baseline object may authorize recording.
                     // When motion persists past timeoutExpired, allow fallback trigger.
-                    if (aiAvailable && !aiRecentlyConfirmed && !timeoutExpired) {
+                    // Also honour the user's explicit "Record on strong motion" opt-in
+                    // (motionSalienceEnabled, default OFF) via salienceExempts, which
+                    // already carries every salience brake (master flag, 5s latch TTL,
+                    // 15s cooldown, brightness/deterrent guards, and quadrant coherence).
+                    if (aiAvailable && !aiRecentlyConfirmed && !timeoutExpired && !salienceExempts) {
                         shouldSuppress = true;
                     }
                     
@@ -6212,9 +6216,6 @@ public class SurveillanceEngineGpu {
                         }
                         
                         boolean hasActiveMotion = timeSinceMotion < 2000;
-                        // Always send to timeline — pre-trigger ring buffer captures
-                        // events before recording starts for the JSON sidecar.
-                        timelineCollector.onAiDetection(motionFiltered, hasActiveMotion, 1 << qIdx);
                         
                         // Cross-quadrant tracking REQUIRES bboxes in 320×240 quadrant
                         // pixel space — its centroid threshold (dist < 120) and edge
@@ -6275,6 +6276,12 @@ public class SurveillanceEngineGpu {
                         } else {
                             cqtDetections = motionFiltered;
                         }
+
+                        // The timeline uses the same quadrant-space boxes as the
+                        // tracker: mosaic and foveated detections must share one
+                        // coordinate system for conservative class-flicker matching.
+                        // This call also fills the pre-trigger semantic ring.
+                        timelineCollector.onAiDetection(cqtDetections, hasActiveMotion, 1 << qIdx);
 
                         // CAPTURE-ANCHORED OBSERVATION TIME (audit R13-7 /
                         // ExtE-8). Foveated pixels are older than "now" by the
