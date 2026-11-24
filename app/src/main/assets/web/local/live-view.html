@@ -1218,6 +1218,18 @@
         #panelCameras.map-expanded .location-expand-button {
             display: none;
         }
+
+        /* "My location" and the distance chip are about the viewing device:
+           where it is and how far the car is. In the car app that device is
+           the car itself, already on the map, and the WebView never grants
+           geolocation, so hide both there. */
+        :root[data-android-embed="1"] #panelCameras .btn-my-location,
+        :root[data-android-embed="1"] #panelCameras .location-distance-chip {
+            display: none;
+        }
+        :root[data-android-embed="1"] #panelCameras .btn-my-location + .btn-map-float {
+            margin-top: 0;
+        }
         
         /* Fullscreen */
         .seamless-camera-view.fullscreen {

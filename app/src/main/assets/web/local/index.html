@@ -16,7 +16,6 @@
     <script src="../shared/theme.js?v=8"></script>
     <script src="../shared/app-shell.js?v=8" defer></script>
     <link rel="stylesheet" href="../shared/leaflet.css">
-    <script src="../shared/leaflet.js" defer></script>
     <link rel="stylesheet" href="../shared/styles.css?v=35">
 </head>
 <body class="dashboard-page">
@@ -1641,6 +1640,9 @@
     <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js?v=20"></script>
     <script src="../shared/update-flow.js"></script>
+    <!-- Load Leaflet after the dashboard markup to avoid blocking its parsing
+         on slow connections; keep it ahead of the map module. -->
+    <script src="../shared/leaflet.js"></script>
     <script src="../shared/map.js?v=6"></script>
     <script>
         function toggleSidebar() {

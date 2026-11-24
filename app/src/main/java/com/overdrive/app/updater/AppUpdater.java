@@ -3603,7 +3603,8 @@ public class AppUpdater {
         // doesn't parse as channel-prefix + dotted version is rejected → caller
         // falls back to the always-correct BuildConfig identity.
         String labelChannel = channelOfLabel(label);   // matches ^<channel>-v
-        if (labelChannel == null || numericVersion(label).isEmpty()) {
+        String labelNumeric = numericVersion(label);
+        if (labelChannel == null || labelNumeric.isEmpty()) {
             return "";   // malformed/legacy label — fall back to BuildConfig
         }
         // Only trust it for the channel we're actually running (a stale
@@ -3612,6 +3613,14 @@ public class AppUpdater {
         if (runningChannel != null && !runningChannel.isEmpty()
                 && !labelChannel.equals(runningChannel)) {
             return "";   // stale cross-channel label — let the caller fall back
+        }
+        // Sideload / ADB overlay guard: VERSION_FILE is only written by the
+        // in-app updater. If a newer build was installed via ADB (`pm install -r`),
+        // the persisted file is strictly older than BuildConfig and must not mask
+        // the running version on the Web UI / About screen.
+        String buildNumeric = numericVersion(getInstalledVersion());
+        if (!buildNumeric.isEmpty() && isNewerVersion(labelNumeric, buildNumeric)) {
+            return "";
         }
         return label;
     }

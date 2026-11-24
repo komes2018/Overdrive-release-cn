@@ -105,27 +105,26 @@ jobs:
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.publish_release == 'true')
         with:
           tag_name: "v${{ env.APP_VERSION }}-cn-sec"
-          name: "OverDrive v${{ env.APP_VERSION }} - DiLink 3.0 性能与录像稳健性强化 + 存储无限制/驻车碰撞状态/已读标记"
+          name: "OverDrive v${{ env.APP_VERSION }} - 后台 Binder 死锁防护、硬编码器超时清理、采样降负与版本显示修复"
           body: |
             ## OverDrive v${{ env.APP_VERSION }} 定制版（实车验证通过）
 
-            ### ✨ 1. 新增实用功能 (P1)
-            - **存储空间「无限制」模式**：录像 / 哨兵 / 行程模块新增「无限制 (No Limit)」容量上限选项，彻底放开配额限制，同时保留磁盘物理满盘前的自动兜底清理保护，避免存储写满卡死；
-            - **WebUI 仪表盘一键重启车机**：首页快捷卡片新增「重启车机 (`#dashIviReboot`)」入口，远程排障或卡顿时可一键软重启车机；
-            - **哨兵事件「未观看 / 已观看」标记与动物误标纠偏**：事件列表支持跨刷新/跨设备同步已读状态、一键筛查未看片段，并在事件时间轴中修正人物与宠物/动物检测框的归类渲染；
-            - **驻车碰撞震动检测与传感器心跳**：哨兵设置面板支持驻车震动碰撞开关与灵敏度调节，每 `15` 秒上报传感器实时运行与唤醒状态；
-            - **中英文 i18n 完整同步**：所有新增设置项、提示与状态文本均已完成 `en.json` / `zh-CN.json` 双语校验。
+            ### 🛡️ 1. 核心稳定性与性能修复 (P0)
+            - **防止 MediaScanner 广播风暴与 Shell 阻塞耗尽 `system_server` Binder 池 (`StorageManager` / `SentryDaemon`，PR #881)**：新增单线程 `mediaScanExecutor` 串行执行录像媒体索引、`5s` 子进程超时强杀与并发流排空、启动补扫 `50` 文件上限与连续 `2` 次超时熔断及单调递增水印；`SentryDaemon.execShell` 增加 `15s` 超时强杀与流排空，定位服务重启超时提前短路；
+            - **硬件编码器初始化超时资源清理与中断传播 (`HardwareEventRecorderGpu` / `LateResourceHandoff`，PR #908 / #917 / #919)**：引入 `LateResourceHandoff` 原子交接释放超时后晚到的 `MediaCodec` / `Surface`，补齐 `start` 超时漏放的 `inputSurface`，正确传播 `InterruptedException` 避免误触发编解码回退；
+            - **守护进程 `getApplicationContext()` 防空指针 (`AccSentryDaemon` / `DaemonBootstrap` / `SentryDaemon`，PR #906)**：当底层返回 `null` 时回退 `this`，防止 BYD 原生 SDK 监听注册空指针导致 ACC-OFF 检出或哨兵异常；
+            - **`/proc/stat` 无分配缓冲采样 (`PerformanceMonitor`，PR #904)**：改用 `BufferedReader` 与 `parseAggregateCpuTimes()` 原地解析，消灭 `RandomAccessFile` 逐字节读取与正则 `split` 临时对象分配；
+            - **车机内嵌 WebView 注入修复与地图界面优化 (`WebViewFragment` / `live-view.html`，PR #918)**：改按 `EMBED_MARKER` 判重修复页面 CSS 含 `data-android-embed` 时跳过注入的缺陷，车机内嵌模式下自动隐藏“我的位置”与距离胶囊；
+            - **仪表盘 `leaflet.js` 加载顺序优化 (`index.html`，PR #892)**：将 `leaflet.js` 移至 `map.js` 正前方，避免阻塞首屏解析并消除脚本执行顺序竞态。
 
-            ### ⚡ 2. DiLink 3.0 / Android 10 性能、录像稳健性与驻车功耗优化 (P0)
-            - **DM-i 混动驻车零多余唤醒 (`TripDetector`)**：驻车阶段自动挂起发动机（ICE）工况采样器，熄火期不再无效轮询混动状态，延续 `v49.9.39` 的超低功耗驻车与 `24h` WireGuard / ADB 在线体验；
-            - **缩短 DiLink 3 点火 360 镜头交接延迟 (`ManualClipService` / `GpuMosaicRecorder` / `PanoramicCameraGpu` / `CameraPreviewHelper`)**：ACC ON 启动或全景复用切换时加速管线预热，消除首段事件录像偶现空白/绿屏问题；
-            - **WebSocket 单次空闲休眠与 Android 10 编解码校验 (`WebSocketStreamServer` / `CodecBufferWindow`)**：合并推流空闲计时为单次定时器降低唤醒次数，并在读取 MediaCodec Buffer 前强制执行边界保护，防止低版本系统偶发崩溃；
-            - **Adreno 610 AI 纹理锁与四象限公平调度 (`AiLaneGl` / `SurveillanceEngineGpu`)**：大幅缩短 GPU 纹理锁持有时间并均衡四路画面检测调度，降低夜间哨兵掉帧；
-            - **守护进程通信与存储 IO 加固**：为 `TcpCommandServer` 启用 `SO_REUSEADDR` 防止重启端口占用；将录像索引监听与事件写入解耦消除大目录卡顿；`StorageManager` 实时解析外部 TF/SD 卡挂载路径；断网环境下跳过云端握手等待（`VehicleCommandRouter`）；大幅精简 `PerformanceMonitor` 与 `/proc` 高频采样开销。
+            ### 🔧 2. 基础防御修复与中文版优化
+            - **修复 ADB 覆盖升级后 Web 面板版本号滞留旧值 (`AppUpdater`)**：当 `/data/local/tmp/overdrive_version` 中持久化版本号低于当前运行 APK 的 `BuildConfig.VERSION_NAME` 时，自动忽略旧缓存并回退显示真实运行版本；
+            - **GPS 无效坐标过滤与跨 Geohash 边界缓存清理 (`GeoCoordinates` / `GeoCache` / `Geohash` / `GeocodingResolver` / `GeoBackfillSweep` / `GeoSnapshot`，PR #896 / #897)**：屏蔽 `(0,0)` 与越界坐标污染逆地理缓存，修复安全地点改名后跨 Geohash 前缀边界残留旧地名；
+            - **基础健壮性与区域无关解析 (`FileUtils` / `app-collapse.js` / `AvmByteCallbackProbe` / `CameraDaemon` / `QualitySettingsApiHandler` / `StreamingApiHandler` / `GpuPipelineConfig`，PR #895 / #891 / #890 / #903)**：增强目录创建校验、避免折叠卡片内控件按键冒泡误折叠、限定 AVM 探测编码器 EOS 排空 `2s` 上限，以及画质/编码枚举解析统一传入 `Locale.ROOT`。
 
             ### 🔒 3. 门禁验证与升级说明
-            - 已通过 `scripts/i18n_check.py` 双端 i18n 门禁检查、`JS` 语法校验，并在实车 DiLink 3.0（Android 10）完成安装、双守护进程加载、`WebUI` 交互及 `4.5%` 驻车闲置 CPU 实测；
-            - 沿用独立车机永久密钥签名（SHA-256 指纹已锁死校验），支持应用内检查更新直接覆盖，或通过 `adb install -r` 无损升级。
+            - 已通过 `scripts/i18n_check.py` 双端 i18n 门禁检查（`errors=0`）、JS 语法校验与源码契约检查，并已在实车 DiLink 3.0（Android 10）完成覆盖安装与三大守护进程平稳运行验证；
+            - 沿用独立车机永久密钥签名（SHA-256 指纹已锁死校验），支持应用内检查更新直接覆盖，或通过两步法 `adb push` + `pm install -r` 无损升级。
           files: release-assets/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
