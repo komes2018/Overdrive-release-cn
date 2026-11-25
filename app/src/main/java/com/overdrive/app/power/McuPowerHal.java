@@ -425,6 +425,14 @@ public final class McuPowerHal {
         return rc;
     }
 
+    /** {@code BYDAutoPowerDevice.getMcuStatus()}; -1 when unavailable. */
+    public static int readMcuStatus() {
+        Object device = resolvePowerDevice();
+        if (device == null) return -1;
+        Object v = BydDeviceHelper.callGetter(device, "getMcuStatus");
+        return v instanceof Number ? ((Number) v).intValue() : -1;
+    }
+
     /** {@code BYDAutoPowerDevice.getMcuStatus()} for the lease; -1 when unavailable. */
     public static int readMcuStatusForLease(Di5LeaseToken token) {
         if (!leaseAuthorized(token, true)) return -1;

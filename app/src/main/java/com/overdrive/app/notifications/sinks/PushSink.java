@@ -60,6 +60,9 @@ public final class PushSink implements NotificationBus.Sink {
         // OTHER sinks — HistorySink persists it to the Log, LogSink logs it,
         // TelegramSink forwards it — so suppression is push-only, not a drop.
         if (event.isPushSuppressed()) return;
+        if (com.overdrive.app.remoteaccess.RemoteAccessNotifications.isRemoteAccess(event)
+                && !com.overdrive.app.remoteaccess.RemoteAccessNotifications
+                        .canDeliver(event, "push")) return;
         // Cheapest possible early-out: zero phones registered means no push
         // work, ever. Don't touch the registry, don't allocate, don't spin
         // up the executor.
@@ -160,7 +163,12 @@ public final class PushSink implements NotificationBus.Sink {
             // server-suggested Retry-After when present.
             PushTransport.Result result = null;
             for (int attempt = 0; attempt < 2; attempt++) {
-                result = PushTransport.send(sub.endpoint, jwt, pubKey, encoded.body, TTL_SECONDS);
+                boolean remoteAccess = com.overdrive.app.remoteaccess.RemoteAccessNotifications
+                        .isRemoteAccess(event);
+                if (remoteAccess && !com.overdrive.app.remoteaccess.RemoteAccessNotifications
+                        .canDeliver(event, "push")) return;
+                result = PushTransport.send(sub.endpoint, jwt, pubKey, encoded.body, TTL_SECONDS,
+                        remoteAccess);
 
                 if (result.expired()) {
                     // Push service told us the sub is gone at the browser

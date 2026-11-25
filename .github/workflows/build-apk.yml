@@ -105,21 +105,18 @@ jobs:
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.publish_release == 'true')
         with:
           tag_name: "v${{ env.APP_VERSION }}-cn-sec"
-          name: "OverDrive v${{ env.APP_VERSION }} - 通知导航栏入口、车辆设置独立分栏、驻车耗电展示、强动检触发与动物时间轴修正"
+          name: "OverDrive v${{ env.APP_VERSION }} - 修复蓝牙靠近自动解锁、实体钥匙 CAN 感知与本地遥控帧头"
           body: |
-            ## OverDrive v${{ env.APP_VERSION }} 定制版（实车与 Web 端全链路验证通过）
+            ## OverDrive v${{ env.APP_VERSION }} 定制版（修复靠近感知自动解闭锁全链路）
 
-            ### 🚀 1. 核心功能与体验升级 (P1 功能包)
-            - **原生侧边栏新增「通知」入口 (`MainActivity` / `NavigationRailCatalog` / `nav_graph`，PR #910)**：在横竖屏侧边栏系统分组中新增「通知」直达入口（加载 `/notifications`），同步补全 `values`、`values-zh-rCN` 与镜像 `values-zh` 中文资源；
-            - **通知页独立「车辆设置」底栏分页并保留企业微信直推 (`notifications.html` / `zh-CN.json`，PR #909)**：将车辆布局（左/右舵）与轮胎压力限制归纳至独立 `车辆设置` 分页，完整保留国内定制的 `企业微信 / Webhook` 分页，支持 `#tyreLimitsSection` 等深链直达自动切页与滚动定位；
-            - **Web 仪表盘 Hero 驻车耗电展示 (`index.html` / `zh-CN.json`，PR #893)**：在仪表盘副标题下方新增驻车期间耗电显示（优先读取 `/api/parking/current` 活跃驻车能耗，未开启或返车后回退 `/api/performance/parking-delta?maxAgeHours=72`），严格兼容车机 ES5 运行环境；
-            - **AI 加载时遵守「强动检触发录像」开关 (`SurveillanceEngineGpu`，PR #922)**：在保留国内版持续动检 `!timeoutExpired` 兜底触发的前提下引入 `!salienceExempts` 豁免，主动开启强动检后可在 AI 在线期间即时放行触发录像；
-            - **按片段帧证据修正动物时间轴闪跳 (`EventTimelineCollector` / `SurveillanceEngineGpu` / `EventTimelineView` / `VideoPlayerFragment`，PR #861)**：用每片段 `AnimalFrameEvidence` 状态机替代基于 Actor 快照的事后修正，贯穿预录环形缓冲并对齐 320×240 跨象限坐标；补充 `${it}动物` 播放器图例并复用 `Path` 对象避免绘制内存抖动。
+            ### 🔧 1. 靠近感知（自动解闭锁）完整修复
+            - **补齐 `com.overdrive.app.remoteaccess` 完整采集与评估模块**：合入 App 进程原生蓝牙 RSSI 采样（`BluetoothAccessMonitor` / `BluetoothRssiReader`）、驻车蓝牙自动回连（`BluetoothPhoneReconnectController`）、实体车钥匙 CAN `0x180` 监听（`KeyFobAccessMonitor` / `KeyFobCanDecoder`）以及双滞后窗口状态机（`ProximityEvaluator`）；
+            - **贯通 App 进程与守护进程桥接链路**：在 `RemoteDevViewBridgeService` 补齐 `remoteAccess` / `bluetoothStatus` 指令处理与后台自启恢复，在 `HttpServer` 新增 `/api/remote-access/relay` 签名中继入口，并接入完整版 `RemoteAccessApiHandler`（修复 `connected` 恒为 false、硬编码阈值及 `/calibrate` 返回字段名不匹配等问题）；
+            - **共享驻车蓝牙保活与动作通知联动**：新增 `BluetoothKeepAlivePolicy` 与 `SharedBluetoothKeepAliveController`，统一 `UnifiedConfigManager`、`AccSentryDaemon` 与哨兵/靠近感知页面的驻车蓝牙开关，并打通 Web Push / Telegram 靠近动作优先通知；
+            - **修复本地遥控指令帧头偏移 (`RemoteKeyControl`)**：补全 4 字节固定帧头 `0x5E 0x02 0x14 0x00` 与两段式解锁时序，同步补全 `AndroidManifest` 的 `BLUETOOTH_CONNECT` / `BLUETOOTH_SCAN` 权限。
 
-            ### 🔒 2. 门禁验证与升级说明
-            - 已通过 `scripts/i18n_check.py` 双端 i18n 门禁检查（`errors=0`）、全量 ES5 脚本语法检查与源码契约检查；
-            - 已在实车 DiLink 3.0（Android 10）与 Web 端（直连车机 + 飞牛网桥 `8088`）完成安装、三大守护进程自愈、登录及全部 P1 页面功能实测；
-            - 沿用独立车机永久密钥签名（SHA-256 指纹已锁死校验），支持应用内检查更新直接覆盖，或通过两步法 `adb push` + `pm install -r` 无损升级。
+            ### 🔒 2. 签名与升级说明
+            - 沿用独立车机永久密钥签名（SHA-256 指纹锁死校验），支持应用内检查更新直接覆盖，或通过两步法 `adb push` + `pm install -r` 无损升级。
           files: release-assets/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

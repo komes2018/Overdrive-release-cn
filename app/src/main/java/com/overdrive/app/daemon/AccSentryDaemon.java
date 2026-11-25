@@ -168,6 +168,7 @@ public class AccSentryDaemon {
     private static final Object systemKeepAliveLock = new Object();
     // Interval from  (C0004a0)
     private static final long SYSTEM_KEEPALIVE_INTERVAL_MS = 10000;
+    private static volatile boolean bluetoothKeepAliveApplied = false;
     private static final long PANEL_REDARKEN_AWAIT_MS = 5_000L;
     private static final int SD_RECOVERY_FALSE_CONFIRM_SAMPLES = 3;
     private static final int ADB_TCP_PORT = 5555;
@@ -5567,6 +5568,8 @@ public class AccSentryDaemon {
                         if (!isKeepAliveCommitCurrent(transitionGeneration)) break;
                         ensureMobileDataEnabled(transitionGeneration);
                     }
+                    if (!isKeepAliveCommitCurrent(transitionGeneration)) break;
+                    reconcileParkedBluetoothKeepAlive();
                     // Fake-activity injection resets the AP sleep timer using the
                     // 2-arg stealth userActivity(uptime, noChangeLights=true), which
                     // holds the AP awake (USB VBUS follows wakefulness) WITHOUT
@@ -6868,6 +6871,8 @@ public class AccSentryDaemon {
             }
         }
 
+        reconcileParkedBluetoothKeepAlive();
+
         if (target != null) {
             log("Stopping System Persistence Service...");
             target.interrupt();
@@ -7021,6 +7026,26 @@ public class AccSentryDaemon {
             lastMobileDataAssertElapsedMs = android.os.SystemClock.elapsedRealtime();
         } else if (!result.canceled) {
             log("Mobile-data keepalive command failed: " + result.describeFailure());
+        }
+    }
+
+    /** Uses the existing parked maintenance cadence and authenticated app bridge. */
+    private static void reconcileParkedBluetoothKeepAlive() {
+        boolean enabled = com.overdrive.app.config.UnifiedConfigManager
+                .isBluetoothKeepAliveEnabled();
+        if (!enabled && !bluetoothKeepAliveApplied) return;
+        com.overdrive.app.server.RemoteAccessApiHandler.logCollectorLiveness();
+        try {
+            if (com.overdrive.app.server.RemoteAccessApiHandler
+                    .reconcileBluetoothKeepAlive()) {
+                bluetoothKeepAliveApplied = enabled
+                        && inSentryMode
+                        && !com.overdrive.app.config.UnifiedConfigManager
+                                .isVehicleOnOnlyMode();
+            }
+        } catch (Throwable unavailable) {
+            log("Bluetooth keepalive bridge unavailable: "
+                    + unavailable.getClass().getSimpleName());
         }
     }
 

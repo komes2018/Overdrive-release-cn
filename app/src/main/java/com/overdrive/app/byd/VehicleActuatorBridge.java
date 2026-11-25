@@ -53,6 +53,9 @@ public final class VehicleActuatorBridge {
     public static final String DILINK5_RESULT_SETPOINT = "result_setpoint";
     private static final ThreadLocal<DiLink5RequestScope> DILINK5_REQUEST_SCOPE =
             new ThreadLocal<>();
+    private static final ThreadLocal<com.overdrive.app.remoteaccess.DiLink5ProximityCommandGuard.Scope>
+            PROXIMITY_COMMAND_SCOPE = new ThreadLocal<>();
+    private static final ThreadLocal<String> LAST_DILINK5_LOCK_OUTCOME = new ThreadLocal<>();
     private static final EnergyGenerationGate ENERGY_GENERATIONS = new EnergyGenerationGate();
     private static final long ENERGY_LAUNCH_TIMEOUT_MS = 1500L;
     private static final long ENERGY_STANDALONE_TIMEOUT_MS = 6000L;
@@ -191,8 +194,16 @@ public final class VehicleActuatorBridge {
             android.content.Context context,
             com.overdrive.app.byd.routing.VehicleCommandRouter.VehicleCommand command) {
         if (command == null) return false;
+        LAST_DILINK5_LOCK_OUTCOME.remove();
         android.content.Intent intent = newDiLink5BridgeIntent(DILINK5_VEHICLE_COMMAND);
         intent.putExtra(DILINK5_VEHICLE_COMMAND, command);
+        com.overdrive.app.remoteaccess.DiLink5ProximityCommandGuard.Scope proximity =
+                PROXIMITY_COMMAND_SCOPE.get();
+        if (proximity != null) {
+            intent.putExtra(
+                    com.overdrive.app.remoteaccess.DiLink5ProximityCommandGuard.EXTRA,
+                    proximity.toWire());
+        }
         android.os.Bundle result = dispatchDiLink5Request(context, intent);
         if (result != null) {
             applyDiLink5CommandResult(
@@ -202,6 +213,41 @@ public final class VehicleActuatorBridge {
                             com.overdrive.app.byd.BydVehicleData.UNAVAILABLE));
         }
         return result != null && result.getBoolean("success", false);
+    }
+
+    /** Binds proximity actuation scope on the caller thread for DiLink 5 bridge verification. */
+    public static <T> T withProximityCommand(
+            com.overdrive.app.remoteaccess.DiLink5ProximityCommandGuard.Scope scope,
+            Callable<T> command) throws Exception {
+        com.overdrive.app.remoteaccess.DiLink5ProximityCommandGuard.Scope previous =
+                PROXIMITY_COMMAND_SCOPE.get();
+        PROXIMITY_COMMAND_SCOPE.set(scope);
+        try { return command.call(); }
+        finally {
+            if (previous == null) PROXIMITY_COMMAND_SCOPE.remove();
+            else PROXIMITY_COMMAND_SCOPE.set(previous);
+        }
+    }
+
+    public static com.overdrive.app.remoteaccess.DiLink5ProximityCommandGuard.Scope
+            currentDiLink5ProximityScope() {
+        return PROXIMITY_COMMAND_SCOPE.get();
+    }
+
+    public static String takeLastDiLink5LockOutcome() {
+        String outcome = LAST_DILINK5_LOCK_OUTCOME.get();
+        LAST_DILINK5_LOCK_OUTCOME.remove();
+        return outcome;
+    }
+
+    public static boolean isRemoteKeyRequestExpired() {
+        com.overdrive.app.remoteaccess.DiLink5ProximityCommandGuard.Scope proximity =
+                PROXIMITY_COMMAND_SCOPE.get();
+        return isDiLink5RequestExpired() || (proximity != null && !proximity.locallyCurrent());
+    }
+
+    public static boolean isRemoteKeyRequestCancelled() {
+        return false;
     }
 
     static void applyDiLink5CommandResult(

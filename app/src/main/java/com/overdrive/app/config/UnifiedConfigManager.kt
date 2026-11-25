@@ -652,6 +652,7 @@ object UnifiedConfigManager {
         // is capped per park because the platform exposes no 12 V reading.
         if (!surveillance.has("di5QnxNetworkKeepAlive")) surveillance.put("di5QnxNetworkKeepAlive", false)
         if (!surveillance.has("di5QnxNetworkKeepAliveMaxMinutes")) surveillance.put("di5QnxNetworkKeepAliveMaxMinutes", 60)
+        BluetoothKeepAlivePolicy.ensureCanonical(config)
         // DiLink 5 parked keep-alive (Experimental). DEFAULT FALSE (opt-in). The
         // single user-visible master switch; while it is OFF every lever below is
         // inert and the parked path is byte-identical to the prior build. The
@@ -2651,6 +2652,17 @@ object UnifiedConfigManager {
     fun setDataUsageEnabled(enabled: Boolean): Boolean =
         updateValues("dataUsage", mapOf("enabled" to enabled))
 
+    /** Shared parked-Bluetooth consent for Surveillance, proximity, and radio rules. */
+    @JvmStatic
+    fun isBluetoothKeepAliveEnabled(): Boolean =
+        try { BluetoothKeepAlivePolicy.enabled(loadConfig()) }
+        catch (t: Throwable) { false }
+
+    /** Off-main-looper atomic write; app callers use the existing daemon route. */
+    @JvmStatic
+    fun setBluetoothKeepAliveEnabled(enabled: Boolean): Boolean =
+        updateValues("surveillance", mapOf("bluetoothKeepAlive" to enabled))
+
     /** The list of key bindings. Empty array when unset. Never null. */
     @JvmStatic
     fun getKeymapBindings(): org.json.JSONArray =
@@ -3879,6 +3891,28 @@ object UnifiedConfigManager {
         config.put(MUTATION_CLOCKS_KEY, clocks)
     }
 
+    private fun isBluetoothPreferenceKey(section: String, key: String): Boolean =
+        (section == BluetoothKeepAlivePolicy.SECTION && key == BluetoothKeepAlivePolicy.KEY) ||
+            (section == BluetoothKeepAlivePolicy.LEGACY_SECTION &&
+                key == BluetoothKeepAlivePolicy.LEGACY_KEY)
+
+    private fun sharedBluetoothMutationSequence(
+        config: JSONObject, section: String, key: String, stamp: MutationStamp
+    ): Long = if (isBluetoothPreferenceKey(section, key)) {
+        appliedMutationSequence(
+            config, BluetoothKeepAlivePolicy.SECTION, BluetoothKeepAlivePolicy.KEY, stamp)
+    } else 0L
+
+    private fun recordSharedBluetoothMutation(
+        config: JSONObject, section: String, keys: List<String>, stamp: MutationStamp
+    ) {
+        if (keys.any { isBluetoothPreferenceKey(section, it) }) {
+            recordMutationApplied(
+                config, BluetoothKeepAlivePolicy.SECTION,
+                listOf(BluetoothKeepAlivePolicy.KEY), stamp)
+        }
+    }
+
     /**
      * Resolve every post-send transport failure against durable state before a
      * caller is allowed to attempt the idempotent local fallback. This covers
@@ -4029,6 +4063,7 @@ object UnifiedConfigManager {
         // publication. The local path may retain this object in cachedConfig
         // after a successful save.
         val routedPayload = JSONObject(data.toString())
+        if (!BluetoothKeepAlivePolicy.validPatch(section, routedPayload)) return false
         if (section == ROOT_PROMOTION_SECTION) {
             routeWriteIfApp("UPDATE_SECTION", section, "data", routedPayload)
                 ?.let { return it }
@@ -4067,9 +4102,19 @@ object UnifiedConfigManager {
             val keys = payload.keys()
             while (keys.hasNext()) {
                 val key = keys.next()
-                if (!replace && mutationStamp != null
-                        && appliedMutationSequence(
+                if (replace && mutationStamp != null
+                        && sharedBluetoothMutationSequence(
                             config, section, key, mutationStamp
+                        ) >= mutationStamp.sequence) {
+                    if (isBluetoothPreferenceKey(section, key)) {
+                        existing.put(key, BluetoothKeepAlivePolicy.enabled(config))
+                    }
+                    continue
+                }
+                if (!replace && mutationStamp != null
+                        && maxOf(
+                            appliedMutationSequence(config, section, key, mutationStamp),
+                            sharedBluetoothMutationSequence(config, section, key, mutationStamp)
                         ) >= mutationStamp.sequence) {
                     continue
                 }
@@ -4080,6 +4125,7 @@ object UnifiedConfigManager {
                 return@withConfigMutationLock true
             }
             config.put(section, existing)
+            BluetoothKeepAlivePolicy.synchronizeSectionWrite(config, section, appliedKeys)
             if (mutationStamp != null) {
                 recordMutationApplied(
                     config,
@@ -4087,6 +4133,7 @@ object UnifiedConfigManager {
                     if (replace) listOf("*") else appliedKeys,
                     mutationStamp
                 )
+                recordSharedBluetoothMutation(config, section, appliedKeys, mutationStamp)
             }
             val success = saveConfig(config)
             if (success) {
@@ -4134,6 +4181,7 @@ object UnifiedConfigManager {
         // into a JSONObject for the wire; the daemon applies it via updateValues.
         val valuesJson = JSONObject()
         values.forEach { (key, value) -> valuesJson.put(key, value) }
+        if (!BluetoothKeepAlivePolicy.validPatch(section, valuesJson)) return false
         val payload = ensureMutationStamp(JSONObject(valuesJson.toString()))
         routeWriteIfApp("UPDATE_VALUES", section, "values", payload)?.let { return it }
         val mutationStamp = stripMutationStamp(payload)
@@ -4146,8 +4194,9 @@ object UnifiedConfigManager {
             while (keys.hasNext()) {
                 val key = keys.next()
                 if (mutationStamp != null
-                        && appliedMutationSequence(
-                            config, section, key, mutationStamp
+                        && maxOf(
+                            appliedMutationSequence(config, section, key, mutationStamp),
+                            sharedBluetoothMutationSequence(config, section, key, mutationStamp)
                         ) >= mutationStamp.sequence) {
                     continue
                 }
@@ -4159,9 +4208,11 @@ object UnifiedConfigManager {
             }
 
             config.put(section, sectionObj)
+            BluetoothKeepAlivePolicy.synchronizeSectionWrite(config, section, appliedKeys)
             if (mutationStamp != null) {
                 recordMutationApplied(
                     config, section, appliedKeys, mutationStamp)
+                recordSharedBluetoothMutation(config, section, appliedKeys, mutationStamp)
             }
             val success = saveConfig(config)
             if (success) {

@@ -2925,6 +2925,21 @@ public class BydDataCollector {
         return BydVehicleData.UNAVAILABLE;
     }
 
+    /** Live bodywork power level: 0=off, 1=ACC, 2=on, 3=OK, or UNAVAILABLE for any other SDK value. */
+    public int readPowerLevelNow() {
+        if (bodyworkDevice == null) return BydVehicleData.UNAVAILABLE;
+        try {
+            Object v = BydDeviceHelper.callGetter(bodyworkDevice, "getPowerLevel");
+            if (v instanceof Number) {
+                int level = ((Number) v).intValue();
+                if (level >= 0 && level <= 3) return level;
+            }
+        } catch (Throwable t) {
+            logger.debug("readPowerLevelNow error: " + t.getMessage());
+        }
+        return BydVehicleData.UNAVAILABLE;
+    }
+
     /** Live AC power state: 0=off, 1=on, or UNAVAILABLE for every other SDK value. */
     public int readAcPowerNow() {
         if (isDiLink5BridgeConsumer()) {
@@ -15345,6 +15360,100 @@ public class BydDataCollector {
     public static final int DOOR_STATE_UNLOCK = 1;
     public static final int DOOR_STATE_LOCK = 2;
 
+    /** DiLink 5 door-lock evidence snapshot used by the proximity actuation gate. */
+    public static final class DiLink5LockEvidence {
+        private static final DiLink5LockEvidence UNKNOWN =
+                new DiLink5LockEvidence(DOOR_STATE_INVALID, 0L, null, Integer.MIN_VALUE, 0L);
+        public final int state;
+        public final long observedAtElapsedMs;
+        public final DiLink5LockRail rail;
+        public final int raw;
+        public final long halTimestampNs;
+
+        public DiLink5LockEvidence(int state, long observedAtElapsedMs, DiLink5LockRail rail,
+                int raw, long halTimestampNs) {
+            this.state = state;
+            this.observedAtElapsedMs = observedAtElapsedMs;
+            this.rail = rail;
+            this.raw = raw;
+            this.halTimestampNs = halTimestampNs;
+        }
+
+        public static DiLink5LockEvidence unknown() { return UNKNOWN; }
+
+        public boolean known() {
+            return state == DOOR_STATE_UNLOCK || state == DOOR_STATE_LOCK;
+        }
+    }
+
+    private volatile java.util.Set<DiLink5LockRail> diLink5LockRails =
+            java.util.Collections.unmodifiableSet(java.util.EnumSet.of(DiLink5LockRail.TYPED_CABIN));
+    private volatile long diLink5CarSvcLockMaxEventAgeSec = 10L;
+    private volatile boolean loggedDiLink5LockRailsFallback = false;
+
+    public DiLink5LockEvidence readDiLink5GateDoorLockEvidence() {
+        if (!isDiLink5Vehicle() || isMainAppProcess()) return DiLink5LockEvidence.unknown();
+        int state = readDoorLockState();
+        long observed = diLink5BridgeReceivedAtElapsedMs;
+        if (state != DOOR_STATE_UNLOCK && state != DOOR_STATE_LOCK) {
+            return DiLink5LockEvidence.unknown();
+        }
+        return new DiLink5LockEvidence(state, observed > 0L ? observed : SystemClock.elapsedRealtime(),
+                DiLink5LockRail.TYPED_CABIN, state, 0L);
+    }
+
+    public DiLink5LockEvidence readDiLink5GateDoorLockEvidenceFor(DiLink5LockRail rail) {
+        if (!isDiLink5Vehicle() || isMainAppProcess() || rail == null) return null;
+        if (rail == DiLink5LockRail.TYPED_CABIN) {
+            DiLink5LockEvidence ev = readDiLink5GateDoorLockEvidence();
+            return ev.known() ? ev : null;
+        }
+        if (rail == DiLink5LockRail.OTA && otaDevice != null) {
+            try {
+                Object v = BydDeviceHelper.callGetter(otaDevice, "getLFDoorLockState");
+                if (v instanceof Number) {
+                    int s = ((Number) v).intValue();
+                    if (s == DOOR_STATE_UNLOCK || s == DOOR_STATE_LOCK) {
+                        return new DiLink5LockEvidence(s, SystemClock.elapsedRealtime(),
+                                DiLink5LockRail.OTA, s, 0L);
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+        return null;
+    }
+
+    public void setDiLink5LockRails(java.util.Set<DiLink5LockRail> rails) {
+        if (rails != null && !rails.isEmpty()) {
+            this.diLink5LockRails = java.util.Collections.unmodifiableSet(
+                    java.util.EnumSet.copyOf(rails));
+        }
+    }
+
+    public void setDiLink5CarSvcLockMaxEventAgeSec(long seconds) {
+        this.diLink5CarSvcLockMaxEventAgeSec = Math.max(1L, Math.min(60L, seconds));
+    }
+
+    public void noteDiLink5LockSettingsFallback(String detail) {
+        if (detail == null || loggedDiLink5LockRailsFallback) return;
+        loggedDiLink5LockRailsFallback = true;
+        logger.warn("DI5 gate settings: persisted value fell back to default: " + detail);
+    }
+
+    public void requestDiLink5CarSvcLockBurst(long windowMs) {
+        // On-demand burst is optional; current CarSvcTelemetry polls on its own TTL.
+    }
+
+    public void confirmLockStateAfterCommand(boolean locked) {
+        int expected = locked ? DOOR_STATE_LOCK : DOOR_STATE_UNLOCK;
+        if (isDiLink5Vehicle()) {
+            diLink5DoorLockState = expected;
+        }
+        com.overdrive.app.automation.Automations.update(
+                com.overdrive.app.automation.condition.BydEvent.LOCK,
+                locked ? "locked" : "unlocked");
+    }
+
     /**
      * Read the driver's-door (LF) lock state via the OTA device.
      *
@@ -15395,12 +15504,9 @@ public class BydDataCollector {
             }
         }
         if (lock) {
-            return RemoteKeyControl.sendKey(context, RemoteKeyControl.CODE_LOCK);
+            return RemoteKeyControl.lock(context);
         } else {
-            boolean first = RemoteKeyControl.sendKeyDirect(context, RemoteKeyControl.CODE_UNLOCK);
-            try { Thread.sleep(500L); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
-            boolean second = RemoteKeyControl.sendKeyDirect(context, RemoteKeyControl.CODE_UNLOCK);
-            return first || second;
+            return RemoteKeyControl.unlock(context);
         }
     }
 

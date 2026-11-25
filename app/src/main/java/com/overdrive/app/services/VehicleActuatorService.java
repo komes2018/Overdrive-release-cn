@@ -231,7 +231,12 @@ public class VehicleActuatorService extends Service {
                         null,
                         "bluetooth enabled=" + enabled,
                         () -> logger.info("bluetooth enabled=" + enabled
-                                + " -> ok=" + setBluetoothEnabled(enabled)));
+                                + " -> ok=" + (intent.getBooleanExtra(
+                                        "bluetooth_intent_persisted", false)
+                                        ? com.overdrive.app.remoteaccess.SharedBluetoothKeepAliveController
+                                                .applySavedIntent(getApplicationContext(), enabled)
+                                        : com.overdrive.app.remoteaccess.SharedBluetoothKeepAliveController
+                                                .manualSet(getApplicationContext(), enabled))));
             } else if ("ac_charge_current_limit".equals(action)) {
                 int state = parseBoundedIntExtra(
                         intent.getStringExtra("state"),
@@ -330,6 +335,14 @@ public class VehicleActuatorService extends Service {
             }
             VehicleCommandRouter.VehicleCommand command =
                     (VehicleCommandRouter.VehicleCommand) value;
+            com.overdrive.app.remoteaccess.DiLink5ProximityCommandGuard.Scope proximity = null;
+            if (request.hasExtra(com.overdrive.app.remoteaccess.DiLink5ProximityCommandGuard.EXTRA)) {
+                proximity = com.overdrive.app.remoteaccess.DiLink5ProximityCommandGuard.Scope.parse(
+                        request.getStringExtra(com.overdrive.app.remoteaccess.DiLink5ProximityCommandGuard.EXTRA));
+                if (!command.name().equals(proximity.action) || !proximity.locallyCurrent()) {
+                    return bridgeFailure("proximity command revoked");
+                }
+            }
             String safetyGuard = null;
             if (command.motionSafety()
                     == VehicleCommandRouter.VehicleCommand.MotionSafety.BLOCK_WHILE_MOVING) {
@@ -554,6 +567,10 @@ public class VehicleActuatorService extends Service {
 
     private static boolean isAppProcessActionBlocked(String guardKey) {
         return DrivingSafetyGuard.isActionBlockedViaDaemon(guardKey);
+    }
+
+    public static boolean setBluetoothEnabledDirect(boolean enabled) {
+        return setBluetoothEnabled(enabled);
     }
 
     private static boolean setBluetoothEnabled(boolean enabled) {

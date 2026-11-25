@@ -8,6 +8,8 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.util.Log;
 
+import com.overdrive.app.remoteaccess.BluetoothRadioRecoveryEvents;
+import com.overdrive.app.remoteaccess.SharedBluetoothKeepAliveController;
 import com.overdrive.app.util.DaemonHttpClient;
 
 import org.json.JSONObject;
@@ -88,6 +90,7 @@ public final class BluetoothStateMonitor {
         t.setDaemon(true);
         return t;
     });
+    private final BluetoothRadioRecoveryEvents radioRecovery;
 
     // ── BT-automation gate ────────────────────────────────────────────────────
     // Whether any ENABLED automation references a bluetooth trigger. Answered by
@@ -149,6 +152,11 @@ public final class BluetoothStateMonitor {
 
     private BluetoothStateMonitor(Context ctx) {
         this.appContext = ctx.getApplicationContext();
+        this.radioRecovery = new BluetoothRadioRecoveryEvents((task, delayMs) -> {
+            java.util.concurrent.ScheduledFuture<?> scheduled =
+                    reassert.schedule(task, delayMs, TimeUnit.MILLISECONDS);
+            return () -> scheduled.cancel(false);
+        }, () -> SharedBluetoothKeepAliveController.resume(appContext));
     }
 
     /** Start the monitor (idempotent). Safe to call from onServiceConnected each bind. */
@@ -165,6 +173,15 @@ public final class BluetoothStateMonitor {
         try {
             receiver = new BroadcastReceiver() {
                 @Override public void onReceive(Context c, Intent intent) {
+                    if (intent == null) return;
+                    if (BluetoothAdapter.ACTION_STATE_CHANGED.equals(intent.getAction())) {
+                        try {
+                            radioRecovery.onAdapterChanged();
+                        } catch (RuntimeException unavailable) {
+                            Log.w(TAG, "Radio recovery scheduling failed: "
+                                    + unavailable.getClass().getSimpleName());
+                        }
+                    }
                     // Any BT edge — re-resolve ground truth and relay if it changed.
                     //
                     // Pass the device the broadcast CARRIES as a name hint. On a fresh connect

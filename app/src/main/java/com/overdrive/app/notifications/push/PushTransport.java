@@ -43,6 +43,13 @@ public final class PushTransport {
 
     public static Result send(String endpoint, String vapidJwt, String vapidPubKeyB64Url,
                               byte[] aes128gcmBody, int ttlSeconds) throws Exception {
+        return send(endpoint, vapidJwt, vapidPubKeyB64Url, aes128gcmBody, ttlSeconds, false);
+    }
+
+    /** High urgency asks the push service to deliver promptly to sleeping devices. */
+    public static Result send(String endpoint, String vapidJwt, String vapidPubKeyB64Url,
+                              byte[] aes128gcmBody, int ttlSeconds, boolean highPriority)
+            throws Exception {
         // Proxy first, ONE direct retry on an IO-level proxied failure. The
         // probe behind getHttpProxy() prefers the Tailscale SOCKS listener,
         // which on most cars is tailnet-only: public push endpoints (FCM,
@@ -54,18 +61,18 @@ public final class PushTransport {
                 && proxy.type() != java.net.Proxy.Type.DIRECT;
         try {
             return sendVia(proxy, endpoint, vapidJwt, vapidPubKeyB64Url,
-                    aes128gcmBody, ttlSeconds);
+                    aes128gcmBody, ttlSeconds, highPriority);
         } catch (java.io.IOException first) {
             if (!viaProxy) throw first;
             ProxyHelper.invalidateCache();
             return sendVia(java.net.Proxy.NO_PROXY, endpoint, vapidJwt,
-                    vapidPubKeyB64Url, aes128gcmBody, ttlSeconds);
+                    vapidPubKeyB64Url, aes128gcmBody, ttlSeconds, highPriority);
         }
     }
 
     private static Result sendVia(java.net.Proxy route, String endpoint, String vapidJwt,
                                   String vapidPubKeyB64Url, byte[] aes128gcmBody,
-                                  int ttlSeconds) throws Exception {
+                                  int ttlSeconds, boolean highPriority) throws Exception {
         URL url = new URL(endpoint);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection(route);
         try {
@@ -76,6 +83,7 @@ public final class PushTransport {
             conn.setRequestProperty("Content-Type", "application/octet-stream");
             conn.setRequestProperty("Content-Encoding", "aes128gcm");
             conn.setRequestProperty("TTL", String.valueOf(ttlSeconds));
+            if (highPriority) conn.setRequestProperty("Urgency", "high");
             conn.setRequestProperty("Authorization",
                     "vapid t=" + vapidJwt + ", k=" + vapidPubKeyB64Url);
             conn.setFixedLengthStreamingMode(aes128gcmBody.length);

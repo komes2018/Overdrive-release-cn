@@ -709,6 +709,8 @@ public class SurveillanceApiHandler {
         // Parked cellular keep-alive. Default FALSE (opt-in) — see the daemon's
         // keep-alive loop; only needed where the data module sleeps after ACC OFF.
         config.put("mobileDataKeepAlive", survConfig.optBoolean("mobileDataKeepAlive", false));
+        config.put("bluetoothKeepAlive",
+                com.overdrive.app.config.UnifiedConfigManager.isBluetoothKeepAliveEnabled());
         // Experimental DiLink 5 cloud heartbeat. Keep capability/readiness
         // separate so the UI can hide it on other generations and explain why
         // it is disabled when a BYD account has not been verified.
@@ -1603,6 +1605,19 @@ public class SurveillanceApiHandler {
                 }
                 CameraDaemon.log("Mobile-data keep-alive while parked set to: " + dataKeepAlive
                         + " (takes effect next ACC-OFF cycle)");
+            }
+
+            if (configJson.has("bluetoothKeepAlive")) {
+                boolean bluetoothKeepAlive = configJson.optBoolean("bluetoothKeepAlive", false);
+                if (!com.overdrive.app.config.UnifiedConfigManager
+                        .setBluetoothKeepAliveEnabled(bluetoothKeepAlive)) {
+                    CameraDaemon.log("Failed to persist bluetoothKeepAlive=" + bluetoothKeepAlive);
+                    HttpResponse.sendJsonError(out, "Failed to save Bluetooth keep-alive setting");
+                    return;
+                }
+                boolean applied = RemoteAccessApiHandler.reconcileBluetoothKeepAlive(true);
+                CameraDaemon.log("Shared parked Bluetooth keep-alive set to: "
+                        + bluetoothKeepAlive + " (applied=" + applied + ")");
             }
 
             // DiLink 5 BYD-cloud heartbeat. Unlike the mobile-data bearer hold,

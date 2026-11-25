@@ -452,6 +452,10 @@ public final class VehicleCommandRouter {
     }
 
     public static final class UnlockCommand extends VehicleCommand {
+        private final boolean confirmLanded;
+        public UnlockCommand() { this(true); }
+        /** {@code confirmLanded=false} for callers that confirm and re-send on their own. */
+        public UnlockCommand(boolean confirmLanded) { this.confirmLanded = confirmLanded; }
         public String name() { return "unlock"; }
         public Capability cloudCapability() { return Capability.AVAILABLE; }
         public Capability sdkCapability() { return Capability.AVAILABLE; }
@@ -2143,6 +2147,21 @@ public final class VehicleCommandRouter {
                 seatCompositeStateAtMs = 0L;
             }
         }
+    }
+
+    /**
+     * Cloud-only dispatch for the cloud fallback ACTUATOR of the proximity path.
+     */
+    public CommandResult executeCloudOnly(VehicleCommand cmd) {
+        if (cmd instanceof NativeVehicleCommand) {
+            return CommandResult.notSupported("Manual native vehicle commands require owner action");
+        }
+        CommandResult blocked = checkDrivingSafety(cmd);
+        if (blocked != null) return blocked;
+        if (resolveEffectivePreference(cmd) == RoutePreference.SDK_ONLY) {
+            return CommandResult.notSupported(msg("not_supported"));
+        }
+        return finishCommand(cmd, runCloudOnly(cmd));
     }
 
     private CommandResult runCloudOnly(VehicleCommand cmd) {

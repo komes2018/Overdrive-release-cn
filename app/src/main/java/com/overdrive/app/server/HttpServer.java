@@ -1131,7 +1131,27 @@ public class HttpServer {
 
         // Remote Access / Bluetooth Proximity API
         if (path.startsWith("/api/remote-access")) {
-            return RemoteAccessApiHandler.handle(method, path, body, out);
+            try {
+                String route = path.split("\\?", 2)[0];
+                if (route.equals("/api/remote-access/relay") && "POST".equals(method)) {
+                    RemoteAccessApiHandler.relay(body, out);
+                    return true;
+                }
+                if (RemoteAccessApiHandler.handle(method, path, body, out)) return true;
+                HttpResponse.sendJson(out, 404, "{\"success\":false,\"error\":\"Unknown remote-access route\"}");
+            } catch (SecurityException refused) {
+                HttpResponse.sendJson(out, 403, "{\"success\":false,\"error\":\"Signal authentication refused\"}");
+            } catch (IllegalArgumentException | org.json.JSONException invalid) {
+                HttpResponse.sendJson(out, 400, com.overdrive.app.remoteaccess.RemoteAccessMessageCodes.annotate(
+                        new org.json.JSONObject().put("success", false).put("error", invalid.getMessage()),
+                        "error", invalid.getMessage()).toString());
+            } catch (Exception unavailable) {
+                HttpResponse.sendJson(out, 503, com.overdrive.app.remoteaccess.RemoteAccessMessageCodes.annotate(
+                        new org.json.JSONObject().put("success", false)
+                                .put("error", "Remote access is temporarily unavailable"),
+                        "error", "Remote access is temporarily unavailable").toString());
+            }
+            return true;
         }
         
         // Streaming API
@@ -1372,6 +1392,10 @@ public class HttpServer {
         // moves. See SeatDebugApiHandler / BodyworkSeatProbe.
         if (path.startsWith("/api/debug/seat/")) {
             return SeatDebugApiHandler.handle(method, path, body, out);
+        }
+
+        if (path.startsWith("/api/debug/remote-key")) {
+            return RemoteKeyDiagnosticsApiHandler.handle(method, path, body, out);
         }
 
         // Telenav OEM user-data AIDL — READ-ONLY spike: bind TnNaviService and read

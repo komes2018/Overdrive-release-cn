@@ -367,6 +367,18 @@ public class GpsMonitor {
 
     public boolean isRunning() { return isRunning; }
     public GpsFixSnapshot getFixSnapshot() { return fixSnapshot; }
+
+    /**
+     * Age in ms of a live (non-cached) fix against the daemon's monotonic clock,
+     * or {@code -1} when unavailable or cross-boot cached.
+     */
+    public static long fixAgeMs(GpsFixSnapshot fix) {
+        if (fix == null || !fix.hasLocation() || fix.loadedFromCache || fix.fixElapsedMs <= 0L) {
+            return -1L;
+        }
+        long age = SystemClock.elapsedRealtime() - fix.fixElapsedMs;
+        return age >= 0L ? age : -1L;
+    }
     public double getLatitude() { return fixSnapshot.latitude; }
     public double getLongitude() { return fixSnapshot.longitude; }
     public float getSpeed() { return fixSnapshot.speed; }

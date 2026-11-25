@@ -528,6 +528,30 @@ public class TelegramNotifier {
             }
         });
     }
+
+    /** Send a remote-access / proximity unlock or lock outcome via Telegram IPC. */
+    public static void sendRemoteAccess(String text, JSONObject eventData) {
+        if (eventData == null) return;
+        final JSONObject data;
+        try { data = new JSONObject(eventData.toString()); }
+        catch (Exception invalid) { return; }
+        criticalExecutor.execute(() -> {
+            try {
+                if (!com.overdrive.app.remoteaccess.RemoteAccessNotifications
+                        .canDeliver(data, "telegram")
+                        || !UnifiedTelegramConfig.shouldStartOnAccOff()
+                        || !UnifiedTelegramConfig.hasOwner()) return;
+                JSONObject cmd = new JSONObject()
+                        .put("cmd", "sendMessage").put("text", text)
+                        .put("category",
+                                com.overdrive.app.remoteaccess.RemoteAccessNotifications.TELEGRAM_CATEGORY)
+                        .put("remoteAccess", data);
+                sendIpc(cmd, /*spoolOnDaemonDown=*/true);
+            } catch (Exception e) {
+                Log.e(TAG, "sendRemoteAccess IPC error", e);
+            }
+        });
+    }
     
     /** Default send: no spooling (response-bearing / non-spoolable callers). */
     private static JSONObject sendIpc(JSONObject command) {

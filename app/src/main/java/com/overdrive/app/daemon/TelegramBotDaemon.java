@@ -1288,7 +1288,15 @@ public class TelegramBotDaemon {
                     long chatId = cmd.optLong("chatId", ownerChatId);
                     String text = cmd.optString("text", "");
                     String msgCategory = cmd.optString("category", "CRITICAL");
-                    if (!isCategoryEnabled(msgCategory)) {
+                    boolean remoteAccess = com.overdrive.app.remoteaccess.RemoteAccessNotifications
+                            .TELEGRAM_CATEGORY.equals(msgCategory);
+                    boolean categoryEnabled = remoteAccess
+                            ? com.overdrive.app.remoteaccess.RemoteAccessNotifications.canDeliver(
+                                    cmd.optJSONObject("remoteAccess"), "telegram")
+                                    && com.overdrive.app.telegram.config.UnifiedTelegramConfig
+                                            .shouldStartOnAccOff()
+                            : isCategoryEnabled(msgCategory);
+                    if (!categoryEnabled) {
                         log("sendMessage skipped - " + msgCategory + " disabled");
                         response.put("status", "skipped");
                         response.put("message", msgCategory + " disabled");

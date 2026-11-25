@@ -46,6 +46,9 @@ public class SafeLocationManager {
     private static volatile SafeLocationManager instance;
 
     private final CopyOnWriteArrayList<SafeLocation> zones = new CopyOnWriteArrayList<>();
+    // Geometry publication only. Never hold this across file I/O, GPS callbacks,
+    // lifecycle recalculation or proximity command locks.
+    private final Object geometryLock = new Object();
     private volatile boolean featureEnabled = true;
     // Suppression axis: true only when surveillance should be held off here
     // (feature toggle ON + inside a zone whose own switch is ON). Drives the
@@ -132,11 +135,12 @@ public class SafeLocationManager {
                 double oldLat = zone.getLatitude();
                 double oldLng = zone.getLongitude();
                 int oldRad = zone.getRadiusMeters();
-                if (updates.has("name")) zone.setName(updates.optString("name"));
-                if (updates.has("lat")) zone.setLatitude(updates.optDouble("lat"));
-                if (updates.has("lng")) zone.setLongitude(updates.optDouble("lng"));
-                if (updates.has("radiusM")) zone.setRadiusMeters(updates.optInt("radiusM"));
-                if (updates.has("enabled")) zone.setEnabled(updates.optBoolean("enabled"));
+                synchronized (geometryLock) {
+                    if (updates.has("name")) zone.setName(updates.optString("name"));
+                    zone.applyCoordinateUpdates(updates);
+                    if (updates.has("radiusM")) zone.setRadiusMeters(updates.optInt("radiusM"));
+                    if (updates.has("enabled")) zone.setEnabled(updates.optBoolean("enabled"));
+                }
                 saveToFile();
                 invalidateGeoCacheNear(oldLat, oldLng, oldRad);
                 invalidateGeoCacheNear(zone.getLatitude(), zone.getLongitude(),
@@ -185,6 +189,31 @@ public class SafeLocationManager {
 
     public List<SafeLocation> getZones() {
         return new ArrayList<>(zones);
+    }
+
+    /** A complete immutable zone publication for independent action gates. */
+    public static final class ZoneSnapshot {
+        public final String id, name;
+        public final double latitude, longitude;
+        public final int radiusMeters;
+        public final boolean geometryValid;
+
+        private ZoneSnapshot(SafeLocation zone) {
+            id = zone.getId();
+            name = zone.getName();
+            latitude = zone.getLatitude();
+            longitude = zone.getLongitude();
+            radiusMeters = zone.getRadiusMeters();
+            geometryValid = zone.hasValidProximityGeometry();
+        }
+    }
+
+    public List<ZoneSnapshot> getGeometrySnapshot() {
+        synchronized (geometryLock) {
+            List<ZoneSnapshot> snapshot = new ArrayList<>(zones.size());
+            for (SafeLocation zone : zones) snapshot.add(new ZoneSnapshot(zone));
+            return java.util.Collections.unmodifiableList(snapshot);
+        }
     }
 
     public void setFeatureEnabled(boolean enabled) {

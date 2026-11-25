@@ -40,12 +40,17 @@ final class RemoteDevViewBridgeClient {
     }
 
     Response send(JSONObject request) {
+        return send(request, 1_000, READ_TIMEOUT_MS, true);
+    }
+
+    /** Bounded, quiet reads let routine status requests tolerate an unavailable app bridge. */
+    Response send(JSONObject request, int connectTimeoutMs, int readTimeoutMs, boolean logFailures) {
         Socket socket = null;
         try {
             socket = new Socket();
             socket.connect(new InetSocketAddress(
-                InetAddress.getLoopbackAddress(), RemoteDevViewBridgeService.PORT), 1_000);
-            socket.setSoTimeout(READ_TIMEOUT_MS);
+                InetAddress.getLoopbackAddress(), RemoteDevViewBridgeService.PORT), connectTimeoutMs);
+            socket.setSoTimeout(readTimeoutMs);
 
             PrintWriter writer = new PrintWriter(
                 new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
@@ -63,7 +68,7 @@ final class RemoteDevViewBridgeClient {
             if (payloadLength > 0) input.readFully(payload);
             return new Response(metadata, payload);
         } catch (Throwable error) {
-            Log.w(TAG, "App-process bridge request failed", error);
+            if (logFailures) Log.w(TAG, "App-process bridge request failed", error);
             return null;
         } finally {
             try { if (socket != null) socket.close(); } catch (Exception ignored) {}
