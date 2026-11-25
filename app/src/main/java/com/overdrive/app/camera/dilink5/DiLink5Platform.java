@@ -10,6 +10,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStreamReader;
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 
 /** Explicit opt-in boundary for every DiLink 5-only runtime path. */
@@ -229,6 +230,60 @@ public final class DiLink5Platform {
 
     public static boolean matchesActiveModeGeneration(String expected) {
         return matchesModeGeneration(expected, currentActiveModeGeneration());
+    }
+
+    /** Mode and generation read from the same committed marker file. */
+    public static final class ActiveModeSnapshot {
+        public final String mode;
+        public final String generation;
+
+        private ActiveModeSnapshot(String mode, String generation) {
+            this.mode = mode;
+            this.generation = generation;
+        }
+
+        /** Legacy vehicle HAL / Bluetooth API is only available outside DiLink 5 mode. */
+        public boolean supportsLegacyVehicleApi() {
+            return MODE_DEFAULT.equals(mode) || MODE_DILINK4.equals(mode);
+        }
+
+        public boolean matches(ActiveModeSnapshot other) {
+            return other != null && mode.equals(other.mode)
+                    && generation.equals(other.generation);
+        }
+    }
+
+    /**
+     * Read and validate the active vehicle mode marker atomically without mutating processMode.
+     * Returns null when the marker is missing or malformed.
+     */
+    public static ActiveModeSnapshot currentActiveModeSnapshot() {
+        try {
+            return parseActiveModeMarker(readMarkerBytes(ACTIVE_MODE_PATH));
+        } catch (Exception unavailable) {
+            return null;
+        }
+    }
+
+    static ActiveModeSnapshot parseActiveModeMarker(byte[] bytes) {
+        if (bytes == null || bytes.length == 0 || bytes.length > MODE_MARKER_MAX_BYTES)
+            return null;
+        try (BufferedReader reader = new BufferedReader(new StringReader(
+                new String(bytes, StandardCharsets.UTF_8)))) {
+            String mode = normalizeMode(reader.readLine());
+            String generation = reader.readLine();
+            if (mode == null || generation == null) return null;
+            generation = generation.trim();
+            if (generation.isEmpty() || generation.length() > 128) return null;
+            String canonical = java.util.UUID.fromString(generation).toString();
+            if (!canonical.equalsIgnoreCase(generation)) return null;
+            String remaining;
+            while ((remaining = reader.readLine()) != null)
+                if (!remaining.trim().isEmpty()) return null;
+            return new ActiveModeSnapshot(mode, canonical);
+        } catch (Exception malformed) {
+            return null;
+        }
     }
 
     static boolean matchesModeGeneration(String expected, String current) {

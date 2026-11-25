@@ -2153,9 +2153,6 @@ public final class VehicleCommandRouter {
      * Cloud-only dispatch for the cloud fallback ACTUATOR of the proximity path.
      */
     public CommandResult executeCloudOnly(VehicleCommand cmd) {
-        if (cmd instanceof NativeVehicleCommand) {
-            return CommandResult.notSupported("Manual native vehicle commands require owner action");
-        }
         CommandResult blocked = checkDrivingSafety(cmd);
         if (blocked != null) return blocked;
         if (resolveEffectivePreference(cmd) == RoutePreference.SDK_ONLY) {

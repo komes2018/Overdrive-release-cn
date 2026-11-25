@@ -200,9 +200,14 @@ public final class VehicleActuatorBridge {
         com.overdrive.app.remoteaccess.DiLink5ProximityCommandGuard.Scope proximity =
                 PROXIMITY_COMMAND_SCOPE.get();
         if (proximity != null) {
-            intent.putExtra(
-                    com.overdrive.app.remoteaccess.DiLink5ProximityCommandGuard.EXTRA,
-                    proximity.toWire());
+            try {
+                // Bridge service parses Scope JSON string via DiLink5ProximityCommandGuard.Scope.parse().
+                intent.putExtra(
+                        com.overdrive.app.remoteaccess.DiLink5ProximityCommandGuard.EXTRA,
+                        proximity.toJson().toString());
+            } catch (Exception failed) {
+                return false;
+            }
         }
         android.os.Bundle result = dispatchDiLink5Request(context, intent);
         if (result != null) {
