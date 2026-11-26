@@ -100,6 +100,29 @@ public class NavigationRailLayoutParityTest {
         }
     }
 
+    @Test
+    public void removedCnRailPlaceholdersAreGoneInBothOrientations() throws Exception {
+        String[] layouts = {
+                "src/main/res/layout/activity_main_new.xml",
+                "src/main/res/layout-land/activity_main_new.xml"
+        };
+        Pattern roadSenseBlock = Pattern.compile(
+                "<include[^>]*android:id=\"@\\+id/railDestRoadSense\"[^>]*/>", Pattern.DOTALL);
+        Pattern mapBlock = Pattern.compile(
+                "<include[^>]*android:id=\"@\\+id/railDestMap\"[^>]*/>", Pattern.DOTALL);
+        for (String layout : layouts) {
+            String xml = readProjectFile(layout);
+            Matcher rs = roadSenseBlock.matcher(xml);
+            assertTrue(layout + " missing railDestRoadSense", rs.find());
+            assertTrue(layout + " railDestRoadSense must be gone",
+                    rs.group().contains("android:visibility=\"gone\""));
+            Matcher map = mapBlock.matcher(xml);
+            assertTrue(layout + " missing railDestMap", map.find());
+            assertTrue(layout + " railDestMap must be gone",
+                    map.group().contains("android:visibility=\"gone\""));
+        }
+    }
+
     private static Set<String> destinationIds(String xml) {
         return matches(DESTINATION_ID, xml);
     }

@@ -149,12 +149,14 @@
                         android:id="@+id/railDestRoadSense"
                         layout="@layout/item_rail_destination"
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
+                        android:layout_height="wrap_content"
+                        android:visibility="gone" />
                     <include
                         android:id="@+id/railDestMap"
                         layout="@layout/item_rail_destination"
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
+                        android:layout_height="wrap_content"
+                        android:visibility="gone" />
 
                     <include
                         android:id="@+id/railSectionAutomation"

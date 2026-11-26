@@ -105,21 +105,21 @@ jobs:
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.publish_release == 'true')
         with:
           tag_name: "v${{ env.APP_VERSION }}-cn-sec"
-          name: "OverDrive v${{ env.APP_VERSION }} - 自动化支持蓝牙 RSSI 信号阈值/靠近区域与设备选择，含蓝牙靠近解锁全链路修复"
+          name: "OverDrive v${{ env.APP_VERSION }} - 修复左侧导航栏空白占位，含蓝牙自动化阈值与靠近解锁全链路"
           body: |
-            ## OverDrive v${{ env.APP_VERSION }} 定制版（蓝牙自动化信号阈值 + 靠近感知全链路修复）
+            ## OverDrive v${{ env.APP_VERSION }} 定制版（导航栏空白修复 + 蓝牙自动化与靠近解锁）
 
-            ### ⚡ 1. 任务自动化新增蓝牙能力（v${{ env.APP_VERSION }}）
-            - **新增蓝牙信号强度 `btRssi` 数值信号（dBm）**：支持在自动化触发器、条件判断、`If / Loop / Wait Until` 流程及 `${signal:btRssi}` 动态变量/表达式中直接比较蓝牙信号阈值（如 `btRssi > -14` / `btRssi < -24`），且在车辆上电（ACC/OK）与下电状态下均可使用；
-            - **新增蓝牙靠近区域 `btProximity` 状态信号**：复用多样本中值与滞回防抖算法（`near` 靠近 / `transition` 过渡 / `away` 远离 / `unknown` 未知），可直接配置无抖动“靠近/远离”自动化规则；
-            - **自动化编辑器支持选择已配对蓝牙设备**：为“蓝牙设备名称 (`btDeviceName`)”新增已配对/已连接蓝牙设备下拉列表（同时保留“手动输入设备名称”兼容自定义与跨版本配置）；
-            - **按需零开销采集**：`BluetoothStateMonitor` 仅在已启用规则引用或编辑页打开时按 2s 周期采样 RSSI，无相关规则时保持零唤醒。
+            ### 🩹 1. 界面修复（v${{ env.APP_VERSION }}）
+            - **消除左侧导航栏「行程」与「自动化」之间的空白间隙**：在横/竖屏主布局（`activity_main_new.xml`）中为 CN 精简版已移除的 `railDestRoadSense` 与 `railDestMap` 占位行补充 `android:visibility="gone"`，消除两行共 `112dp` 的空白占高与可点击空区；
+            - 在 `MainActivity.applyNavigationRailVisibility()` 中增加 `View.GONE` 显式兜底，并补充布局单测校验横竖屏一致性。
 
-            ### 🔧 2. 靠近感知（自动解闭锁）完整修复（继承自 v49.9.43）
-            - 补齐 `com.overdrive.app.remoteaccess` 原生蓝牙 RSSI 采样、驻车蓝牙重连、实体车钥匙 CAN `0x180` 监听、双滞后窗口状态机及 `RemoteKeyControl` 4 字节固定帧头修复；
-            - 贯通 `RemoteDevViewBridgeService` 与 `HttpServer` 中继链路，统一共享驻车蓝牙开关与 Web Push / Telegram 动作通知。
+            ### ⚡ 2. 任务自动化蓝牙能力（继承自 v49.9.44）
+            - 支持蓝牙信号强度 `btRssi`（dBm）、蓝牙靠近区域 `btProximity`（`near` / `transition` / `away` / `unknown`）触发器与条件判断，以及已配对蓝牙设备下拉选择。
 
-            ### 🔒 3. 签名与升级说明
+            ### 🔧 3. 靠近感知（自动解闭锁）完整修复（继承自 v49.9.43）
+            - 补齐 `com.overdrive.app.remoteaccess` 蓝牙 RSSI 采样、驻车蓝牙重连、车钥匙 CAN `0x180` 监听及 `RemoteKeyControl` 4 字节固定帧头修复。
+
+            ### 🔒 4. 签名与升级说明
             - 沿用独立车机永久密钥签名（SHA-256 指纹锁死校验），支持应用内检查更新直接覆盖，或通过两步法 `adb push` + `pm install -r` 无损升级。
           files: release-assets/*.apk
         env:

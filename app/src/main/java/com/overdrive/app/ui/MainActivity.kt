@@ -1932,6 +1932,10 @@ open class MainActivity : AppCompatActivity() {
             navigationRail.findViewById<View>(item.rowId)?.visibility =
                 if (visible) View.VISIBLE else View.GONE
         }
+        // CN build removes RoadSense & Map from railItems; keep their XML placeholders GONE
+        // so they never leave a blank gap between Trips and Automations.
+        navigationRail.findViewById<View>(R.id.railDestRoadSense)?.visibility = View.GONE
+        navigationRail.findViewById<View>(R.id.railDestMap)?.visibility = View.GONE
         // Unpinning every row in a group would otherwise leave its header
         // titling nothing.
         railSections.forEach { section ->
