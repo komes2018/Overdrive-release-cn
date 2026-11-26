@@ -1849,6 +1849,32 @@ public class Automations {
                 if (value.length() > 64) value = value.substring(0, 64);
                 update(com.overdrive.app.automation.condition.BydEvent.BT_DEVICE_NAME, value, true);
                 return true;
+            case "btRssi":
+                // Connected Bluetooth RSSI from BluetoothStateMonitor. Empty value expires the
+                // reading cleanly on disconnect/radio-off so stale thresholds never stay true.
+                if (value == null || value.trim().isEmpty()) {
+                    expireState(com.overdrive.app.automation.condition.BydEvent.BT_RSSI);
+                    return true;
+                }
+                try {
+                    int rssi = Integer.parseInt(value.trim());
+                    if (rssi < -127 || rssi > 20) return false;
+                    // Store even if disabled (like btState/btDeviceName) so conditions/editor hints
+                    // see fresh state, but expire after 15s if sampling stops.
+                    update(com.overdrive.app.automation.condition.BydEvent.BT_RSSI,
+                            new IntValue(rssi), true, System.currentTimeMillis() + 15_000L);
+                    return true;
+                } catch (NumberFormatException ignored) {
+                    return false;
+                }
+            case "btProximity":
+                // Hysteresis-stabilized proximity zone from BluetoothStateMonitor.
+                if ("near".equals(value) || "transition".equals(value)
+                        || "away".equals(value) || "unknown".equals(value)) {
+                    update(com.overdrive.app.automation.condition.BydEvent.BT_PROXIMITY, value, true);
+                    return true;
+                }
+                return false;
             default:
                 return false;
         }

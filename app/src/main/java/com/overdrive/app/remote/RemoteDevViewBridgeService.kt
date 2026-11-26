@@ -185,6 +185,10 @@ class RemoteDevViewBridgeService : Service() {
                         response,
                         RemoteDevViewController.dispatchText(request.optString("text", "")),
                     )
+                    "refreshBtProbe" -> {
+                        com.overdrive.app.services.BluetoothStateMonitor.refreshProbe()
+                        response.put("success", true)
+                    }
                     else -> {
                         response.put("success", false)
                         response.put("error", "Unknown bridge command")

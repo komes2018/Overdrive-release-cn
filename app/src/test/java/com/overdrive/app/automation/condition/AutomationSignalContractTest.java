@@ -213,6 +213,37 @@ public class AutomationSignalContractTest {
         assertEquals("open", rawState(DoorEvent.DOOR_HOOD));
     }
 
+    @Test
+    public void bluetoothRssiAndProximityRelayAndExpireCleanly() throws Exception {
+        Conditions conditions = new Conditions();
+        assertNotNull(conditions.getCondition("btRssi"));
+        assertNotNull(conditions.getCondition("btProximity"));
+        assertEquals(AutomationCategories.SYSTEM, AutomationCategories.forId("btRssi"));
+        assertEquals(AutomationCategories.SYSTEM, AutomationCategories.forId("btProximity"));
+
+        assertTrue(Automations.publishExternalEvent("btRssi", "-14"));
+        assertEquals(-14, rawState(BydEvent.BT_RSSI));
+        assertFalse(Automations.publishExternalEvent("btRssi", "-128"));
+        assertFalse(Automations.publishExternalEvent("btRssi", "21"));
+        assertFalse(Automations.publishExternalEvent("btRssi", "not-a-number"));
+
+        // Numeric condition + ${signal:btRssi} comparison both evaluate against live RSSI.
+        com.overdrive.app.automation.AutomationCondition gtNear =
+                new com.overdrive.app.automation.AutomationCondition(
+                        BydEvent.BT_RSSI, "gt", -20);
+        assertTrue(gtNear.compare(Automations.getStateValue(BydEvent.BT_RSSI)));
+
+        // Disconnecting relays empty btRssi to expire the stale reading.
+        assertTrue(Automations.publishExternalEvent("btRssi", ""));
+        assertNull(Automations.getStateValue(BydEvent.BT_RSSI));
+
+        assertTrue(Automations.publishExternalEvent("btProximity", "near"));
+        assertEquals("near", rawState(BydEvent.BT_PROXIMITY));
+        assertTrue(Automations.publishExternalEvent("btProximity", "away"));
+        assertEquals("away", rawState(BydEvent.BT_PROXIMITY));
+        assertFalse(Automations.publishExternalEvent("btProximity", "invalid"));
+    }
+
     private static void assertEventFieldsParse(
             Conditions conditions, Set<String> publishedTypes, Class<?> source) throws Exception {
         for (Field field : source.getDeclaredFields()) {

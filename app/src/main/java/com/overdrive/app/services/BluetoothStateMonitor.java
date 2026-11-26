@@ -6,9 +6,13 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.os.SystemClock;
 import android.util.Log;
 
 import com.overdrive.app.remoteaccess.BluetoothRadioRecoveryEvents;
+import com.overdrive.app.remoteaccess.BluetoothRssiReader;
+import com.overdrive.app.remoteaccess.ProximityEvaluator;
+import com.overdrive.app.remoteaccess.RemoteAccessSettings;
 import com.overdrive.app.remoteaccess.SharedBluetoothKeepAliveController;
 import com.overdrive.app.util.DaemonHttpClient;
 
@@ -17,6 +21,7 @@ import org.json.JSONObject;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -59,6 +64,9 @@ public final class BluetoothStateMonitor {
     // daemon's Automations.update is edge-gated anyway, but this saves the HTTP round-trip).
     private volatile String lastState;      // "on" / "off"
     private volatile String lastName;       // device name or ""
+    private volatile String lastRssi;       // dBm integer string or "" (expired)
+    private volatile String lastProximity;  // "near" / "transition" / "away" / "unknown"
+    private volatile long lastRssiSentWallMs = 0L;
     // Cached hidden Method handles (resolve once). null after a failed probe.
     private volatile Method getConnectDevices;
     private volatile boolean getConnectDevicesProbed;
@@ -100,54 +108,87 @@ public final class BluetoothStateMonitor {
     // at most one small loopback GET per TTL, not one per tick.
     private static final long REASSERT_GATE_TTL_MS = 5L * 60_000L;
     private static final long REASSERT_GATE_IDLE_TTL_MS = 30L * 60_000L;
-    private volatile long gateCheckedAtMs = 0L;
-    // FAIL OPEN: default true so that until we have a definitive answer (or if the
-    // daemon is unreachable) the re-assert behaves exactly as it did before this
-    // gate existed. Losing the self-heal would be a silent correctness regression;
-    // an extra 60s POST is merely wasteful.
-    private volatile boolean gateBtInUse = true;
+    private static final long RSSI_POLL_MS = 2_000L;
+    private static final long RSSI_REFRESH_MS = 8_000L;
+    private static final long PROBE_ACTIVE_TTL_MS = 10_000L;
+    private static final long SETTINGS_REFRESH_MS = 10_000L;
 
-    /**
-     * True when the periodic re-assert is worth doing. Re-queries the daemon at
-     * most once per {@link #REASSERT_GATE_TTL_MS} (or {@link #REASSERT_GATE_IDLE_TTL_MS}
-     * when idle); on any error the cached value is kept (and the initial value is
-     * {@code true}), so this can only ever reduce work when we are CERTAIN no bluetooth
-     * automation is configured.
-     */
-    private boolean btAutomationInUse() {
+    private volatile long gateCheckedAtMs = 0L;
+    // FAIL OPEN for basic state reassert until definitively checked; RSSI stays off until requested.
+    private volatile boolean gateBtInUse = true;
+    private volatile boolean gateRssiInUse = false;
+
+    private final ScheduledExecutorService rssiPoller = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "bt-rssi-poller");
+        t.setDaemon(true);
+        return t;
+    });
+    // Confined to rssiPoller thread:
+    private BluetoothRssiReader rssiReader;
+    private String rssiReaderAddress;
+    private ProximityEvaluator proximityEvaluator;
+    private String evaluatorSignature;
+    private String lastTrackedConnectedAddress;
+    private long disconnectedAtElapsedMs = -1L;
+    private int disconnectedReads = 0;
+    private JSONObject cachedEffectiveSettings;
+    private long lastSettingsReadWallMs = 0L;
+
+    /** Called via bridge when automations change or editor opens, to start/stop RSSI polling promptly. */
+    public static void refreshProbe() {
+        BluetoothStateMonitor m = instance;
+        if (m == null) return;
+        m.gateCheckedAtMs = 0L;
+        m.rssiPoller.execute(() -> m.sampleRssiAndProximityIfActive(true));
+    }
+
+    private void refreshProbeSnapshot(boolean force) {
         long now = System.currentTimeMillis();
-        long ttlMs = (gateCheckedAtMs > 0L && !gateBtInUse) ? REASSERT_GATE_IDLE_TTL_MS : REASSERT_GATE_TTL_MS;
-        if (now - gateCheckedAtMs < ttlMs) return gateBtInUse;
+        long ttlMs = gateRssiInUse ? PROBE_ACTIVE_TTL_MS
+                : ((gateCheckedAtMs > 0L && !gateBtInUse) ? REASSERT_GATE_IDLE_TTL_MS : REASSERT_GATE_TTL_MS);
+        if (!force && gateCheckedAtMs > 0L && now - gateCheckedAtMs < ttlMs) return;
         gateCheckedAtMs = now;
         HttpURLConnection conn = null;
         try {
-            conn = DaemonHttpClient.open("/api/automations/list", "GET", 2000, 3000);
+            conn = DaemonHttpClient.open("/api/automations/bt-probe", "GET", 1500, 2500);
             int code = conn.getResponseCode();
-            if (code < 200 || code >= 300) return gateBtInUse;  // keep prior answer
-            StringBuilder sb = new StringBuilder();
-            try (java.io.BufferedReader r = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(conn.getInputStream(),
-                            java.nio.charset.StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = r.readLine()) != null) sb.append(line);
+            if (code >= 200 && code < 300) {
+                StringBuilder sb = new StringBuilder();
+                try (java.io.BufferedReader r = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(conn.getInputStream(),
+                                java.nio.charset.StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = r.readLine()) != null) sb.append(line);
+                }
+                JSONObject json = new JSONObject(sb.toString());
+                if (json.optBoolean("success", false)) {
+                    boolean bt = json.optBoolean("btActive", gateBtInUse);
+                    boolean rssi = json.optBoolean("rssiActive", false);
+                    if (gateBtInUse != bt || gateRssiInUse != rssi) {
+                        Log.i(TAG, "BT probe gate: btActive=" + bt + " rssiActive=" + rssi);
+                    }
+                    gateBtInUse = bt;
+                    gateRssiInUse = rssi;
+                }
             }
-            // Substring test rather than a full schema walk: the condition keys are
-            // the literal strings "btState" / "btDeviceName" (BydEvent.java:115-116)
-            // and they appear in the serialized automation only when a rule actually
-            // references them. Erring toward "in use" on any ambiguity is safe.
-            String body = sb.toString();
-            boolean inUse = body.contains("btState") || body.contains("btDeviceName");
-            if (gateBtInUse != inUse) {
-                Log.i(TAG, "BT re-assert gate: bluetoothAutomationInUse=" + inUse);
-            }
-            gateBtInUse = inUse;
-            return inUse;
-        } catch (Throwable t) {
-            // Daemon not up / transport hiccup — keep the previous (fail-open) answer.
-            return gateBtInUse;
+        } catch (Throwable ignored) {
+            // Keep prior cached values on transient IPC hiccup.
         } finally {
             if (conn != null) conn.disconnect();
         }
+    }
+
+    /**
+     * True when the periodic re-assert is worth doing.
+     */
+    private boolean btAutomationInUse() {
+        refreshProbeSnapshot(false);
+        return gateBtInUse;
+    }
+
+    private boolean rssiAutomationInUse(boolean forceProbe) {
+        refreshProbeSnapshot(forceProbe);
+        return gateRssiInUse;
     }
 
     private BluetoothStateMonitor(Context ctx) {
@@ -201,6 +242,9 @@ public final class BluetoothStateMonitor {
                     // A connect whose name is still unresolved gets one short retry, so the name
                     // lands in ~1s instead of waiting for the next periodic re-assert.
                     if (connectEdge) scheduleNameRecheck();
+                    if (gateRssiInUse) {
+                        rssiPoller.execute(() -> sampleRssiAndProximityIfActive(false));
+                    }
                 }
             };
             IntentFilter filter = new IntentFilter();
@@ -247,6 +291,13 @@ public final class BluetoothStateMonitor {
             }, REASSERT_SECONDS, REASSERT_SECONDS, TimeUnit.SECONDS);
         } catch (Throwable t) {
             Log.w(TAG, "reassert schedule failed: " + t.getMessage());
+        }
+        try {
+            rssiPoller.scheduleWithFixedDelay(
+                    () -> sampleRssiAndProximityIfActive(false),
+                    RSSI_POLL_MS, RSSI_POLL_MS, TimeUnit.MILLISECONDS);
+        } catch (Throwable t) {
+            Log.w(TAG, "rssiPoller schedule failed: " + t.getMessage());
         }
         Log.i(TAG, "bluetooth-state monitor started");
         return true;
@@ -473,6 +524,11 @@ public final class BluetoothStateMonitor {
             if (!force) {
                 if ("btState".equals(event)) { if (v.equals(lastState)) return; }
                 else if ("btDeviceName".equals(event)) { if (v.equals(lastName)) return; }
+                else if ("btRssi".equals(event)) {
+                    if (v.equals(lastRssi) && (v.isEmpty()
+                            || System.currentTimeMillis() - lastRssiSentWallMs < RSSI_REFRESH_MS)) return;
+                }
+                else if ("btProximity".equals(event)) { if (v.equals(lastProximity)) return; }
             }
 
             final String body;
@@ -506,15 +562,144 @@ public final class BluetoothStateMonitor {
                     if (accepted) {
                         if ("btState".equals(event)) lastState = v;
                         else if ("btDeviceName".equals(event)) lastName = v;
+                        else if ("btRssi".equals(event)) {
+                            lastRssi = v;
+                            lastRssiSentWallMs = System.currentTimeMillis();
+                        }
+                        else if ("btProximity".equals(event)) lastProximity = v;
                     }
                 }
-                Log.i(TAG, "relayed " + event + "=" + v + " -> HTTP " + code
-                        + (accepted ? "" : " (not accepted)"));
+                if (!"btRssi".equals(event)) {
+                    Log.i(TAG, "relayed " + event + "=" + v + " -> HTTP " + code
+                            + (accepted ? "" : " (not accepted)"));
+                }
             } catch (Throwable t) {
                 Log.w(TAG, "relay failed (" + event + "): " + t.getMessage());
             } finally {
                 if (conn != null) conn.disconnect();
             }
         });
+    }
+
+    /** Samples connected BT RSSI and evaluates stabilized btProximity when automations listen. */
+    private void sampleRssiAndProximityIfActive(boolean forceProbe) {
+        if (!rssiAutomationInUse(forceProbe)) {
+            releaseRssiReader();
+            proximityEvaluator = null;
+            evaluatorSignature = null;
+            disconnectedAtElapsedMs = -1L;
+            disconnectedReads = 0;
+            return;
+        }
+        try {
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            if (adapter == null || !adapter.isEnabled()) {
+                releaseRssiReader();
+                proximityEvaluator = null;
+                evaluatorSignature = null;
+                disconnectedAtElapsedMs = -1L;
+                disconnectedReads = 0;
+                clearRssiRelayIfNeeded();
+                relay("btProximity", "unknown", false);
+                return;
+            }
+            BluetoothDevice dev = firstConnectedDevice(adapter);
+            if (dev == null) {
+                releaseRssiReader();
+                clearRssiRelayIfNeeded();
+                if (lastTrackedConnectedAddress != null) {
+                    long nowElapsed = SystemClock.elapsedRealtime();
+                    if (disconnectedAtElapsedMs < 0L) {
+                        disconnectedAtElapsedMs = nowElapsed;
+                        disconnectedReads = 1;
+                    } else {
+                        disconnectedReads++;
+                    }
+                    if (disconnectedReads >= 2 && nowElapsed - disconnectedAtElapsedMs >= 2_000L) {
+                        if (proximityEvaluator != null) proximityEvaluator.reset();
+                        relay("btProximity", "away", false);
+                    }
+                } else {
+                    relay("btProximity", "unknown", false);
+                }
+                return;
+            }
+            String rawAddr = dev.getAddress();
+            String address = rawAddr != null ? rawAddr.trim().toUpperCase(Locale.US) : "";
+            if (address.isEmpty()) return;
+            disconnectedAtElapsedMs = -1L;
+            disconnectedReads = 0;
+            lastTrackedConnectedAddress = address;
+
+            Integer rssi = readRssiFor(address);
+            if (rssi != null) {
+                relay("btRssi", String.valueOf(rssi), false);
+            } else if (lastRssi != null && !lastRssi.isEmpty()
+                    && System.currentTimeMillis() - lastRssiSentWallMs > 10_000L) {
+                relay("btRssi", "", true);
+            }
+
+            ProximityEvaluator evaluator = ensureProximityEvaluator(address);
+            ProximityEvaluator.Snapshot snap = evaluator.observe(
+                    address, rssi, SystemClock.elapsedRealtime(), true, true);
+            relay("btProximity", snap.state.name().toLowerCase(Locale.US), false);
+        } catch (Throwable t) {
+            Log.w(TAG, "RSSI automation poll failed: " + t.getMessage());
+        }
+    }
+
+    private void clearRssiRelayIfNeeded() {
+        if (lastRssi != null && !lastRssi.isEmpty()) {
+            relay("btRssi", "", true);
+        }
+    }
+
+    private Integer readRssiFor(String address) {
+        try {
+            if (rssiReader == null || !address.equalsIgnoreCase(rssiReaderAddress)) {
+                releaseRssiReader();
+                rssiReader = new BluetoothRssiReader(appContext, address);
+                rssiReaderAddress = address;
+            }
+            Integer val = rssiReader.read();
+            if (val == null) releaseRssiReader();
+            return val;
+        } catch (Throwable unavailable) {
+            releaseRssiReader();
+            return null;
+        }
+    }
+
+    private void releaseRssiReader() {
+        BluetoothRssiReader reader = rssiReader;
+        rssiReader = null;
+        rssiReaderAddress = null;
+        if (reader != null) {
+            try { reader.close(); } catch (Throwable ignored) {}
+        }
+    }
+
+    private ProximityEvaluator ensureProximityEvaluator(String address) {
+        long nowWall = System.currentTimeMillis();
+        if (cachedEffectiveSettings == null || nowWall - lastSettingsReadWallMs >= SETTINGS_REFRESH_MS) {
+            try {
+                cachedEffectiveSettings = RemoteAccessSettings.effective(RemoteAccessSettings.read());
+            } catch (Throwable ignored) {
+                if (cachedEffectiveSettings == null) cachedEffectiveSettings = new JSONObject();
+            }
+            lastSettingsReadWallMs = nowWall;
+        }
+        JSONObject phone = RemoteAccessSettings.phone(cachedEffectiveSettings, address);
+        ProximityEvaluator.Config cfg = phone != null
+                ? RemoteAccessSettings.evaluatorConfig(cachedEffectiveSettings, phone)
+                : RemoteAccessSettings.evaluatorConfig(cachedEffectiveSettings);
+        String sig = address + ":" + cfg.nearThreshold + ":" + cfg.awayThreshold + ":"
+                + cfg.windowMs + ":" + cfg.stableMs + ":" + cfg.staleMs + ":"
+                + cfg.nearWindowMs + ":" + cfg.nearStableMs + ":" + cfg.unlockTrigger.setting;
+        if (proximityEvaluator == null || !sig.equals(evaluatorSignature)) {
+            proximityEvaluator = new ProximityEvaluator(cfg);
+            evaluatorSignature = sig;
+        }
+        return proximityEvaluator;
     }
 }

@@ -105,17 +105,21 @@ jobs:
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.publish_release == 'true')
         with:
           tag_name: "v${{ env.APP_VERSION }}-cn-sec"
-          name: "OverDrive v${{ env.APP_VERSION }} - 修复蓝牙靠近自动解锁、实体钥匙 CAN 感知与本地遥控帧头"
+          name: "OverDrive v${{ env.APP_VERSION }} - 自动化支持蓝牙 RSSI 信号阈值/靠近区域与设备选择，含蓝牙靠近解锁全链路修复"
           body: |
-            ## OverDrive v${{ env.APP_VERSION }} 定制版（修复靠近感知自动解闭锁全链路）
+            ## OverDrive v${{ env.APP_VERSION }} 定制版（蓝牙自动化信号阈值 + 靠近感知全链路修复）
 
-            ### 🔧 1. 靠近感知（自动解闭锁）完整修复
-            - **补齐 `com.overdrive.app.remoteaccess` 完整采集与评估模块**：合入 App 进程原生蓝牙 RSSI 采样（`BluetoothAccessMonitor` / `BluetoothRssiReader`）、驻车蓝牙自动回连（`BluetoothPhoneReconnectController`）、实体车钥匙 CAN `0x180` 监听（`KeyFobAccessMonitor` / `KeyFobCanDecoder`）以及双滞后窗口状态机（`ProximityEvaluator`）；
-            - **贯通 App 进程与守护进程桥接链路**：在 `RemoteDevViewBridgeService` 补齐 `remoteAccess` / `bluetoothStatus` 指令处理与后台自启恢复，在 `HttpServer` 新增 `/api/remote-access/relay` 签名中继入口，并接入完整版 `RemoteAccessApiHandler`（修复 `connected` 恒为 false、硬编码阈值及 `/calibrate` 返回字段名不匹配等问题）；
-            - **共享驻车蓝牙保活与动作通知联动**：新增 `BluetoothKeepAlivePolicy` 与 `SharedBluetoothKeepAliveController`，统一 `UnifiedConfigManager`、`AccSentryDaemon` 与哨兵/靠近感知页面的驻车蓝牙开关，并打通 Web Push / Telegram 靠近动作优先通知；
-            - **修复本地遥控指令帧头偏移 (`RemoteKeyControl`)**：补全 4 字节固定帧头 `0x5E 0x02 0x14 0x00` 与两段式解锁时序，同步补全 `AndroidManifest` 的 `BLUETOOTH_CONNECT` / `BLUETOOTH_SCAN` 权限。
+            ### ⚡ 1. 任务自动化新增蓝牙能力（v${{ env.APP_VERSION }}）
+            - **新增蓝牙信号强度 `btRssi` 数值信号（dBm）**：支持在自动化触发器、条件判断、`If / Loop / Wait Until` 流程及 `${signal:btRssi}` 动态变量/表达式中直接比较蓝牙信号阈值（如 `btRssi > -14` / `btRssi < -24`），且在车辆上电（ACC/OK）与下电状态下均可使用；
+            - **新增蓝牙靠近区域 `btProximity` 状态信号**：复用多样本中值与滞回防抖算法（`near` 靠近 / `transition` 过渡 / `away` 远离 / `unknown` 未知），可直接配置无抖动“靠近/远离”自动化规则；
+            - **自动化编辑器支持选择已配对蓝牙设备**：为“蓝牙设备名称 (`btDeviceName`)”新增已配对/已连接蓝牙设备下拉列表（同时保留“手动输入设备名称”兼容自定义与跨版本配置）；
+            - **按需零开销采集**：`BluetoothStateMonitor` 仅在已启用规则引用或编辑页打开时按 2s 周期采样 RSSI，无相关规则时保持零唤醒。
 
-            ### 🔒 2. 签名与升级说明
+            ### 🔧 2. 靠近感知（自动解闭锁）完整修复（继承自 v49.9.43）
+            - 补齐 `com.overdrive.app.remoteaccess` 原生蓝牙 RSSI 采样、驻车蓝牙重连、实体车钥匙 CAN `0x180` 监听、双滞后窗口状态机及 `RemoteKeyControl` 4 字节固定帧头修复；
+            - 贯通 `RemoteDevViewBridgeService` 与 `HttpServer` 中继链路，统一共享驻车蓝牙开关与 Web Push / Telegram 动作通知。
+
+            ### 🔒 3. 签名与升级说明
             - 沿用独立车机永久密钥签名（SHA-256 指纹锁死校验），支持应用内检查更新直接覆盖，或通过两步法 `adb push` + `pm install -r` 无损升级。
           files: release-assets/*.apk
         env:

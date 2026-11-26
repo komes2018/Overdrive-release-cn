@@ -96,6 +96,14 @@ public final class AutomationApiHandler {
         if (path.equals("/api/automations/state") && method.equals("GET")) {
             return getState(out);
         }
+        // Lightweight probe polled by app-process BluetoothStateMonitor to gate BT/RSSI polling.
+        if (path.equals("/api/automations/bt-probe") && method.equals("GET")) {
+            return getBtProbeStatus(out);
+        }
+        // Paired & connected Bluetooth devices for the automation btDeviceName picker.
+        if (path.equals("/api/automations/bt-devices") && method.equals("GET")) {
+            return getBtDevices(out);
+        }
         if (path.equals("/api/automations/settings") && method.equals("GET")) {
             return getSettings(out);
         }
@@ -260,6 +268,7 @@ public final class AutomationApiHandler {
         boolean replace = json.optBoolean("replace", false);
         if (map == null) map = json; // bare map (no wrapper) → merge
         int count = Automations.importAutomations(map, replace);
+        if (count > 0) notifyBtProbeChanged(false);
         JSONObject resp = new JSONObject();
         resp.put("success", count > 0);
         resp.put("imported", count);
@@ -365,6 +374,7 @@ public final class AutomationApiHandler {
                     });
             com.overdrive.app.automation.condition.TimeEvent.seedForEditor();
             com.overdrive.app.automation.condition.NetworkEvent.seedForEditor();
+            notifyBtProbeChanged(true);
         } catch (Throwable t) {
             // Best-effort: fall back to whatever the state map already holds.
             logger.warn("state seed publish failed: " + t.getMessage());
@@ -374,6 +384,58 @@ public final class AutomationApiHandler {
         resp.put("state", Automations.stateSnapshotJson());
         HttpResponse.sendJson(out, resp.toString());
         return true;
+    }
+
+    private static boolean getBtProbeStatus(OutputStream out) throws Exception {
+        boolean rssiActive = Automations.isEventReferenced(com.overdrive.app.automation.condition.BydEvent.BT_RSSI)
+                || Automations.isEventReferenced(com.overdrive.app.automation.condition.BydEvent.BT_PROXIMITY)
+                || Automations.editorSeedActive();
+        boolean btActive = rssiActive
+                || Automations.isEventReferenced(com.overdrive.app.automation.condition.BydEvent.BT_STATE)
+                || Automations.isEventReferenced(com.overdrive.app.automation.condition.BydEvent.BT_DEVICE_NAME)
+                || Automations.editorSeedActive();
+        JSONObject resp = new JSONObject();
+        resp.put("success", true);
+        resp.put("btActive", btActive);
+        resp.put("rssiActive", rssiActive);
+        HttpResponse.sendJson(out, resp.toString());
+        return true;
+    }
+
+    private static boolean getBtDevices(OutputStream out) throws Exception {
+        JSONObject result = RemoteAccessApiHandler.queryBluetoothDevices();
+        if (result != null && result.optBoolean("success")) {
+            HttpResponse.sendJson(out, result.toString());
+        } else {
+            JSONObject fallback = new JSONObject();
+            fallback.put("success", false);
+            fallback.put("devices", new JSONArray());
+            fallback.put("error", "The car app is unavailable. Open OverDrive and retry.");
+            HttpResponse.sendJson(out, 503, fallback.toString());
+        }
+        return true;
+    }
+
+    private static final java.util.concurrent.ExecutorService BT_PROBE_NOTIFY_EXECUTOR =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "AutomationBtProbeNudge");
+                t.setDaemon(true);
+                return t;
+            });
+    private static volatile long lastBtProbeNudgeMs = 0L;
+
+    /** Nudge app-process BluetoothStateMonitor asynchronously when rules/editor seed state change. */
+    private static void notifyBtProbeChanged(boolean rateLimit) {
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (rateLimit && now - lastBtProbeNudgeMs < 4000L) return;
+        lastBtProbeNudgeMs = now;
+        BT_PROBE_NOTIFY_EXECUTOR.submit(() -> {
+            try {
+                new RemoteDevViewBridgeClient().send(
+                        new JSONObject().put("command", "refreshBtProbe"),
+                        300, 1000, false);
+            } catch (Throwable ignored) {}
+        });
     }
 
     /** GET automation-wide settings. Fresh read for cross-UID. */
@@ -566,6 +628,7 @@ public final class AutomationApiHandler {
             return true;
         }
         if (Automations.updateAutomation(id, parsed)) {
+            notifyBtProbeChanged(false);
             HttpResponse.sendJsonSuccess(out);
         } else {
             HttpResponse.sendError(out, 500, "Saved in memory but could not be written to storage — check free space.");
@@ -583,6 +646,7 @@ public final class AutomationApiHandler {
      */
     private static boolean deleteAutomation(String id, OutputStream out) throws Exception {
         if (Automations.deleteAutomation(id)) {
+            notifyBtProbeChanged(false);
             HttpResponse.sendJsonSuccess(out);
         } else {
             HttpResponse.sendError(out, 404, "Automation not found.");
@@ -705,6 +769,7 @@ public final class AutomationApiHandler {
             return true;
         }
         if (Automations.disableAutomation(id, json.getBoolean("disabled"))) {
+            notifyBtProbeChanged(false);
             HttpResponse.sendJsonSuccess(out);
         } else {
             HttpResponse.sendError(out, 404, "Automation not found.");
@@ -736,6 +801,7 @@ public final class AutomationApiHandler {
             return true;
         }
         if (Automations.setAutomationMode(id, (String) rawMode)) {
+            notifyBtProbeChanged(false);
             HttpResponse.sendJsonSuccess(out);
         } else {
             HttpResponse.sendError(out, 404, "Automation not found.");

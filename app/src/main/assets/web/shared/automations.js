@@ -1313,12 +1313,15 @@ BYD.automations = {
                     inp = this.createConditionValueInput(
                         nRhs, e.variables[variable.id],
                         (value) => { e.variables[variable.id] = value; },
-                        this.conditionCatalog(), null);
+                        this.conditionCatalog(), e.variables.event);
                 } else if (variable.id === 'state' && selected && this.hasSignalAddress(selected)) {
                     // Awaited state for a NESTED wait-until-signal — same vocabulary dropdown.
                     const nState = this.awaitedStateSchema(variable, e.variables.event);
-                    inp = this.createInput(nState, e.variables[variable.id],
-                        (element, value) => { e.variables[variable.id] = value; });
+                    inp = this.isBtDeviceNameField(e.variables.event, nState)
+                        ? this.createBtDeviceNameInput(nState, e.variables[variable.id],
+                            (value) => { e.variables[variable.id] = value; })
+                        : this.createInput(nState, e.variables[variable.id],
+                            (element, value) => { e.variables[variable.id] = value; });
                 } else if (variable.signalAddress) {
                     // LHS signal picker for a NESTED flow action — same catalog + attribute
                     // selectors as the top-level path, so nesting doesn't lose the capability.
@@ -1696,6 +1699,125 @@ BYD.automations = {
                 });
             });
         };
+
+        return wrap;
+    },
+
+    // Paired & connected Bluetooth devices cache for the btDeviceName picker.
+    _btDeviceCache: null,
+
+    loadBtDevices() {
+        if (this._btDeviceCache && !this._btDeviceCache.failed) {
+            return Promise.resolve(this._btDeviceCache);
+        }
+        return fetch('/api/automations/bt-devices')
+            .then(r => r.json().then(d => ({ ok: r.ok, d })))
+            .then(({ ok, d }) => {
+                if (!ok || !d || !d.success || !Array.isArray(d.devices)) {
+                    return { devices: [], failed: true };
+                }
+                this._btDeviceCache = { devices: d.devices, failed: false };
+                return this._btDeviceCache;
+            })
+            .catch(() => ({ devices: [], failed: true }));
+    },
+
+    isBtDeviceNameField(selfType, schema) {
+        return selfType === 'btDeviceName' && !!(schema && schema.type === 'string');
+    },
+
+    createBtDeviceNameInput(schema, currentValue, onChange) {
+        const wrap = document.createElement('div');
+        wrap.classList.add('cond-value-wrap', 'bt-device-picker');
+
+        const sel = document.createElement('select');
+        sel.classList.add('input', 'enum');
+        const customInput = document.createElement('input');
+        customInput.type = 'text';
+        customInput.classList.add('input', 'string');
+        customInput.placeholder = (schema && schema.label) || BYD.i18n.t('automation.bt_device_pick');
+        customInput.maxLength = (schema && schema.maxLength != null) ? schema.maxLength : 64;
+        customInput.style.display = 'none';
+
+        const hint = document.createElement('div');
+        hint.classList.add('field-help');
+        hint.textContent = BYD.i18n.t('automation.bt_device_hint');
+        wrap.append(sel, customInput, hint);
+
+        const CUSTOM = '__custom__';
+        const stored = (typeof currentValue === 'string') ? currentValue : '';
+
+        const rebuild = (devices) => {
+            sel.innerHTML = '';
+            const ph = document.createElement('option');
+            ph.value = '';
+            ph.textContent = BYD.i18n.t('automation.bt_device_pick');
+            sel.append(ph);
+
+            const seen = new Set();
+            const sorted = (devices || []).slice().sort((a, b) => {
+                if (!!a.connected !== !!b.connected) return a.connected ? -1 : 1;
+                return String(a.name || '').localeCompare(String(b.name || ''));
+            });
+            for (const dev of sorted) {
+                const name = (dev && typeof dev.name === 'string') ? dev.name.trim() : '';
+                if (!name || seen.has(name)) continue;
+                seen.add(name);
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = dev.connected
+                    ? (name + ' (' + BYD.i18n.t('automation.bt_device_connected') + ')')
+                    : name;
+                sel.append(opt);
+            }
+
+            const customOpt = document.createElement('option');
+            customOpt.value = CUSTOM;
+            customOpt.textContent = BYD.i18n.t('automation.bt_device_custom');
+            sel.append(customOpt);
+
+            if (stored && seen.has(stored)) {
+                sel.value = stored;
+                customInput.style.display = 'none';
+            } else if (stored) {
+                sel.value = CUSTOM;
+                customInput.value = stored;
+                customInput.style.display = '';
+            } else {
+                sel.value = '';
+                customInput.style.display = 'none';
+            }
+        };
+
+        const asTextFallback = () => {
+            wrap.innerHTML = '';
+            const inp = this.createInput(schema, stored, (el, v) => onChange(v));
+            const h = document.createElement('div');
+            h.classList.add('field-help');
+            h.textContent = BYD.i18n.t('automation.bt_device_hint');
+            wrap.append(inp, h);
+        };
+
+        // Keep existing stored value intact before async fetch lands.
+        if (stored) onChange(stored);
+
+        this.loadBtDevices().then((data) => {
+            if (!data || data.failed) { asTextFallback(); return; }
+            rebuild(data.devices);
+            sel.addEventListener('change', () => {
+                if (sel.value === CUSTOM) {
+                    customInput.style.display = '';
+                    customInput.focus();
+                    onChange(customInput.value);
+                } else {
+                    customInput.style.display = 'none';
+                    onChange(sel.value);
+                }
+            });
+            customInput.addEventListener('input', () => {
+                if (sel.value === CUSTOM) onChange(customInput.value);
+            });
+        });
 
         return wrap;
     },
@@ -2328,7 +2450,9 @@ BYD.automations = {
                 // The normal typed editor. Seed it only when the current value is a real
                 // constant (not a leftover ${…} token from another mode).
                 const seed = parseRef(currentValue) ? undefined : currentValue;
-                const input = this.createInput(valueSchema, seed, (el, value) => onChange(value));
+                const input = this.isBtDeviceNameField(selfType, valueSchema)
+                    ? this.createBtDeviceNameInput(valueSchema, seed, (value) => onChange(value))
+                    : this.createInput(valueSchema, seed, (el, value) => onChange(value));
                 body.append(input);
             } else if (mode === 'var') {
                 const input = document.createElement('input');
@@ -2559,16 +2683,21 @@ BYD.automations = {
                     variableSelector = this.createConditionValueInput(
                         rhsSchema, this.formData[id][index].variables[variable.id],
                         (value) => { this.formData[id][index].variables[variable.id] = value; },
-                        this.conditionCatalog(), null);
+                        this.conditionCatalog(), this.formData[id][index].variables.event);
                     inputs.classList.add('has-cond-value');   // top-align (2-line editor)
                 } else if (variable.id === 'state' && selected && this.hasSignalAddress(selected)) {
                     // "Wait until signal" awaited state: a DROPDOWN of the chosen signal's own
                     // vocabulary when it has one, else the plain free-text field.
                     const stateSchema = this.awaitedStateSchema(
                         variable, this.formData[id][index].variables.event);
-                    variableSelector = this.createInput(
-                        stateSchema, this.formData[id][index].variables[variable.id],
-                        (element, value) => { this.formData[id][index].variables[variable.id] = value; });
+                    variableSelector = this.isBtDeviceNameField(
+                        this.formData[id][index].variables.event, stateSchema)
+                        ? this.createBtDeviceNameInput(
+                            stateSchema, this.formData[id][index].variables[variable.id],
+                            (value) => { this.formData[id][index].variables[variable.id] = value; })
+                        : this.createInput(
+                            stateSchema, this.formData[id][index].variables[variable.id],
+                            (element, value) => { this.formData[id][index].variables[variable.id] = value; });
                 } else if (variable.signalAddress) {
                     // The LHS signal picker of a flow action: the whole conditions catalog
                     // plus per-attribute selectors. A "variable" operand stays available for

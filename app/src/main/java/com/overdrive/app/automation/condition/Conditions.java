@@ -347,6 +347,22 @@ public class Conditions {
                 new Label("btDeviceName", "automation.bt_device_name"),
                 "automation.bt_device_name_description",
                 new StringType(new Label("name", "automation.bt_device_name"), 64)));
+        // Live Bluetooth signal strength (RSSI, [-127, 20]) and stabilized proximity zone
+        // (near / transition / away / unknown) for connected devices, independent of car power.
+        addCondition(new EventCondition(
+                new Label("btRssi", "automation.bt_rssi"),
+                "automation.bt_rssi_description",
+                new com.overdrive.app.automation.type.IntType(
+                        new Label("dbm", "automation.bt_rssi_unit"), -127, 20)));
+        addCondition(new EventCondition(
+                new Label("btProximity", "automation.bt_proximity"),
+                "automation.bt_proximity_description",
+                new EnumType(
+                        new Label("state", "automation.state"),
+                        new Label("near", "automation.bt_proximity_near"),
+                        new Label("transition", "automation.bt_proximity_transition"),
+                        new Label("away", "automation.bt_proximity_away"),
+                        new Label("unknown", "automation.bt_proximity_unknown"))));
         // Location zone — fires when the car enters/leaves a geofence. The value is a
         // zone NAME (as defined in Safe Locations, map-picked with a radius down to
         // 15m), or "none" when outside every zone. So "location = Home" matches while

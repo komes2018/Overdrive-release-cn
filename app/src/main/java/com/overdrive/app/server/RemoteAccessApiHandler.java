@@ -247,9 +247,8 @@ public final class RemoteAccessApiHandler {
             return true;
         }
         if ("GET".equals(method) && route.equals("/api/remote-access/devices")) {
-            JSONObject result = bridge("devices");
+            JSONObject result = queryBluetoothDevices();
             if (result != null && result.optBoolean("success")) {
-                synchronized (STATE) { pairedDevices = result.optJSONArray("devices"); }
                 HttpResponse.sendJson(out, result.toString());
             } else {
                 HttpResponse.sendJson(out, 503, error("The car app is unavailable. Open OverDrive and retry.").toString());
@@ -1450,6 +1449,15 @@ public final class RemoteAccessApiHandler {
         for (int i = 0; i < 6; i++) if (doors[i] != 0) return false;
         return BluetoothProximityDecisionGuard.fresh(decision.observed, SystemClock.elapsedRealtime(),
                 decision.freshnessMs) && decision.valid();
+    }
+
+    /** Queries paired/connected Bluetooth devices from the app process and updates daemon cache. */
+    static JSONObject queryBluetoothDevices() throws Exception {
+        JSONObject result = bridge("devices");
+        if (result != null && result.optBoolean("success")) {
+            synchronized (STATE) { pairedDevices = result.optJSONArray("devices"); }
+        }
+        return result;
     }
 
     private static JSONObject bridge(String operation) throws Exception {

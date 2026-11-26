@@ -154,6 +154,11 @@ public class BydEvent {
     // the BT analogue of WIFI_SSID.
     public static final EventData BT_STATE = new EventData("btState");
     public static final EventData BT_DEVICE_NAME = new EventData("btDeviceName");
+    // Relayed by app-process BluetoothStateMonitor when enabled automations reference
+    // btRssi or btProximity (works even while vehicle power is ON). btRssi is dBm/RSSI
+    // [-127, 20]; btProximity is the hysteresis-stabilized zone (near/transition/away/unknown).
+    public static final EventData BT_RSSI = new EventData("btRssi");
+    public static final EventData BT_PROXIMITY = new EventData("btProximity");
     // Published by SafeLocationManager on a geofence transition: the name of the
     // zone the car is currently inside, or "none" when outside every zone. Lets an
     // automation trigger on entering/leaving a map-picked location (the same zones

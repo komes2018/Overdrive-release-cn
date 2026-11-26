@@ -109,7 +109,7 @@ public final class AutomationCategories {
         put(SYSTEM, "notification", "showToast", "showDialog", "openApp", "openAppSplit",
                 "openAppsSplit", "shell", "radio",
                 "mqttPublish", "mqttTrigger",
-                "wifiState", "wifiSsid", "btState", "btDeviceName", "locationZone",
+                "wifiState", "wifiSsid", "btState", "btDeviceName", "btRssi", "btProximity", "locationZone",
                 "boot", "power", "time", "day", "dayOfMonth", "month", "sunPhase",
                 "uiNav", "screenshot", "iviReboot", "moveAppToDisplay", "stopClusterCast");
         // ── Surveillance / recording / camera ──
