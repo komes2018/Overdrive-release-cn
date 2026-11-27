@@ -3416,7 +3416,7 @@ BYD.surveillance = {
                 keepUsbName.dataset.vehiclePowerText = keepUsbName.textContent;
             }
             keepUsbName.textContent = wakeOnly
-                ? (window.BYD?.i18n?.t ? window.BYD.i18n.t('surveillance.keep_awake_title') : '驻车时保持车机唤醒')
+                ? ((window.BYD && window.BYD.i18n && window.BYD.i18n.t) ? window.BYD.i18n.t('surveillance.keep_awake_title') : '驻车时保持车机唤醒')
                 : keepUsbName.dataset.vehiclePowerText;
         }
         if (keepUsbDesc) {
@@ -3424,7 +3424,7 @@ BYD.surveillance = {
                 keepUsbDesc.dataset.vehiclePowerText = keepUsbDesc.textContent;
             }
             keepUsbDesc.textContent = wakeOnly
-                ? (window.BYD?.i18n?.t ? window.BYD.i18n.t('surveillance.keep_awake_desc') : '在车辆熄火后保持 Android CPU 和网络唤醒锁。车辆固件可能仍会切断 USB 或 SD 卡供电。')
+                ? ((window.BYD && window.BYD.i18n && window.BYD.i18n.t) ? window.BYD.i18n.t('surveillance.keep_awake_desc') : '在车辆熄火后保持 Android CPU 和网络唤醒锁。车辆固件可能仍会切断 USB 或 SD 卡供电。')
                 : keepUsbDesc.dataset.vehiclePowerText;
         }
         if (keepUsbNote) keepUsbNote.style.display = wakeOnly ? 'block' : 'none';
@@ -5706,23 +5706,81 @@ window.BydCloud = {
         { name: 'Vietnam', code: 'VN', language: 'vi', region: 'vn' }
     ],
 
-    normalizeRegion(region) {
-        if (region === 'kr-ali') return 'kr';
-        return this.regionLabels[region] ? region : 'eu';
+    pinnedCountryCodes: ['CN', 'HK', 'MO', 'SG'],
+    zhCountryLabels: {
+        CN: { 'zh-CN': '中国大陆', 'zh-TW': '中國大陸' },
+        HK: { 'zh-CN': '中国香港', 'zh-TW': '中國香港' },
+        MO: { 'zh-CN': '中国澳门', 'zh-TW': '中國澳門' },
+        SG: { 'zh-CN': '新加坡', 'zh-TW': '新加坡' },
+        MY: { 'zh-CN': '马来西亚', 'zh-TW': '馬來西亞' },
+        TH: { 'zh-CN': '泰国', 'zh-TW': '泰國' },
+        JP: { 'zh-CN': '日本', 'zh-TW': '日本' },
+        KR: { 'zh-CN': '韩国', 'zh-TW': '韓國' },
+        AU: { 'zh-CN': '澳大利亚', 'zh-TW': '澳洲' },
+        NZ: { 'zh-CN': '新西兰', 'zh-TW': '紐西蘭' },
+        GB: { 'zh-CN': '英国', 'zh-TW': '英國' },
+        DE: { 'zh-CN': '德国', 'zh-TW': '德國' },
+        FR: { 'zh-CN': '法国', 'zh-TW': '法國' },
+        AE: { 'zh-CN': '阿联酋', 'zh-TW': '阿聯酋' },
+        BR: { 'zh-CN': '巴西', 'zh-TW': '巴西' }
     },
 
-    ensureCountryOptions() {
+    normalizeRegion(region) {
+        if (region === 'kr-ali') return 'kr';
+        return this.regionLabels[region] ? region : 'cn';
+    },
+
+    formatCountryLabel(country) {
+        var lang = (window.BYD && BYD.i18n && BYD.i18n.getLang) ? BYD.i18n.getLang() : '';
+        if (lang && lang.indexOf('zh') === 0) {
+            var zhEntry = this.zhCountryLabels[country.code];
+            if (zhEntry) {
+                var zhName = zhEntry[lang] || zhEntry['zh-CN'];
+                if (zhName) return zhName + ' · ' + country.name + ' (' + country.code + ')';
+            }
+        }
+        return country.name + ' (' + country.code + ')';
+    },
+
+    ensureCountryOptions(forceRebuild) {
         const select = document.getElementById('bydCountryCode');
-        if (!select || select.dataset.loaded === '1') return;
+        if (!select) return;
+        if (!forceRebuild && select.dataset.loaded === '1') return;
+        var prevValue = select.value;
         select.innerHTML = '';
         this.countryByCode = {};
         for (var i = 0; i < this.countries.length; i++) {
-            var country = this.countries[i];
-            this.countryByCode[country.code] = country;
+            this.countryByCode[this.countries[i].code] = this.countries[i];
+        }
+        var added = {};
+        var ordered = [];
+        for (var p = 0; p < this.pinnedCountryCodes.length; p++) {
+            var pinned = this.countryByCode[this.pinnedCountryCodes[p]];
+            if (pinned) {
+                ordered.push(pinned);
+                added[pinned.code] = true;
+            }
+        }
+        for (var j = 0; j < this.countries.length; j++) {
+            var c = this.countries[j];
+            if (!added[c.code]) ordered.push(c);
+        }
+        for (var k = 0; k < ordered.length; k++) {
+            var country = ordered[k];
             var opt = document.createElement('option');
             opt.value = country.code;
-            opt.textContent = country.name + ' (' + country.code + ')';
+            opt.textContent = this.formatCountryLabel(country);
             select.appendChild(opt);
+        }
+        if (prevValue && this.countryByCode[prevValue]) {
+            select.value = prevValue;
+        }
+        if (!this._countryLangHooked && window.BYD && BYD.i18n && BYD.i18n.onChange) {
+            this._countryLangHooked = true;
+            var self = this;
+            BYD.i18n.onChange(function () {
+                self.ensureCountryOptions(true);
+            });
         }
         select.dataset.loaded = '1';
     },
@@ -5735,7 +5793,7 @@ window.BydCloud = {
 
     countryForRegion(region) {
         var normalized = this.normalizeRegion(region);
-        return this.defaultCountriesByRegion[normalized] || 'GB';
+        return this.defaultCountriesByRegion[normalized] || 'CN';
     },
 
     setRegionDisplay(region, countryCode) {
@@ -5751,7 +5809,7 @@ window.BydCloud = {
             } else {
                 label = (entry && entry.en) || normalized.toUpperCase();
             }
-            var ctry = countryCode || 'GB';
+            var ctry = countryCode || 'CN';
             if (BYD && BYD.i18n) {
                 summary.textContent = BYD.i18n.t('byd_cloud.region_derived', {
                     country: ctry, region: label
@@ -5774,8 +5832,8 @@ window.BydCloud = {
         this.ensureCountryOptions();
         var meta = this.getCountryMeta(countryCode);
         if (!meta) {
-            var fallbackCode = this.countryForRegion(region || 'eu');
-            meta = this.getCountryMeta(fallbackCode) || this.getCountryMeta('GB');
+            var fallbackCode = this.countryForRegion(region || 'cn');
+            meta = this.getCountryMeta(fallbackCode) || this.getCountryMeta('CN');
         }
         const select = document.getElementById('bydCountryCode');
         if (select && meta) select.value = meta.code;
@@ -5785,7 +5843,7 @@ window.BydCloud = {
     async loadStatus() {
         const mergeWriteVersion = this._mergeWriteVersion;
         this.ensureCountryOptions();
-        this.applyCountrySelection('GB', 'eu');
+        this.applyCountrySelection('CN', 'cn');
         try {
             const resp = await fetch('/api/bydcloud/status');
             const data = await resp.json();
@@ -5809,7 +5867,7 @@ window.BydCloud = {
 
     onCountryChange(countryCode) {
         var meta = this.getCountryMeta(countryCode);
-        this.setRegionDisplay(meta ? meta.region : 'eu', meta ? meta.code : countryCode);
+        this.setRegionDisplay(meta ? meta.region : 'cn', meta ? meta.code : countryCode);
     },
 
     onRegionChange(region) {
@@ -5955,8 +6013,8 @@ window.BydCloud = {
         const password = document.getElementById('bydPassword').value.trim();
         const pin = document.getElementById('bydPin').value.trim();
         const countrySelect = document.getElementById('bydCountryCode');
-        const countryMeta = this.getCountryMeta(countrySelect ? countrySelect.value : 'GB') || this.getCountryMeta('GB');
-        const region = countryMeta ? countryMeta.region : 'eu';
+        const countryMeta = this.getCountryMeta(countrySelect ? countrySelect.value : 'CN') || this.getCountryMeta('CN');
+        const region = countryMeta ? countryMeta.region : 'cn';
         const saveBtn = document.getElementById('bydSaveBtn');
         // Preserve the icon + label so the finally block can restore it cleanly
         // after the request resolves; assigning .textContent strips the SVG.
@@ -5976,8 +6034,8 @@ window.BydCloud = {
             const body = {
                 username: email,
                 region: region,
-                countryCode: countryMeta ? countryMeta.code : 'GB',
-                language: countryMeta ? countryMeta.language : 'en'
+                countryCode: countryMeta ? countryMeta.code : 'CN',
+                language: countryMeta ? countryMeta.language : 'zh'
             };
             if (password) body.password = password;
             if (pin) body.controlPin = pin;
@@ -6073,7 +6131,7 @@ window.BydCloud = {
             document.getElementById('bydEmail').value = '';
             document.getElementById('bydPassword').value = '';
             document.getElementById('bydPin').value = '';
-            this.applyCountrySelection('GB', 'eu');
+            this.applyCountrySelection('CN', 'cn');
             const deterrentSelect = document.getElementById('deterrentAction');
             if (deterrentSelect && deterrentSelect.value !== 'silent') {
                 deterrentSelect.value = 'silent';

@@ -817,10 +817,10 @@
                     try {
                         if (navigator.share) {
                             await navigator.share({ text });
-                        } else if (navigator.clipboard?.writeText) {
+                        } else if (navigator.clipboard && navigator.clipboard.writeText) {
                             await navigator.clipboard.writeText(text);
                             // toastContainer is in DOM; reuse PWA toast helper if exposed.
-                            if (window.BYD?.toast) {
+                            if (window.BYD && window.BYD.toast) {
                                 window.BYD.toast(t('common.copied', 'Copied'), 'success');
                             } else {
                                 console.info('[About] share text copied to clipboard');
@@ -828,7 +828,7 @@
                         }
                     } catch (e) {
                         // User dismissed the share sheet — nothing to surface.
-                        if (e?.name !== 'AbortError') console.warn('[About] share failed:', e);
+                        if (!e || e.name !== 'AbortError') console.warn('[About] share failed:', e);
                     }
                 });
             }
@@ -848,8 +848,8 @@
             loadVehicleInfo();
             // Re-bind on every i18n change so tier URLs/copy follow locale.
             bindSupportTiers();
-            if (window.BYD?.i18n?.onChange) {
-                window.BYD.i18n.onChange(() => {
+            if (window.BYD && BYD.i18n && BYD.i18n.onChange) {
+                BYD.i18n.onChange(() => {
                     bindSupportTiers();
                     // Tier labels and the legend are imperative text with no
                     // data-i18n attribute, so hydrate() can't repair them —

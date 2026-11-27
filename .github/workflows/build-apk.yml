@@ -105,21 +105,24 @@ jobs:
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.publish_release == 'true')
         with:
           tag_name: "v${{ env.APP_VERSION }}-cn-sec"
-          name: "OverDrive v${{ env.APP_VERSION }} - 修复左侧导航栏空白占位，含蓝牙自动化阈值与靠近解锁全链路"
+          name: "OverDrive v${{ env.APP_VERSION }} - 修复老车机WebView设定卡死并默认国内BYD云，含导航栏与蓝牙自动化修复"
           body: |
-            ## OverDrive v${{ env.APP_VERSION }} 定制版（导航栏空白修复 + 蓝牙自动化与靠近解锁）
+            ## OverDrive v${{ env.APP_VERSION }} 定制版（老车机 WebView 兼容性修复 + BYD 云默认国内与常用地区置顶）
 
-            ### 🩹 1. 界面修复（v${{ env.APP_VERSION }}）
-            - **消除左侧导航栏「行程」与「自动化」之间的空白间隙**：在横/竖屏主布局（`activity_main_new.xml`）中为 CN 精简版已移除的 `railDestRoadSense` 与 `railDestMap` 占位行补充 `android:visibility="gone"`，消除两行共 `112dp` 的空白占高与可点击空区；
-            - 在 `MainActivity.applyNavigationRailVisibility()` 中增加 `View.GONE` 显式兜底，并补充布局单测校验横竖屏一致性。
+            ### 🩹 1. 老车机 WebView 兼容性与 BYD 云体验修复（v${{ env.APP_VERSION }}）
+            - **修复 DiLink 3/4（如元 Plus / Atto 3）车机端无法点击设定页的问题**：移除 `surveillance.js` 与 `about.html` 中不兼容 Chrome < 80 WebView 的 ES2020 可选链（`?.`）语法，并刷新页面脚本缓存标识（`survtoggle10`），彻底解决车机端「哨兵监控」「BYD 云」「通知」页面因脚本解析失败而停留在锁定状态、只能通过手机浏览器修改设置的问题；
+            - **BYD 云默认国家/服务器改为中国大陆（`CN`）**：未配置时默认选中中国大陆服务器，同时在中文界面为国家下拉框补充中文名称并将 `中国大陆 (CN)`、`中国香港 (HK)`、`中国澳门 (MO)`、`新加坡 (SG)` 置顶方便查找，不影响已有国内或海外/港澳账号配置。
 
-            ### ⚡ 2. 任务自动化蓝牙能力（继承自 v49.9.44）
+            ### 🩹 2. 界面与导航栏修复（继承自 v49.9.45）
+            - 消除左侧导航栏「行程」与「自动化」之间的空白占位间隙（`railDestRoadSense` / `railDestMap`）。
+
+            ### ⚡ 3. 任务自动化蓝牙能力（继承自 v49.9.44）
             - 支持蓝牙信号强度 `btRssi`（dBm）、蓝牙靠近区域 `btProximity`（`near` / `transition` / `away` / `unknown`）触发器与条件判断，以及已配对蓝牙设备下拉选择。
 
-            ### 🔧 3. 靠近感知（自动解闭锁）完整修复（继承自 v49.9.43）
+            ### 🔧 4. 靠近感知（自动解闭锁）完整修复（继承自 v49.9.43）
             - 补齐 `com.overdrive.app.remoteaccess` 蓝牙 RSSI 采样、驻车蓝牙重连、车钥匙 CAN `0x180` 监听及 `RemoteKeyControl` 4 字节固定帧头修复。
 
-            ### 🔒 4. 签名与升级说明
+            ### 🔒 5. 签名与升级说明
             - 沿用独立车机永久密钥签名（SHA-256 指纹锁死校验），支持应用内检查更新直接覆盖，或通过两步法 `adb push` + `pm install -r` 无损升级。
           files: release-assets/*.apk
         env:

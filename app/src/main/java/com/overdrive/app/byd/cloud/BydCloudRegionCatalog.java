@@ -19,9 +19,9 @@ import java.util.Map;
  * normalized to "kr" by {@link #normalizeRegion(String)}.
  */
 public final class BydCloudRegionCatalog {
-    public static final String DEFAULT_REGION = "eu";
-    public static final String DEFAULT_COUNTRY_CODE = "GB";
-    public static final String DEFAULT_LANGUAGE = "en";
+    public static final String DEFAULT_REGION = "cn";
+    public static final String DEFAULT_COUNTRY_CODE = "CN";
+    public static final String DEFAULT_LANGUAGE = "zh";
 
     private static final Map<String, String> COUNTRY_TO_REGION;
     private static final Map<String, String> COUNTRY_TO_LANGUAGE;

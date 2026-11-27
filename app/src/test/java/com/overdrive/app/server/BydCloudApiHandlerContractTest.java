@@ -1,6 +1,10 @@
 package com.overdrive.app.server;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+
+import com.overdrive.app.byd.cloud.BydCloudRegionCatalog;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -43,6 +47,27 @@ public class BydCloudApiHandlerContractTest {
         assertTrue(body.contains("JSONObject delta = new JSONObject();"));
         assertTrue(body.contains("if (!persisted)"));
         assertTrue(body.contains("Could not save BYD Cloud settings"));
+    }
+
+    @Test
+    public void chinaDefaultPreservesHongKongAndOverseasCatalogMappings() throws IOException {
+        assertEquals("CN", BydCloudRegionCatalog.DEFAULT_COUNTRY_CODE);
+        assertEquals("cn", BydCloudRegionCatalog.DEFAULT_REGION);
+        assertEquals("zh", BydCloudRegionCatalog.DEFAULT_LANGUAGE);
+        assertEquals("cn", BydCloudRegionCatalog.regionForCountryCode("CN"));
+        assertEquals("zh", BydCloudRegionCatalog.languageForCountryCode("CN"));
+        assertEquals("sg", BydCloudRegionCatalog.regionForCountryCode("HK"));
+        assertEquals("zh_TW", BydCloudRegionCatalog.languageForCountryCode("HK"));
+        assertEquals("eu", BydCloudRegionCatalog.regionForCountryCode("GB"));
+        assertEquals("GB", BydCloudRegionCatalog.defaultCountryForRegion("eu"));
+        assertEquals("SG", BydCloudRegionCatalog.defaultCountryForRegion("sg"));
+
+        String surveillance = readRepositoryFile("app/src/main/assets/web/shared/surveillance.js");
+        String about = readRepositoryFile("app/src/main/assets/web/local/about.html");
+        assertFalse("surveillance.js must stay compatible with older head-unit WebViews",
+                surveillance.contains("?."));
+        assertFalse("about.html must stay compatible with older head-unit WebViews",
+                about.contains("?."));
     }
 
     private static String readRepositoryFile(String relativePath) throws IOException {
